@@ -60,6 +60,7 @@ Soter uses a monorepo under the `app` parent folder for streamlined development:
 ├── app/                  # Monorepo root
 │   ├── frontend/         # Next.js app (UI, maps, wallet connect)
 │   ├── backend/          # NestJS API (aid logic, verification, APIs)
+│   ├── mobile/           # Expo React Native app (field operations)
 │   ├── contracts/        # Rust sources (Soroban AidEscrow contract)
 │   └── soroban/          # Soroban CLI scripts (build/deploy/invoke)
 ├── docs/                 # Additional guides (e.g., API docs)
@@ -91,6 +92,7 @@ Soter uses a monorepo under the `app` parent folder for streamlined development:
    Create `.env` files in each package (see `.env.example`):
    - `app/backend/.env`: `DATABASE_URL`, `STELLAR_RPC_URL=https://soroban-testnet.stellar.org`, `OPENAI_API_KEY`
    - `soroban/.env`: `SECRET_KEY=your-stellar-secret-key`
+   - `app/mobile/.env`: `EXPO_PUBLIC_API_URL` (points to backend)
 
 3. **Database Setup**  
    ```bash
@@ -109,7 +111,7 @@ Soter uses a monorepo under the `app` parent folder for streamlined development:
 
 1. **Deploy Contracts**  
    ```bash
-   cd soroban
+   cd app/soroban
    soroban contract deploy \
      --wasm target/soroban/wasm32-unknown-unknown/release/aid_escrow.wasm \
      --source YOUR_SECRET_KEY \
@@ -119,16 +121,16 @@ Soter uses a monorepo under the `app` parent folder for streamlined development:
 
 2. **Run Locally**  
    ```bash
-# From monorepo root (app/)
+   # From monorepo root (app/)
+   cd app
 
-# Frontend (Next.js on port 3000)
-pnpm --filter frontend dev
-# Or: cd frontend && pnpm dev
+   # Frontend (Next.js on port 3000)
+   pnpm --filter frontend dev
+   # Or: cd frontend && pnpm dev
 
-# Backend (NestJS on port 4000)
-pnpm --filter backend start:dev
-# Or: cd backend && pnpm start:dev
-
+   # Backend (NestJS on port 4000)
+   pnpm --filter backend start:dev
+   # Or: cd backend && pnpm start:dev
 
    # Contracts (in another terminal)
    cd soroban && soroban contract invoke ...  # For testing
@@ -136,6 +138,8 @@ pnpm --filter backend start:dev
    # Health checks
    # Frontend: http://localhost:3000/api/health
    # Backend: http://localhost:4000/health
+   # Mobile (requires backend running)
+   pnpm --filter mobile start
    ```
 
 3. **Production**  
@@ -145,10 +149,11 @@ pnpm --filter backend start:dev
 
 ## Development
 
-- **Scripts** (run from `app/` root with `pnpm`):
+- **Scripts** (run from root with `pnpm`):
   - `pnpm build`: Full monorepo build.
   - `pnpm test`: Run tests across packages.
   - `pnpm lint`: ESLint checks.
+  - `pnpm --filter <package> <command>`: Run command for a specific package.
 
 - **Local Testing**: Use Stellar Testnet; simulate claims with demo wallets.
 - **API Docs**: Auto-generated at `/api/docs` in dev mode.

@@ -1,8 +1,25 @@
-# compiled output
-/dist
-/node_modules
-/build
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
 .jest-cache/
+.nyc_output/
+
+# Production
+build/
+dist/
+
+# Misc
+.DS_Store
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.development
 
 # Logs
 logs
@@ -12,6 +29,24 @@ pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
+
+# Expo
+.expo/
+web-build/
+expo-env.d.ts
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE
+.idea/
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+.vscode/
 
 # Lockfiles
 yarn.lock
@@ -23,35 +58,7 @@ package-json.lock
 # OS
 .DS_Store
 
-# Tests
-/coverage
-/.nyc_output
-
-# IDEs and editors
-/.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
-
-# IDE - VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-
-# dotenv environment variable files
-.env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
-.env.development
-
-# temp directory
+# Temp
 .temp
 .tmp
 
@@ -61,15 +68,15 @@ pids
 *.seed
 *.pid.lock
 
-# Diagnostic reports (https://nodejs.org/api/report.html)
+# Diagnostic reports
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .qodo
 
-# Stryker mutation testing
+# Stryker
 stryker-tmp/
 .stryker-tmp/
 reports/mutation/
 
-# Keep reports directory but ignore contents
+# Reports
 reports/*
 !reports/.gitkeep
