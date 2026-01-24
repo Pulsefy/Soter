@@ -222,12 +222,7 @@ mod test {
         env.mock_all_auths();
 
         let result = client.try_create_package(&recipient, &0, &token, &86400);
-        assert_eq!(
-            result.unwrap(),
-            Err(soroban_sdk::Error::from_contract_error(
-                Error::InvalidAmount as u32
-            ))
-        );
+        assert_eq!(result, Err(Ok(Error::InvalidAmount)));
     }
 
     #[test]
