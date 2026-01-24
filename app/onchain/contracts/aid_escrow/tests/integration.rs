@@ -95,8 +95,7 @@ fn test_error_cases() {
     assert_eq!(result, Ok(Err(Error::InvalidAmount.into())));
 
     // Create valid package first
-    let _package_id = client
-        .create_package(&recipient, &1000, &token, &86400);
+    let _package_id = client.create_package(&recipient, &1000, &token, &86400);
 
     // Try to claim non-existent package
     let result = client.try_claim_package(&999);
