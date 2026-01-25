@@ -47,7 +47,8 @@ All environment variables are documented in [`.env.example`](.env.example) with 
 | `VERIFICATION_MODE` | Verification mode: `client-side` or `server-side` | `client-side` | No |
 | `OPENAI_MODEL` | OpenAI model to use | `gpt-3.5-turbo` | No |
 | **CORS** |
-| `CORS_ORIGINS` | Comma-separated allowed origins | `http://localhost:3000,http://localhost:3001` | No |
+| `CORS_ORIGINS` | Comma-separated allowed origins (defaults only in dev/test) | `http://localhost:3000,http://localhost:3001` | No |
+| `CORS_ALLOW_CREDENTIALS` | Allow CORS credentials (cookies/authorization headers) | `false` | No |
 | **Queue & Cache** |
 | `REDIS_URL` | Redis connection URL for BullMQ | `redis://localhost:6379` | No*** |
 | `QUEUE_ENABLED` | Enable background job queues | `false` | No |
@@ -56,6 +57,7 @@ All environment variables are documented in [`.env.example`](.env.example) with 
 | `JWT_EXPIRES_IN` | JWT token expiration time | `7d` | No |
 | **Rate Limiting** |
 | `API_RATE_LIMIT` | Max requests per minute per IP | `100` | No |
+| `THROTTLE_TTL` | Rate limit window (milliseconds) | `60000` | No |
 | `THROTTLE_ENABLED` | Enable request throttling | `true` | No |
 | **Monitoring** |
 | `METRICS_ENABLED` | Enable Prometheus metrics at `/metrics` | `false` | No |
