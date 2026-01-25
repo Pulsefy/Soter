@@ -1,8 +1,18 @@
 #![no_std]
 
 use soroban_sdk::{
-    Address, Env, Map, String, Symbol, contract, contracterror, contractimpl, contracttype,
+    Address, Env, Map, String, Symbol, Vec, contract, contracterror, contractimpl, contracttype,
 };
+
+// ============================================================================
+// Event Topic Constants
+// ============================================================================
+
+pub const EVENT_PACKAGE_CREATED: &str = "package_created";
+pub const EVENT_PACKAGE_CLAIMED: &str = "package_claimed";
+pub const EVENT_PACKAGE_EXPIRED: &str = "package_expired";
+pub const EVENT_PACKAGE_CANCELLED: &str = "package_cancelled";
+pub const EVENT_CONTRACT_INITIALIZED: &str = "contract_initialized";
 
 #[contract]
 pub struct AidEscrow;
@@ -44,6 +54,10 @@ pub enum Error {
 
 #[contractimpl]
 impl AidEscrow {
+    // ========================================================================
+    // Core Contract Methods
+    // ========================================================================
+
     /// Initialize the contract with an admin
     pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
         env.storage()
@@ -52,6 +66,10 @@ impl AidEscrow {
         env.storage()
             .instance()
             .set(&Symbol::new(&env, "package_counter"), &0u64);
+        
+        // Emit initialization event
+        Self::emit_contract_initialized(&env, admin);
+        
         Ok(())
     }
 
@@ -103,9 +121,9 @@ impl AidEscrow {
         };
 
         let package = Package {
-            recipient,
+            recipient: recipient.clone(),
             amount,
-            token,
+            token: token.clone(),
             status: PackageStatus::Created,
             created_at,
             expires_at,
@@ -115,6 +133,18 @@ impl AidEscrow {
         env.storage()
             .persistent()
             .set(&(Symbol::new(&env, "package"), package_id), &package);
+
+        // Emit PackageCreated event
+        Self::emit_package_created(
+            &env,
+            package_id,
+            recipient,
+            amount,
+            token,
+            admin,
+            created_at,
+            expires_at,
+        );
 
         Ok(package_id)
     }
@@ -132,11 +162,24 @@ impl AidEscrow {
             return Err(Error::PackageAlreadyClaimed);
         }
 
-        if package.expires_at > 0 && env.ledger().timestamp() > package.expires_at {
+        let timestamp = env.ledger().timestamp();
+
+        if package.expires_at > 0 && timestamp > package.expires_at {
             package.status = PackageStatus::Expired;
             env.storage()
                 .persistent()
                 .set(&(key.clone(), package_id), &package);
+            
+            // Emit PackageExpired event
+            Self::emit_package_expired(
+                &env,
+                package_id,
+                package.recipient.clone(),
+                package.amount,
+                package.token.clone(),
+                timestamp,
+            );
+            
             return Err(Error::PackageExpired);
         }
 
@@ -145,6 +188,57 @@ impl AidEscrow {
 
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&(key, package_id), &package);
+        
+        // Emit PackageClaimed event
+        Self::emit_package_claimed(
+            &env,
+            package_id,
+            package.recipient.clone(),
+            package.amount,
+            package.token.clone(),
+            timestamp,
+        );
+        
+        Ok(())
+    }
+
+    /// Cancel a package (admin only)
+    pub fn cancel_package(env: Env, package_id: u64) -> Result<(), Error> {
+        // Only admin can cancel
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .ok_or(Error::NotAuthorized)?;
+        admin.require_auth();
+
+        let key = Symbol::new(&env, "package");
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&(key.clone(), package_id))
+            .ok_or(Error::PackageNotFound)?;
+
+        if package.status == PackageStatus::Claimed {
+            return Err(Error::PackageAlreadyClaimed);
+        }
+
+        let timestamp = env.ledger().timestamp();
+
+        package.status = PackageStatus::Cancelled;
+        env.storage().persistent().set(&(key, package_id), &package);
+
+        // Emit PackageCancelled event
+        Self::emit_package_cancelled(
+            &env,
+            package_id,
+            package.recipient.clone(),
+            package.amount,
+            package.token.clone(),
+            admin,
+            timestamp,
+        );
+
         Ok(())
     }
 
@@ -163,13 +257,106 @@ impl AidEscrow {
             .unwrap_or(0);
         Ok(count)
     }
+
+    // ========================================================================
+    // Event Emission Helpers
+    // ========================================================================
+
+    fn emit_contract_initialized(env: &Env, admin: Address) {
+        let topics = Symbol::new(env, EVENT_CONTRACT_INITIALIZED);
+        let mut data = Vec::new(env);
+        data.push_back(admin);
+        data.push_back(env.ledger().timestamp());
+        env.events().publish(topics, data);
+    }
+
+    fn emit_package_created(
+        env: &Env,
+        package_id: u64,
+        recipient: Address,
+        amount: i128,
+        token: Address,
+        creator: Address,
+        created_at: u64,
+        expires_at: u64,
+    ) {
+        let topics = (Symbol::new(env, EVENT_PACKAGE_CREATED), package_id);
+        let mut data = Vec::new(env);
+        data.push_back(package_id);
+        data.push_back(recipient);
+        data.push_back(amount);
+        data.push_back(token);
+        data.push_back(creator);
+        data.push_back(created_at);
+        data.push_back(expires_at);
+        env.events().publish(topics, data);
+    }
+
+    fn emit_package_claimed(
+        env: &Env,
+        package_id: u64,
+        recipient: Address,
+        amount: i128,
+        token: Address,
+        timestamp: u64,
+    ) {
+        let topics = (Symbol::new(env, EVENT_PACKAGE_CLAIMED), package_id);
+        let mut data = Vec::new(env);
+        data.push_back(package_id);
+        data.push_back(recipient);
+        data.push_back(amount);
+        data.push_back(token);
+        data.push_back(timestamp);
+        env.events().publish(topics, data);
+    }
+
+    fn emit_package_expired(
+        env: &Env,
+        package_id: u64,
+        recipient: Address,
+        amount: i128,
+        token: Address,
+        timestamp: u64,
+    ) {
+        let topics = (Symbol::new(env, EVENT_PACKAGE_EXPIRED), package_id);
+        let mut data = Vec::new(env);
+        data.push_back(package_id);
+        data.push_back(recipient);
+        data.push_back(amount);
+        data.push_back(token);
+        data.push_back(timestamp);
+        env.events().publish(topics, data);
+    }
+
+    fn emit_package_cancelled(
+        env: &Env,
+        package_id: u64,
+        recipient: Address,
+        amount: i128,
+        token: Address,
+        actor: Address,
+        timestamp: u64,
+    ) {
+        let topics = (Symbol::new(env, EVENT_PACKAGE_CANCELLED), package_id);
+        let mut data = Vec::new(env);
+        data.push_back(package_id);
+        data.push_back(recipient);
+        data.push_back(amount);
+        data.push_back(token);
+        data.push_back(actor);
+        data.push_back(timestamp);
+        env.events().publish(topics, data);
+    }
 }
 
-// Unit tests
+// ============================================================================
+// Unit Tests
+// ============================================================================
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{Address, Env, testutils::Address as _};
+    use soroban_sdk::{testutils::Address as _, Address, Env};
 
     fn setup() -> (Env, AidEscrowClient<'static>) {
         let env = Env::default();
@@ -296,5 +483,22 @@ mod test {
 
         let result = client.get_package(&999);
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_cancel_package() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        client.initialize(&admin);
+        env.mock_all_auths();
+
+        let package_id = client.create_package(&recipient, &1000, &token, &86400);
+        client.cancel_package(&package_id);
+
+        let package = client.get_package(&package_id).unwrap();
+        assert_eq!(package.status, PackageStatus::Cancelled);
     }
 }
