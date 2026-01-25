@@ -8,6 +8,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { VerificationModule } from './verification/verification.module';
 import { LoggerModule } from './logger/logger.module';
 import { RequestCorrelationMiddleware } from './middleware/request-correlation.middleware';
+import { ClaimsModule } from './claims/claims.module';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -31,6 +32,7 @@ import { join } from 'node:path';
     HealthModule,
     AidModule,
     VerificationModule,
+    ClaimsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

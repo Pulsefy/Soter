@@ -7,12 +7,22 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum ClaimStatus {
+  requested
+  verified
+  approved
+  disbursed
+  archived
+}
+
 model AidPackage {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   status    String   @default("draft")
+
+  claims    Claim[]
 }
 
 model VerificationRequest {
@@ -21,4 +31,17 @@ model VerificationRequest {
   updatedAt DateTime @updatedAt
 
   status    String   @default("pending")
+}
+
+model Claim {
+  id          String     @id @default(cuid())
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  status      ClaimStatus @default(requested)
+  campaignId  String
+  campaign    AidPackage  @relation(fields: [campaignId], references: [id])
+  amount      Float
+  recipientRef String
+  evidenceRef String?
 }
