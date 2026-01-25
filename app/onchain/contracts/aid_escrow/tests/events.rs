@@ -3,16 +3,17 @@
 
 #![cfg(test)]
 
+
+
 use soroban_sdk::{
-    testutils::{Address as _, Events},
-    Address, Env, Symbol, Vec as SdkVec,
+    testutils::{Address as _, Events, Ledger},
+    Address, Env, Symbol, Val, TryFromVal,
 };
 
 // Import from your main contract
 use aid_escrow::{
     AidEscrow, AidEscrowClient, PackageStatus, EVENT_CONTRACT_INITIALIZED,
-    EVENT_PACKAGE_CANCELLED, EVENT_PACKAGE_CLAIMED, EVENT_PACKAGE_CREATED,
-    EVENT_PACKAGE_EXPIRED,
+    EVENT_PACKAGE_CANCELLED, EVENT_PACKAGE_CLAIMED, EVENT_PACKAGE_CREATED, EVENT_PACKAGE_EXPIRED,
 };
 
 fn setup_test() -> (Env, AidEscrowClient<'static>, Address) {
@@ -41,18 +42,17 @@ fn test_contract_initialized_event() {
     // Find ContractInitialized event
     let init_event = events.iter().find(|e| {
         if let Ok((_, topics, _)) = e.clone().try_into() {
-            let topic_vec: SdkVec<Symbol> = topics;
+            let topic_vec: soroban_sdk::Vec<Val> = topics;
             if let Some(first_topic) = topic_vec.first() {
-                return first_topic == Symbol::new(&env, EVENT_CONTRACT_INITIALIZED);
+                if let Ok(symbol) = Symbol::try_from_val(&env, &first_topic) {
+                    return symbol == Symbol::new(&env, EVENT_CONTRACT_INITIALIZED);
+                }
             }
         }
         false
     });
 
-    assert!(
-        init_event.is_some(),
-        "ContractInitialized event not found"
-    );
+    assert!(init_event.is_some(), "ContractInitialized event not found");
 }
 
 #[test]
@@ -71,9 +71,11 @@ fn test_package_created_event() {
     // Find PackageCreated event
     let package_created_event = events.iter().find(|e| {
         if let Ok((_, topics, _)) = e.clone().try_into() {
-            let topic_vec: SdkVec<Symbol> = topics;
+            let topic_vec: soroban_sdk::Vec<Val> = topics;
             if let Some(first_topic) = topic_vec.first() {
-                return first_topic == Symbol::new(&env, EVENT_PACKAGE_CREATED);
+                if let Ok(symbol) = Symbol::try_from_val(&env, &first_topic) {
+                    return symbol == Symbol::new(&env, EVENT_PACKAGE_CREATED);
+                }
             }
         }
         false
@@ -99,21 +101,23 @@ fn test_package_claimed_event() {
     let amount: i128 = 500;
 
     let package_id = client.create_package(&recipient, &amount, &token, &86400);
-    
+
     // Clear events from creation
     let events_before = env.events().all().len();
-    
+
     client.claim_package(&package_id);
 
     // Get events
     let events = env.events().all();
-    
+
     // Find PackageClaimed event (skip earlier events)
-    let package_claimed_event = events.iter().skip(events_before).find(|e| {
+    let package_claimed_event = events.iter().skip(events_before as usize).find(|e| {
         if let Ok((_, topics, _)) = e.clone().try_into() {
-            let topic_vec: SdkVec<Symbol> = topics;
+            let topic_vec: soroban_sdk::Vec<Val> = topics;
             if let Some(first_topic) = topic_vec.first() {
-                return first_topic == Symbol::new(&env, EVENT_PACKAGE_CLAIMED);
+                if let Ok(symbol) = Symbol::try_from_val(&env, &first_topic) {
+                    return symbol == Symbol::new(&env, EVENT_PACKAGE_CLAIMED);
+                }
             }
         }
         false
@@ -154,11 +158,13 @@ fn test_package_expired_event() {
     let events = env.events().all();
 
     // Find PackageExpired event
-    let package_expired_event = events.iter().skip(events_before).find(|e| {
+    let package_expired_event = events.iter().skip(events_before as usize).find(|e| {
         if let Ok((_, topics, _)) = e.clone().try_into() {
-            let topic_vec: SdkVec<Symbol> = topics;
+            let topic_vec: soroban_sdk::Vec<Val> = topics;
             if let Some(first_topic) = topic_vec.first() {
-                return first_topic == Symbol::new(&env, EVENT_PACKAGE_EXPIRED);
+                if let Ok(symbol) = Symbol::try_from_val(&env, &first_topic) {
+                    return symbol == Symbol::new(&env, EVENT_PACKAGE_EXPIRED);
+                }
             }
         }
         false
@@ -191,11 +197,13 @@ fn test_package_cancelled_event() {
     let events = env.events().all();
 
     // Find PackageCancelled event
-    let package_cancelled_event = events.iter().skip(events_before).find(|e| {
+    let package_cancelled_event = events.iter().skip(events_before as usize).find(|e| {
         if let Ok((_, topics, _)) = e.clone().try_into() {
-            let topic_vec: SdkVec<Symbol> = topics;
+            let topic_vec: soroban_sdk::Vec<Val> = topics;
             if let Some(first_topic) = topic_vec.first() {
-                return first_topic == Symbol::new(&env, EVENT_PACKAGE_CANCELLED);
+                if let Ok(symbol) = Symbol::try_from_val(&env, &first_topic) {
+                    return symbol == Symbol::new(&env, EVENT_PACKAGE_CANCELLED);
+                }
             }
         }
         false
@@ -231,19 +239,27 @@ fn test_multiple_events_in_workflow() {
 
     for event in events.iter() {
         if let Ok((_, topics, _)) = event.clone().try_into() {
-            let topic_vec: SdkVec<Symbol> = topics;
+            let topic_vec: soroban_sdk::Vec<Val> = topics;
             if let Some(first_topic) = topic_vec.first() {
-                if first_topic == Symbol::new(&env, EVENT_PACKAGE_CREATED) {
-                    created_count += 1;
-                } else if first_topic == Symbol::new(&env, EVENT_PACKAGE_CLAIMED) {
-                    claimed_count += 1;
+                if let Ok(symbol) = Symbol::try_from_val(&env, &first_topic) {
+                    if symbol == Symbol::new(&env, EVENT_PACKAGE_CREATED) {
+                        created_count += 1;
+                    } else if symbol == Symbol::new(&env, EVENT_PACKAGE_CLAIMED) {
+                        claimed_count += 1;
+                    }
                 }
             }
         }
     }
 
-    assert_eq!(created_count, 1, "Should have exactly 1 PackageCreated event");
-    assert_eq!(claimed_count, 1, "Should have exactly 1 PackageClaimed event");
+    assert_eq!(
+        created_count, 1,
+        "Should have exactly 1 PackageCreated event"
+    );
+    assert_eq!(
+        claimed_count, 1,
+        "Should have exactly 1 PackageClaimed event"
+    );
 }
 
 #[test]
@@ -273,14 +289,16 @@ fn test_multiple_packages_separate_events() {
 
     for event in events.iter() {
         if let Ok((_, topics, _)) = event.clone().try_into() {
-            let topic_vec: SdkVec<Symbol> = topics;
+            let topic_vec: soroban_sdk::Vec<Val> = topics;
             if let Some(first_topic) = topic_vec.first() {
-                if first_topic == Symbol::new(&env, EVENT_PACKAGE_CREATED) {
-                    created_count += 1;
-                } else if first_topic == Symbol::new(&env, EVENT_PACKAGE_CLAIMED) {
-                    claimed_count += 1;
-                } else if first_topic == Symbol::new(&env, EVENT_PACKAGE_CANCELLED) {
-                    cancelled_count += 1;
+                if let Ok(symbol) = Symbol::try_from_val(&env, &first_topic) {
+                    if symbol == Symbol::new(&env, EVENT_PACKAGE_CREATED) {
+                        created_count += 1;
+                    } else if symbol == Symbol::new(&env, EVENT_PACKAGE_CLAIMED) {
+                        claimed_count += 1;
+                    } else if symbol == Symbol::new(&env, EVENT_PACKAGE_CANCELLED) {
+                        cancelled_count += 1;
+                    }
                 }
             }
         }
@@ -312,9 +330,11 @@ fn test_event_topics_include_package_id() {
     // Find PackageCreated event and verify it has package_id in topics
     let package_created_event = events.iter().find(|e| {
         if let Ok((_, topics, _)) = e.clone().try_into() {
-            let topic_vec: SdkVec<Symbol> = topics;
+            let topic_vec: soroban_sdk::Vec<Val> = topics;
             if let Some(first_topic) = topic_vec.first() {
-                return first_topic == Symbol::new(&env, EVENT_PACKAGE_CREATED);
+                if let Ok(symbol) = Symbol::try_from_val(&env, &first_topic) {
+                    return symbol == Symbol::new(&env, EVENT_PACKAGE_CREATED);
+                }
             }
         }
         false
@@ -327,7 +347,7 @@ fn test_event_topics_include_package_id() {
 
     // Verify topics contain both event name and package_id
     if let Ok((_, topics, _)) = package_created_event.unwrap().clone().try_into() {
-        let topic_vec: SdkVec<Symbol> = topics;
+        let topic_vec: soroban_sdk::Vec<Val> = topics;
         // First topic is event name, second should be package_id
         assert!(topic_vec.len() >= 1, "Topics should contain event name");
     }
@@ -345,19 +365,19 @@ fn test_no_events_on_failed_operations() {
     let result = client.try_create_package(&recipient, &0, &token, &86400);
     assert!(result.is_err());
 
-    let events_after = env.events().all().len();
-
     // Should not have created any new events (except possibly initialization)
     // The key is that no PackageCreated event should be emitted
     let events = env.events().all();
     let package_created_count = events
         .iter()
-        .skip(events_before)
+        .skip(events_before as usize)
         .filter(|e| {
             if let Ok((_, topics, _)) = e.clone().try_into() {
-                let topic_vec: SdkVec<Symbol> = topics;
+                let topic_vec: soroban_sdk::Vec<Val> = topics;
                 if let Some(first_topic) = topic_vec.first() {
-                    return first_topic == Symbol::new(&env, EVENT_PACKAGE_CREATED);
+                    if let Ok(symbol) = Symbol::try_from_val(&env, &first_topic) {
+                        return symbol == Symbol::new(&env, EVENT_PACKAGE_CREATED);
+                    }
                 }
             }
             false

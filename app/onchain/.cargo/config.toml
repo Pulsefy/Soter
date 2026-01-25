@@ -1,8 +1,8 @@
-[build]
-target = "wasm32-unknown-unknown"
-
 [target.wasm32-unknown-unknown]
-runner = "echo"  # Placeholder, can be customized
+runner = "echo"
 
 [env]
 RUSTFLAGS = "-C link-arg=-zstack-size=65536"
+
+[alias]
+wasm = "build --release --target wasm32-unknown-unknown"

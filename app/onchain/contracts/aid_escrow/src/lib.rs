@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    Address, Env, Map, String, Symbol, Vec, contract, contracterror, contractimpl, contracttype,
+    Address, Env, Map, String, Symbol, contract, contracterror, contractimpl, contracttype,
 };
 
 // ============================================================================
@@ -66,10 +66,10 @@ impl AidEscrow {
         env.storage()
             .instance()
             .set(&Symbol::new(&env, "package_counter"), &0u64);
-        
+
         // Emit initialization event
         Self::emit_contract_initialized(&env, admin);
-        
+
         Ok(())
     }
 
@@ -136,14 +136,7 @@ impl AidEscrow {
 
         // Emit PackageCreated event
         Self::emit_package_created(
-            &env,
-            package_id,
-            recipient,
-            amount,
-            token,
-            admin,
-            created_at,
-            expires_at,
+            &env, package_id, recipient, amount, token, admin, created_at, expires_at,
         );
 
         Ok(package_id)
@@ -169,7 +162,7 @@ impl AidEscrow {
             env.storage()
                 .persistent()
                 .set(&(key.clone(), package_id), &package);
-            
+
             // Emit PackageExpired event
             Self::emit_package_expired(
                 &env,
@@ -179,7 +172,7 @@ impl AidEscrow {
                 package.token.clone(),
                 timestamp,
             );
-            
+
             return Err(Error::PackageExpired);
         }
 
@@ -188,7 +181,7 @@ impl AidEscrow {
 
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&(key, package_id), &package);
-        
+
         // Emit PackageClaimed event
         Self::emit_package_claimed(
             &env,
@@ -198,7 +191,7 @@ impl AidEscrow {
             package.token.clone(),
             timestamp,
         );
-        
+
         Ok(())
     }
 
@@ -263,10 +256,8 @@ impl AidEscrow {
     // ========================================================================
 
     fn emit_contract_initialized(env: &Env, admin: Address) {
-        let topics = Symbol::new(env, EVENT_CONTRACT_INITIALIZED);
-        let mut data = Vec::new(env);
-        data.push_back(admin);
-        data.push_back(env.ledger().timestamp());
+        let topics = (Symbol::new(env, EVENT_CONTRACT_INITIALIZED),);
+        let data = (admin, env.ledger().timestamp());
         env.events().publish(topics, data);
     }
 
@@ -281,14 +272,7 @@ impl AidEscrow {
         expires_at: u64,
     ) {
         let topics = (Symbol::new(env, EVENT_PACKAGE_CREATED), package_id);
-        let mut data = Vec::new(env);
-        data.push_back(package_id);
-        data.push_back(recipient);
-        data.push_back(amount);
-        data.push_back(token);
-        data.push_back(creator);
-        data.push_back(created_at);
-        data.push_back(expires_at);
+        let data = (recipient, amount, token, creator, created_at, expires_at);
         env.events().publish(topics, data);
     }
 
@@ -301,12 +285,7 @@ impl AidEscrow {
         timestamp: u64,
     ) {
         let topics = (Symbol::new(env, EVENT_PACKAGE_CLAIMED), package_id);
-        let mut data = Vec::new(env);
-        data.push_back(package_id);
-        data.push_back(recipient);
-        data.push_back(amount);
-        data.push_back(token);
-        data.push_back(timestamp);
+        let data = (recipient, amount, token, timestamp);
         env.events().publish(topics, data);
     }
 
@@ -319,12 +298,7 @@ impl AidEscrow {
         timestamp: u64,
     ) {
         let topics = (Symbol::new(env, EVENT_PACKAGE_EXPIRED), package_id);
-        let mut data = Vec::new(env);
-        data.push_back(package_id);
-        data.push_back(recipient);
-        data.push_back(amount);
-        data.push_back(token);
-        data.push_back(timestamp);
+        let data = (recipient, amount, token, timestamp);
         env.events().publish(topics, data);
     }
 
@@ -338,13 +312,7 @@ impl AidEscrow {
         timestamp: u64,
     ) {
         let topics = (Symbol::new(env, EVENT_PACKAGE_CANCELLED), package_id);
-        let mut data = Vec::new(env);
-        data.push_back(package_id);
-        data.push_back(recipient);
-        data.push_back(amount);
-        data.push_back(token);
-        data.push_back(actor);
-        data.push_back(timestamp);
+        let data = (recipient, amount, token, actor, timestamp);
         env.events().publish(topics, data);
     }
 }
@@ -356,7 +324,7 @@ impl AidEscrow {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::{Address, Env, testutils::Address as _};
 
     fn setup() -> (Env, AidEscrowClient<'static>) {
         let env = Env::default();
