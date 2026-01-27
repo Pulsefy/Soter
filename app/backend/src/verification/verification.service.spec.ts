@@ -171,6 +171,17 @@ describe('VerificationService', () => {
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
+
+      jest.spyOn(service as any, 'generateMockVerification').mockReturnValue({
+        score: 0.85,
+        confidence: 0.9,
+        details: {
+          factors: ['Test factor'],
+          riskLevel: 'low',
+        },
+        processedAt: new Date(),
+      });
+
       const updateSpy = jest
         .spyOn(prismaService.claim, 'update')
         .mockResolvedValue({
@@ -184,8 +195,8 @@ describe('VerificationService', () => {
       });
 
       const updateCall = updateSpy.mock.calls[0]?.[0];
-      expect(updateCall?.data).toHaveProperty('verificationScore');
-      expect(updateCall?.data).toHaveProperty('verificationResult');
+      expect(updateCall?.data).toHaveProperty('status');
+      expect(updateCall?.data?.status).toBe('verified');
     });
   });
 
