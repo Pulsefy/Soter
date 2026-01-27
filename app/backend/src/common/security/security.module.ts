@@ -152,9 +152,7 @@ export const createCorsOriginValidator = (
   };
 };
 
-export const createRateLimiter = (
-  config: ConfigService,
-): RequestHandler => {
+export const createRateLimiter = (config: ConfigService): RequestHandler => {
   const windowMs = parseNumber(
     config.get<string>('THROTTLE_TTL'),
     DEFAULT_RATE_LIMIT_WINDOW_MS,

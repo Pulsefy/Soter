@@ -1,5 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AidModule } from './aid/aid.module';
@@ -14,6 +15,8 @@ import { SecurityModule } from './common/security/security.module';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { ObservabilityModule } from './observability/observability.module';
+import { ClaimsModule } from './claims/claims.module';
 
 @Module({
   imports: [
@@ -30,6 +33,16 @@ import { CampaignsModule } from './campaigns/campaigns.module';
         return existing.length > 0 ? existing : candidates;
       })(),
     }),
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get<string>('REDIS_HOST') || 'localhost',
+          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+        },
+      }),
+      inject: [ConfigService],
+    }),
     LoggerModule,
     PrismaModule,
     HealthModule,
@@ -39,6 +52,8 @@ import { CampaignsModule } from './campaigns/campaigns.module';
     SecurityModule,
     TestErrorModule,
     CampaignsModule,
+    ObservabilityModule,
+    ClaimsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

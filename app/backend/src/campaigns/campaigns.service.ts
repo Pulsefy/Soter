@@ -20,7 +20,7 @@ export class CampaignsService {
       data: {
         name: dto.name,
         status: dto.status ?? CampaignStatus.draft,
-        budget: new Prisma.Decimal(dto.budget),
+        budget: dto.budget,
         metadata: this.sanitizeMetadata(dto.metadata),
       },
     });
@@ -47,8 +47,7 @@ export class CampaignsService {
       data: {
         name: dto.name,
         status: dto.status,
-        budget:
-          dto.budget === undefined ? undefined : new Prisma.Decimal(dto.budget),
+        budget: dto.budget,
         metadata:
           dto.metadata === undefined
             ? undefined

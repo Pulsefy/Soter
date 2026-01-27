@@ -56,7 +56,7 @@ describe('CampaignsService', () => {
         data: expect.objectContaining({
           name: 'Winter Relief 2026',
           status: CampaignStatus.draft,
-          budget: expect.any(Prisma.Decimal),
+          budget: expect.any(Number),
         }),
       }),
     );

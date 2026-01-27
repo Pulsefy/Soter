@@ -105,7 +105,9 @@ describe('Security (e2e)', () => {
       expect(response.headers['access-control-allow-origin']).toBe(
         'http://localhost:3000',
       );
-      expect(response.headers['access-control-allow-credentials']).toBeUndefined();
+      expect(
+        response.headers['access-control-allow-credentials'],
+      ).toBeUndefined();
     });
 
     it('should block request from non-whitelisted origin', async () => {
@@ -194,7 +196,6 @@ describe('Security (e2e)', () => {
         expect(response.status).toBe(200);
       }
     });
-
   });
 
   describe('Docs Endpoint', () => {

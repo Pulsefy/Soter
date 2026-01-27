@@ -6,6 +6,7 @@ import {
   Param,
   Version,
   HttpStatus,
+  HttpCode,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -22,6 +23,69 @@ import { CreateVerificationDto } from './dto/create-verification.dto';
 @Controller('verification')
 export class VerificationController {
   constructor(private readonly verificationService: VerificationService) {}
+
+  @Post('claims/:id/enqueue')
+  @Version('1')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Enqueue claim verification job',
+    description:
+      'Add a claim to the verification queue for async processing. Returns immediately with job ID.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Unique identifier of the claim to verify',
+    example: 'clv789xyz123',
+  })
+  @ApiResponse({
+    status: HttpStatus.ACCEPTED,
+    description: 'Verification job enqueued successfully',
+    schema: {
+      example: {
+        jobId: '12345',
+        claimId: 'clv789xyz123',
+        status: 'queued',
+        message: 'Verification job enqueued successfully',
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Claim not found',
+  })
+  async enqueueVerification(@Param('id') id: string) {
+    const { jobId } = await this.verificationService.enqueueVerification(id);
+    return {
+      jobId,
+      claimId: id,
+      status: 'queued',
+      message: 'Verification job enqueued successfully',
+    };
+  }
+
+  @Get('metrics')
+  @Version('1')
+  @ApiOperation({
+    summary: 'Get verification queue metrics',
+    description:
+      'Retrieve current queue statistics including waiting, active, completed, and failed job counts',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Queue metrics retrieved successfully',
+    schema: {
+      example: {
+        waiting: 5,
+        active: 2,
+        completed: 150,
+        failed: 3,
+        total: 160,
+      },
+    },
+  })
+  async getMetrics() {
+    return this.verificationService.getQueueMetrics();
+  }
 
   @Post()
   @Version('1')
@@ -55,6 +119,55 @@ export class VerificationController {
   })
   create(@Body() createVerificationDto: CreateVerificationDto) {
     return this.verificationService.create(createVerificationDto);
+  }
+
+  @Get('claims/:id')
+  @Version('1')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Get claim verification status',
+    description:
+      'Retrieve the current verification status and details of a claim',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Unique identifier of the claim',
+    example: 'clv789xyz123',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Claim verification status retrieved successfully',
+    schema: {
+      example: {
+        id: 'clv789xyz123',
+        status: 'verified',
+        verificationScore: 0.85,
+        verificationResult: {
+          score: 0.85,
+          confidence: 0.92,
+          details: {
+            factors: [
+              'Document authenticity verified',
+              'Identity cross-reference passed',
+            ],
+            riskLevel: 'low',
+          },
+          processedAt: '2025-01-23T14:30:00.000Z',
+        },
+        verifiedAt: '2025-01-23T14:30:00.000Z',
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Claim not found',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Unauthorized - authentication required',
+  })
+  findClaim(@Param('id') id: string) {
+    return this.verificationService.findOne(id);
   }
 
   @Get(':id')

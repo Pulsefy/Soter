@@ -16,10 +16,11 @@ enum CampaignStatus {
 }
 
 enum ClaimStatus {
-  pending
+  requested
+  verified
   approved
-  rejected
-  paid
+  disbursed
+  archived
 }
 
 model AidPackage {
@@ -36,6 +37,22 @@ model VerificationRequest {
   updatedAt DateTime @updatedAt
 
   status    String   @default("pending")
+}
+
+model Claim {
+  id           String      @id @default(cuid())
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  status       ClaimStatus @default(requested)
+
+  campaignId   String
+  campaign     Campaign    @relation(fields: [campaignId], references: [id])
+
+  amount       Decimal     @db.Decimal(14, 2)
+
+  recipientRef String
+  evidenceRef  String?
 }
 
 model AuditLog {
@@ -66,6 +83,8 @@ model Campaign {
 
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
+  claims      Claim[]
+
   claims      Claim[]
 
   @@index([status])
