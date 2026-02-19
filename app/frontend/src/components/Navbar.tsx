@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React from 'react';
 import Link from 'next/link';
@@ -17,9 +17,11 @@ export const Navbar: React.FC = () => {
         <div className="flex items-center space-x-4">
           {publicKey && (
             <span className="text-sm">
-              Wallet: {publicKey.substring(0, 6)}...{publicKey.substring(publicKey.length - 6)}
+              Wallet: {publicKey.substring(0, 6)}...
+              {publicKey.substring(publicKey.length - 6)}
             </span>
           )}
+          <HealthBadge />
           <WalletConnect />
         </div>
       </div>
