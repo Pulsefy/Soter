@@ -9,6 +9,7 @@ import {
   IsString,
   Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class UpdateCampaignDto {
   @ApiPropertyOptional({ example: 'Winter Relief 2026' })
@@ -19,6 +20,7 @@ export class UpdateCampaignDto {
 
   @ApiPropertyOptional({ example: 25000.5, minimum: 0 })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   budget?: number;

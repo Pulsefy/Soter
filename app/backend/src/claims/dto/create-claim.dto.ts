@@ -5,6 +5,7 @@ import {
   IsOptional,
   Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateClaimDto {
@@ -21,6 +22,7 @@ export class CreateClaimDto {
     example: 100.5,
     minimum: 0,
   })
+  @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   amount: number;
