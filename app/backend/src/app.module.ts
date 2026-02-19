@@ -14,6 +14,8 @@ import { SecurityModule } from './common/security/security.module';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { APP_GUARD } from '@nestjs/core';
+import { ApiKeyGuard } from './common/guards/api-key.guard';
 
 @Module({
   imports: [
@@ -41,7 +43,13 @@ import { CampaignsModule } from './campaigns/campaigns.module';
     CampaignsModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ApiKeyGuard,
+    },
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

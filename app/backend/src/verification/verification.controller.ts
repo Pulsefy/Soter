@@ -14,11 +14,13 @@ import {
   ApiParam,
   ApiBearerAuth,
   ApiConsumes,
+  ApiSecurity,
 } from '@nestjs/swagger';
 import { VerificationService } from './verification.service';
 import { CreateVerificationDto } from './dto/create-verification.dto';
 
 @ApiTags('verification')
+@ApiSecurity('x-api-key')
 @Controller('verification')
 export class VerificationController {
   constructor(private readonly verificationService: VerificationService) {}

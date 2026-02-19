@@ -1,6 +1,7 @@
 import { Controller, Get, Version } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { AppService } from './app.service';
+import { Public } from './common/decorators/public.decorator';
 
 @ApiTags('app')
 @Controller()
@@ -26,5 +27,11 @@ export class AppController {
   })
   getHello() {
     return this.appService.getHello();
+  }
+
+  @Public()
+  @Get('health')
+  health() {
+    return { status: 'ok' };
   }
 }
