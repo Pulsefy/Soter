@@ -17,12 +17,19 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { VerificationService } from './verification.service';
+import { VerificationFlowService } from './verification-flow.service';
 import { CreateVerificationDto } from './dto/create-verification.dto';
+import { StartVerificationDto } from './dto/start-verification.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { CompleteVerificationDto } from './dto/complete-verification.dto';
 
 @ApiTags('verification')
 @Controller('verification')
 export class VerificationController {
-  constructor(private readonly verificationService: VerificationService) {}
+  constructor(
+    private readonly verificationService: VerificationService,
+    private readonly verificationFlowService: VerificationFlowService,
+  ) {}
 
   @Post('claims/:id/enqueue')
   @Version('1')
@@ -85,6 +92,96 @@ export class VerificationController {
   })
   async getMetrics() {
     return this.verificationService.getQueueMetrics();
+  }
+
+  @Post('start')
+  @Version('1')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Start verification flow (OTP/email/phone)',
+    description:
+      'Start a verification session. Sends an OTP to the given email or phone. Rate-limited per identifier.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Verification started; code sent to channel',
+    schema: {
+      example: {
+        sessionId: 'clv789xyz123',
+        channel: 'email',
+        expiresAt: '2025-02-19T12:10:00.000Z',
+        message: 'Verification code sent to email. Code expires in 10 minutes.',
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Invalid input or rate limit exceeded',
+  })
+  async startVerification(@Body() dto: StartVerificationDto) {
+    return this.verificationFlowService.start(dto);
+  }
+
+  @Post('resend')
+  @Version('1')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Resend verification code',
+    description:
+      'Resend OTP for an existing pending session. Limited resends per session.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'New code sent',
+    schema: {
+      example: {
+        sessionId: 'clv789xyz123',
+        expiresAt: '2025-02-19T12:10:00.000Z',
+        message: 'New verification code sent.',
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Session inactive, expired, or resend limit exceeded',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Verification session not found',
+  })
+  async resendVerification(@Body() dto: ResendVerificationDto) {
+    return this.verificationFlowService.resend(dto);
+  }
+
+  @Post('complete')
+  @Version('1')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Complete verification with OTP',
+    description:
+      'Submit the OTP code to complete the verification. Attempts are rate-limited per session.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Verification completed successfully',
+    schema: {
+      example: {
+        sessionId: 'clv789xyz123',
+        verified: true,
+        message: 'Verification completed successfully.',
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Invalid code, session expired, or too many attempts',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Verification session not found',
+  })
+  async completeVerification(@Body() dto: CompleteVerificationDto) {
+    return this.verificationFlowService.complete(dto);
   }
 
   @Post()

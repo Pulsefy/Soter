@@ -30,7 +30,45 @@ Service.processVerification()
 Database Update (Prisma)
 ```
 
-## API Endpoints
+## OTP / Identity Verification Flow
+
+Soter supports an OTP-based verification flow (email or phone) with rate limiting.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/verification/start` | Start a verification session; sends OTP to email or phone |
+| POST | `/api/v1/verification/resend` | Resend OTP for an existing session |
+| POST | `/api/v1/verification/complete` | Submit OTP to complete verification |
+
+### Flow
+
+1. **Start**: `POST /verification/start` with `{ "channel": "email", "email": "user@example.com" }` or `{ "channel": "phone", "phone": "+15551234567" }`. Returns `sessionId` and `expiresAt`. Rate-limited per identifier (e.g. max 5 starts per email/phone per hour).
+2. **Resend** (optional): `POST /verification/resend` with `{ "sessionId": "<id>" }`. Limited resends per session (default 3).
+3. **Complete**: `POST /verification/complete` with `{ "sessionId": "<id>", "code": "123456" }`. Limited wrong-code attempts per session (default 5).
+
+### Configuration (.env)
+
+- `VERIFICATION_OTP_LENGTH` – OTP length in digits (default: 6)
+- `VERIFICATION_OTP_TTL_MINUTES` – OTP validity in minutes (default: 10)
+- `VERIFICATION_MAX_STARTS_PER_IDENTIFIER_PER_HOUR` – Start rate limit (default: 5)
+- `VERIFICATION_MAX_RESENDS_PER_SESSION` – Max resends per session (default: 3)
+- `VERIFICATION_MAX_ATTEMPTS_PER_SESSION` – Max wrong-code attempts (default: 5)
+
+### Persistence
+
+Sessions are stored in the `VerificationSession` table (Prisma). Run migrations so the table exists:
+
+```bash
+npx prisma migrate dev
+```
+
+E2E tests for this flow require the database to be migrated and (for full app) Redis for the claim-verification queue.
+
+---
+
+## API Endpoints (Claim verification)
 
 ### Enqueue Verification
 ```http

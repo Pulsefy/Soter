@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { VerificationController } from './verification.controller';
 import { VerificationService } from './verification.service';
+import { VerificationFlowService } from './verification-flow.service';
 import { VerificationProcessor } from './verification.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuditModule } from '../audit/audit.module';
@@ -29,7 +30,11 @@ import { AuditModule } from '../audit/audit.module';
     }),
   ],
   controllers: [VerificationController],
-  providers: [VerificationService, VerificationProcessor],
-  exports: [VerificationService],
+  providers: [
+    VerificationService,
+    VerificationFlowService,
+    VerificationProcessor,
+  ],
+  exports: [VerificationService, VerificationFlowService],
 })
 export class VerificationModule {}

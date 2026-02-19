@@ -31,6 +31,33 @@ model AidPackage {
   status    String   @default("draft")
 }
 
+enum VerificationChannel {
+  email
+  phone
+}
+
+enum VerificationSessionStatus {
+  pending
+  completed
+  expired
+}
+
+model VerificationSession {
+  id          String                   @id @default(cuid())
+  channel     VerificationChannel
+  identifier  String
+  code        String
+  attempts    Int                      @default(0)
+  resendCount Int                      @default(0)
+  status      VerificationSessionStatus @default(pending)
+  expiresAt   DateTime
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+
+  @@index([identifier, createdAt])
+  @@index([status, expiresAt])
+}
+
 model VerificationRequest {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
