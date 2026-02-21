@@ -110,11 +110,27 @@ model Campaign {
 
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
+  claims      Claim[]
 
   claims      Claim[]
 
   @@index([status])
   @@index([archivedAt])
+}
+
+model Claim {
+  id          String      @id @default(cuid())
+  campaignId  String
+  campaign    Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  status      ClaimStatus @default(pending)
+  amount      Decimal     @db.Decimal(14, 2)
+  description String?
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([campaignId])
+  @@index([status])
 }
 
 model Role {
