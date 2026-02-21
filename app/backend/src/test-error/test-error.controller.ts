@@ -6,6 +6,9 @@ import {
   ValidationPipe,
   BadRequestException,
   InternalServerErrorException,
+  UnauthorizedException,
+  ForbiddenException,
+  NotFoundException,
   UsePipes,
 } from '@nestjs/common';
 import { CreateVerificationDto } from '../verification/dto/create-verification.dto';
@@ -25,6 +28,21 @@ export class TestErrorController {
   @Get('internal-server-error')
   getInternalServerError() {
     throw new InternalServerErrorException('This is an internal server error');
+  }
+
+  @Get('unauthorized')
+  getUnauthorized() {
+    throw new UnauthorizedException('Authentication required');
+  }
+
+  @Get('forbidden')
+  getForbidden() {
+    throw new ForbiddenException('Access denied');
+  }
+
+  @Get('not-found')
+  getNotFound() {
+    throw new NotFoundException('Resource not found');
   }
 
   @Post('validation-error')

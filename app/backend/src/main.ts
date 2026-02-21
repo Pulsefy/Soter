@@ -5,11 +5,10 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { LoggerService } from './logger/logger.service';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
-import { HttpExceptionFilter } from './filters/http-exception.filter';
 import { config as loadEnv } from 'dotenv';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor';
 import {
   buildCorsOptions,
@@ -60,9 +59,6 @@ async function bootstrap() {
     prefix: 'v',
   });
 
-  // Register global exception filter
-  app.useGlobalFilters(new AllExceptionsFilter());
-
   // Register global request ID interceptor
   app.useGlobalInterceptors(new RequestIdInterceptor());
 
@@ -80,9 +76,6 @@ async function bootstrap() {
 
   // Global interceptors
   app.useGlobalInterceptors(new LoggingInterceptor(logger));
-
-  // Global exception filters
-  app.useGlobalFilters(new HttpExceptionFilter(logger));
 
   // Swagger/OpenAPI Documentation
   const config = new DocumentBuilder()

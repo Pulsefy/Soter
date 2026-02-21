@@ -4,73 +4,77 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
-  Logger,
+  Injectable,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { ValidationError } from 'class-validator';
+import { LoggerService } from '../../logger/logger.service';
 
 export interface ErrorResponse {
-  code: string | number;
+  code: number;
   message: string;
   details?: any;
-  requestId?: string;
+  traceId?: string;
   timestamp: string;
   path: string;
 }
 
+@Injectable()
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
-  private readonly logger = new Logger(AllExceptionsFilter.name);
+  constructor(private readonly logger: LoggerService) {}
 
   catch(exception: any, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
-    const requestId = request.headers['x-request-id'] as string;
+    const traceId = request.headers['x-request-id'] as string | undefined;
 
     // Log the error
     this.logger.error(
-      `Request ID: ${requestId} | ${exception.constructor.name} | Status: ${
+      `Trace ID: ${traceId ?? 'N/A'} | ${exception.constructor?.name ?? 'UnknownError'} | Status: ${
         exception.status || HttpStatus.INTERNAL_SERVER_ERROR
       } | Message: ${exception.message} | Path: ${request.url}`,
       exception.stack,
+      'AllExceptionsFilter',
     );
 
     let errorResponse: ErrorResponse;
 
     if (exception instanceof HttpException) {
-      errorResponse = this.handleHttpException(exception, request, requestId);
+      errorResponse = this.handleHttpException(exception, request, traceId);
     } else if (this.isPrismaError(exception)) {
-      errorResponse = this.handlePrismaError(exception, request, requestId);
+      errorResponse = this.handlePrismaError(exception, request, traceId);
     } else if (
       Array.isArray(exception) &&
       exception.some(e => e instanceof ValidationError)
     ) {
-      errorResponse = this.handleValidationErrors(
-        exception,
-        request,
-        requestId,
-      );
+      errorResponse = this.handleValidationErrors(exception, request, traceId);
     } else {
-      errorResponse = this.handleGenericError(exception, request, requestId);
+      errorResponse = this.handleGenericError(exception, request, traceId);
     }
 
-    response.status(errorResponse.code as number).json(errorResponse);
+    response.status(errorResponse.code).json(errorResponse);
   }
 
   private handleHttpException(
     exception: HttpException,
     request: Request,
-    requestId: string,
+    traceId?: string,
   ): ErrorResponse {
     const status = exception.getStatus();
-    const message = exception.message || exception.getResponse();
+    const exceptionResponse = exception.getResponse();
+    const message =
+      typeof exceptionResponse === 'string'
+        ? exceptionResponse
+        : (exceptionResponse as any).message || exception.message;
 
     return {
       code: status,
       message: typeof message === 'string' ? message : JSON.stringify(message),
-      details: exception.getResponse(),
-      requestId,
+      details:
+        typeof exceptionResponse === 'object' ? exceptionResponse : undefined,
+      traceId,
       timestamp: new Date().toISOString(),
       path: request.url,
     };
@@ -87,7 +91,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
   private handlePrismaError(
     exception: any,
     request: Request,
-    requestId: string,
+    traceId?: string,
   ): ErrorResponse {
     let code = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Database error occurred';
@@ -136,7 +140,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       code,
       message,
       details,
-      requestId,
+      traceId,
       timestamp: new Date().toISOString(),
       path: request.url,
     };
@@ -145,7 +149,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
   private handleValidationErrors(
     exceptions: ValidationError[],
     request: Request,
-    requestId: string,
+    traceId?: string,
   ): ErrorResponse {
     const validationErrors = exceptions.map(error => ({
       property: error.property,
@@ -162,7 +166,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       details: {
         errors: validationErrors,
       },
-      requestId,
+      traceId,
       timestamp: new Date().toISOString(),
       path: request.url,
     };
@@ -182,7 +186,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
   private handleGenericError(
     exception: any,
     request: Request,
-    requestId: string,
+    traceId?: string,
   ): ErrorResponse {
     return {
       code: HttpStatus.INTERNAL_SERVER_ERROR,
@@ -194,7 +198,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
             stack: exception.stack,
           }),
       },
-      requestId,
+      traceId,
       timestamp: new Date().toISOString(),
       path: request.url,
     };
