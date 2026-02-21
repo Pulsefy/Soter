@@ -342,6 +342,46 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Admin can extend the expiration of a package that is still in Created status.
+    pub fn extend_expiration(env: Env, id: u64, additional_time: u64) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        if additional_time == 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let key = (symbol_short!("pkg"), id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        // Must be in Created state
+        if package.status != PackageStatus::Created {
+            return Err(Error::PackageNotActive);
+        }
+
+        // Check expiry: if already expired, mark expired and return error
+        if package.expires_at > 0 && env.ledger().timestamp() > package.expires_at {
+            package.status = PackageStatus::Expired;
+            env.storage().persistent().set(&key, &package);
+            return Err(Error::PackageExpired);
+        }
+
+        // If expires_at == 0 treat as unbounded and disallow extension
+        if package.expires_at == 0 {
+            return Err(Error::InvalidState);
+        }
+
+        // Safe to extend
+        package.expires_at = package.expires_at + additional_time;
+        env.storage().persistent().set(&key, &package);
+
+        Ok(())
+    }
+
     pub fn refund(env: Env, id: u64) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();

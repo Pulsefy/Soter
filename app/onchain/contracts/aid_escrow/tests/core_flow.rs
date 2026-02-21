@@ -163,3 +163,53 @@ fn test_revoke_flow() {
     let pkg_id_2 = 2;
     client.create_package(&pkg_id_2, &recipient, &1000, &token_client.address, &0);
 }
+
+#[test]
+fn test_extend_expiration_success_and_failures() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    token_admin_client.mint(&admin, &1000);
+    client.fund(&token_client.address, &admin, &1000);
+
+    // Create package with expiry
+    let start_time = 2000;
+    env.ledger().set_timestamp(start_time);
+    let pkg_id = 77;
+    let expiry = start_time + 100;
+    client.create_package(&pkg_id, &recipient, &500, &token_client.address, &expiry);
+
+    // Extend successfully by 50
+    client.extend_expiration(&pkg_id, &50u64);
+    let pkg = client.get_package(&pkg_id);
+    assert_eq!(pkg.expires_at, expiry + 50);
+
+    // Non-existent package -> PackageNotFound
+    let res = client.try_extend_expiration(&9999, &10u64);
+    assert_eq!(res, Err(Ok(Error::PackageNotFound)));
+
+    // Claimed package cannot be extended
+    let pkg_claim_id = 78;
+    client.create_package(&pkg_claim_id, &recipient, &100, &token_client.address, &0);
+    client.claim(&pkg_claim_id);
+    let res2 = client.try_extend_expiration(&pkg_claim_id, &10u64);
+    assert_eq!(res2, Err(Ok(Error::PackageNotActive)));
+
+    // Expired package cannot be extended
+    let pkg_exp_id = 79;
+    let expiry2 = start_time + 10;
+    client.create_package(&pkg_exp_id, &recipient, &100, &token_client.address, &expiry2);
+    // Advance past expiry
+    env.ledger().set_timestamp(expiry2 + 1);
+    let res3 = client.try_extend_expiration(&pkg_exp_id, &10u64);
+    assert_eq!(res3, Err(Ok(Error::PackageExpired)));
+}
