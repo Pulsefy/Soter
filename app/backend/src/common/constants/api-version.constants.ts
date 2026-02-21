@@ -23,9 +23,20 @@ export const API_VERSION_STATUS = {
 } as const;
 
 /**
+ * Version metadata type
+ */
+interface VersionMetadata {
+  version: string;
+  status: string;
+  releasedAt: string;
+  description: string;
+  documentation: string;
+}
+
+/**
  * Version metadata for documentation and deprecation tracking
  */
-export const VERSION_METADATA = {
+export const VERSION_METADATA: Record<string, VersionMetadata> = {
   [API_VERSIONS.V1]: {
     version: API_VERSIONS.V1,
     status: API_VERSION_STATUS.CURRENT,
@@ -33,7 +44,7 @@ export const VERSION_METADATA = {
     description: 'Initial API version with core features',
     documentation: '/api/docs',
   },
-} as const;
+};
 
 /**
  * Deprecation policy constants
@@ -69,15 +80,18 @@ export type ApiVersion = (typeof API_VERSIONS)[keyof typeof API_VERSIONS];
  * Check if a version is deprecated
  */
 export function isVersionDeprecated(version: string): boolean {
-  const metadata = VERSION_METADATA[version as ApiVersion];
-  return metadata?.status === API_VERSION_STATUS.DEPRECATED;
+  const metadata = VERSION_METADATA[version];
+  if (!metadata) {
+    return false;
+  }
+  return metadata.status === API_VERSION_STATUS.DEPRECATED;
 }
 
 /**
  * Get version metadata
  */
-export function getVersionMetadata(version: string) {
-  return VERSION_METADATA[version as ApiVersion];
+export function getVersionMetadata(version: string): VersionMetadata | undefined {
+  return VERSION_METADATA[version];
 }
 
 /**

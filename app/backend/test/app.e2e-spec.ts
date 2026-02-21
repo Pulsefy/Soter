@@ -20,6 +20,8 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer())
       .get('/')
       .expect(200)
-      .expect('Hello World!');
+      .expect((res: { body: { message?: string } }) => {
+        expect(res.body.message).toBe('Welcome to Pulsefy/Soter API');
+      });
   });
 });

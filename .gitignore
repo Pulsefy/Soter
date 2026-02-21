@@ -3,6 +3,10 @@ node_modules/
 .pnp
 .pnp.js
 
+# Compiled output
+dist/
+build/
+
 # Testing
 coverage/
 .jest-cache/
@@ -50,7 +54,6 @@ expo-env.d.ts
 
 # Lockfiles
 yarn.lock
-pnpm-lock.yaml
 pnpm-lock.json
 npm-shrinkwrap.json
 package-json.lock

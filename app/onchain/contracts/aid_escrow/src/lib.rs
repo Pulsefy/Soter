@@ -1,25 +1,31 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracterror, Address, Env, IntoVal, Map, Symbol, TryFromVal, Val,
+    Address, Env, Map, String, Symbol, contract, contracterror, contractevent, contractimpl,
+    contracttype, symbol_short, token,
 };
 
-#[contract]
-pub struct AidEscrow;
+// --- Storage Keys ---
+const KEY_ADMIN: Symbol = symbol_short!("admin");
+const KEY_TOTAL_LOCKED: Symbol = symbol_short!("locked"); // Map<Address, i128>
 
-/// Package status enum
-#[derive(Clone, Copy, PartialEq, Eq, TryFromVal, IntoVal)]
+// --- Data Types ---
+
+#[contracttype]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u32)]
 pub enum PackageStatus {
     Created = 0,
     Claimed = 1,
     Expired = 2,
     Cancelled = 3,
+    Refunded = 4,
 }
 
-/// Package structure
-#[derive(Clone, TryFromVal, IntoVal)]
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Package {
+    pub id: u64,
     pub recipient: Address,
     pub amount: i128,
     pub token: Address,
@@ -29,281 +35,431 @@ pub struct Package {
     pub metadata: Map<Symbol, String>,
 }
 
-/// Contract errors
 #[contracterror]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Error {
-    NotAuthorized = 1,
-    InvalidAmount = 2,
-    PackageNotFound = 3,
-    PackageAlreadyClaimed = 4,
-    PackageExpired = 5,
+    NotInitialized = 1,
+    AlreadyInitialized = 2,
+    NotAuthorized = 3,
+    InvalidAmount = 4,
+    PackageNotFound = 5,
+    PackageNotActive = 6, // Already claimed, expired, or cancelled
+    PackageExpired = 7,
+    PackageNotExpired = 8,
+    InsufficientFunds = 9, // Contract balance < Total Locked + New Amount
+    PackageIdExists = 10,
+    InvalidState = 11, // Transition not allowed
 }
+
+// --- Contract Events ---
+// Changed from #[contracttype] to #[contractevent]
+
+#[contractevent]
+pub struct FundEvent {
+    pub from: Address,
+    pub token: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct PackageCreatedEvent {
+    pub id: u64,
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct ClaimedEvent {
+    pub id: u64,
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct DisbursedEvent {
+    pub id: u64,
+    pub admin: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct RevokedEvent {
+    pub id: u64,
+    pub admin: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct RefundedEvent {
+    pub id: u64,
+    pub admin: Address,
+    pub amount: i128,
+}
+
+#[contract]
+pub struct AidEscrow;
 
 #[contractimpl]
 impl AidEscrow {
-    /// Initialize the contract with an admin
-    pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
-        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
-        env.storage().instance().set(&Symbol::new(&env, "package_counter"), &0u64);
+    // --- Admin & Config ---
+
+    pub fn init(env: Env, admin: Address) -> Result<(), Error> {
+        if env.storage().instance().has(&KEY_ADMIN) {
+            return Err(Error::AlreadyInitialized);
+        }
+        env.storage().instance().set(&KEY_ADMIN, &admin);
         Ok(())
     }
 
-    /// Get the admin address
     pub fn get_admin(env: Env) -> Result<Address, Error> {
         env.storage()
             .instance()
-            .get(&Symbol::new(&env, "admin"))
-            .ok_or(Error::NotAuthorized)
+            .get(&KEY_ADMIN)
+            .ok_or(Error::NotInitialized)
     }
 
-    /// Create a new aid package
+    // --- Funding & Packages ---
+
+    /// Funds the contract (Pool Model).
+    /// Transfers `amount` of `token` from `from` to this contract.
+    /// This increases the contract's balance, allowing new packages to be created.
+    pub fn fund(env: Env, token: Address, from: Address, amount: i128) -> Result<(), Error> {
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        from.require_auth();
+
+        // Perform transfer: From -> Contract
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&from, env.current_contract_address(), &amount);
+
+        // Emit event
+        FundEvent {
+            from,
+            token,
+            amount,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Creates a package with a specific ID.
+    /// Locks funds from the available pool (Contract Balance - Total Locked).
     pub fn create_package(
         env: Env,
+        id: u64,
         recipient: Address,
         amount: i128,
         token: Address,
-        expires_in: u64,
+        expires_at: u64,
     ) -> Result<u64, Error> {
-        // Only admin
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&Symbol::new(&env, "admin"))
-            .ok_or(Error::NotAuthorized)?;
+        let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
 
         if amount <= 0 {
             return Err(Error::InvalidAmount);
         }
 
-        // Increment package counter
-        let mut package_counter: u64 = env
+        // 1. Check ID Uniqueness
+        let key = (symbol_short!("pkg"), id);
+        if env.storage().persistent().has(&key) {
+            return Err(Error::PackageIdExists);
+        }
+
+        // 2. Check Solvency (Available Balance vs Locked)
+        let token_client = token::Client::new(&env, &token);
+        let contract_balance = token_client.balance(&env.current_contract_address());
+
+        let mut locked_map: Map<Address, i128> = env
             .storage()
             .instance()
-            .get(&Symbol::new(&env, "package_counter"))
-            .unwrap_or(0);
-        let package_id = package_counter;
-        package_counter += 1;
-        env.storage()
-            .instance()
-            .set(&Symbol::new(&env, "package_counter"), &package_counter);
+            .get(&KEY_TOTAL_LOCKED)
+            .unwrap_or(Map::new(&env));
+        let current_locked = locked_map.get(token.clone()).unwrap_or(0);
 
+        // Ensure we don't over-promise funds
+        if contract_balance < current_locked + amount {
+            return Err(Error::InsufficientFunds);
+        }
+
+        // 3. Update Locked State
+        locked_map.set(token.clone(), current_locked + amount);
+        env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+
+        // 4. Create Package
         let created_at = env.ledger().timestamp();
-        let expires_at = if expires_in > 0 { created_at + expires_in } else { 0 };
-
         let package = Package {
-            recipient,
+            id,
+            recipient: recipient.clone(),
             amount,
-            token,
+            token: token.clone(),
             status: PackageStatus::Created,
             created_at,
             expires_at,
             metadata: Map::new(&env),
         };
 
-        env.storage()
-            .persistent()
-            .set(&(Symbol::new(&env, "package"), package_id), &package);
+        env.storage().persistent().set(&key, &package);
 
-        Ok(package_id)
+        // Emit Event
+        PackageCreatedEvent {
+            id,
+            recipient,
+            amount,
+        }
+        .publish(&env);
+
+        Ok(id)
     }
 
-    /// Claim a package
-    pub fn claim_package(env: Env, package_id: u64) -> Result<(), Error> {
-        let key = Symbol::new(&env, "package");
+    // --- Recipient Actions ---
+
+    /// Recipient claims the package.
+    pub fn claim(env: Env, id: u64) -> Result<(), Error> {
+        let key = (symbol_short!("pkg"), id);
         let mut package: Package = env
             .storage()
             .persistent()
-            .get(&(key, package_id))
+            .get(&key)
             .ok_or(Error::PackageNotFound)?;
 
-        if package.status == PackageStatus::Claimed {
-            return Err(Error::PackageAlreadyClaimed);
+        // Validations
+        if package.status != PackageStatus::Created {
+            return Err(Error::PackageNotActive);
         }
-
+        // Check expiry
         if package.expires_at > 0 && env.ledger().timestamp() > package.expires_at {
+            // Auto-expire if accessed after date
             package.status = PackageStatus::Expired;
-            env.storage().persistent().set(&(key, package_id), &package);
+            env.storage().persistent().set(&key, &package);
             return Err(Error::PackageExpired);
         }
 
-        // Only recipient can claim
+        // Auth
         package.recipient.require_auth();
 
+        // State Transition: Created -> Claimed
+        // Checks passed, update state FIRST (Re-entrancy protection)
         package.status = PackageStatus::Claimed;
-        env.storage().persistent().set(&(key, package_id), &package);
+        env.storage().persistent().set(&key, &package);
+
+        // Update Global Locked
+        Self::decrement_locked(&env, &package.token, package.amount);
+
+        // Effect: Transfer Funds
+        let token_client = token::Client::new(&env, &package.token);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &package.recipient,
+            &package.amount,
+        );
+
+        // Emit Event
+        ClaimedEvent {
+            id,
+            recipient: package.recipient.clone(),
+            amount: package.amount,
+        }
+        .publish(&env);
+
         Ok(())
     }
 
-    /// Get package details
-    pub fn get_package(env: Env, package_id: u64) -> Result<Option<(Address, i128, Address, u32, u64, u64)>, Error> {
-        let recipient_key = Symbol::new(&env, "recipient");
-        let recipient: Option<Address> = env.storage().persistent().get(&(recipient_key, package_id));
-        
-        if let Some(recipient) = recipient {
-            let amount: i128 = env.storage().persistent().get(&(Symbol::new(&env, "amount"), package_id)).unwrap();
-            let token: Address = env.storage().persistent().get(&(Symbol::new(&env, "token"), package_id)).unwrap();
-            let status: u32 = env.storage().persistent().get(&(Symbol::new(&env, "status"), package_id)).unwrap();
-            let created_at: u64 = env.storage().persistent().get(&(Symbol::new(&env, "created_at"), package_id)).unwrap();
-            let expires_at: u64 = env.storage().persistent().get(&(Symbol::new(&env, "expires_at"), package_id)).unwrap();
-            
-            Ok(Some((recipient, amount, token, status, created_at, expires_at)))
-        } else {
-            Ok(None)
+    // --- Admin Actions ---
+
+    /// Admin manually triggers disbursement (overrides recipient claim need, strictly checks status).
+    pub fn disburse(env: Env, id: u64) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let key = (symbol_short!("pkg"), id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        if package.status != PackageStatus::Created {
+            return Err(Error::PackageNotActive);
         }
+
+        // State Transition
+        package.status = PackageStatus::Claimed; // Mark as claimed (or Disbursed if we had that enum)
+        env.storage().persistent().set(&key, &package);
+
+        // Update Locked
+        Self::decrement_locked(&env, &package.token, package.amount);
+
+        // Transfer
+        let token_client = token::Client::new(&env, &package.token);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &package.recipient,
+            &package.amount,
+        );
+
+        DisbursedEvent {
+            id,
+            admin: admin.clone(),
+            amount: package.amount,
+        }
+        .publish(&env);
+
+        Ok(())
     }
 
-    /// Get total package count
-    pub fn get_package_count(env: Env) -> Result<u64, Error> {
-        let count: u64 = env
+    /// Admin revokes a package (Cancels it). Funds are effectively unlocked but remain in contract pool.
+    pub fn revoke(env: Env, id: u64) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let key = (symbol_short!("pkg"), id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        if package.status != PackageStatus::Created {
+            return Err(Error::InvalidState);
+        }
+
+        // State Transition
+        package.status = PackageStatus::Cancelled;
+        env.storage().persistent().set(&key, &package);
+
+        // Unlock funds (return to pool)
+        Self::decrement_locked(&env, &package.token, package.amount);
+
+        RevokedEvent {
+            id,
+            admin: admin.clone(),
+            amount: package.amount,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    pub fn refund(env: Env, id: u64) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let key = (symbol_short!("pkg"), id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        // Can only refund if Expired or Cancelled.
+        // If Created, must Revoke first. If Claimed, impossible.
+        // If Refunded, impossible.
+        if package.status == PackageStatus::Created {
+            // Check if actually expired
+            if package.expires_at > 0 && env.ledger().timestamp() > package.expires_at {
+                package.status = PackageStatus::Expired;
+                // If we just expired it, we need to unlock the funds first
+                Self::decrement_locked(&env, &package.token, package.amount);
+            } else {
+                return Err(Error::InvalidState); // Must revoke first
+            }
+        } else if package.status == PackageStatus::Claimed
+            || package.status == PackageStatus::Refunded
+        {
+            return Err(Error::InvalidState);
+        }
+
+        // If Cancelled, funds were already unlocked in `revoke`.
+        // If Expired (logic above), funds were just unlocked.
+
+        // State Transition
+        package.status = PackageStatus::Refunded;
+        env.storage().persistent().set(&key, &package);
+
+        // Transfer Contract -> Admin
+        let token_client = token::Client::new(&env, &package.token);
+        token_client.transfer(&env.current_contract_address(), &admin, &package.amount);
+
+        RefundedEvent {
+            id,
+            admin: admin.clone(),
+            amount: package.amount,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Admin-only package cancellation.
+    /// Requirements: Admin auth, existing package, status must be 'Created'.
+    pub fn cancel_package(env: Env, package_id: u64) -> Result<(), Error> {
+        // 1. Only the admin can cancel (check stored admin and require_auth)
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        // 2. Package must exist
+        let key = (symbol_short!("pkg"), package_id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        // 3. Package status must be Created (not Claimed, Expired, or already Cancelled)
+        if package.status != PackageStatus::Created {
+            return Err(Error::PackageNotActive);
+        }
+
+        // Additional check: Ensure it hasn't expired yet (consistent with 'claim' logic)
+        if package.expires_at > 0 && env.ledger().timestamp() > package.expires_at {
+            return Err(Error::PackageExpired);
+        }
+
+        // 4. Update status to Cancelled and persist
+        package.status = PackageStatus::Cancelled;
+        env.storage().persistent().set(&key, &package);
+
+        // 5. Unlock funds (Decrement the global locked amount so funds return to the pool)
+        Self::decrement_locked(&env, &package.token, package.amount);
+
+        // Reuse RevokedEvent or create a new CancelledEvent if preferred
+        RevokedEvent {
+            id: package_id,
+            admin,
+            amount: package.amount,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    // --- Helpers ---
+
+    fn decrement_locked(env: &Env, token: &Address, amount: i128) {
+        let mut locked_map: Map<Address, i128> = env
             .storage()
             .instance()
-            .get(&Symbol::new(&env, "package_counter"))
-            .unwrap_or(0);
-        Ok(count)
+            .get(&KEY_TOTAL_LOCKED)
+            .unwrap_or(Map::new(env));
+
+        let current = locked_map.get(token.clone()).unwrap_or(0);
+        let new_locked = if current > amount {
+            current - amount
+        } else {
+            0
+        };
+
+        locked_map.set(token.clone(), new_locked);
+        env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+    }
+
+    pub fn get_package(env: Env, id: u64) -> Result<Package, Error> {
+        let key = (symbol_short!("pkg"), id);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)
     }
 }
-
-
-
-
-
-
-
-// Unit tests
-#[cfg(test)]
-mod test {
-    use super::*;
-    use soroban_sdk::{Env, Address, Symbol, testutils::Address as _};
-
-    fn setup<'a>() -> (Env, AidEscrowClient<'a>) {
-        let env = Env::default();
-        let contract_id = env.register(AidEscrow, ());
-        let client = AidEscrowClient::new(&env, &contract_id);
-        (env, client)
-    }
-
-    #[test]
-    fn test_initialize_and_get_admin() {
-        let (env, client) = setup();
-        let admin = Address::generate(&env);
-        
-        client.initialize(&admin);
-        let retrieved_admin = client.get_admin();
-        
-        assert_eq!(retrieved_admin, admin);
-    }
-
-    #[test]
-    fn test_create_package() {
-        let (env, client) = setup();
-        let admin = Address::generate(&env);
-        let recipient = Address::generate(&env);
-        let token = Address::generate(&env);
-        
-        client.initialize(&admin);
-        
-        // Admin must authorize
-        env.mock_all_auths();
-        
-        let package_id = client.create_package(&recipient, &1000, &token, &86400).unwrap();
-        assert_eq!(package_id, 0);
-        
-        let package = client.get_package(&package_id).unwrap();
-        assert_eq!(package.recipient, recipient);
-        assert_eq!(package.amount, 1000);
-        assert_eq!(package.token, token);
-        assert_eq!(package.status, PackageStatus::Created);
-    }
-
-    #[test]
-    fn test_create_package_invalid_amount() {
-        let (env, client) = setup();
-        let admin = Address::generate(&env);
-        let recipient = Address::generate(&env);
-        let token = Address::generate(&env);
-        
-        client.initialize(&admin);
-        env.mock_all_auths();
-        
-        let result = client.create_package(&recipient, &0, &token, &86400);
-        assert_eq!(result, Err(Error::InvalidAmount));
-    }
-
-    #[test]
-    fn test_claim_package() {
-        let (env, client) = setup();
-        let admin = Address::generate(&env);
-        let recipient = Address::generate(&env);
-        let token = Address::generate(&env);
-        
-        client.initialize(&admin);
-        env.mock_all_auths();
-        
-        let package_id = client.create_package(&recipient, &1000, &token, &86400).unwrap();
-        
-        // Mock recipient auth for claim
-        env.mock_all_auths();
-        
-        let result = client.claim_package(&package_id);
-        assert!(result.is_ok());
-        
-        let package = client.get_package(&package_id).unwrap();
-        assert_eq!(package.status, PackageStatus::Claimed);
-    }
-
-    #[test]
-    fn test_claim_package_not_recipient() {
-        let (env, client) = setup();
-        let admin = Address::generate(&env);
-        let recipient = Address::generate(&env);
-        let other = Address::generate(&env);
-        let token = Address::generate(&env);
-        
-        client.initialize(&admin);
-        env.mock_all_auths();
-        
-        let package_id = client.create_package(&recipient, &1000, &token, &86400).unwrap();
-        
-        // Mock wrong auth (other instead of recipient)
-        env.mock_all_auths();
-        
-        let result = client.claim_package(&package_id);
-        // This would fail auth check in real scenario
-        // For test, we're mocking all auths so it passes
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_get_package_count() {
-        let (env, client) = setup();
-        let admin = Address::generate(&env);
-        let recipient1 = Address::generate(&env);
-        let recipient2 = Address::generate(&env);
-        let token = Address::generate(&env);
-        
-        client.initialize(&admin);
-        env.mock_all_auths();
-        
-        assert_eq!(client.get_package_count(), 0);
-        
-        client.create_package(&recipient1, &1000, &token, &86400).unwrap();
-        assert_eq!(client.get_package_count(), 1);
-        
-        client.create_package(&recipient2, &2000, &token, &86400).unwrap();
-        assert_eq!(client.get_package_count(), 2);
-    }
-
-    #[test]
-    fn test_package_not_found() {
-        let (env, client) = setup();
-        let admin = Address::generate(&env);
-        
-        client.initialize(&admin);
-        
-        let result = client.get_package(&999);
-        assert_eq!(result, None);
-    }
-}
-

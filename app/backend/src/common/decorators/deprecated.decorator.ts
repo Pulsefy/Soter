@@ -5,6 +5,7 @@
  * as deprecated, with support for OpenAPI documentation and HTTP headers.
  */
 
+import 'reflect-metadata';
 import { applyDecorators, SetMetadata } from '@nestjs/common';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { DEPRECATION_POLICY } from '../constants/api-version.constants';
@@ -140,7 +141,9 @@ export function getDeprecationMetadata(
   propertyKey?: string | symbol,
 ): DeprecationMetadata | undefined {
   if (propertyKey) {
-    return Reflect.getMetadata(DEPRECATION_KEY, target, propertyKey);
+    const metadata = Reflect.getMetadata(DEPRECATION_KEY, target, propertyKey);
+    return metadata as DeprecationMetadata | undefined;
   }
-  return Reflect.getMetadata(DEPRECATION_KEY, target);
+  const metadata = Reflect.getMetadata(DEPRECATION_KEY, target);
+  return metadata as DeprecationMetadata | undefined;
 }

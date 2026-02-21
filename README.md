@@ -182,6 +182,11 @@ MIT License—see [LICENSE](LICENSE) for details.
 - [Soroban](https://soroban.stellar.org) – Smart contracts on Stellar.
 - Inspired by GiveDirectly & MSF for transparent aid.
 
+  
+## Support & Community
+- Join the [Soter Discord](https://discord.gg/gBmApTNVV) for real-time help, discussions, and updates.
+- Have questions? Open an issue or DM @pulsefy.
+
 ---
 
 *Built with ❤️ for humanity. Star us, contribute, and help save lives.* 🌍

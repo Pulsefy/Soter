@@ -7,6 +7,22 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum CampaignStatus {
+  draft
+  active
+  paused
+  completed
+  archived
+}
+
+enum ClaimStatus {
+  requested
+  verified
+  approved
+  disbursed
+  archived
+}
+
 model AidPackage {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -15,10 +31,93 @@ model AidPackage {
   status    String   @default("draft")
 }
 
+enum VerificationChannel {
+  email
+  phone
+}
+
+enum VerificationSessionStatus {
+  pending
+  completed
+  expired
+}
+
+model VerificationSession {
+  id          String                   @id @default(cuid())
+  channel     VerificationChannel
+  identifier  String
+  code        String
+  attempts    Int                      @default(0)
+  resendCount Int                      @default(0)
+  status      VerificationSessionStatus @default(pending)
+  expiresAt   DateTime
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+
+  @@index([identifier, createdAt])
+  @@index([status, expiresAt])
+}
+
 model VerificationRequest {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   status    String   @default("pending")
+}
+
+model Claim {
+  id           String      @id @default(cuid())
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  status       ClaimStatus @default(requested)
+
+  campaignId   String
+  campaign     Campaign    @relation(fields: [campaignId], references: [id])
+
+  amount       Decimal     @db.Decimal(14, 2)
+
+  recipientRef String
+  evidenceRef  String?
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String
+  entity    String
+  entityId  String
+  action    String
+  timestamp DateTime @default(now())
+  metadata  Json?
+
+  @@index([entity, entityId])
+  @@index([timestamp])
+}
+
+model Campaign {
+  id          String          @id @default(cuid())
+
+  name        String
+
+  status      CampaignStatus @default(draft)
+
+  budget      Decimal        @db.Decimal(14, 2)
+
+  metadata    Json?
+
+  archivedAt  DateTime?
+
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  claims      Claim[]
+
+  @@index([status])
+  @@index([archivedAt])
+}
+
+model Role {
+  id   Int    @id @default(autoincrement())
+  name String @unique
 }

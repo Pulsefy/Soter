@@ -1,0 +1,45 @@
+name: Contract CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'app/onchain/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'app/onchain/**'
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/onchain
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "app/onchain"
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: |
+          cargo clippy --target wasm32-unknown-unknown -- -D warnings
+          cargo clippy --tests --target x86_64-unknown-linux-gnu -- -D warnings
+
+      - name: Run tests
+        run: cargo test --target x86_64-unknown-linux-gnu
