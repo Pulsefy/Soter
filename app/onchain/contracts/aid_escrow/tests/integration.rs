@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use aid_escrow::{AidEscrow, AidEscrowClient, Error, PackageStatus};
-use soroban_sdk::{Env, Address, testutils};
+use soroban_sdk::{Env, Address};
 
 #[test]
 fn test_integration_flow() {
@@ -25,19 +25,20 @@ fn test_integration_flow() {
     assert_eq!(package_id, 0);
     
     // 3. Verify package details
-    let package = client.get_package(&package_id).unwrap();
-    assert_eq!(package.recipient, recipient);
-    assert_eq!(package.amount, 1000);
-    assert_eq!(package.token, token);
-    assert_eq!(package.status, PackageStatus::Created);
+    // get_package returns: (recipient, amount, token, status, created_at, expires_at)
+    let package = client.get_package(&package_id).unwrap().unwrap();
+    assert_eq!(package.0, recipient);  // recipient
+    assert_eq!(package.1, 1000);       // amount
+    assert_eq!(package.2, token);      // token
+    assert_eq!(package.3, PackageStatus::Created as u32); // status
     
     // 4. Claim package (recipient auth required)
     env.mock_all_auths();
     client.claim_package(&package_id).unwrap();
     
     // 5. Verify claimed
-    let package = client.get_package(&package_id).unwrap();
-    assert_eq!(package.status, PackageStatus::Claimed);
+    let package = client.get_package(&package_id).unwrap().unwrap();
+    assert_eq!(package.3, PackageStatus::Claimed as u32); // status
     
     // 6. Verify count
     assert_eq!(client.get_package_count(), 1);
@@ -67,13 +68,14 @@ fn test_multiple_packages() {
     assert_eq!(client.get_package_count(), 2);
     
     // Verify each package is independent
-    let p1 = client.get_package(&id1).unwrap();
-    let p2 = client.get_package(&id2).unwrap();
+    // get_package returns: (recipient, amount, token, status, created_at, expires_at)
+    let p1 = client.get_package(&id1).unwrap().unwrap();
+    let p2 = client.get_package(&id2).unwrap().unwrap();
     
-    assert_eq!(p1.recipient, recipient1);
-    assert_eq!(p2.recipient, recipient2);
-    assert_eq!(p1.amount, 500);
-    assert_eq!(p2.amount, 1000);
+    assert_eq!(p1.0, recipient1);  // recipient
+    assert_eq!(p2.0, recipient2);  // recipient
+    assert_eq!(p1.1, 500);         // amount
+    assert_eq!(p2.1, 1000);        // amount
 }
 
 #[test]
@@ -97,11 +99,11 @@ fn test_error_cases() {
     // Create valid package first
     let package_id = client.create_package(&recipient, &1000, &token, &86400).unwrap();
     
-    // Try to claim non-existent package
+    // Try to claim non-existent package - should return error
     let result = client.claim_package(&999);
-    assert_eq!(result, ());
+    assert_eq!(result, Err(Error::PackageNotFound));
     
-    // Get non-existent package
+    // Get non-existent package - should return None (not an error)
     let result = client.get_package(&999);
-    assert_eq!(result, None);
+    assert_eq!(result, Ok(None));
 }
