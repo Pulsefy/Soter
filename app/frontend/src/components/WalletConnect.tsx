@@ -6,10 +6,13 @@ import { useWalletStore } from "../lib/walletStore";
 
 export const WalletConnect: React.FC = () => {
   const [loading, setLoading] = useState(false);
-  const { publicKey, setPublicKey } = useWalletStore();
+  const [error, setError] = useState<string | null>(null);
+  const { publicKey, setPublicKey, disconnect } = useWalletStore();
   const [freighterInstalled, setFreighterInstalled] = useState(true); // Assume installed until proven otherwise
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     async function checkFreighterAvailability() {
       // Check if Freighter API is available
       if (typeof window === "undefined" || !(window as any).FreighterApi) {
@@ -56,6 +59,7 @@ export const WalletConnect: React.FC = () => {
     // }
 
     setLoading(true);
+    setError(null);
     console.log("Attempting to connect wallet...");
     try {
       console.log("Calling setAllowed()...");
@@ -66,7 +70,7 @@ export const WalletConnect: React.FC = () => {
       } catch (err) {
         console.error("Error during setAllowed():", err);
         // User likely rejected the connection request
-        alert("Wallet connection rejected or failed. Please try again.");
+        setError("Wallet connection rejected or failed.");
         throw err;
       }
 
@@ -77,7 +81,7 @@ export const WalletConnect: React.FC = () => {
         console.log("Raw pubKey object from getAddress() after connect:", pubKey);
       } catch (err) {
         console.error("Error during getAddress() after setAllowed():", err);
-        alert("Failed to retrieve wallet address. Please ensure Freighter is unlocked and try again.");
+        setError("Failed to retrieve wallet address. Ensure Freighter is unlocked.");
         throw err;
       }
 
@@ -85,19 +89,17 @@ export const WalletConnect: React.FC = () => {
         setPublicKey(pubKey.address);
       } else {
         console.warn("getAddress() returned no address after connect.", pubKey);
-        alert("Failed to retrieve wallet address. Result was empty.");
+        setError("Failed to retrieve wallet address. Result was empty.");
         setPublicKey(null);
       }
-    } catch (error) {
-      console.error("Final catch: Error connecting to Freighter:", error);
+    } catch (err) {
+      console.error("Final catch: Error connecting to Freighter:", err);
+      // Only set generic error if specific error wasn't already set
+      setError((prev) => prev || "Error connecting to Freighter. Please try again.");
       setPublicKey(null);
     } finally {
       setLoading(false);
     }
-  };
-
-  const disconnectWallet = () => {
-    setPublicKey(null);
   };
 
   // if (!freighterInstalled) {
@@ -111,6 +113,10 @@ export const WalletConnect: React.FC = () => {
   //   );
   // }
 
+  if (!mounted) {
+    return null; // Avoid hydration mismatch on initial render
+  }
+
   if (loading) {
     return (
       <button className="px-4 py-2 rounded-md bg-gray-700 text-white" disabled>
@@ -121,26 +127,33 @@ export const WalletConnect: React.FC = () => {
 
   if (publicKey) {
     return (
-      <div className="flex items-center space-x-2">
-        <span className="text-white text-sm">
-          {publicKey.substring(0, 4)}...{publicKey.substring(publicKey.length - 4)}
-        </span>
-        <button
-          onClick={disconnectWallet}
-          className="px-3 py-1 rounded-md bg-red-600 text-white text-sm hover:bg-red-700"
-        >
-          Disconnect
-        </button>
+      <div className="flex flex-col items-end space-y-1">
+        <div className="flex items-center space-x-2">
+          <span className="text-white text-sm bg-gray-900 px-3 py-1 rounded-md border border-gray-700">
+            {publicKey.substring(0, 4)}...{publicKey.substring(publicKey.length - 4)}
+          </span>
+          <button
+            onClick={disconnect}
+            className="px-3 py-1 rounded-md bg-red-600/80 text-white text-sm hover:bg-red-700 transition"
+          >
+            Disconnect
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <button
-      onClick={connectWallet}
-      className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700"
-    >
-      Connect Wallet
-    </button>
+    <div className="flex flex-col items-end space-y-2">
+      <button
+        onClick={connectWallet}
+        className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 transition"
+      >
+        Connect Freighter Wallet
+      </button>
+      {error && (
+        <span className="text-red-400 text-xs max-w-xs text-right break-words">{error}</span>
+      )}
+    </div>
   );
 };
