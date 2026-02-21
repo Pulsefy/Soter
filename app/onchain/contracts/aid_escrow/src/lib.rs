@@ -153,6 +153,7 @@ impl AidEscrow {
         amount: i128,
         token: Address,
         expires_at: u64,
+        metadata: Map<Symbol, String>,
     ) -> Result<u64, Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -197,7 +198,7 @@ impl AidEscrow {
             status: PackageStatus::Created,
             created_at,
             expires_at,
-            metadata: Map::new(&env),
+            metadata,
         };
 
         env.storage().persistent().set(&key, &package);
