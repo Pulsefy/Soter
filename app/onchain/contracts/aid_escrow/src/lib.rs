@@ -432,6 +432,49 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Admin-only package cancellation.
+    /// Requirements: Admin auth, existing package, status must be 'Created'.
+    pub fn cancel_package(env: Env, package_id: u64) -> Result<(), Error> {
+        // 1. Only the admin can cancel (check stored admin and require_auth)
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        // 2. Package must exist
+        let key = (symbol_short!("pkg"), package_id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        // 3. Package status must be Created (not Claimed, Expired, or already Cancelled)
+        if package.status != PackageStatus::Created {
+            return Err(Error::PackageNotActive);
+        }
+
+        // Additional check: Ensure it hasn't expired yet (consistent with 'claim' logic)
+        if package.expires_at > 0 && env.ledger().timestamp() > package.expires_at {
+            return Err(Error::PackageExpired);
+        }
+
+        // 4. Update status to Cancelled and persist
+        package.status = PackageStatus::Cancelled;
+        env.storage().persistent().set(&key, &package);
+
+        // 5. Unlock funds (Decrement the global locked amount so funds return to the pool)
+        Self::decrement_locked(&env, &package.token, package.amount);
+
+        // Reuse RevokedEvent or create a new CancelledEvent if preferred
+        RevokedEvent {
+            id: package_id,
+            admin,
+            amount: package.amount,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
     // --- Helpers ---
 
     fn decrement_locked(env: &Env, token: &Address, amount: i128) {
