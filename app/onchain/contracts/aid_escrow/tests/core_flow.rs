@@ -163,3 +163,61 @@ fn test_revoke_flow() {
     let pkg_id_2 = 2;
     client.create_package(&pkg_id_2, &recipient, &1000, &token_client.address, &0);
 }
+
+#[test]
+fn test_get_recipient_package_count() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient1 = Address::generate(&env);
+    let recipient2 = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    token_admin_client.mint(&admin, &10000);
+    client.fund(&token_client.address, &admin, &10000);
+
+    // Test 1: Recipient with no packages returns 0
+    let count = client.get_recipient_package_count(&recipient1);
+    assert_eq!(count, 0);
+
+    // Test 2: Create packages for recipient1
+    client.create_package(&1, &recipient1, &100, &token_client.address, &0);
+    client.create_package(&2, &recipient1, &200, &token_client.address, &0);
+    client.create_package(&3, &recipient1, &300, &token_client.address, &0);
+
+    // Count should be 3
+    let count = client.get_recipient_package_count(&recipient1);
+    assert_eq!(count, 3);
+
+    // Test 3: Create package for recipient2
+    client.create_package(&4, &recipient2, &400, &token_client.address, &0);
+
+    // recipient1 still has 3 packages
+    let count1 = client.get_recipient_package_count(&recipient1);
+    assert_eq!(count1, 3);
+
+    // recipient2 has 1 package
+    let count2 = client.get_recipient_package_count(&recipient2);
+    assert_eq!(count2, 1);
+
+    // Test 4: Claim a package - should still count
+    client.claim(&1);
+    let count = client.get_recipient_package_count(&recipient1);
+    assert_eq!(count, 3); // Still counts claimed packages
+
+    // Test 5: Revoke a package - should still count
+    client.revoke(&2);
+    let count = client.get_recipient_package_count(&recipient1);
+    assert_eq!(count, 3); // Still counts revoked packages
+
+    // Test 6: Refund a package - should still count
+    client.refund(&3);
+    let count = client.get_recipient_package_count(&recipient1);
+    assert_eq!(count, 3); // Still counts refunded packages
+}
