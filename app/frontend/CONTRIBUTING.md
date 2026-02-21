@@ -55,12 +55,15 @@ Thank you for your interest in contributing to the Soter frontend! This document
    Key variables to configure (testnet values are fine for local dev):
    ```bash
    NEXT_PUBLIC_API_URL=http://localhost:4000
-   NEXT_PUBLIC_STELLAR_NETWORK=testnet
+   NEXT_PUBLIC_STELLAR_NETWORK=testnet   # or NEXT_PUBLIC_NETWORK — shown in navbar
    NEXT_PUBLIC_STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
    NEXT_PUBLIC_STELLAR_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
    NEXT_PUBLIC_AID_ESCROW_CONTRACT_ID=your_contract_id
    NEXT_PUBLIC_VERIFICATION_CONTRACT_ID=your_contract_id
+   # NEXT_PUBLIC_ENV_NAME=dev   # optional; app environment label shown in navbar (dev/staging/prod)
    ```
+
+   The navbar shows a **network & environment indicator** (Network: testnet, Environment: …) so you always know which Stellar network and environment you’re targeting. These values are safe to show in production (no secrets).
 
    > All client-side variables must be prefixed with `NEXT_PUBLIC_`. Restart the dev server after any change to `.env.local`.
 

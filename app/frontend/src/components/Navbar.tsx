@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { WalletConnect } from './WalletConnect';
 import { useWalletStore } from '@/lib/walletStore';
 import { HealthBadge } from './HealthBadge';
+import { EnvironmentIndicator } from './EnvironmentIndicator';
 
 export const Navbar: React.FC = () => {
   const { publicKey } = useWalletStore();
@@ -15,7 +16,8 @@ export const Navbar: React.FC = () => {
         <Link href="/" className="text-xl font-bold">
           Soter
         </Link>
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center gap-4 flex-wrap">
+          <EnvironmentIndicator />
           {publicKey && (
             <span className="text-sm">
               Wallet: {publicKey.substring(0, 6)}...

@@ -79,15 +79,21 @@ cp .env.example .env.local
 # API Configuration
 NEXT_PUBLIC_API_URL=http://localhost:4000
 
-# Stellar Network (testnet or mainnet)
+# Stellar Network (testnet, futurenet, or mainnet)
 NEXT_PUBLIC_STELLAR_NETWORK=testnet
+# Optional alias: NEXT_PUBLIC_NETWORK is used if NEXT_PUBLIC_STELLAR_NETWORK is not set
 NEXT_PUBLIC_STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
 NEXT_PUBLIC_STELLAR_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+
+# Optional: application environment label (dev, staging, prod) — shown in the navbar
+# NEXT_PUBLIC_ENV_NAME=dev
 
 # Contract IDs (get these after deploying contracts)
 NEXT_PUBLIC_AID_ESCROW_CONTRACT_ID=your_contract_id
 NEXT_PUBLIC_VERIFICATION_CONTRACT_ID=your_contract_id
 ```
+
+The navbar displays a small **network & environment indicator** (e.g. “Network: testnet”, “Environment: dev”) so contributors and testers always know which Stellar network and app environment they are using. These values come from `NEXT_PUBLIC_STELLAR_NETWORK` (or `NEXT_PUBLIC_NETWORK`) and optional `NEXT_PUBLIC_ENV_NAME`; they are safe to expose in production and contain no secrets.
 
 ### Development
 
