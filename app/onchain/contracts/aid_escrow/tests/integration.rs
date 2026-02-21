@@ -18,6 +18,7 @@ fn test_integration_flow() {
     // 1. Initialize contract
     client.initialize(&admin);
     assert_eq!(client.get_admin(), admin);
+<<<<<<< Updated upstream
     
     // 2. Create package (admin auth required)
     env.mock_all_auths();
@@ -42,6 +43,41 @@ fn test_integration_flow() {
     
     // 6. Verify count
     assert_eq!(client.get_package_count(), 1);
+=======
+
+    // Mint tokens to admin for funding
+    token_admin_client.mint(&admin, &10_000);
+
+    // Fund the contract (Pool)
+    client.fund(&token_client.address, &admin, &5000);
+    assert_eq!(token_client.balance(&contract_id), 5000);
+
+    // Create package
+    let pkg_id = 0;
+    let expires_at = env.ledger().timestamp() + 86400; // 1 day from now
+
+    let returned_id = client
+        .create_package(&pkg_id, &recipient, &1000, &token_client.address, &expires_at);
+    assert_eq!(returned_id, pkg_id);
+
+    // Verify package details
+    let package = client.get_package(&pkg_id);
+    assert_eq!(package.recipient, recipient);
+    assert_eq!(package.amount, 1000);
+    assert_eq!(package.token, token_client.address);
+    assert_eq!(package.status, PackageStatus::Created);
+
+    // Claim package
+    client.claim(&pkg_id);
+
+    // Verify claimed state
+    let package = client.get_package(&pkg_id);
+    assert_eq!(package.status, PackageStatus::Claimed);
+
+    // Verify funds moved
+    assert_eq!(token_client.balance(&recipient), 1000);
+    assert_eq!(token_client.balance(&contract_id), 4000);
+>>>>>>> Stashed changes
 }
 
 #[test]
