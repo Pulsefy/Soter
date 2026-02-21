@@ -1,38 +1,92 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react-native';
+import { render, waitFor, screen } from '@testing-library/react-native';
 import { HealthScreen } from '../screens/HealthScreen';
+import { fetchHealthStatus } from '../services/api';
 
-// Mock fetch
-global.fetch = jest.fn();
+// Mock the API module
+jest.mock('../services/api');
+
+const mockFetchHealthStatus = fetchHealthStatus as jest.MockedFunction<typeof fetchHealthStatus>;
 
 describe('HealthScreen', () => {
   beforeEach(() => {
-    (global.fetch as jest.Mock).mockClear();
+    jest.clearAllMocks();
   });
 
-  it('renders health status from API', async () => {
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ status: 'ok', version: '1.2.3' }),
-    });
+  it('shows loading state initially', () => {
+    mockFetchHealthStatus.mockImplementationOnce(() => new Promise(() => {}));
+    
+    render(<HealthScreen />);
+    
+    expect(screen.getByText('Checking system health...')).toBeTruthy();
+  });
 
-    const { getByText } = render(<HealthScreen />);
+  it('renders live backend data correctly', async () => {
+    const mockData = {
+      status: 'ok',
+      service: 'backend',
+      version: '1.0.0',
+      environment: 'development',
+      timestamp: new Date().toISOString(),
+    };
+
+    mockFetchHealthStatus.mockResolvedValueOnce(mockData);
+
+    render(<HealthScreen />);
 
     await waitFor(() => {
-      expect(getByText('Status: ok')).toBeTruthy();
-      expect(getByText('Version: 1.2.3')).toBeTruthy();
+      expect(screen.getByText('OK')).toBeTruthy();
+      expect(screen.getByText('🌐 Live backend data')).toBeTruthy();
+      expect(screen.getByText('backend')).toBeTruthy();
+      expect(screen.getByText('1.0.0')).toBeTruthy();
     });
   });
 
-  it('renders mock data when API fails', async () => {
-    (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
+  it('shows mock data label when backend fails', async () => {
+    mockFetchHealthStatus.mockRejectedValueOnce(new Error('Network error'));
 
-    const { getByText } = render(<HealthScreen />);
+    render(<HealthScreen />);
 
     await waitFor(() => {
-      expect(getByText('Error: Network error')).toBeTruthy();
-      expect(getByText('Using mock data for demonstration')).toBeTruthy();
-      expect(getByText('Status: ok')).toBeTruthy();
+      expect(screen.getByText('🔧 MOCK DATA')).toBeTruthy();
+      expect(screen.getByText('📊 Using simulated data')).toBeTruthy();
+      expect(screen.getByText('Backend unreachable - showing mock data')).toBeTruthy();
+      expect(screen.getByText('⚠️ This is simulated data - backend connection failed')).toBeTruthy();
+    });
+  });
+
+  it('shows troubleshooting tips when using mock data', async () => {
+    mockFetchHealthStatus.mockRejectedValueOnce(new Error('Network error'));
+
+    render(<HealthScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByText('🔍 Troubleshooting Tips')).toBeTruthy();
+    });
+  });
+
+  it('displays the correct mock data structure', async () => {
+    mockFetchHealthStatus.mockRejectedValueOnce(new Error('Network error'));
+
+    render(<HealthScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByText('backend')).toBeTruthy();
+      expect(screen.getByText('0.0.0')).toBeTruthy();
+      expect(screen.getByText('development')).toBeTruthy();
+      expect(screen.getByText('✅')).toBeTruthy();
+      expect(screen.getByText('OK')).toBeTruthy();
+    });
+  });
+
+  it('shows retry button when error occurs', async () => {
+    mockFetchHealthStatus.mockRejectedValueOnce(new Error('Network error'));
+
+    render(<HealthScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByText('🔄 Retry Connection')).toBeTruthy();
     });
   });
 });
+

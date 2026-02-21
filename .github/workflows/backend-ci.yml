@@ -15,27 +15,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Install pnpm
-      uses: pnpm/action-setup@v2
-      with:
-        version: 9
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
 
-    - name: Use Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'pnpm'
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
 
-    - name: Install dependencies
-      run: pnpm install --no-frozen-lockfile
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
 
-    - name: Lint
-      run: pnpm --filter backend run lint
+      - name: Lint
+        run: pnpm --filter backend run lint
 
-    - name: Test
-      run: pnpm --filter backend run test
+      - name: Test
+        run: pnpm --filter backend run test
 
-    - name: Build
-      run: pnpm --filter backend run build
+      - name: Build
+        run: pnpm --filter backend run build

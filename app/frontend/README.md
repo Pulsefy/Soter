@@ -79,15 +79,21 @@ cp .env.example .env.local
 # API Configuration
 NEXT_PUBLIC_API_URL=http://localhost:4000
 
-# Stellar Network (testnet or mainnet)
+# Stellar Network (testnet, futurenet, or mainnet)
 NEXT_PUBLIC_STELLAR_NETWORK=testnet
+# Optional alias: NEXT_PUBLIC_NETWORK is used if NEXT_PUBLIC_STELLAR_NETWORK is not set
 NEXT_PUBLIC_STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
 NEXT_PUBLIC_STELLAR_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+
+# Optional: application environment label (dev, staging, prod) — shown in the navbar
+# NEXT_PUBLIC_ENV_NAME=dev
 
 # Contract IDs (get these after deploying contracts)
 NEXT_PUBLIC_AID_ESCROW_CONTRACT_ID=your_contract_id
 NEXT_PUBLIC_VERIFICATION_CONTRACT_ID=your_contract_id
 ```
+
+The navbar displays a small **network & environment indicator** (e.g. “Network: testnet”, “Environment: dev”) so contributors and testers always know which Stellar network and app environment they are using. These values come from `NEXT_PUBLIC_STELLAR_NETWORK` (or `NEXT_PUBLIC_NETWORK`) and optional `NEXT_PUBLIC_ENV_NAME`; they are safe to expose in production and contain no secrets.
 
 ### Development
 
@@ -121,14 +127,14 @@ pnpm start
 
 ## Available Scripts
 
-| Script        | Description                                    |
-| ------------- | ---------------------------------------------- |
-| `dev`         | Start development server on port 3000          |
-| `build`       | Create optimized production build              |
-| `start`       | Run production server                          |
-| `lint`        | Run ESLint for code quality checks             |
-| `type-check`  | Run TypeScript compiler without emitting files |
-| `test`        | Run test suite (placeholder for now)           |
+| Script       | Description                                    |
+| ------------ | ---------------------------------------------- |
+| `dev`        | Start development server on port 3000          |
+| `build`      | Create optimized production build              |
+| `start`      | Run production server                          |
+| `lint`       | Run ESLint for code quality checks             |
+| `type-check` | Run TypeScript compiler without emitting files |
+| `test`       | Run test suite (placeholder for now)           |
 
 ## Health Check
 
@@ -147,6 +153,14 @@ The frontend includes a health check endpoint for monitoring:
 ```
 
 Use this endpoint in CI/CD pipelines, monitoring tools, or health check probes.
+
+## Mock API
+
+To enable the mock API layer for development when the backend is unavailable:
+
+1.  Set `NEXT_PUBLIC_USE_MOCKS=true` in your `.env.local` file.
+2.  The application will intercept requests to supported endpoints (e.g., `/health`, `/aid-packages`) and return mock data.
+3.  Mock handlers are defined in `src/lib/mock-api/handlers.ts`.
 
 ## Key Features Implementation
 
@@ -177,8 +191,8 @@ Create custom components in `src/components/ui/`.
 For mapping aid distributions:
 
 ```tsx
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 
 // Use in components
 <MapContainer center={[51.505, -0.09]} zoom={13}>
@@ -196,7 +210,7 @@ import "leaflet/dist/leaflet.css";
 Connect with Freighter wallet (to be implemented):
 
 ```tsx
-import { isConnected, getPublicKey } from "@stellar/freighter-api";
+import { isConnected, getPublicKey } from '@stellar/freighter-api';
 
 // Check if wallet is available
 const hasWallet = await isConnected();
@@ -240,11 +254,11 @@ export function MyComponent({ title, onAction }: MyComponentProps) {
 Use React Query hooks for data fetching:
 
 ```tsx
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from '@tanstack/react-query';
 
 function useCampaigns() {
   return useQuery({
-    queryKey: ["campaigns"],
+    queryKey: ['campaigns'],
     queryFn: async () => {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/campaigns`);
       return res.json();
@@ -273,9 +287,9 @@ pnpm dev -- -p 3001
 Common with server/client mismatches. For client-only components:
 
 ```tsx
-import dynamic from "next/dynamic";
+import dynamic from 'next/dynamic';
 
-const MapComponent = dynamic(() => import("./MapComponent"), { ssr: false });
+const MapComponent = dynamic(() => import('./MapComponent'), { ssr: false });
 ```
 
 ### Environment Variables Not Loading

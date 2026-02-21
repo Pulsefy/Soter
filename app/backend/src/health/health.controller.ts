@@ -1,5 +1,6 @@
-import { Controller, Get, Version } from '@nestjs/common';
+import { Controller, Get, Req, Version } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { RequestWithRequestId } from '../middleware/request-correlation.middleware';
 import { HealthService } from './health.service';
 import { API_VERSIONS } from '../common/constants/api-version.constants';
 
@@ -25,7 +26,27 @@ export class HealthController {
       },
     },
   })
-  check() {
+  check(@Req() req: RequestWithRequestId) {
+    // Access the request ID from the request object
+    const requestId = req.requestId;
+
+    // Log with request correlation
+    this.healthService.logHealthCheck(requestId);
+
     return this.healthService.check();
+  }
+
+  @Get('error')
+  @Version(API_VERSIONS.V1)
+  @ApiOperation({ summary: 'Trigger an error for testing' })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  triggerError(@Req() req: RequestWithRequestId) {
+    const requestId = req.requestId;
+
+    // Log the error attempt
+    this.healthService.logErrorAttempt(requestId);
+
+    // Throw an error to test exception handling
+    throw new Error('This is a test error for logging demonstration');
   }
 }
