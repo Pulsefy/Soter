@@ -462,4 +462,27 @@ impl AidEscrow {
             .get(&key)
             .ok_or(Error::PackageNotFound)
     }
+
+    /// Returns the count of packages for a given recipient.
+    /// Naive approach: iterates through package IDs 1 to 10000 and counts matches.
+    pub fn get_recipient_package_count(env: Env, recipient: Address) -> u64 {
+        let mut count = 0u64;
+
+        // Iterate through a reasonable range of package IDs
+        // In a production system, you might want to implement a more efficient indexing mechanism
+        for id in 1u64..=10000u64 {
+            let key = (symbol_short!("pkg"), id);
+            if let Some(package) = env
+                .storage()
+                .persistent()
+                .get::<(Symbol, u64), Package>(&key)
+            {
+                if package.recipient == recipient {
+                    count += 1;
+                }
+            }
+        }
+
+        count
+    }
 }
