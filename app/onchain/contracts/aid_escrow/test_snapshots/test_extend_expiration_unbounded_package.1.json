@@ -94,7 +94,6 @@
         }
       ]
     ],
-    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
@@ -117,7 +116,7 @@
                   "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                 },
                 {
-                  "u64": "86400"
+                  "u64": "0"
                 }
               ]
             }
@@ -126,7 +125,6 @@
         }
       ]
     ],
-    [],
     []
   ],
   "ledger": {
@@ -239,7 +237,7 @@
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
             "key": {
               "ledger_key_nonce": {
-                "nonce": "2032731177588607455"
+                "nonce": "4837995959683129791"
               }
             },
             "durability": "temporary"
@@ -254,7 +252,7 @@
                 "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
                 "key": {
                   "ledger_key_nonce": {
-                    "nonce": "2032731177588607455"
+                    "nonce": "4837995959683129791"
                   }
                 },
                 "durability": "temporary",
@@ -357,7 +355,7 @@
                         "symbol": "expires_at"
                       },
                       "val": {
-                        "u64": "86400"
+                        "u64": "0"
                       }
                     },
                     {

@@ -96,6 +96,14 @@ pub struct RefundedEvent {
     pub amount: i128,
 }
 
+#[contractevent]
+pub struct ExtendedEvent {
+    pub id: u64,
+    pub admin: Address,
+    pub old_expires_at: u64,
+    pub new_expires_at: u64,
+}
+
 #[contract]
 pub struct AidEscrow;
 
@@ -429,6 +437,61 @@ impl AidEscrow {
             id: package_id,
             admin,
             amount: package.amount,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Admin-only package expiration extension.
+    /// Requirements: Admin auth, existing package, status must be 'Created', additional_time > 0.
+    /// Behavior: Adds additional_time to the package's expires_at timestamp.
+    /// Cannot extend unbounded packages (expires_at == 0).
+    pub fn extend_expiration(env: Env, package_id: u64, additional_time: u64) -> Result<(), Error> {
+        // 1. Only the admin can extend (check stored admin and require_auth)
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        // 2. Package must exist
+        let key = (symbol_short!("pkg"), package_id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        // 3. Package status must be Created
+        if package.status != PackageStatus::Created {
+            return Err(Error::PackageNotActive);
+        }
+
+        // 4. additional_time must be greater than 0
+        if additional_time == 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        // 5. Package must not be unbounded (expires_at must be > 0)
+        if package.expires_at == 0 {
+            return Err(Error::InvalidState); // Cannot extend unbounded packages
+        }
+
+        // 6. Package must not already be expired
+        if env.ledger().timestamp() > package.expires_at {
+            return Err(Error::PackageExpired);
+        }
+
+        // 7. Calculate new expiration and update
+        let old_expires_at = package.expires_at;
+        let new_expires_at = old_expires_at + additional_time;
+        package.expires_at = new_expires_at;
+        env.storage().persistent().set(&key, &package);
+
+        // 8. Emit Extended event
+        ExtendedEvent {
+            id: package_id,
+            admin: admin.clone(),
+            old_expires_at,
+            new_expires_at,
         }
         .publish(&env);
 

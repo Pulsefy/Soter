@@ -39,7 +39,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
-                  "i128": "10000"
+                  "i128": "1000"
                 }
               ]
             }
@@ -64,7 +64,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
-                  "i128": "5000"
+                  "i128": "1000"
                 }
               ]
             }
@@ -83,7 +83,7 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                     },
                     {
-                      "i128": "5000"
+                      "i128": "1000"
                     }
                   ]
                 }
@@ -105,7 +105,7 @@
               "function_name": "create_package",
               "args": [
                 {
-                  "u64": "1"
+                  "u64": "2"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
@@ -117,7 +117,7 @@
                   "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                 },
                 {
-                  "u64": "86400"
+                  "u64": "0"
                 }
               ]
             }
@@ -126,7 +126,6 @@
         }
       ]
     ],
-    [],
     []
   ],
   "ledger": {
@@ -309,7 +308,7 @@
                   "symbol": "pkg"
                 },
                 {
-                  "u64": "1"
+                  "u64": "2"
                 }
               ]
             },
@@ -329,7 +328,7 @@
                       "symbol": "pkg"
                     },
                     {
-                      "u64": "1"
+                      "u64": "2"
                     }
                   ]
                 },
@@ -357,7 +356,7 @@
                         "symbol": "expires_at"
                       },
                       "val": {
-                        "u64": "86400"
+                        "u64": "0"
                       }
                     },
                     {
@@ -365,7 +364,7 @@
                         "symbol": "id"
                       },
                       "val": {
-                        "u64": "1"
+                        "u64": "2"
                       }
                     },
                     {
@@ -509,7 +508,7 @@
                         "symbol": "amount"
                       },
                       "val": {
-                        "i128": "5000"
+                        "i128": "0"
                       }
                     },
                     {
@@ -579,7 +578,7 @@
                         "symbol": "amount"
                       },
                       "val": {
-                        "i128": "5000"
+                        "i128": "1000"
                       }
                     },
                     {
