@@ -11,7 +11,14 @@ repository = "https://github.com/soter/aid-escrow"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-soroban-sdk = { workspace = true }
+# Build contracts for `wasm32` without pulling std into the SDK. Disable
+# default features so the SDK compiles as no_std for wasm targets.
+soroban-sdk = { workspace = true, default-features = false }
 
 [dev-dependencies]
-soroban-sdk = { workspace = true, features = ["testutils"] }
+# `testutils` provides helper utilities for host-side testing and must not
+# be enabled when compiling for the `wasm32` target. Move the dev-dependency
+# into a target-specific table so it's only used for non-wasm builds.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Dev-only test utilities (host-side) — only enabled for non-wasm builds.
+soroban-sdk = { workspace = true, default-features = false, features = ["testutils"] }
