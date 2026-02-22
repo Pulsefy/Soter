@@ -9,6 +9,11 @@ exclude = [
 
 [workspace.dependencies]
 soroban-sdk = "23"
+ed25519-dalek = "1"
+serde_json = "1"
+rand = "0.8"
+serde = "1"
+soroban-env-guest = "23"
 
 [profile.release]
 opt-level = "z"

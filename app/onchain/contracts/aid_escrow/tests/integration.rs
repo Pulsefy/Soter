@@ -43,12 +43,14 @@ fn test_integration_flow() {
     let pkg_id = 0;
     let expires_at = env.ledger().timestamp() + 86400; // 1 day from now
 
+    let empty_metadata = soroban_sdk::Map::new(&env);
     let returned_id = client.create_package(
         &pkg_id,
         &recipient,
         &1000,
         &token_client.address,
         &expires_at,
+        &empty_metadata,
     );
     assert_eq!(returned_id, pkg_id);
 
@@ -99,8 +101,24 @@ fn test_multiple_packages() {
     let id2 = 101;
     let expiry = env.ledger().timestamp() + 86400;
 
-    client.create_package(&id1, &recipient1, &500, &token_client.address, &expiry);
-    client.create_package(&id2, &recipient2, &1000, &token_client.address, &expiry);
+    let empty_metadata = soroban_sdk::Map::new(&env);
+    client.create_package(
+        &id1,
+        &recipient1,
+        &500,
+        &token_client.address,
+        &expiry,
+        &empty_metadata,
+    );
+    let empty_metadata = soroban_sdk::Map::new(&env);
+    client.create_package(
+        &id2,
+        &recipient2,
+        &1000,
+        &token_client.address,
+        &expiry,
+        &empty_metadata,
+    );
 
     // Verify each package is independent
     let p1 = client.get_package(&id1);
@@ -142,7 +160,15 @@ fn test_error_cases() {
 
     // Create valid package first to establish state
     let pkg_id = 1;
-    client.create_package(&pkg_id, &recipient, &1000, &token_client.address, &86400);
+    let empty_metadata = soroban_sdk::Map::new(&env);
+    client.create_package(
+        &pkg_id,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &86400,
+        &empty_metadata,
+    );
 
     // Try to claim non-existent package
     let result = client.try_claim(&999);

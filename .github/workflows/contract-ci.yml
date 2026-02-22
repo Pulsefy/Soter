@@ -25,21 +25,26 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "app/onchain"
 
+      - name: Check Cargo.lock
+        run: |
+          cargo metadata --format-version 1 > /dev/null
+          git diff --exit-code Cargo.lock || (echo "Cargo.lock is out of date. Please run 'cargo check' locally and commit the changes." && exit 1)
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Run clippy
         run: |
-          cargo clippy --target wasm32-unknown-unknown -- -D warnings
-          cargo clippy --tests --target x86_64-unknown-linux-gnu -- -D warnings
+          cargo clippy --all-targets -- -D warnings
 
       - name: Run tests
-        run: cargo test --target x86_64-unknown-linux-gnu
+        run: |
+          cargo test -- --nocapture
