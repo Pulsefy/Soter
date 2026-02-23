@@ -28,6 +28,7 @@ import { ClaimsModule } from './claims/claims.module';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { LoggerService } from './logger/logger.service';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { SorobanModule } from './soroban/soroban.module';
 
 @Module({
   imports: [
@@ -67,6 +68,7 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
     CampaignsModule,
     ObservabilityModule,
     ClaimsModule,
+    SorobanModule,
   ],
 
   controllers: [AppController],
