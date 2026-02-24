@@ -29,17 +29,27 @@ Welcome! This document outlines how to contribute to Soter's on-chain contracts.
 ///
 /// # Arguments
 /// * `env` - The Soroban environment
+/// * `id` - Unique package identifier
 /// * `recipient` - Address of the recipient
 /// * `amount` - Amount to escrow
 /// * `token` - Token contract address
+/// * `expires_at` - Expiration timestamp (0 for no expiration)
 ///
 /// # Returns
 /// * `u64` - Package ID
 ///
 /// # Errors
-/// Returns `Error::InvalidAmount` if amount is zero
-/// Returns `Error::InvalidToken` if token address is invalid
-pub fn create_package(env: Env, recipient: Address, amount: i128, token: Address) -> Result<u64, Error> {
+/// Returns `Error::InvalidAmount` if amount is less than min_amount
+/// Returns `Error::PackageIdExists` if package ID already exists
+/// Returns `Error::InsufficientFunds` if contract balance is insufficient
+pub fn create_package(
+    env: Env, 
+    id: u64, 
+    recipient: Address, 
+    amount: i128, 
+    token: Address, 
+    expires_at: u64
+) -> Result<u64, Error> {
     // implementation
 }
 ```
