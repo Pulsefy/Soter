@@ -144,6 +144,71 @@ pnpm --filter backend lint
 pnpm --filter backend test
 ```
 
+## Running E2E Tests
+
+The backend includes a comprehensive End-to-End (E2E) test suite that validates critical user and system flows over real HTTP boundaries.
+
+### Prerequisites
+
+Ensure you have the test environment configured:
+
+```bash
+# Copy test environment configuration
+cp app/backend/.env.test app/backend/.env.test
+# The test environment uses CI-safe settings and mocks
+```
+
+### Running Tests
+
+```bash
+# Run all E2E tests
+pnpm --filter backend test:e2e
+
+# Run with coverage
+pnpm --filter backend test:e2e -- --coverage
+
+# Run specific test file
+pnpm --filter backend test:e2e -- health.e2e-spec.ts
+
+# Run with verbose output
+pnpm --filter backend test:e2e -- --verbose
+```
+
+### Test Coverage
+
+The E2E test suite covers:
+
+- **Health & Readiness**: Tests `/health`, `/health/live`, and `/health/ready` endpoints
+- **Verification Flow**: Complete user verification lifecycle (start → complete → verify state)
+- **Soroban Proxy**: On-chain operations with mocked blockchain client
+- **Authentication & Authorization**: API key and JWT token validation
+- **Error Handling**: Proper HTTP status codes and error responses
+- **Database Side Effects**: Data persistence and state transitions
+
+### Test Architecture
+
+- **Framework**: NestJS Testing utilities with Jest
+- **HTTP Client**: Supertest for real HTTP requests
+- **Database**: In-memory SQLite for testing
+- **Blockchain**: Mocked Soroban adapter (no real network calls)
+- **Configuration**: CI-safe with `.env.test`
+
+### Test Files
+
+- `test/e2e/health.e2e-spec.ts` - Health endpoint tests
+- `test/e2e/verification-flow.e2e-spec.ts` - Verification lifecycle tests
+- `test/e2e/soroban-proxy.e2e-spec.ts` - On-chain operation tests
+- `test/utils/test-app.ts` - Test bootstrap utilities
+- `test/utils/factories.ts` - Test data factories
+
+### CI/CD Integration
+
+The E2E tests are designed to run in CI/CD pipelines with:
+- Zero secrets required
+- Mocked external dependencies
+- Deterministic test data
+- Parallel execution support
+
 ## Contributing
 
 See `app/backend/CONTRIBUTING.md`.

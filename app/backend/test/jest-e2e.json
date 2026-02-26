@@ -6,7 +6,28 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
+  "extensionsToTreatAsEsm": [".ts"],
+  "globals": {
+    "ts-jest": {
+      "useESM": true
+    }
+  },
   "moduleNameMapper": {
     "^src/(.*)$": "<rootDir>/src/$1"
-  }
+  },
+  "setupFilesAfterEnv": ["<rootDir>/test/setup.ts"],
+  "testTimeout": 30000,
+  "maxWorkers": 1,
+  "verbose": true,
+  "collectCoverageFrom": [
+    "src/**/*.(t|j)s",
+    "!src/**/*.spec.ts",
+    "!src/**/*.dto.ts",
+    "!src/main.ts"
+  ],
+  "coverageDirectory": "../coverage/e2e",
+  "reporters": [
+    "default",
+    ["jest-junit", { "outputDirectory": "../coverage", "outputName": "e2e-junit.xml" }]
+  ]
 }
