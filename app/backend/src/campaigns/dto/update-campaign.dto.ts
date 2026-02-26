@@ -1,5 +1,4 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { CampaignStatus } from '@prisma/client';
 import {
   IsEnum,
   IsNotEmpty,
@@ -10,6 +9,15 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+// Local enum definition to avoid Prisma import issues
+enum CampaignStatus {
+  draft = 'draft',
+  active = 'active',
+  paused = 'paused',
+  completed = 'completed',
+  archived = 'archived',
+}
 
 export class UpdateCampaignDto {
   @ApiPropertyOptional({
