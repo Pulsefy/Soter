@@ -268,7 +268,6 @@ impl AidEscrow {
             return Err(Error::InvalidAmount);
         }
 
-
         env.storage().instance().set(&KEY_CONFIG, &config);
 
         Ok(())
