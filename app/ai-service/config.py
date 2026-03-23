@@ -1,0 +1,80 @@
+"""
+Configuration module for Soter AI Service
+Handles environment variables and API key management
+"""
+
+from pydantic_settings import BaseSettings
+from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class Settings(BaseSettings):
+    """
+    Application settings loaded from environment variables
+    
+    Environment Variables:
+        OPENAI_API_KEY: OpenAI API key for AI model access
+        GROQ_API_KEY: Groq API key for AI model access (alternative to OpenAI)
+        APP_ENV: Application environment (development, staging, production)
+        LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        HOST: Server host (default: 0.0.0.0)
+        PORT: Server port (default: 8000)
+    """
+    
+    # API Keys
+    openai_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    
+    # Application settings
+    app_env: str = "development"
+    log_level: str = "INFO"
+    host: str = "0.0.0.0"
+    port: int = 8000
+    
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        case_sensitive = False
+    
+    def validate_api_keys(self) -> bool:
+        """
+        Validate that at least one API key is configured
+        
+        Returns:
+            bool: True if at least one API key is present, False otherwise
+        """
+        has_key = bool(self.openai_api_key or self.groq_api_key)
+        
+        if not has_key:
+            logger.warning("No API keys configured. AI features will be unavailable.")
+        
+        return has_key
+    
+    def get_active_provider(self) -> Optional[str]:
+        """
+        Determine which AI provider is configured
+        
+        Returns:
+            str: Provider name ('openai', 'groq') or None if not configured
+        """
+        if self.openai_api_key:
+            return "openai"
+        elif self.groq_api_key:
+            return "groq"
+        return None
+
+
+# Global settings instance
+settings = Settings()
+
+
+def get_settings() -> Settings:
+    """
+    Get the global settings instance
+    
+    Returns:
+        Settings: The application settings
+    """
+    return settings

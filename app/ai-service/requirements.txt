@@ -1,0 +1,18 @@
+# Soter AI Service - Python Dependencies
+
+# Core FastAPI framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Data validation and settings management
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Environment variable management
+python-dotenv==1.0.0
+
+# HTTP client for API calls (optional, for future AI integrations)
+httpx==0.26.0
+
+# Logging enhancements (optional)
+python-json-logger==2.0.7
