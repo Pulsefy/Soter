@@ -7,14 +7,14 @@ import { firstValueFrom } from 'rxjs';
 @Injectable()
 export class FraudService {
   private readonly logger = new Logger(FraudService.name);
-  private readonly mlServiceUrl: string;
+  private readonly aiServiceUrl: string;
 
   constructor(
     private readonly httpService: HttpService,
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {
-    this.mlServiceUrl = this.configService.get<string>('ML_SERVICE_URL') || 'http://localhost:8000';
+    this.aiServiceUrl = this.configService.get<string>('AI_SERVICE_URL') || 'http://localhost:8000';
   }
 
   async analyzePendingClaimsBatch() {
@@ -41,7 +41,7 @@ export class FraudService {
     const combinedClaims = [...pendingClaims, ...historicalClaims];
 
     try {
-      // Map to the format expected by the ML service
+      // Map to the format expected by the AI service
       const payload = {
         claims: combinedClaims.map(c => ({
           id: c.id,
@@ -53,7 +53,7 @@ export class FraudService {
       };
 
       const response = await firstValueFrom(
-        this.httpService.post(`${this.mlServiceUrl}/analyze-batch`, payload),
+        this.httpService.post(`${this.aiServiceUrl}/analyze-batch`, payload),
       );
 
       const analyzedMap = new Map(response.data.map((c: any) => [c.id, c.fraudRiskScore]));
