@@ -23,3 +23,7 @@ redis==5.0.1
 
 # Task result backend and serialization
 kombu==5.3.4
+
+# Computer vision for proof-of-life checks
+opencv-python-headless==4.10.0.84
+numpy==1.26.4

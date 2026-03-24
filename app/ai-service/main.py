@@ -6,11 +6,12 @@ Main entry point for the AI service layer
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
-from pydantic import BaseModel
-from typing import Any, Dict, Optional
+from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
 import logging
 from config import settings
 import tasks
+from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
 
 # Configure logging
 logging.basicConfig(
@@ -52,6 +53,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+proof_of_life_analyzer = ProofOfLifeAnalyzer(
+    config=ProofOfLifeConfig(
+        confidence_threshold=settings.proof_of_life_confidence_threshold,
+        min_face_size=settings.proof_of_life_min_face_size,
+    )
+)
+
 
 # Request/Response models
 class InferenceRequest(BaseModel):
@@ -67,6 +75,24 @@ class TaskStatusResponse(BaseModel):
     status: str
     result: Optional[Any] = None
     error: Optional[str] = None
+
+
+class ProofOfLifeRequest(BaseModel):
+    """Request model for proof-of-life selfie and optional burst frames."""
+
+    selfie_image_base64: str
+    burst_images_base64: Optional[List[str]] = None
+    confidence_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class ProofOfLifeResponse(BaseModel):
+    """Response model for proof-of-life analysis."""
+
+    is_real_person: bool
+    confidence: float
+    threshold: float
+    checks: Dict[str, Any]
+    reason: str
 
 
 @app.get("/health")
@@ -126,7 +152,7 @@ async def create_inference_task(
                 'priority': request.priority or 'normal'
             }
         )
-        
+
         return {
             "success": True,
             "task_id": task_id,
@@ -134,12 +160,40 @@ async def create_inference_task(
             "message": "Task queued for processing",
             "status_url": f"/ai/status/{task_id}"
         }
-    
+
     except Exception as e:
         logger.error(f"Failed to create inference task: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create task: {str(e)}"
+        )
+
+
+@app.post("/ai/proof-of-life", response_model=ProofOfLifeResponse)
+async def analyze_proof_of_life(request: ProofOfLifeRequest):
+    """
+    Analyze a selfie image with optional burst frames for proof-of-life.
+
+    The endpoint returns a boolean `is_real_person` and confidence score.
+    If burst frames are provided, the service also checks for basic liveness
+    signals such as blink and head movement.
+    """
+    logger.info("Processing proof-of-life verification request")
+
+    try:
+        result = proof_of_life_analyzer.analyze(
+            selfie_image_base64=request.selfie_image_base64,
+            burst_images_base64=request.burst_images_base64,
+            confidence_threshold=request.confidence_threshold,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error(f"Proof-of-life processing failed: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to process proof-of-life request"
         )
 
 

@@ -54,6 +54,36 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
 - **GET** `/docs` - Swagger UI (OpenAPI documentation)
 - **GET** `/redoc` - ReDoc (alternative documentation)
 
+### Proof-of-Life Verification
+- **POST** `/ai/proof-of-life` - Face detection and liveness verification
+
+Request body:
+
+```json
+{
+  "selfie_image_base64": "<base64-image-or-data-uri>",
+  "burst_images_base64": ["<base64-image>", "<base64-image>"],
+  "confidence_threshold": 0.65
+}
+```
+
+Response body:
+
+```json
+{
+  "is_real_person": true,
+  "confidence": 0.87,
+  "threshold": 0.65,
+  "checks": {
+    "face_detected": true,
+    "blink_detected": true,
+    "head_movement_detected": false,
+    "processed_burst_frames": 3
+  },
+  "reason": "Face detected and confidence threshold met"
+}
+```
+
 ## Project Structure
 
 ```
@@ -76,6 +106,7 @@ app/ai-service/
 - ✅ Structured logging
 - ✅ Auto-generated API documentation
 - ✅ Startup/shutdown event handlers
+- ✅ OpenCV face detection and basic liveness verification (blink/head movement)
 
 ## Development
 

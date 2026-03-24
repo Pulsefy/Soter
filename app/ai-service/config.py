@@ -23,6 +23,8 @@ class Settings(BaseSettings):
         PORT: Server port (default: 8000)
         REDIS_URL: Redis connection URL for task broker (default: redis://localhost:6379/0)
         BACKEND_WEBHOOK_URL: Webhook URL to notify NestJS backend when tasks complete
+        PROOF_OF_LIFE_CONFIDENCE_THRESHOLD: Default threshold for liveness verification
+        PROOF_OF_LIFE_MIN_FACE_SIZE: Minimum detected face size in pixels
     """
     
     # API Keys
@@ -40,6 +42,10 @@ class Settings(BaseSettings):
     
     # Backend webhook URL for notifications
     backend_webhook_url: Optional[str] = "http://localhost:3001/ai/webhook"
+
+    # Proof-of-life settings
+    proof_of_life_confidence_threshold: float = 0.65
+    proof_of_life_min_face_size: int = 80
     
     class Config:
         env_file = ".env"
