@@ -160,6 +160,13 @@ pub struct AidEscrow;
 impl AidEscrow {
     // --- Admin & Config ---
 
+    /// Initialises the contract. Must be called exactly once before any other function.
+    ///
+    /// # Arguments
+    /// * `admin` - The address that will own the contract and hold admin privileges.
+    ///
+    /// # Errors
+    /// * [`Error::AlreadyInitialized`] – contract has already been initialised.
     pub fn init(env: Env, admin: Address) -> Result<(), Error> {
         if env.storage().instance().has(&KEY_ADMIN) {
             return Err(Error::AlreadyInitialized);
@@ -174,6 +181,10 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Returns the current admin address.
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`] – contract has not been initialised yet.
     pub fn get_admin(env: Env) -> Result<Address, Error> {
         env.storage()
             .instance()
@@ -181,6 +192,14 @@ impl AidEscrow {
             .ok_or(Error::NotInitialized)
     }
 
+    /// Grants distributor privileges to `addr`, allowing it to call `create_package` and `batch_create_packages`.
+    ///
+    /// # Arguments
+    /// * `addr` - Address to promote to distributor.
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`] – contract not initialised.
+    /// * [`Error::NotAuthorized`] – caller is not the admin.
     pub fn add_distributor(env: Env, addr: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -198,6 +217,14 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Revokes distributor privileges from `addr`.
+    ///
+    /// # Arguments
+    /// * `addr` - Address to demote.
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`] – contract not initialised.
+    /// * [`Error::NotAuthorized`] – caller is not the admin.
     pub fn remove_distributor(env: Env, addr: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -215,6 +242,15 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Updates the contract configuration.
+    ///
+    /// # Arguments
+    /// * `config` - New [`Config`] value containing `min_amount`, `max_expires_in`, and `allowed_tokens`.
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`] – contract not initialised.
+    /// * [`Error::NotAuthorized`] – caller is not the admin.
+    /// * [`Error::InvalidAmount`] – `config.min_amount` is ≤ 0.
     pub fn set_config(env: Env, config: Config) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -227,6 +263,11 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Pauses the contract, blocking `create_package`, `batch_create_packages`, and `claim`.
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`] – contract not initialised.
+    /// * [`Error::NotAuthorized`] – caller is not the admin.
     pub fn pause(env: Env) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -235,6 +276,11 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Resumes normal contract operation after a pause.
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`] – contract not initialised.
+    /// * [`Error::NotAuthorized`] – caller is not the admin.
     pub fn unpause(env: Env) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -243,10 +289,12 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Returns `true` if the contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
         env.storage().instance().get(&KEY_PAUSED).unwrap_or(false)
     }
 
+    /// Returns the current [`Config`]. Falls back to safe defaults if not yet set.
     pub fn get_config(env: Env) -> Config {
         env.storage().instance().get(&KEY_CONFIG).unwrap_or(Config {
             min_amount: 1,
@@ -257,9 +305,15 @@ impl AidEscrow {
 
     // --- Funding & Packages ---
 
-    /// Funds the contract (Pool Model).
-    /// Transfers `amount` of `token` from `from` to this contract.
-    /// This increases the contract's balance, allowing new packages to be created.
+    /// Deposits tokens into the contract pool so packages can be created against them.
+    ///
+    /// # Arguments
+    /// * `token` - SEP-41 token contract address.
+    /// * `from`  - Address funding the contract; must authorise this call.
+    /// * `amount` - Amount to transfer (must be > 0).
+    ///
+    /// # Errors
+    /// * [`Error::InvalidAmount`] – `amount` is ≤ 0.
     pub fn fund(env: Env, token: Address, from: Address, amount: i128) -> Result<(), Error> {
         if amount <= 0 {
             return Err(Error::InvalidAmount);
@@ -281,8 +335,27 @@ impl AidEscrow {
         Ok(())
     }
 
-    /// Creates a package with a specific ID.
-    /// Locks funds from the available pool (Contract Balance - Total Locked).
+    /// Creates a single aid package and locks the specified funds for the recipient.
+    ///
+    /// The caller must be the admin or an authorised distributor. Funds are reserved
+    /// from the contract's unallocated pool; the package cannot be created if the pool
+    /// has insufficient balance.
+    ///
+    /// # Arguments
+    /// * `operator`   - Admin or distributor address; must authorise this call.
+    /// * `id`         - Caller-supplied unique package identifier.
+    /// * `recipient`  - Address that may claim the package.
+    /// * `amount`     - Token amount to lock (must be ≥ `config.min_amount`).
+    /// * `token`      - SEP-41 token contract address.
+    /// * `expires_at` - Unix timestamp after which the package expires (`0` = no expiry).
+    ///
+    /// # Errors
+    /// * [`Error::ContractPaused`]    – contract is paused.
+    /// * [`Error::NotAuthorized`]     – `operator` is neither admin nor distributor.
+    /// * [`Error::InvalidAmount`]     – `amount` ≤ 0 or below `min_amount`.
+    /// * [`Error::InvalidState`]      – token not in `allowed_tokens`, or expiry violates `max_expires_in`.
+    /// * [`Error::PackageIdExists`]   – a package with `id` already exists.
+    /// * [`Error::InsufficientFunds`] – contract pool cannot cover the new package.
     pub fn create_package(
         env: Env,
         operator: Address,
@@ -373,8 +446,24 @@ impl AidEscrow {
         Ok(id)
     }
 
-    /// Creates multiple packages in a single transaction for multiple recipients.
-    /// Uses an auto-incrementing counter for package IDs.
+    /// Creates multiple aid packages in a single transaction using auto-incremented IDs.
+    ///
+    /// Package IDs are assigned sequentially from the internal counter. Each package
+    /// shares the same `token` and expiry window (`expires_in` seconds from now).
+    ///
+    /// # Arguments
+    /// * `operator`   - Admin or distributor address; must authorise this call.
+    /// * `recipients` - Ordered list of recipient addresses.
+    /// * `amounts`    - Ordered list of amounts, one per recipient (must be > 0 each).
+    /// * `token`      - SEP-41 token contract address.
+    /// * `expires_in` - Seconds from the current ledger timestamp until expiry.
+    ///
+    /// # Errors
+    /// * [`Error::ContractPaused`]    – contract is paused.
+    /// * [`Error::NotAuthorized`]     – `operator` is neither admin nor distributor.
+    /// * [`Error::MismatchedArrays`]  – `recipients` and `amounts` have different lengths.
+    /// * [`Error::InvalidAmount`]     – any individual amount is ≤ 0.
+    /// * [`Error::InsufficientFunds`] – contract pool cannot cover all packages.
     pub fn batch_create_packages(
         env: Env,
         operator: Address,
@@ -485,7 +574,20 @@ impl AidEscrow {
 
     // --- Recipient Actions ---
 
-    /// Recipient claims the package.
+    /// Allows the designated recipient to claim their aid package.
+    ///
+    /// The recipient must authorise this call. On success the package status transitions
+    /// to `Claimed`, the locked funds are released, and the token amount is transferred
+    /// directly to the recipient.
+    ///
+    /// # Arguments
+    /// * `id` - Package identifier to claim.
+    ///
+    /// # Errors
+    /// * [`Error::ContractPaused`]   – contract is paused.
+    /// * [`Error::PackageNotFound`]  – no package exists with `id`.
+    /// * [`Error::PackageNotActive`] – package is not in `Created` status.
+    /// * [`Error::PackageExpired`]   – package has passed its `expires_at` timestamp.
     pub fn claim(env: Env, id: u64) -> Result<(), Error> {
         Self::check_paused(&env)?;
         let key = (symbol_short!("pkg"), id);
@@ -539,7 +641,19 @@ impl AidEscrow {
 
     // --- Admin Actions ---
 
-    /// Admin manually triggers disbursement (overrides recipient claim need, strictly checks status).
+    /// Admin-initiated disbursement — pushes funds to the recipient without requiring their signature.
+    ///
+    /// Useful when the recipient cannot sign (e.g. field operations). Transitions the package
+    /// to `Claimed` and transfers funds to the recipient address on record.
+    ///
+    /// # Arguments
+    /// * `id` - Package identifier to disburse.
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`]   – contract not initialised.
+    /// * [`Error::NotAuthorized`]    – caller is not the admin.
+    /// * [`Error::PackageNotFound`]  – no package exists with `id`.
+    /// * [`Error::PackageNotActive`] – package is not in `Created` status.
     pub fn disburse(env: Env, id: u64) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -580,7 +694,19 @@ impl AidEscrow {
         Ok(())
     }
 
-    /// Admin revokes a package (Cancels it). Funds are effectively unlocked but remain in contract pool.
+    /// Cancels a `Created` package and returns its locked funds to the pool.
+    ///
+    /// Unlike `cancel_package`, this does not check whether the package has expired,
+    /// making it suitable for administrative clean-up of any active package.
+    ///
+    /// # Arguments
+    /// * `id` - Package identifier to revoke.
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`]  – contract not initialised.
+    /// * [`Error::NotAuthorized`]   – caller is not the admin.
+    /// * [`Error::PackageNotFound`] – no package exists with `id`.
+    /// * [`Error::InvalidState`]    – package is not in `Created` status.
     pub fn revoke(env: Env, id: u64) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -613,6 +739,19 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Transfers a package's tokens back to the admin after the package is `Expired` or `Cancelled`.
+    ///
+    /// If the package is still in `Created` status but its `expires_at` has passed, this
+    /// function will auto-transition it to `Expired` before processing the refund.
+    ///
+    /// # Arguments
+    /// * `id` - Package identifier to refund.
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`]  – contract not initialised.
+    /// * [`Error::NotAuthorized`]   – caller is not the admin.
+    /// * [`Error::PackageNotFound`] – no package exists with `id`.
+    /// * [`Error::InvalidState`]    – package is `Claimed`, already `Refunded`, or `Created` but not yet expired.
     pub fn refund(env: Env, id: u64) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -663,8 +802,17 @@ impl AidEscrow {
         Ok(())
     }
 
-    /// Admin-only package cancellation.
-    /// Requirements: Admin auth, existing package, status must be 'Created'.
+    /// Cancels a `Created` package that has not yet expired, returning funds to the pool.
+    ///
+    /// # Arguments
+    /// * `package_id` - Package identifier to cancel.
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`]   – contract not initialised.
+    /// * [`Error::NotAuthorized`]    – caller is not the admin.
+    /// * [`Error::PackageNotFound`]  – no package exists with `package_id`.
+    /// * [`Error::PackageNotActive`] – package is not in `Created` status.
+    /// * [`Error::PackageExpired`]   – package has already passed its `expires_at` timestamp.
     pub fn cancel_package(env: Env, package_id: u64) -> Result<(), Error> {
         // 1. Only the admin can cancel (check stored admin and require_auth)
         let admin = Self::get_admin(env.clone())?;
@@ -706,10 +854,23 @@ impl AidEscrow {
         Ok(())
     }
 
-    /// Admin-only package expiration extension.
-    /// Requirements: Admin auth, existing package, status must be 'Created', additional_time > 0.
-    /// Behavior: Adds additional_time to the package's expires_at timestamp.
-    /// Cannot extend unbounded packages (expires_at == 0).
+    /// Extends the expiry of a `Created` package by `additional_time` seconds.
+    ///
+    /// Cannot be used on unbounded packages (`expires_at == 0`). The resulting
+    /// `expires_at` must still satisfy `config.max_expires_in` if that limit is set.
+    ///
+    /// # Arguments
+    /// * `package_id`      - Package identifier to extend.
+    /// * `additional_time` - Seconds to add to the current `expires_at` (must be > 0).
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`]   – contract not initialised.
+    /// * [`Error::NotAuthorized`]    – caller is not the admin.
+    /// * [`Error::PackageNotFound`]  – no package exists with `package_id`.
+    /// * [`Error::PackageNotActive`] – package is not in `Created` status.
+    /// * [`Error::InvalidAmount`]    – `additional_time` is 0.
+    /// * [`Error::InvalidState`]     – package is unbounded or new expiry violates `max_expires_in`.
+    /// * [`Error::PackageExpired`]   – package has already expired.
     pub fn extend_expiration(env: Env, package_id: u64, additional_time: u64) -> Result<(), Error> {
         // 1. Only the admin can extend (check stored admin and require_auth)
         let admin = Self::get_admin(env.clone())?;
@@ -768,9 +929,21 @@ impl AidEscrow {
         Ok(())
     }
 
-    /// Admin-only function to withdraw surplus (unallocated) funds from the contract.
-    /// Requirements: Admin auth, valid amount, sufficient surplus available.
-    /// Behavior: Transfers amount of token from contract to the specified address.
+    /// Withdraws surplus (unallocated) tokens from the contract to `to`.
+    ///
+    /// Surplus = contract token balance − total locked amount. Only tokens not
+    /// committed to any active package may be withdrawn.
+    ///
+    /// # Arguments
+    /// * `to`     - Destination address for the withdrawn tokens.
+    /// * `amount` - Amount to withdraw (must be > 0).
+    /// * `token`  - SEP-41 token contract address.
+    ///
+    /// # Errors
+    /// * [`Error::NotInitialized`]      – contract not initialised.
+    /// * [`Error::NotAuthorized`]       – caller is not the admin.
+    /// * [`Error::InvalidAmount`]       – `amount` is ≤ 0.
+    /// * [`Error::InsufficientSurplus`] – requested amount exceeds available surplus.
     pub fn withdraw_surplus(
         env: Env,
         to: Address,
@@ -865,6 +1038,13 @@ impl AidEscrow {
         }
     }
 
+    /// Returns the full [`Package`] struct for the given ID.
+    ///
+    /// # Arguments
+    /// * `id` - Package identifier to look up.
+    ///
+    /// # Errors
+    /// * [`Error::PackageNotFound`] – no package exists with `id`.
     pub fn get_package(env: Env, id: u64) -> Result<Package, Error> {
         let key = (symbol_short!("pkg"), id);
         env.storage()
