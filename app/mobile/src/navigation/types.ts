@@ -5,4 +5,8 @@ export type RootStackParamList = {
   AidDetails: { aidId: string };
   Settings: undefined;
   Scanner: undefined;
+  EvidenceUpload: { 
+    recipientId?: string; 
+    evidenceType?: 'document' | 'physical' 
+  };
 };
