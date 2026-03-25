@@ -20,6 +20,81 @@ Or using uvicorn directly:
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+## HMAC Authentication
+
+All API endpoints (except `/health`, `/`, `/docs`, `/openapi.json`, `/redoc`) require HMAC-SHA256 signature authentication to ensure only authorized services can access the AI layer.
+
+### Configuration
+
+Set the shared secret key in your environment:
+
+```bash
+# Generate a secure key
+openssl rand -hex 32
+
+# Add to .env
+HMAC_SECRET_KEY=your_generated_key_here
+```
+
+### Required Headers
+
+| Header | Description |
+|--------|-------------|
+| `X-HMAC-Signature` | HMAC-SHA256 signature (hex-encoded) |
+| `X-HMAC-Timestamp` | Unix timestamp (seconds since epoch) |
+
+### Signature Generation
+
+The signature is computed as:
+
+```
+HMAC-SHA256(secret_key, method + path + timestamp + body)
+```
+
+Where:
+- `method`: HTTP method (GET, POST, etc.)
+- `path`: Request path (e.g., `/ai/ocr`)
+- `timestamp`: Unix timestamp as string
+- `body`: Request body (empty string if no body)
+
+### NestJS Backend Integration
+
+Use the provided utility in the NestJS backend:
+
+```typescript
+import { generateHmacSignature } from './common/utils/hmac.util';
+
+const body = JSON.stringify({ data: 'example' });
+const headers = generateHmacSignature({
+  method: 'POST',
+  path: '/ai/ocr',
+  body,
+  secretKey: process.env.HMAC_SECRET_KEY,
+});
+
+// headers contains:
+// {
+//   'X-HMAC-Signature': '...',
+//   'X-HMAC-Timestamp': '...'
+// }
+
+await fetch('http://ai-service:8000/ai/ocr', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    ...headers,
+  },
+  body,
+});
+```
+
+### Signature Validation Rules
+
+1. Requests without signature headers return `403 Forbidden`
+2. Requests with invalid timestamp format return `403 Forbidden`
+3. Requests older than 5 minutes (300 seconds) are rejected as expired
+4. Requests with invalid signatures return `403 Forbidden`
+
 ## API
 
 ### Health Check
@@ -186,6 +261,7 @@ app/ai-service/
 - ✅ Image preprocessing (grayscale, thresholding, denoising)
 - ✅ Field extraction with confidence scores
 - ✅ Rate limiting (10 requests/minute)
+- ✅ HMAC-SHA256 signature validation for inter-service authentication
 
 ## Development
 
