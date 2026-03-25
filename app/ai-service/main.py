@@ -19,6 +19,7 @@ from slowapi.util import get_remote_address
 
 from api.routes import router as ocr_router
 from config import settings
+from middleware import HMACAuthMiddleware
 import tasks
 from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
 from schemas.anonymization import AnonymizeRequest, AnonymizeResponse
@@ -109,6 +110,8 @@ class ProofOfLifeResponse(BaseModel):
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+app.add_middleware(HMACAuthMiddleware)
 
 app.include_router(ocr_router)
 

@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # Redis and Celery settings
     redis_url: str = "redis://localhost:6379/0"
     
+    # HMAC authentication
+    hmac_secret_key: Optional[str] = None
+    
     # Backend webhook URL for notifications
     backend_webhook_url: Optional[str] = "http://localhost:3001/ai/webhook"
 
