@@ -10,20 +10,23 @@ import { MockOnchainAdapter } from './onchain.adapter.mock';
 
 describe('OnchainModule', () => {
   let module: TestingModule;
-  let _configService: ConfigService;
 
   beforeEach(async () => {
     module = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
           isGlobal: false,
-          envFilePath: false,
+          ignoreEnvFile: true,
         }),
         OnchainModule,
       ],
+      providers: [
+        {
+          provide: ONCHAIN_ADAPTER_TOKEN,
+          useClass: MockOnchainAdapter,
+        },
+      ],
     }).compile();
-
-    _configService = module.get<ConfigService>(ConfigService);
   });
 
   afterEach(async () => {

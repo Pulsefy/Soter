@@ -18,7 +18,25 @@ jest.mock('@stellar/stellar-sdk', () => {
       })),
       Api: {
         ...actual.SorobanRpc.Api,
-        assembleTransaction: jest.fn(),
+        assembleTransaction: jest.fn().mockImplementation(tx => {
+          // Return a proper transaction object that the SDK can use
+          return {
+            build: jest.fn().mockReturnValue({
+              ...tx,
+              signatures: ['mock_signature'],
+            }),
+            sign: jest.fn().mockReturnValue({
+              ...tx,
+              signatures: ['mock_signature'],
+            }),
+            toXDR: jest.fn().mockReturnValue('mock_xdr'),
+          };
+        }),
+        GetTransactionStatus: {
+          SUCCESS: 'SUCCESS',
+          NOT_FOUND: 'NOT_FOUND',
+          FAILED: 'FAILED',
+        },
       },
     },
     Contract: jest.fn().mockImplementation(() => ({
@@ -81,7 +99,7 @@ describe('SorobanOnchainAdapter', () => {
     }).compile();
 
     adapter = module.get<SorobanOnchainAdapter>(SorobanOnchainAdapter);
-    configService = module.get<ConfigService>(ConfigService);
+    _configService = module.get<ConfigService>(ConfigService);
     mockServer = (adapter as any).server;
   });
 
