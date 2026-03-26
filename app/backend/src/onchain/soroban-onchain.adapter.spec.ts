@@ -53,7 +53,7 @@ jest.mock('@stellar/stellar-sdk', () => {
 
 describe('SorobanOnchainAdapter', () => {
   let adapter: SorobanOnchainAdapter;
-  let configService: ConfigService;
+  let _configService: ConfigService;
   let mockServer: any;
 
   const mockConfig = {

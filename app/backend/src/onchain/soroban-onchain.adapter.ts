@@ -125,7 +125,11 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
 
       if (sendTransactionResponse.status !== 'PENDING') {
         throw new Error(
-          `Transaction submission failed: ${sendTransactionResponse.errorResult || 'Unknown error'}`,
+          `Transaction submission failed: ${
+            sendTransactionResponse.errorResult
+              ? JSON.stringify(sendTransactionResponse.errorResult)
+              : 'Unknown error'
+          }`,
         );
       }
 
@@ -134,7 +138,7 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       this.logger.log(`Transaction submitted: ${txHash}`);
 
       // Poll for transaction result
-      const txResult = await this.pollTransaction(txHash);
+      await this.pollTransaction(txHash);
 
       return {
         escrowAddress: this.contractId,
