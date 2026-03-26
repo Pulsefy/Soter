@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+import time
+import metrics
 
 
 BBox = Tuple[int, int, int, int]
@@ -34,12 +36,17 @@ class ProofOfLifeAnalyzer:
     def __init__(self, config: Optional[ProofOfLifeConfig] = None) -> None:
         self.config = config or ProofOfLifeConfig()
 
+        start_load = time.time()
         self.face_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
+        metrics.MODEL_LOAD_TIME.labels(model_name="haarcascade_frontalface").observe(time.time() - start_load)
+
+        start_load2 = time.time()
         self.eye_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_eye.xml"
         )
+        metrics.MODEL_LOAD_TIME.labels(model_name="haarcascade_eye").observe(time.time() - start_load2)
 
         if self.face_cascade.empty() or self.eye_cascade.empty():
             raise RuntimeError("Unable to load OpenCV Haar cascade models")
@@ -56,6 +63,7 @@ class ProofOfLifeAnalyzer:
         Returns:
             Dict with is_real_person, confidence score, threshold and checks.
         """
+        start_inference = time.time()
         selfie = self._decode_image(selfie_image_base64)
         selfie_gray = cv2.cvtColor(selfie, cv2.COLOR_BGR2GRAY)
 
@@ -114,13 +122,17 @@ class ProofOfLifeAnalyzer:
         elif confidence < threshold:
             reason = "Confidence score is below threshold"
 
-        return {
+        result = {
             "is_real_person": is_real_person,
             "confidence": confidence,
             "threshold": threshold,
             "checks": checks,
             "reason": reason,
         }
+        
+        metrics.INFERENCE_LATENCY.labels(task_type="proof_of_life").observe(time.time() - start_inference)
+        metrics.logger.info(f"Proof of life inference completed in {time.time() - start_inference:.4f}s")
+        return result
 
     def _decode_image(self, image_base64: str) -> np.ndarray:
         """Decode a base64 image string into an OpenCV BGR image."""

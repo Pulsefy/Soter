@@ -3,6 +3,7 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+import metrics
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -66,7 +67,12 @@ async def process_ocr(
                 },
             )
 
+        start_inference = time.time()
         result = ocr_service.process_image(img)
+        inference_latency = time.time() - start_inference
+        
+        metrics.INFERENCE_LATENCY.labels(task_type="ocr").observe(inference_latency)
+        metrics.logger.info(f"OCR Inference completed in {inference_latency:.4f}s")
 
         processing_time_ms = int((time.time() - start_time) * 1000)
 

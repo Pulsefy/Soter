@@ -221,13 +221,11 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
 
           <TouchableOpacity
             style={styles.secondaryButton}
-            onPress={() =>
-              Alert.alert('Coming Soon', 'Coming in a future wave')
-            }
+            onPress={() => navigation.navigate('AidDetails', { aidId: '1' })}
             activeOpacity={0.7}
           >
             <Text style={styles.secondaryButtonText}>
-              View Aid Details (Coming Soon)
+              View Aid Details
             </Text>
           </TouchableOpacity>
         </View>

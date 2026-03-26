@@ -11,6 +11,7 @@ from celery import Celery
 from celery.result import AsyncResult
 import httpx
 
+import metrics
 from config import settings
 
 # Configure logging
@@ -132,6 +133,8 @@ def process_heavy_inference(self, task_id: str, payload: Dict[str, Any]) -> Dict
         # Extract task type from payload
         task_type = payload.get('type', 'inference')
         
+        start_inference = time.time()
+        
         # Simulate heavy processing (replace with actual AI inference logic)
         # In production, this would handle:
         # - Large image processing
@@ -153,7 +156,10 @@ def process_heavy_inference(self, task_id: str, payload: Dict[str, Any]) -> Dict
         # Send webhook notification to backend
         send_webhook_notification(task_id, 'completed', result)
         
-        logger.info(f"Task {task_id} completed successfully")
+        inference_latency = time.time() - start_inference
+        metrics.INFERENCE_LATENCY.labels(task_type=task_type).observe(inference_latency)
+        
+        logger.info(f"Task {task_id} completed successfully in {inference_latency:.4f}s")
         return result
         
     except Exception as e:

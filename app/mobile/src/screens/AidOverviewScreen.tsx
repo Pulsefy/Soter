@@ -8,10 +8,11 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   SafeAreaView,
+  TextInput,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
-import { AidItem, fetchAidList, getMockAidList } from '../services/aidApi';
+import { AidPackage, getAidPackages } from '../services/api';
 import { cacheAidList, loadCachedAidList, getCacheTimestamp } from '../services/aidCache';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { OfflineBanner } from '../components/OfflineBanner';
@@ -20,7 +21,7 @@ import { AppColors } from '../theme/useAppTheme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidOverview'>;
 
-const STATUS_COLORS: Record<AidItem['status'], string> = {
+const STATUS_COLORS: Record<string, string> = {
   active: '#16A34A',
   pending: '#D97706',
   closed: '#6B7280',
@@ -30,19 +31,20 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
-  const [aidList, setAidList] = useState<AidItem[]>([]);
+  const [aidList, setAidList] = useState<AidPackage[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isCached, setIsCached] = useState(false);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const loadData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
 
     try {
-      const fresh = await fetchAidList();
+      const fresh = await getAidPackages();
       setAidList(fresh);
       setIsCached(false);
       await cacheAidList(fresh);
@@ -55,7 +57,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
         const ts = await getCacheTimestamp();
         setCachedAt(ts);
       } else {
-        setAidList(getMockAidList());
+        setAidList([]);
         setIsCached(true);
         setCachedAt(null);
       }
@@ -78,7 +80,15 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
     loadData();
   }, [loadData]);
 
-  const renderItem = ({ item }: { item: AidItem }) => (
+  const filteredAidList = useMemo(() => {
+    if (!searchQuery) return aidList;
+    const lowerQuery = searchQuery.toLowerCase();
+    return aidList.filter(
+      (item) => item.id.toLowerCase().includes(lowerQuery) || item.title.toLowerCase().includes(lowerQuery)
+    );
+  }, [aidList, searchQuery]);
+
+  const renderItem = ({ item }: { item: AidPackage }) => (
     <TouchableOpacity
       style={styles.card}
       onPress={() => navigation.navigate('AidDetails', { aidId: item.id })}
@@ -86,15 +96,13 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
       accessibilityLabel={`View details for ${item.title}`}
     >
       <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{item.title}</Text>
-        <View style={[styles.badge, { backgroundColor: STATUS_COLORS[item.status] }]}>
+        <Text style={styles.cardTitle}>{item.title} <Text style={styles.idText}>(#{item.id})</Text></Text>
+        <View style={[styles.badge, { backgroundColor: STATUS_COLORS[item.status.toLowerCase()] || '#16A34A' }]}>
           <Text style={styles.badgeText}>{item.status.toUpperCase()}</Text>
         </View>
       </View>
-      <Text style={styles.cardDescription} numberOfLines={2}>
-        {item.description}
-      </Text>
-      <Text style={styles.cardLocation}>📍 {item.location}</Text>
+      <Text style={styles.cardDescription}>Amount: ${item.amount}</Text>
+      <Text style={styles.cardLocation}>Date: {new Date(item.date).toLocaleDateString()}</Text>
     </TouchableOpacity>
   );
 
@@ -118,8 +126,18 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
         </View>
       )}
 
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search by ID or Title..."
+          placeholderTextColor={colors.textSecondary}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+      </View>
+
       <FlatList
-        data={aidList}
+        data={filteredAidList}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         contentContainerStyle={styles.list}
@@ -166,6 +184,19 @@ const makeStyles = (colors: AppColors) =>
       fontSize: 14,
       color: colors.textSecondary,
     },
+    searchContainer: {
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 4,
+    },
+    searchInput: {
+      backgroundColor: colors.surface,
+      borderRadius: 8,
+      padding: 12,
+      color: colors.textPrimary,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
     list: {
       padding: 16,
       gap: 12,
@@ -189,6 +220,11 @@ const makeStyles = (colors: AppColors) =>
       color: colors.textPrimary,
       flex: 1,
       marginRight: 8,
+    },
+    idText: {
+      fontSize: 14,
+      fontWeight: 'normal',
+      color: colors.textSecondary,
     },
     badge: {
       borderRadius: 6,

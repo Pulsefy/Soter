@@ -39,3 +39,7 @@ slowapi==0.1.9
 # Testing
 pytest==8.0.0
 pytest-cov==4.1.0
+
+# Monitoring and Metrics
+prometheus-client==0.20.0
+psutil==5.9.8

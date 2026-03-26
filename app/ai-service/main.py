@@ -8,8 +8,11 @@ from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 import logging
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi.responses import JSONResponse, Response
+import time
+import metrics
+
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -99,6 +102,47 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.include_router(ocr_router)
+
+
+@app.middleware("http")
+async def monitor_requests(request: Request, call_next):
+    # Skip checking metrics endpoint to avoid infinite loop / log spam
+    if request.url.path == "/ai/metrics":
+        return await call_next(request)
+
+    # Automatically Throttle if over 90%
+    if not metrics.check_system_resources(memory_threshold_percent=90.0):
+        # Gracefully throttle requests if exhausting resources
+        metrics.REQUEST_COUNT.labels(method=request.method, endpoint=request.url.path, http_status=503).inc()
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Service unavailable: System resources (RAM/VRAM) exhausted, gracefully throttling."}
+        )
+
+    start_time = time.time()
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+    except Exception as e:
+        status_code = 500
+        raise e
+    finally:
+        latency = time.time() - start_time
+        metrics.REQUEST_COUNT.labels(method=request.method, endpoint=request.url.path, http_status=status_code).inc()
+        metrics.REQUEST_LATENCY.labels(method=request.method, endpoint=request.url.path).observe(latency)
+        
+        # General API request latency logging (model inference logging happens inside the service / tasks layer)
+        if request.url.path.startswith("/ai/") and request.url.path != "/ai/metrics":
+            metrics.logger.info(f"API route {request.url.path} latency: {latency:.4f}s")
+            
+    return response
+
+
+@app.get("/ai/metrics")
+async def get_metrics():
+    """Endpoint for Prometheus metrics."""
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/health")
