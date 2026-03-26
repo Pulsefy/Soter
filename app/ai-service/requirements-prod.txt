@@ -1,9 +1,10 @@
-# Soter AI Service - Python Dependencies
+# Production requirements for Soter AI Service
+# Optimized subset of requirements.txt for production deployment
 
 # Core FastAPI framework
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
-python-multipart==0.0.6
+gunicorn==21.2.0
 
 # Data validation and settings management
 pydantic==2.5.3
@@ -12,10 +13,13 @@ pydantic-settings==2.1.0
 # Environment variable management
 python-dotenv==1.0.0
 
-# HTTP client for API calls (optional, for future AI integrations)
+# HTTP client for API calls
 httpx==0.26.0
 
-# Logging enhancements (optional)
+# Form data support
+python-multipart==0.0.6
+
+# Logging enhancements
 python-json-logger==2.0.7
 
 # Celery for background task processing
@@ -35,7 +39,3 @@ Pillow==11.3.0
 
 # Rate limiting
 slowapi==0.1.9
-
-# Testing
-pytest==8.0.0
-pytest-cov==4.1.0
