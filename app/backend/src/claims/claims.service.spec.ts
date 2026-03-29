@@ -11,6 +11,7 @@ import type { DisburseParams } from '../onchain/onchain.adapter';
 import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
+import { EncryptionService } from '../common/encryption/encryption.service';
 import { ClaimStatus, Prisma } from '@prisma/client';
 
 describe('ClaimsService', () => {
@@ -110,6 +111,15 @@ describe('ClaimsService', () => {
         {
           provide: AuditService,
           useValue: mockAuditService,
+        },
+        {
+          provide: EncryptionService,
+          useValue: {
+            encrypt: jest.fn((v: string) => v),
+            decrypt: jest.fn((v: string) => v),
+            encryptDeterministic: jest.fn((v: string) => v),
+            decryptDeterministic: jest.fn((v: string) => v),
+          },
         },
       ],
     }).compile();
@@ -298,6 +308,15 @@ describe('ClaimsService', () => {
           {
             provide: AuditService,
             useValue: mockAuditService,
+          },
+          {
+            provide: EncryptionService,
+            useValue: {
+              encrypt: jest.fn((v: string) => v),
+              decrypt: jest.fn((v: string) => v),
+              encryptDeterministic: jest.fn((v: string) => v),
+              decryptDeterministic: jest.fn((v: string) => v),
+            },
           },
         ],
       }).compile();

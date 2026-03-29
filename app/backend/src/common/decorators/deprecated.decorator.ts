@@ -141,7 +141,11 @@ export function getDeprecationMetadata(
   propertyKey?: string | symbol,
 ): DeprecationMetadata | undefined {
   if (propertyKey) {
-    const metadata = Reflect.getMetadata(DEPRECATION_KEY, target, propertyKey) as unknown;
+    const metadata = Reflect.getMetadata(
+      DEPRECATION_KEY,
+      target,
+      propertyKey,
+    ) as unknown;
     return metadata as DeprecationMetadata | undefined;
   }
   const metadata = Reflect.getMetadata(DEPRECATION_KEY, target) as unknown;

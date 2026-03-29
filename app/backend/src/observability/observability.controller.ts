@@ -1,9 +1,11 @@
+import { Controller, Body, Param } from '@nestjs/common';
 import {
-  Controller,
-  Body,
-  Param,
-} from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiOkResponse, ApiCreatedResponse, ApiNotFoundResponse } from '@nestjs/swagger';
+  ApiTags,
+  ApiOperation,
+  ApiOkResponse,
+  ApiCreatedResponse,
+  ApiNotFoundResponse,
+} from '@nestjs/swagger';
 import { ObservabilityService } from './observability.service';
 import { CreateObservabilityDto } from './dto/create-observability.dto';
 import { UpdateObservabilityDto } from './dto/update-observability.dto';
@@ -11,7 +13,7 @@ import { UpdateObservabilityDto } from './dto/update-observability.dto';
 @ApiTags('Observability')
 @Controller('observability')
 export class ObservabilityController {
-  constructor(private readonly observabilityService: ObservabilityService) { }
+  constructor(private readonly observabilityService: ObservabilityService) {}
 
   @ApiOperation({ summary: 'Create observability record' })
   @ApiCreatedResponse({ description: 'Record created successfully.' })

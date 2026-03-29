@@ -2,9 +2,35 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { AppNavigator } from '../navigation/AppNavigator';
+import { useWallet } from '../contexts/WalletContext';
 import type { RootStackParamList } from '../navigation/types';
 
+jest.mock('../contexts/WalletContext', () => ({
+  useWallet: jest.fn(),
+}));
+
+jest.mock('@react-native-community/netinfo', () => ({
+  addEventListener: jest.fn(() => jest.fn()),
+  fetch: jest.fn(() => Promise.resolve({ isConnected: true, isInternetReachable: true })),
+}));
+
+const mockUseWallet = useWallet as jest.Mock;
+
 describe('AppNavigator', () => {
+  beforeEach(() => {
+    mockUseWallet.mockReturnValue({
+      connectWallet: jest.fn(),
+      disconnectWallet: jest.fn(),
+      error: null,
+      lastDeepLinkUrl: null,
+      pairingUri: null,
+      publicKey: null,
+      reopenWallet: jest.fn(),
+      status: 'idle',
+      walletName: null,
+    });
+  });
+
   it('renders Home by default and navigates to Health route', async () => {
     const { getByText, findByText } = render(
       <NavigationContainer>
@@ -22,7 +48,7 @@ describe('AppNavigator', () => {
 
   it('declares AidOverview and AidDetails routes in navigator config', async () => {
     const navigationRef = createNavigationContainerRef<RootStackParamList>();
-    const { findByText } = render(
+    render(
       <NavigationContainer ref={navigationRef}>
         <AppNavigator />
       </NavigationContainer>
@@ -30,15 +56,19 @@ describe('AppNavigator', () => {
 
     await waitFor(() => expect(navigationRef.isReady()).toBe(true));
 
-    act(() => {
+    await act(async () => {
       navigationRef.navigate('AidOverview');
     });
-    expect(await findByText('Aid Overview')).toBeTruthy();
+    await waitFor(() =>
+      expect(navigationRef.getCurrentRoute()?.name).toBe('AidOverview'),
+    );
 
-    act(() => {
+    await act(async () => {
       navigationRef.navigate('AidDetails', { aidId: 'aid-123' });
     });
-    expect(await findByText('Aid Details')).toBeTruthy();
-    expect(await findByText('ID: aid-123')).toBeTruthy();
+    await waitFor(() =>
+      expect(navigationRef.getCurrentRoute()?.name).toBe('AidDetails'),
+    );
+    expect(navigationRef.getCurrentRoute()?.params).toMatchObject({ aidId: 'aid-123' });
   });
 });

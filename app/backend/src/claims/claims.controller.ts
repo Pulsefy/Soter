@@ -1,5 +1,13 @@
 import { Controller, Get, Post, Body, Param, Patch } from '@nestjs/common';
-import { ApiTags, ApiOkResponse, ApiCreatedResponse, ApiBadRequestResponse, ApiForbiddenResponse, ApiNotFoundResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOkResponse,
+  ApiCreatedResponse,
+  ApiBadRequestResponse,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { ClaimsService } from './claims.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { Roles } from 'src/auth/roles.decorator';
@@ -9,7 +17,7 @@ import { AppRole } from 'src/auth/app-role.enum';
 @ApiBearerAuth('JWT-auth')
 @Controller('claims')
 export class ClaimsController {
-  constructor(private readonly claimsService: ClaimsService) { }
+  constructor(private readonly claimsService: ClaimsService) {}
 
   @Post()
   @ApiCreatedResponse({

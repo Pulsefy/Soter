@@ -6,7 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "nest build",
+    "build": "node ../../node_modules/@nestjs/cli/bin/nest.js build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
@@ -14,10 +14,10 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "prisma db seed",
     "prisma:studio": "prisma studio",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
-    "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
+    "start": "node ../../node_modules/@nestjs/cli/bin/nest.js start",
+    "start:dev": "node ../../node_modules/@nestjs/cli/bin/nest.js start --watch",
+    "start:debug": "node ../../node_modules/@nestjs/cli/bin/nest.js start --debug --watch",
+    "start:prod": "node dist/src/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -25,14 +25,13 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
-    "prepare": "cd ../.. && husky app/backend/.husky"
+    "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
-    "@nestjs/bullmq": "^11.0.4",
     "@liaoliaots/nestjs-redis": "^10.0.0",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/bull": "^11.0.4",
+    "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",
@@ -41,9 +40,10 @@
     "@nestjs/terminus": "^11.0.0",
     "@nestjs/throttler": "^6.5.0",
     "@prisma/client": "^6.19.2",
-    "bullmq": "^5.67.0",
     "@willsoto/nestjs-prometheus": "^6.0.2",
+    "axios": "^1.13.6",
     "bull": "^4.16.5",
+    "bullmq": "^5.67.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
     "dotenv": "^17.2.3",
@@ -72,11 +72,9 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",
     "globals": "^16.0.0",
-    "husky": "^9.1.7",
     "ioredis-mock": "^8.13.1",
     "jest": "^30.0.0",
     "jest-mock-extended": "^4.0.0",
-    "lint-staged": "^16.2.7",
     "prettier": "^3.4.2",
     "prisma": "^6.19.2",
     "source-map-support": "^0.5.21",
@@ -107,12 +105,6 @@
     "moduleNameMapper": {
       "^src/(.*)$": "<rootDir>/src/$1"
     }
-  },
-  "lint-staged": {
-    "*.ts": [
-      "eslint --fix",
-      "prettier --write"
-    ]
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

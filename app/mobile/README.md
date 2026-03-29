@@ -37,6 +37,8 @@ All Expo public variables are prefixed with `EXPO_PUBLIC_` and are safe to ship 
 | `EXPO_PUBLIC_API_URL` | Yes | `http://localhost:3000` | Full URL of the backend API. Used by the Health Screen and the API service. |
 | `EXPO_PUBLIC_ENV_NAME` | No | auto-inferred | Human-readable label shown in the Health Screen badge and footer (e.g. `dev`, `staging`, `prod`). |
 | `EXPO_PUBLIC_NETWORK` | No | `testnet` | Blockchain network identifier. |
+| `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` | Yes for wallet connect | none | WalletConnect v2 project id used by the mobile wallet pairing flow. |
+| `EXPO_PUBLIC_WALLETCONNECT_STELLAR_CHAIN_ID` | No | inferred from `EXPO_PUBLIC_NETWORK` | Optional CAIP-2 override for the Stellar WalletConnect chain id. |
 
 ### `EXPO_PUBLIC_API_URL`
 
@@ -70,6 +72,25 @@ EXPO_PUBLIC_ENV_NAME=dev      # or staging, prod, or any custom name
 ```
 
 > The badge and footer text are always visible (there are no secrets) so they are safe to leave in production builds.
+
+### WalletConnect setup
+
+The Home Screen now includes a `Connect Wallet` action for mobile Stellar wallets.
+
+1. Create a WalletConnect project at `https://dashboard.walletconnect.com`.
+2. Set `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` in `.env`.
+3. Build a development client or production build so the custom `soter://` scheme is registered on the device.
+
+```bash
+EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID=your_project_id
+EXPO_PUBLIC_WALLETCONNECT_STELLAR_CHAIN_ID=stellar:testnet
+```
+
+Notes:
+
+- The app requests a WalletConnect `stellar:*` namespace and stores the connected public key from the approved session.
+- `soter://` is configured as the mobile deep-link scheme so the wallet can return the user to Soter after approval.
+- SEP-7 transaction URI helpers are included in the mobile wallet service for the next signing flow.
 
 ## Health Screen
 

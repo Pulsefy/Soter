@@ -30,6 +30,7 @@ import { ClaimsModule } from './claims/claims.module';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { LoggerService } from './logger/logger.service';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
     ClaimsModule,
     NotificationsModule,
     JobsModule,
+    AnalyticsModule,
   ],
 
   controllers: [AppController],

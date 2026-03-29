@@ -34,7 +34,8 @@ export class AppController {
   @Get('health')
   @ApiOperation({
     summary: 'Simple health check',
-    description: 'Basic endpoint to verify the service is running and reach the backend.',
+    description:
+      'Basic endpoint to verify the service is running and reach the backend.',
   })
   @ApiOkResponse({ description: 'Service is available.' })
   health() {

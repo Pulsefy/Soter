@@ -1,13 +1,41 @@
 @import "tailwindcss";
 
-/* Uncomment when using Leaflet maps */
-/* @import "leaflet/dist/leaflet.css"; */
+@import "leaflet/dist/leaflet.css";
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --nav-background: #ffffff;
+  --nav-foreground: #171717;
+  --nav-border: #e5e7eb;
 }
 
+html.dark {
+  --background: #0f172a;
+  --foreground: #f1f5f9;
+  --nav-background: #1e293b;
+  --nav-foreground: #f1f5f9;
+  --nav-border: #334155;
+}
+
+html.light {
+  --background: #ffffff;
+  --foreground: #1e3a8a; /* Changed from blue-800 to blue-900 */
+  --nav-background: #ffffff;
+  --nav-foreground: #1e3a8a; /* Changed from blue-800 to blue-900 */
+  --nav-border: #e5e7eb;
+}
+
+/* Force Navbar background to white in light theme, overriding any conflicts */
+html.light nav {
+  background-color: #ffffff !important;
+  color: var(--nav-foreground) !important;
+}
+
+/* Force body text color in light theme, overriding any conflicts */
+html.light body {
+  color: var(--foreground) !important;
+}
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -15,15 +43,73 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+.aid-map {
+  height: 100%;
+  width: 100%;
+  font-family: inherit;
+}
+
+.aid-map .leaflet-control-attribution {
+  font-size: 10px;
+}
+
+.aid-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #2563eb;
+  border: 2px solid #e5e7eb;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.25);
+}
+
+.aid-marker span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.aid-marker--default span {
+  background: #38bdf8;
+}
+
+.aid-marker--delivered span {
+  background: #22c55e;
+}
+
+.aid-marker--pending span {
+  background: #f59e0b;
+}
+
+.aid-marker--in-transit span {
+  background: #0ea5e9;
+}
+
+.aid-marker--failed span {
+  background: #ef4444;
+}
+
+.aid-marker--cluster {
+  background: rgba(37, 99, 235, 0.9);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+}
+
+.aid-marker--cluster span {
+  width: auto;
+  height: auto;
+  background: transparent;
+}
+
+.aid-popup .leaflet-popup-content-wrapper {
+  border-radius: 12px;
 }

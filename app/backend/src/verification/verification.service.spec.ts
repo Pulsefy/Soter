@@ -2,9 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getQueueToken } from '@nestjs/bullmq';
+import { HttpService } from '@nestjs/axios';
 import { VerificationService } from './verification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { of } from 'rxjs';
 
 describe('VerificationService', () => {
   let service: VerificationService;
@@ -53,6 +55,8 @@ describe('VerificationService', () => {
                 VERIFICATION_MODE: 'mock',
                 VERIFICATION_THRESHOLD: '0.7',
                 QUEUE_MAX_RETRIES: '3',
+                AI_SERVICE_URL: 'http://localhost:8000',
+                AI_SERVICE_TIMEOUT_MS: '30000',
               };
               return config[key];
             }),
@@ -71,6 +75,12 @@ describe('VerificationService', () => {
           provide: AuditService,
           useValue: {
             record: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: HttpService,
+          useValue: {
+            post: jest.fn().mockReturnValue(of({ data: {} })),
           },
         },
       ],

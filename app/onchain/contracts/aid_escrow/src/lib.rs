@@ -7,7 +7,8 @@ use soroban_sdk::{
 
 // --- Storage Keys ---
 const KEY_ADMIN: Symbol = symbol_short!("admin");
-const KEY_TOTAL_LOCKED: Symbol = symbol_short!("locked");
+const KEY_TOTAL_LOCKED: Symbol = symbol_short!("locked"); // Map<Address, i128>
+const KEY_VERSION: Symbol = symbol_short!("version");
 const KEY_PKG_COUNTER: Symbol = symbol_short!("pkg_cnt");
 const KEY_CONFIG: Symbol = symbol_short!("config");
 const KEY_PKG_IDX: Symbol = symbol_short!("pkg_idx"); // Aggregation index counter
@@ -76,49 +77,66 @@ pub enum Error {
     ContractPaused = 14,
 }
 
-// --- Contract Events ---
-// Changed from #[contracttype] to #[contractevent]
+// --- Contract Events (indexer-friendly; stable topics & payloads) ---
+// Topic = struct name in snake_case (e.g. package_created). Do not rename without versioning.
 
+/// Emitted when the escrow pool is funded. Actor = funder.
 #[contractevent]
-pub struct FundEvent {
+pub struct EscrowFunded {
     pub from: Address,
     pub token: Address,
     pub amount: i128,
+    pub timestamp: u64,
 }
 
+/// Emitted when a package is created. Actor = operator (admin or distributor).
 #[contractevent]
-pub struct PackageCreatedEvent {
-    pub id: u64,
+pub struct PackageCreated {
+    pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub actor: Address,
+    pub timestamp: u64,
 }
 
+/// Emitted when a recipient claims a package. Actor = recipient.
 #[contractevent]
-pub struct ClaimedEvent {
-    pub id: u64,
+pub struct PackageClaimed {
+    pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub actor: Address,
+    pub timestamp: u64,
 }
 
+/// Emitted when admin disburses a package. Actor = admin.
 #[contractevent]
-pub struct DisbursedEvent {
-    pub id: u64,
-    pub admin: Address,
+pub struct PackageDisbursed {
+    pub package_id: u64,
+    pub recipient: Address,
     pub amount: i128,
+    pub actor: Address,
+    pub timestamp: u64,
 }
 
+/// Emitted when a package is revoked/cancelled. Actor = admin.
 #[contractevent]
-pub struct RevokedEvent {
-    pub id: u64,
-    pub admin: Address,
+pub struct PackageRevoked {
+    pub package_id: u64,
+    pub recipient: Address,
     pub amount: i128,
+    pub actor: Address,
+    pub timestamp: u64,
 }
 
+/// Emitted when funds are refunded to admin after expire/cancel. Actor = admin.
 #[contractevent]
-pub struct RefundedEvent {
-    pub id: u64,
-    pub admin: Address,
+pub struct PackageRefunded {
+    pub package_id: u64,
+    pub recipient: Address,
     pub amount: i128,
+    pub actor: Address,
+    pub timestamp: u64,
 }
 
 #[contractevent]
@@ -172,6 +190,7 @@ impl AidEscrow {
             return Err(Error::AlreadyInitialized);
         }
         env.storage().instance().set(&KEY_ADMIN, &admin);
+        env.storage().instance().set(&KEY_VERSION, &1u32);
         let config = Config {
             min_amount: 1,
             max_expires_in: 0,
@@ -192,14 +211,30 @@ impl AidEscrow {
             .ok_or(Error::NotInitialized)
     }
 
-    /// Grants distributor privileges to `addr`, allowing it to call `create_package` and `batch_create_packages`.
-    ///
-    /// # Arguments
-    /// * `addr` - Address to promote to distributor.
-    ///
-    /// # Errors
-    /// * [`Error::NotInitialized`] – contract not initialised.
-    /// * [`Error::NotAuthorized`] – caller is not the admin.
+    pub fn get_version(env: Env) -> u32 {
+        env.storage().instance().get(&KEY_VERSION).unwrap_or(0)
+    }
+
+    pub fn migrate(env: Env, new_version: u32) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let current_version = Self::get_version(env.clone());
+
+        // Perform version-specific migrations
+        match (current_version, new_version) {
+            (1, 2) => {
+                // Future: Add migration logic for v1 -> v2
+            }
+            _ => {
+                // No-op for now, but structured for future use
+            }
+        }
+
+        env.storage().instance().set(&KEY_VERSION, &new_version);
+        Ok(())
+    }
+
     pub fn add_distributor(env: Env, addr: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -324,11 +359,12 @@ impl AidEscrow {
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&from, env.current_contract_address(), &amount);
 
-        // Emit event
-        FundEvent {
+        let timestamp = env.ledger().timestamp();
+        EscrowFunded {
             from,
             token,
             amount,
+            timestamp,
         }
         .publish(&env);
 
@@ -435,11 +471,12 @@ impl AidEscrow {
         env.storage().persistent().set(&idx_key, &id);
         env.storage().instance().set(&KEY_PKG_IDX, &(idx + 1));
 
-        // Emit Event
-        PackageCreatedEvent {
-            id,
-            recipient,
+        PackageCreated {
+            package_id: id,
+            recipient: recipient.clone(),
             amount,
+            actor: operator,
+            timestamp: created_at,
         }
         .publish(&env);
 
@@ -544,11 +581,12 @@ impl AidEscrow {
             current_locked += amount;
             total_amount += amount;
 
-            // Emit per-package event
-            PackageCreatedEvent {
-                id,
-                recipient,
+            PackageCreated {
+                package_id: id,
+                recipient: recipient.clone(),
                 amount,
+                actor: operator.clone(),
+                timestamp: created_at,
             }
             .publish(&env);
 
@@ -628,11 +666,13 @@ impl AidEscrow {
             &package.amount,
         );
 
-        // Emit Event
-        ClaimedEvent {
-            id,
+        let timestamp = env.ledger().timestamp();
+        PackageClaimed {
+            package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
+            actor: package.recipient.clone(),
+            timestamp,
         }
         .publish(&env);
 
@@ -684,10 +724,13 @@ impl AidEscrow {
             &package.amount,
         );
 
-        DisbursedEvent {
-            id,
-            admin: admin.clone(),
+        let timestamp = env.ledger().timestamp();
+        PackageDisbursed {
+            package_id: id,
+            recipient: package.recipient.clone(),
             amount: package.amount,
+            actor: admin.clone(),
+            timestamp,
         }
         .publish(&env);
 
@@ -729,10 +772,13 @@ impl AidEscrow {
         // Unlock funds (return to pool)
         Self::decrement_locked(&env, &package.token, package.amount);
 
-        RevokedEvent {
-            id,
-            admin: admin.clone(),
+        let timestamp = env.ledger().timestamp();
+        PackageRevoked {
+            package_id: id,
+            recipient: package.recipient.clone(),
             amount: package.amount,
+            actor: admin.clone(),
+            timestamp,
         }
         .publish(&env);
 
@@ -792,10 +838,13 @@ impl AidEscrow {
         let token_client = token::Client::new(&env, &package.token);
         token_client.transfer(&env.current_contract_address(), &admin, &package.amount);
 
-        RefundedEvent {
-            id,
-            admin: admin.clone(),
+        let timestamp = env.ledger().timestamp();
+        PackageRefunded {
+            package_id: id,
+            recipient: package.recipient.clone(),
             amount: package.amount,
+            actor: admin.clone(),
+            timestamp,
         }
         .publish(&env);
 
@@ -843,11 +892,13 @@ impl AidEscrow {
         // 5. Unlock funds (Decrement the global locked amount so funds return to the pool)
         Self::decrement_locked(&env, &package.token, package.amount);
 
-        // Reuse RevokedEvent or create a new CancelledEvent if preferred
-        RevokedEvent {
-            id: package_id,
-            admin,
+        let timestamp = env.ledger().timestamp();
+        PackageRevoked {
+            package_id,
+            recipient: package.recipient.clone(),
             amount: package.amount,
+            actor: admin.clone(),
+            timestamp,
         }
         .publish(&env);
 
@@ -1051,6 +1102,13 @@ impl AidEscrow {
             .persistent()
             .get(&key)
             .ok_or(Error::PackageNotFound)
+    }
+
+    /// Returns only the status of a package.
+    /// Cheaper alternative to get_package for polling frontends.
+    pub fn view_package_status(env: Env, id: u64) -> Result<PackageStatus, Error> {
+        let pkg = Self::get_package(env, id)?;
+        Ok(pkg.status)
     }
 
     // --- Analytics ---

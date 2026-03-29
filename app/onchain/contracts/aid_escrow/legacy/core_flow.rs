@@ -244,6 +244,108 @@ fn test_cancel_package_comprehensive() {
     assert_eq!(res_claim, Err(Ok(Error::PackageNotActive)));
 }
 
+
+// Expiration × Claiming interaction tests
+
+
+/// A package created with a short `expires_in` window cannot be claimed once the
+/// ledger timestamp advances past `expires_at`.  The contract must return
+/// `Error::PackageExpired` and auto-transition the package to `Expired`.
+#[test]
+fn test_claim_after_expiry_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // actors 
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    // fund the pool 
+    token_admin_client.mint(&admin, &2_000);
+    client.fund(&token_client.address, &admin, &2_000);
+
+    // create a package that expires in 60 seconds
+    let start_time: u64 = 1_000;
+    env.ledger().set_timestamp(start_time);
+
+    let expires_in: u64 = 60; // short expiry window
+    let expires_at = start_time + expires_in;
+
+    let pkg_id: u64 = 42;
+    client.create_package(&pkg_id, &recipient, &500, &token_client.address, &expires_at);
+
+    // Sanity-check: package is active right after creation
+    let pkg = client.get_package(&pkg_id);
+    assert_eq!(pkg.status, PackageStatus::Created);
+    assert_eq!(pkg.expires_at, expires_at);
+
+    // advance ledger PAST the expiry
+    env.ledger().set_timestamp(expires_at + 1);
+
+    // claim must fail with PackageExpired
+    let result = client.try_claim(&pkg_id);
+    assert_eq!(result, Err(Ok(Error::PackageExpired)));
+
+    // package status should have been auto-updated to Expired
+    let pkg_after = client.get_package(&pkg_id);
+    assert_eq!(pkg_after.status, PackageStatus::Expired);
+
+    //  recipient received nothing 
+    assert_eq!(token_client.balance(&recipient), 0);
+}
+
+/// Claiming exactly one second *before* the expiration timestamp must succeed.
+/// The contract guards with `timestamp > expires_at`, so `expires_at - 1` is
+/// still within the valid window.
+#[test]
+fn test_claim_just_before_expiry_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // actors
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    // fund the pool
+    token_admin_client.mint(&admin, &2_000);
+    client.fund(&token_client.address, &admin, &2_000);
+
+    // create a package that expires in 120 seconds
+    let start_time: u64 = 5_000;
+    env.ledger().set_timestamp(start_time);
+
+    let expires_in: u64 = 120;
+    let expires_at = start_time + expires_in;
+
+    let pkg_id: u64 = 99;
+    let amount: i128 = 750;
+    client.create_package(&pkg_id, &recipient, &amount, &token_client.address, &expires_at);
+
+    // set ledger to one second BEFORE the boundary 
+    env.ledger().set_timestamp(expires_at - 1);
+
+    // claim must succeed 
+    client.claim(&pkg_id);
+
+    // verify final state
+    let pkg = client.get_package(&pkg_id);
+    assert_eq!(pkg.status, PackageStatus::Claimed);
+    assert_eq!(token_client.balance(&recipient), amount);
+    assert_eq!(token_client.balance(&contract_id), 2_000 - amount);
+}
+
 #[test]
 fn test_admin_adds_and_removes_distributor() {
     let env = Env::default();

@@ -127,7 +127,8 @@ export class VerificationController {
               sessionId: 'ses_email_123',
               channel: 'email',
               expiresAt: '2025-02-19T12:10:00.000Z',
-              message: 'Verification code sent to email. Code expires in 10 minutes.',
+              message:
+                'Verification code sent to email. Code expires in 10 minutes.',
             },
           },
           phone: {
@@ -136,7 +137,8 @@ export class VerificationController {
               sessionId: 'ses_phone_456',
               channel: 'phone',
               expiresAt: '2025-02-19T12:10:00.000Z',
-              message: 'Verification code sent to phone. Code expires in 10 minutes.',
+              message:
+                'Verification code sent to phone. Code expires in 10 minutes.',
             },
           },
         },
@@ -144,7 +146,8 @@ export class VerificationController {
     },
   })
   @ApiBadRequestResponse({
-    description: 'Invalid input parameters or rate limit exceeded for this identifier.',
+    description:
+      'Invalid input parameters or rate limit exceeded for this identifier.',
   })
   async startVerification(@Body() dto: StartVerificationDto) {
     return this.verificationFlowService.start(dto);
@@ -169,7 +172,8 @@ export class VerificationController {
     },
   })
   @ApiBadRequestResponse({
-    description: 'Session is inactive, expired, or resend limit has been reached.',
+    description:
+      'Session is inactive, expired, or resend limit has been reached.',
   })
   @ApiNotFoundResponse({
     description: 'The specified verification session was not found.',

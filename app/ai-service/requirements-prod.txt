@@ -1,0 +1,44 @@
+# Production requirements for Soter AI Service
+# Optimized subset of requirements.txt for production deployment
+
+# Core FastAPI framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+gunicorn==21.2.0
+
+# Data validation and settings management
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Environment variable management
+python-dotenv==1.0.0
+
+# HTTP client for API calls
+httpx==0.26.0
+
+# Form data support
+python-multipart==0.0.6
+
+# Logging enhancements
+python-json-logger==2.0.7
+
+# Celery for background task processing
+celery==5.3.6
+redis==5.0.1
+
+# Task result backend and serialization
+kombu==5.3.4
+
+# Computer vision for proof-of-life checks
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+
+# OCR Dependencies
+pytesseract==0.3.10
+Pillow==11.3.0
+
+# NLP for PII anonymization
+spacy==3.7.4
+
+# Rate limiting
+slowapi==0.1.9

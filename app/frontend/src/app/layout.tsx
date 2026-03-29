@@ -3,6 +3,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { QueryProvider } from '@/lib/query-provider';
 import { Navbar } from '@/components/Navbar';
+import { ToastProvider } from '@/components/ToastProvider';
+import { ThemeProvider } from '@/components/ThemeProvider'; // Import ThemeProvider
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -26,14 +29,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    // suppressHydrationWarning is needed when using 'class' strategy with next-themes
+    <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen bg-white text-blue-900 dark:bg-slate-950 dark:text-slate-50`}
       >
-        <QueryProvider>
-          <Navbar />
-          {children}
-        </QueryProvider>
+        <ThemeProvider> {/* Wrap with ThemeProvider */}
+        <ErrorBoundary>
+          <QueryProvider>
+            <ToastProvider>
+              <Navbar />
+              {children}
+            </ToastProvider>
+          </QueryProvider>
+        </ThemeProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );

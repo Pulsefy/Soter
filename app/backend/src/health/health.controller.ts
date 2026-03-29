@@ -1,5 +1,11 @@
 import { Controller, Get, Req, Res, Version, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiOkResponse, ApiServiceUnavailableResponse, ApiInternalServerErrorResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiOkResponse,
+  ApiServiceUnavailableResponse,
+  ApiInternalServerErrorResponse,
+} from '@nestjs/swagger';
 import { Response } from 'express';
 import { RequestWithRequestId } from '../middleware/request-correlation.middleware';
 import { HealthService } from './health.service';

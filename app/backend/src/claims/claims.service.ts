@@ -19,6 +19,7 @@ import {
 import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
+import { EncryptionService } from '../common/encryption/encryption.service';
 
 @Injectable()
 export class ClaimsService {
@@ -34,6 +35,7 @@ export class ClaimsService {
     private readonly loggerService: LoggerService,
     private readonly metricsService: MetricsService,
     private readonly auditService: AuditService,
+    private readonly encryptionService: EncryptionService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
@@ -52,13 +54,17 @@ export class ClaimsService {
       data: {
         campaignId: createClaimDto.campaignId,
         amount: createClaimDto.amount,
-        recipientRef: createClaimDto.recipientRef,
+        recipientRef: this.encryptionService.encrypt(
+          createClaimDto.recipientRef,
+        ),
         evidenceRef: createClaimDto.evidenceRef,
       },
       include: {
         campaign: true,
       },
     });
+
+    claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
     // Stub audit hook
     void this.auditLog('claim', claim.id, 'created', { status: claim.status });
@@ -67,11 +73,15 @@ export class ClaimsService {
   }
 
   async findAll() {
-    return this.prisma.claim.findMany({
+    const claims = await this.prisma.claim.findMany({
       include: {
         campaign: true,
       },
     });
+    return claims.map(claim => ({
+      ...claim,
+      recipientRef: this.encryptionService.decrypt(claim.recipientRef),
+    }));
   }
 
   async findOne(id: string) {
@@ -84,7 +94,10 @@ export class ClaimsService {
     if (!claim) {
       throw new NotFoundException('Claim not found');
     }
-    return claim;
+    return {
+      ...claim,
+      recipientRef: this.encryptionService.decrypt(claim.recipientRef),
+    };
   }
 
   async verify(id: string) {
@@ -140,7 +153,7 @@ export class ClaimsService {
         onchainResult = await this.onchainAdapter.disburse({
           claimId: id,
           packageId,
-          recipientAddress: claim.recipientRef, // Using recipientRef as address placeholder
+          recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
           amount: claim.amount.toString(),
         });
 

@@ -40,7 +40,9 @@ export class TestErrorController {
   }
 
   @ApiOperation({ summary: 'Trigger an InternalServerErrorException' })
-  @ApiInternalServerErrorResponse({ description: 'Internal server error triggered.' })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error triggered.',
+  })
   getInternalServerError() {
     throw new InternalServerErrorException('This is an internal server error');
   }

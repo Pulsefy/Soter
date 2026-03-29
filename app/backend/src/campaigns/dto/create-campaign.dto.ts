@@ -31,7 +31,8 @@ export class CreateCampaignDto {
   budget!: number;
 
   @ApiPropertyOptional({
-    description: 'Arbitrary campaign metadata (e.g., region, location, target audience).',
+    description:
+      'Arbitrary campaign metadata (e.g., region, location, target audience).',
     example: { region: 'Lagos', partner: 'NGO-A', notes: 'Phase 1' },
   })
   @IsOptional()
