@@ -31,6 +31,7 @@ import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { LoggerService } from './logger/logger.service';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     NotificationsModule,
     JobsModule,
     AnalyticsModule,
+    WebhooksModule,
   ],
 
   controllers: [AppController],

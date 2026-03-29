@@ -46,7 +46,7 @@ export class ApiKeyGuard implements CanActivate {
     });
 
     if (record) {
-      request.user = { role: record.role };
+      request.user = { role: record.role, apiKeyId: record.id };
       return true;
     }
 

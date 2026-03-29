@@ -107,6 +107,7 @@ export class CampaignsController {
   @ApiForbiddenResponse({
     description: 'Access denied - insufficient permissions.',
   })
+  @Patch(':id/archive')
   async archive(@Param('id') id: string) {
     const campaignData = await this.campaigns.archive(id);
     const { campaign, alreadyArchived } = campaignData;

@@ -6,6 +6,7 @@ import { OnchainModule } from '../onchain/onchain.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
 import { LoggerModule } from '../logger/logger.module';
 import { AuditModule } from '../audit/audit.module';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { AuditModule } from '../audit/audit.module';
     MetricsModule,
     LoggerModule,
     AuditModule,
+    WebhooksModule,
   ],
   controllers: [ClaimsController],
   providers: [ClaimsService],

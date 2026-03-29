@@ -4,10 +4,14 @@ import { Campaign, CampaignStatus, Prisma } from '@prisma/client';
 import { CampaignsService } from './campaigns.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DeepMockProxy, mockDeep } from 'jest-mock-extended';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 describe('CampaignsService', () => {
   let service: CampaignsService;
   let prismaMock: DeepMockProxy<PrismaService>;
+  const webhooksService = {
+    enqueueEvent: jest.fn().mockResolvedValue(1),
+  };
 
   const now = new Date('2026-01-25T00:00:00.000Z');
 
@@ -19,6 +23,7 @@ describe('CampaignsService', () => {
       providers: [
         CampaignsService,
         { provide: PrismaService, useValue: prismaMock },
+        { provide: WebhooksService, useValue: webhooksService },
       ],
     }).compile();
 
@@ -136,6 +141,41 @@ describe('CampaignsService', () => {
     expect(args).toEqual(
       expect.objectContaining({
         where: { id: 'c1' },
+      }),
+    );
+  });
+
+  it('update(): emits campaign.completed when status transitions to completed', async () => {
+    const existing: Campaign = {
+      id: 'c1',
+      name: 'A',
+      status: CampaignStatus.active,
+      budget: new Prisma.Decimal('10.00'),
+      metadata: null,
+      archivedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const updated: Campaign = {
+      ...existing,
+      status: CampaignStatus.completed,
+      updatedAt: new Date('2026-01-26T00:00:00.000Z'),
+    };
+
+    prismaMock.campaign.findUnique.mockResolvedValue(existing);
+    prismaMock.campaign.update.mockResolvedValue(updated);
+
+    await service.update('c1', { status: CampaignStatus.completed });
+
+    expect(webhooksService.enqueueEvent).toHaveBeenCalledWith(
+      'campaign.completed',
+      expect.objectContaining({
+        event: 'campaign.completed',
+        campaign: expect.objectContaining({
+          id: 'c1',
+          status: CampaignStatus.completed,
+        }),
+        previousStatus: CampaignStatus.active,
       }),
     );
   });

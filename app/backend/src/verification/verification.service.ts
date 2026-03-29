@@ -16,6 +16,7 @@ import {
 } from './interfaces/verification-job.interface';
 import { AuditService } from '../audit/audit.service';
 import { firstValueFrom } from 'rxjs';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 interface OCRFieldResult {
   value: string;
@@ -56,6 +57,7 @@ export class VerificationService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly httpService: HttpService,
+    private readonly webhooksService: WebhooksService,
   ) {
     this.verificationMode =
       this.configService.get<string>('VERIFICATION_MODE') || 'mock';
@@ -143,12 +145,34 @@ export class VerificationService {
 
     const shouldVerify = result.score >= this.verificationThreshold;
 
-    await this.prisma.claim.update({
+    const previousStatus = claim.status;
+    const updatedClaim = await this.prisma.claim.update({
       where: { id: claimId },
       data: {
         status: shouldVerify ? 'verified' : 'requested',
       },
     });
+
+    if (shouldVerify && previousStatus !== 'verified') {
+      await this.webhooksService.enqueueEvent('claim.verified', {
+        event: 'claim.verified',
+        occurredAt: new Date().toISOString(),
+        claim: {
+          id: updatedClaim.id,
+          campaignId: updatedClaim.campaignId,
+          status: updatedClaim.status,
+          amount:
+            typeof updatedClaim.amount === 'object' &&
+            updatedClaim.amount !== null &&
+            'toString' in updatedClaim.amount
+              ? updatedClaim.amount.toString()
+              : String(updatedClaim.amount),
+          recipientRef: updatedClaim.recipientRef,
+          evidenceRef: updatedClaim.evidenceRef ?? null,
+        },
+        previousStatus,
+      });
+    }
 
     this.logger.log(
       `Claim ${claimId} verification completed with score ${result.score} (threshold: ${this.verificationThreshold})`,

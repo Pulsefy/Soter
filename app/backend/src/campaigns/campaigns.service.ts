@@ -3,10 +3,14 @@ import { CampaignStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 @Injectable()
 export class CampaignsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly webhooksService: WebhooksService,
+  ) {}
 
   private sanitizeMetadata(
     metadata?: Record<string, unknown>,
@@ -40,9 +44,9 @@ export class CampaignsService {
   }
 
   async update(id: string, dto: UpdateCampaignDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
 
-    return this.prisma.campaign.update({
+    const updated = await this.prisma.campaign.update({
       where: { id },
       data: {
         name: dto.name,
@@ -54,6 +58,26 @@ export class CampaignsService {
             : this.sanitizeMetadata(dto.metadata),
       },
     });
+
+    if (
+      updated.status === CampaignStatus.completed &&
+      existing.status !== CampaignStatus.completed
+    ) {
+      await this.webhooksService.enqueueEvent('campaign.completed', {
+        event: 'campaign.completed',
+        occurredAt: updated.updatedAt.toISOString(),
+        campaign: {
+          id: updated.id,
+          name: updated.name,
+          status: updated.status,
+          budget: updated.budget.toString(),
+          archivedAt: updated.archivedAt?.toISOString() ?? null,
+        },
+        previousStatus: existing.status,
+      });
+    }
+
+    return updated;
   }
 
   async archive(id: string) {

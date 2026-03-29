@@ -12,6 +12,7 @@ import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { ClaimStatus, Prisma } from '@prisma/client';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 describe('ClaimsService', () => {
   let service: ClaimsService;
@@ -60,6 +61,10 @@ describe('ClaimsService', () => {
 
   const mockAuditService = {
     record: jest.fn().mockResolvedValue({ id: 'audit-1' }),
+  };
+
+  const mockWebhooksService = {
+    enqueueEvent: jest.fn().mockResolvedValue(1),
   };
 
   beforeEach(async () => {
@@ -111,6 +116,10 @@ describe('ClaimsService', () => {
           provide: AuditService,
           useValue: mockAuditService,
         },
+        {
+          provide: WebhooksService,
+          useValue: mockWebhooksService,
+        },
       ],
     }).compile();
 
@@ -122,6 +131,37 @@ describe('ClaimsService', () => {
     configService = module.get(ConfigService);
 
     jest.clearAllMocks();
+  });
+
+  it('verify should enqueue claim.verified webhooks after a successful transition', async () => {
+    jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValueOnce({
+      ...mockClaim,
+      status: ClaimStatus.requested,
+    } as typeof mockClaim);
+    type TxClient = { claim: { update: jest.Mock } };
+    jest.spyOn(prismaService, '$transaction').mockImplementation(
+      async (callback: (tx: TxClient) => Promise<unknown>) =>
+        callback({
+          claim: {
+            update: jest.fn().mockResolvedValue({
+              ...mockClaim,
+              status: ClaimStatus.verified,
+            }),
+          },
+        }),
+    );
+
+    await service.verify('claim-123');
+
+    expect(mockWebhooksService.enqueueEvent).toHaveBeenCalledWith(
+      'claim.verified',
+      expect.objectContaining({
+        event: 'claim.verified',
+        claim: expect.objectContaining({
+          id: 'claim-123',
+        }),
+      }),
+    );
   });
 
   describe('disburse', () => {
@@ -299,6 +339,10 @@ describe('ClaimsService', () => {
             provide: AuditService,
             useValue: mockAuditService,
           },
+          {
+            provide: WebhooksService,
+            useValue: mockWebhooksService,
+          },
         ],
       }).compile();
 
@@ -347,6 +391,34 @@ describe('ClaimsService', () => {
       expect(mockAuditService.record).toHaveBeenCalledWith(
         expect.objectContaining<{ action: string }>({
           action: 'disburse_failed',
+        }),
+      );
+    });
+
+    it('should enqueue claim.disbursed webhooks after a successful disbursement', async () => {
+      jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue(mockClaim);
+      type TxClient = { claim: { update: jest.Mock } };
+      jest.spyOn(prismaService, '$transaction').mockImplementation(
+        async (callback: (tx: TxClient) => Promise<unknown>) =>
+          callback({
+            claim: {
+              update: jest.fn().mockResolvedValue({
+                ...mockClaim,
+                status: ClaimStatus.disbursed,
+              }),
+            },
+          }),
+      );
+
+      await service.disburse('claim-123');
+
+      expect(mockWebhooksService.enqueueEvent).toHaveBeenCalledWith(
+        'claim.disbursed',
+        expect.objectContaining({
+          event: 'claim.disbursed',
+          claim: expect.objectContaining({
+            id: 'claim-123',
+          }),
         }),
       );
     });

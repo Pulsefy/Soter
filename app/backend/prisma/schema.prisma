@@ -82,6 +82,46 @@ model Claim {
   evidenceRef  String?
 }
 
+model WebhookSubscription {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  apiKeyId  String
+  apiKey    ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  url       String
+  secret    String
+  events    String[]
+  isActive  Boolean  @default(true)
+
+  deliveries WebhookDeliveryAttempt[]
+
+  @@index([apiKeyId])
+  @@index([isActive])
+}
+
+model WebhookDeliveryAttempt {
+  id             String               @id @default(cuid())
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  subscriptionId String
+  subscription   WebhookSubscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  event          String
+  attempt        Int
+  status         String
+  payload        Json
+  responseStatus Int?
+  responseBody   String?
+  errorMessage   String?
+  deliveredAt    DateTime?
+
+  @@index([subscriptionId, createdAt])
+  @@index([event, status])
+}
+
 model AuditLog {
   id        String   @id @default(cuid())
   actorId   String
@@ -136,4 +176,6 @@ model ApiKey {
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  webhookSubscriptions WebhookSubscription[]
 }

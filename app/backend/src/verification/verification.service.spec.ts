@@ -7,6 +7,7 @@ import { VerificationService } from './verification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { of } from 'rxjs';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 describe('VerificationService', () => {
   let service: VerificationService;
@@ -18,17 +19,19 @@ describe('VerificationService', () => {
     getCompletedCount: jest.Mock;
     getFailedCount: jest.Mock;
   };
+  const mockWebhooksService = {
+    enqueueEvent: jest.fn().mockResolvedValue(1),
+  };
 
   const mockClaim = {
     id: 'test-claim-id',
-    status: 'pending',
-    description: 'Test claim',
+    status: 'requested',
+    campaignId: 'campaign-1',
+    amount: { toString: () => '125.50' },
+    recipientRef: 'recipient-1',
+    evidenceRef: 'https://example.com/evidence.png',
     createdAt: new Date(),
     updatedAt: new Date(),
-    verificationScore: null,
-    verificationResult: null,
-    verifiedAt: null,
-    metadata: null,
   };
 
   beforeEach(async () => {
@@ -82,6 +85,10 @@ describe('VerificationService', () => {
           useValue: {
             post: jest.fn().mockReturnValue(of({ data: {} })),
           },
+        },
+        {
+          provide: WebhooksService,
+          useValue: mockWebhooksService,
         },
       ],
     }).compile();
@@ -207,6 +214,15 @@ describe('VerificationService', () => {
       const updateCall = updateSpy.mock.calls[0]?.[0];
       expect(updateCall?.data).toHaveProperty('status');
       expect(updateCall?.data?.status).toBe('verified');
+      expect(mockWebhooksService.enqueueEvent).toHaveBeenCalledWith(
+        'claim.verified',
+        expect.objectContaining({
+          event: 'claim.verified',
+          claim: expect.objectContaining({
+            id: 'test-claim-id',
+          }),
+        }),
+      );
     });
   });
 

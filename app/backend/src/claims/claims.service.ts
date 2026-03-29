@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
-import { ClaimStatus } from '@prisma/client';
+import { ClaimStatus, Prisma } from '@prisma/client';
 import {
   OnchainAdapter,
   DisburseResult,
@@ -19,6 +19,7 @@ import {
 import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 @Injectable()
 export class ClaimsService {
@@ -34,6 +35,7 @@ export class ClaimsService {
     private readonly loggerService: LoggerService,
     private readonly metricsService: MetricsService,
     private readonly auditService: AuditService,
+    private readonly webhooksService: WebhooksService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
@@ -288,7 +290,55 @@ export class ClaimsService {
       return updated;
     });
 
+    await this.emitWebhookForClaimStatus(updatedClaim, fromStatus, toStatus);
+
     return updatedClaim;
+  }
+
+  private async emitWebhookForClaimStatus(
+    claim: {
+      id: string;
+      status: ClaimStatus;
+      campaignId: string;
+      amount: Prisma.Decimal;
+      recipientRef: string;
+      evidenceRef?: string | null;
+      updatedAt: Date;
+    },
+    fromStatus: ClaimStatus,
+    toStatus: ClaimStatus,
+  ) {
+    if (toStatus === ClaimStatus.verified) {
+      await this.webhooksService.enqueueEvent('claim.verified', {
+        event: 'claim.verified',
+        occurredAt: claim.updatedAt.toISOString(),
+        claim: {
+          id: claim.id,
+          campaignId: claim.campaignId,
+          status: claim.status,
+          amount: claim.amount.toString(),
+          recipientRef: claim.recipientRef,
+          evidenceRef: claim.evidenceRef ?? null,
+        },
+        previousStatus: fromStatus,
+      });
+    }
+
+    if (toStatus === ClaimStatus.disbursed) {
+      await this.webhooksService.enqueueEvent('claim.disbursed', {
+        event: 'claim.disbursed',
+        occurredAt: claim.updatedAt.toISOString(),
+        claim: {
+          id: claim.id,
+          campaignId: claim.campaignId,
+          status: claim.status,
+          amount: claim.amount.toString(),
+          recipientRef: claim.recipientRef,
+          evidenceRef: claim.evidenceRef ?? null,
+        },
+        previousStatus: fromStatus,
+      });
+    }
   }
 
   private auditLog(
