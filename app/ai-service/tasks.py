@@ -18,26 +18,56 @@ from services.pii_scrubber import PIIScrubberService
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Initialize Celery app
-celery_app = Celery(
-    'soter_ai_service',
-    broker=settings.redis_url,
-    backend=settings.redis_url,
-    include=['tasks']
-)
+# Lazy Celery app initialization - defers actual connection until needed
+celery_app = None
 
-# Celery configuration
-celery_app.conf.update(
-    task_serializer='json',
-    accept_content=['json'],
-    result_serializer='json',
-    timezone='UTC',
-    enable_utc=True,
-    task_track_started=True,
-    task_time_limit=3600,  # 1 hour max
-    task_soft_time_limit=1800,  # 30 minutes soft limit
-    result_expires=86400,  # Results expire after 24 hours
-)
+def get_celery_app() -> Celery:
+    """
+    Get or initialize the Celery app.
+    Uses lazy initialization to avoid connection errors during startup.
+    """
+    global celery_app
+    if celery_app is None:
+        try:
+            celery_app = Celery(
+                'soter_ai_service',
+                broker=settings.redis_url,
+                backend=settings.redis_url,
+                include=['tasks']
+            )
+            
+            # Celery configuration
+            celery_app.conf.update(
+                task_serializer='json',
+                accept_content=['json'],
+                result_serializer='json',
+                timezone='UTC',
+                enable_utc=True,
+                task_track_started=True,
+                task_time_limit=3600,  # 1 hour max
+                task_soft_time_limit=1800,  # 30 minutes soft limit
+                result_expires=86400,  # Results expire after 24 hours
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Celery: {e}. Task processing disabled.")
+            # Return a dummy app that won't crash
+            celery_app = Celery('soter_ai_service')
+    
+    return celery_app
+
+
+def get_process_heavy_inference_task():
+    """
+    Get the lazily-registered process_heavy_inference task.
+    This allows the task to be registered only when Celery is actually available.
+    """
+    app = get_celery_app()
+    # Define and register the task with the app
+    @app.task(bind=True, name='process_heavy_inference')
+    def process_heavy_inference_task(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return process_heavy_inference_impl(self, task_id, payload)
+    
+    return process_heavy_inference_task
 
 # Task status storage (in production, use Redis with proper TTL)
 task_results: Dict[str, Dict[str, Any]] = {}
@@ -114,8 +144,7 @@ def send_webhook_notification(task_id: str, status: str, result: Any = None, err
         logger.error(f"Error setting up webhook notification: {e}")
 
 
-@celery_app.task(bind=True, name='process_heavy_inference')
-def process_heavy_inference(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def process_heavy_inference_impl(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Process heavy AI inference tasks in background
     
@@ -356,11 +385,17 @@ def create_task(task_type: str, payload: Dict[str, Any]) -> str:
     # Initialize task status
     update_task_status(task_id, 'pending')
     
-    # Queue the task
-    process_heavy_inference.apply_async(
-        args=[task_id, {**payload, 'type': task_type}],
-        task_id=task_id
-    )
+    try:
+        # Queue the task using the lazy-registered task
+        task = get_process_heavy_inference_task()
+        task.apply_async(
+            args=[task_id, {**payload, 'type': task_type}],
+            task_id=task_id
+        )
+    except Exception as e:
+        logger.error(f"Failed to queue task {task_id}: {e}. Redis may not be available.")
+        update_task_status(task_id, 'failed', error=str(e))
+        raise
     
     logger.info(f"Created task {task_id} of type {task_type}")
     
