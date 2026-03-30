@@ -88,6 +88,6 @@ const onchainAdapterProvider: Provider = {
     OnchainProcessor,
     OnchainService,
   ],
-  exports: [ONCHAIN_ADAPTER_TOKEN, OnchainService, BullModule],
+  exports: [ONCHAIN_ADAPTER_TOKEN, OnchainService],
 })
 export class OnchainModule {}

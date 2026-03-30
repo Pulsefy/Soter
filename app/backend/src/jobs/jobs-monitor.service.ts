@@ -31,16 +31,19 @@ export class JobsMonitorService {
   }
 
   private async getQueueStatus(queue: Queue) {
-    const [waiting, active, completed, failed, delayed] = await Promise.all([
-      queue.getWaitingCount(),
-      queue.getActiveCount(),
-      queue.getCompletedCount(),
-      queue.getFailedCount(),
-      queue.getDelayedCount(),
-    ]);
+    const [isReady, waiting, active, completed, failed, delayed] =
+      await Promise.all([
+        queue.isReady(),
+        queue.getWaitingCount(),
+        queue.getActiveCount(),
+        queue.getCompletedCount(),
+        queue.getFailedCount(),
+        queue.getDelayedCount(),
+      ]);
 
     return {
       name: queue.name,
+      isReady,
       waiting,
       active,
       completed,
