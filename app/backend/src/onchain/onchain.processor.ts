@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
-import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
-import { Logger, Inject } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Processor, WorkerHost, OnWorkerEvent, InjectQueue } from '@nestjs/bullmq';
+import { Logger, Inject, Injectable } from '@nestjs/common';
+import { Job, Queue } from 'bullmq';
+import { ConfigService } from '@nestjs/config';
 import {
   OnchainJobData,
   OnchainJobResult,
@@ -14,12 +15,20 @@ import { ONCHAIN_ADAPTER_TOKEN, OnchainAdapter } from './onchain.adapter';
 })
 export class OnchainProcessor extends WorkerHost {
   private readonly logger = new Logger(OnchainProcessor.name);
+  private readonly deadLetterQueue: Queue;
 
   constructor(
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
+    private readonly configService: ConfigService,
   ) {
     super();
+    this.deadLetterQueue = new Queue('onchain-dead-letter', {
+      connection: {
+        host: this.configService.get<string>('REDIS_HOST') || 'localhost',
+        port: parseInt(this.configService.get<string>('REDIS_PORT') || '6379', 10),
+      },
+    });
   }
 
   async process(
@@ -57,10 +66,21 @@ export class OnchainProcessor extends WorkerHost {
         metadata: result?.metadata,
       };
     } catch (error) {
-      this.logger.error(
-        `Onchain job ${job.id} failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        error instanceof Error ? error.stack : undefined,
-      );
+      const message =
+        error instanceof Error ? error.message : 'Unknown onchain error';
+      const stack = error instanceof Error ? error.stack : undefined;
+
+      if (this.isTransientOnchainError(error)) {
+        this.logger.warn(
+          `Transient onchain error for job ${job.id}: ${message}`,
+        );
+      } else {
+        this.logger.error(
+          `Onchain job ${job.id} failed: ${message}`,
+          stack,
+        );
+      }
+
       throw error;
     }
   }
@@ -71,11 +91,65 @@ export class OnchainProcessor extends WorkerHost {
   }
 
   @OnWorkerEvent('failed')
-  onFailed(job: Job<OnchainJobData> | undefined, error: Error) {
+  async onFailed(job: Job<OnchainJobData> | undefined, error: Error) {
     if (job) {
       this.logger.error(`Onchain job ${job.id} failed: ${error.message}`);
+      if (this.isFinalFailure(job)) {
+        await this.moveToDeadLetterQueue(job, error);
+      }
     } else {
       this.logger.error(`Onchain job failed: ${error.message}`);
     }
+  }
+
+  private isTransientOnchainError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+
+    const normalized = error.message.toLowerCase();
+    return [
+      'timeout',
+      'timed out',
+      'network',
+      'connection reset',
+      'econnrefused',
+      'econnreset',
+      'ledger congestion',
+      'rate limit',
+      'rate-limited',
+      'service unavailable',
+      'unavailable',
+      '503',
+      '504',
+    ].some(token => normalized.includes(token));
+  }
+
+  private isFinalFailure(job: Job<OnchainJobData>): boolean {
+    const totalAttempts = job.opts.attempts ?? 1;
+    return job.attemptsMade >= totalAttempts;
+  }
+
+  private async moveToDeadLetterQueue(job: Job<OnchainJobData>, error: Error) {
+    await this.deadLetterQueue.add(
+      `dead-letter-${job.id}`,
+      {
+        originalJobId: job.id,
+        originalName: job.name,
+        data: job.data,
+        failedAt: new Date().toISOString(),
+        failedReason: error.message,
+        attemptsMade: job.attemptsMade,
+        stack: error.stack,
+      },
+      {
+        removeOnComplete: false,
+        removeOnFail: false,
+      },
+    );
+
+    this.logger.warn(
+      `Moved job ${job.id} to onchain dead letter queue after ${job.attemptsMade} attempts`,
+    );
   }
 }

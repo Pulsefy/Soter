@@ -37,7 +37,14 @@ export class OnchainService {
         type: 'exponential',
         delay: 10000,
       },
-      removeOnComplete: true,
+      removeOnComplete: {
+        count: 100,
+        age: 7 * 24 * 60 * 60,
+      },
+      removeOnFail: {
+        count: 50,
+        age: 7 * 24 * 60 * 60,
+      },
     });
 
     this.logger.log(`Enqueued onchain job: ${job.id} for ${type}`);

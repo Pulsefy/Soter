@@ -48,6 +48,36 @@ const onchainAdapterProvider: Provider = {
           host: configService.get<string>('REDIS_HOST') || 'localhost',
           port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
         },
+        defaultJobOptions: {
+          attempts: 5,
+          backoff: {
+            type: 'exponential',
+            delay: 10000,
+          },
+          removeOnComplete: {
+            count: 100,
+            age: 7 * 24 * 60 * 60,
+          },
+          removeOnFail: {
+            count: 50,
+            age: 7 * 24 * 60 * 60,
+          },
+        },
+      }),
+      inject: [ConfigService],
+    }),
+    BullModule.registerQueueAsync({
+      name: 'onchain-dead-letter',
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get<string>('REDIS_HOST') || 'localhost',
+          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+        },
+        defaultJobOptions: {
+          removeOnComplete: false,
+          removeOnFail: false,
+        },
       }),
       inject: [ConfigService],
     }),
@@ -58,6 +88,6 @@ const onchainAdapterProvider: Provider = {
     OnchainProcessor,
     OnchainService,
   ],
-  exports: [ONCHAIN_ADAPTER_TOKEN, OnchainService],
+  exports: [ONCHAIN_ADAPTER_TOKEN, OnchainService, BullModule],
 })
 export class OnchainModule {}
