@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Patch } from '@nestjs/common';
 import {
   ApiTags,
+  ApiOperation,
   ApiOkResponse,
   ApiCreatedResponse,
   ApiBadRequestResponse,
@@ -20,6 +21,10 @@ export class ClaimsController {
   constructor(private readonly claimsService: ClaimsService) {}
 
   @Post()
+  @ApiOperation({
+    summary: 'Create a claim',
+    description: 'Initializes a new claim for a specific campaign.',
+  })
   @ApiCreatedResponse({
     description: 'Claim created successfully.',
     type: CreateClaimDto,
@@ -35,6 +40,10 @@ export class ClaimsController {
   }
 
   @Get()
+  @ApiOperation({
+    summary: 'List all claims',
+    description: 'Retrieves a list of all claims across all campaigns.',
+  })
   @ApiOkResponse({
     description: 'List of all claims retrieved successfully.',
   })
@@ -43,6 +52,10 @@ export class ClaimsController {
   }
 
   @Get(':id')
+  @ApiOperation({
+    summary: 'Get claim details',
+    description: 'Retrieves the current details and status of a specific claim.',
+  })
   @ApiOkResponse({
     description: 'Claim details retrieved successfully.',
   })
@@ -55,6 +68,10 @@ export class ClaimsController {
 
   @Post(':id/verify')
   @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Verify a claim',
+    description: 'Marks a claim as verified. Requires operator or admin role.',
+  })
   @ApiOkResponse({
     description: 'Claim status transitioned to verified successfully.',
   })
@@ -73,6 +90,10 @@ export class ClaimsController {
 
   @Post(':id/approve')
   @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'Approve a claim',
+    description: 'Approves a verified claim. Requires admin role.',
+  })
   @ApiOkResponse({
     description: 'Claim approved successfully (verified → approved).',
   })
@@ -91,6 +112,11 @@ export class ClaimsController {
 
   @Post(':id/disburse')
   @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'Disburse funds for a claim',
+    description:
+      'Initiates on-chain disbursement for an approved claim. Requires admin role.',
+  })
   @ApiOkResponse({
     description: 'On-chain disbursement initiated or completed successfully.',
     content: {
@@ -131,6 +157,10 @@ export class ClaimsController {
   }
 
   @Patch(':id/archive')
+  @ApiOperation({
+    summary: 'Archive a claim',
+    description: 'Soft-archives a claim, hiding it from general listings.',
+  })
   @ApiOkResponse({
     description: 'Claim archived successfully.',
   })

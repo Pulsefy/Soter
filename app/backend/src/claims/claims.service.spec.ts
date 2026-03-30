@@ -97,8 +97,8 @@ describe('ClaimsService', () => {
                 ONCHAIN_ENABLED: 'true',
               };
               return config[key];
-            }) as jest.Mock<(key: string) => string | undefined>,
-          } as ConfigService,
+            }),
+          },
         },
         {
           provide: LoggerService,
@@ -179,11 +179,10 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
-      type TxClient = { claim: { update: jest.Mock } };
       jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(
-          async (callback: (tx: TxClient) => Promise<unknown>) => {
+          async (callback: (tx: any) => Promise<unknown>) => {
             await Promise.resolve();
             return callback({
               claim: {
@@ -211,11 +210,10 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
-      type TxClient = { claim: { update: jest.Mock } };
       jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(
-          async (callback: (tx: TxClient) => Promise<unknown>) => {
+          async (callback: (tx: any) => Promise<unknown>) => {
             await Promise.resolve();
             return callback({
               claim: {
@@ -246,11 +244,10 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
-      type TxClient = { claim: { update: jest.Mock } };
       jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(
-          async (callback: (tx: TxClient) => Promise<unknown>) => {
+          async (callback: (tx: any) => Promise<unknown>) => {
             await Promise.resolve();
             return callback({
               claim: {
@@ -290,7 +287,6 @@ describe('ClaimsService', () => {
         });
 
       // Recreate service with new config
-      type TxClient = { claim: { update: jest.Mock } };
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           ClaimsService,
@@ -304,7 +300,7 @@ describe('ClaimsService', () => {
               $transaction: jest
                 .fn()
                 .mockImplementation(
-                  async (callback: (tx: TxClient) => Promise<unknown>) => {
+                  async (callback: (tx: any) => Promise<unknown>) => {
                     await Promise.resolve();
                     return callback({
                       claim: {
@@ -329,8 +325,8 @@ describe('ClaimsService', () => {
                 if (key === 'ONCHAIN_ENABLED') return 'false';
                 if (key === 'ONCHAIN_ADAPTER') return 'mock';
                 return undefined;
-              }) as jest.Mock<(key: string) => string | undefined>,
-            } as ConfigService,
+              }),
+            },
           },
           {
             provide: LoggerService,
@@ -379,11 +375,10 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
-      type TxClient = { claim: { update: jest.Mock } };
       const transactionSpy = jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(
-          async (callback: (tx: TxClient) => Promise<unknown>) => {
+          async (callback: (tx: any) => Promise<unknown>) => {
             await Promise.resolve();
             return callback({
               claim: {

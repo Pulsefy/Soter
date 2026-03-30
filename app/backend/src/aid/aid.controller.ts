@@ -1,4 +1,12 @@
-import { Controller, Body, Param, Post } from '@nestjs/common';
+import {
+  Controller,
+  Body,
+  Param,
+  Post,
+  Patch,
+  Delete,
+  Put,
+} from '@nestjs/common';
 import { AidService } from './aid.service';
 import { AiTaskWebhookDto } from './dto/ai-task-webhook.dto';
 import {
@@ -17,6 +25,7 @@ import {
 export class AidController {
   constructor(private readonly aidService: AidService) {}
 
+  @Post('campaigns')
   @ApiOperation({
     summary: 'Create a new campaign',
     description:
@@ -28,6 +37,7 @@ export class AidController {
     return this.aidService.createCampaign(data);
   }
 
+  @Patch('campaigns/:id')
   @ApiOperation({
     summary: 'Update a campaign',
     description:
@@ -43,6 +53,7 @@ export class AidController {
     return this.aidService.updateCampaign(id, data);
   }
 
+  @Delete('campaigns/:id')
   @ApiOperation({
     summary: 'Archive a campaign',
     description:
@@ -54,6 +65,7 @@ export class AidController {
     return this.aidService.archiveCampaign(id);
   }
 
+  @Put('claims/:id/status')
   @ApiOperation({
     summary: 'Transition a claim status',
     description:

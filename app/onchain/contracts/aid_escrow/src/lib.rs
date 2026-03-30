@@ -988,3 +988,52 @@ impl AidEscrow {
         }
     }
 }
+
+// --- Tests ---
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::Env;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::token::{StellarAssetClient, TokenClient};
+
+    fn setup() -> (Env, AidEscrowClient<'static>) {
+        let env = Env::default();
+        let contract_id = env.register(AidEscrow, ());
+        let client = AidEscrowClient::new(&env, &contract_id);
+        (env, client)
+    }
+
+    #[test]
+    fn test_cancel_package() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        // Deploy a mock Stellar asset contract to use as the token.
+        let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = token_id.address();
+        let sac = StellarAssetClient::new(&env, &token);
+        let token_client = TokenClient::new(&env, &token);
+
+        env.mock_all_auths();
+
+        // Initialise the escrow contract.
+        client.init(&admin);
+
+        // Mint 10_000 tokens to admin and fund the escrow pool.
+        sac.mint(&admin, &10_000);
+        client.fund(&token, &admin, &5_000);
+
+        // Confirm the contract holds the funded balance.
+        assert_eq!(token_client.balance(&client.address), 5_000);
+
+        let operator = admin.clone();
+        let package_id = client.create_package(&operator, &1, &recipient, &1000, &token, &86400);
+        client.cancel_package(&package_id);
+
+        let package = client.get_package(&package_id);
+        assert_eq!(package.status, PackageStatus::Cancelled);
+    }
+}

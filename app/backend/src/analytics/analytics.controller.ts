@@ -55,23 +55,45 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiOkResponse,
+  ApiQuery,
+} from '@nestjs/swagger';
+import { Public } from '../common/decorators/public.decorator';
 import { AnalyticsService } from './analytics.service';
 import {
   GlobalStatsDto,
-  GlobalStatsQuery,
   MapDataDto,
-  MapDataQuery,
   GeoJsonFeatureCollection,
+  GlobalStatsQuery,
+  MapDataQuery,
 } from './dto';
 
+@ApiTags('Analytics')
 @Controller('analytics')
 export class AnalyticsController {
   private readonly logger = new Logger(AnalyticsController.name);
 
   constructor(private readonly analyticsService: AnalyticsService) {}
 
+  @Public()
   @Get('global-stats')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get global distribution statistics',
+    description:
+      'Returns aggregated totals and breakdowns by token and region for the dashboard.',
+  })
+  @ApiOkResponse({
+    description: 'Global statistics retrieved successfully.',
+    type: GlobalStatsDto,
+  })
+  @ApiQuery({ name: 'from', required: false, type: String })
+  @ApiQuery({ name: 'to', required: false, type: String })
+  @ApiQuery({ name: 'region', required: false, type: String })
+  @ApiQuery({ name: 'token', required: false, type: String })
   async getGlobalStats(
     @Query('from') from?: string,
     @Query('to') to?: string,
@@ -83,8 +105,21 @@ export class AnalyticsController {
     return this.analyticsService.getGlobalStats(query);
   }
 
+  @Public()
   @Get('map-data')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get map data points',
+    description:
+      'Returns a list of distribution points with coordinates and amounts for map visualization.',
+  })
+  @ApiOkResponse({
+    description: 'Map data points retrieved successfully.',
+    type: MapDataDto,
+  })
+  @ApiQuery({ name: 'region', required: false, type: String })
+  @ApiQuery({ name: 'token', required: false, type: String })
+  @ApiQuery({ name: 'status', required: false, type: String })
   async getMapData(
     @Query('region') region?: string,
     @Query('token') token?: string,
@@ -95,8 +130,21 @@ export class AnalyticsController {
     return this.analyticsService.getMapData(query);
   }
 
+  @Public()
   @Get('map-anonymized')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get anonymized map data (GeoJSON)',
+    description:
+      'Returns distribution data in GeoJSON format with anonymized locations for privacy.',
+  })
+  @ApiOkResponse({
+    description: 'Anonymized GeoJSON data retrieved successfully.',
+    type: GeoJsonFeatureCollection,
+  })
+  @ApiQuery({ name: 'region', required: false, type: String })
+  @ApiQuery({ name: 'token', required: false, type: String })
+  @ApiQuery({ name: 'status', required: false, type: String })
   async getMapAnonymizedData(
     @Query('region') region?: string,
     @Query('token') token?: string,

@@ -6,6 +6,7 @@ import { HttpService } from '@nestjs/axios';
 import { VerificationService } from './verification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { ClaimStatus, Prisma } from '@prisma/client';
 import { of } from 'rxjs';
 import { WebhooksService } from '../webhooks/webhooks.service';
 
@@ -135,7 +136,7 @@ describe('VerificationService', () => {
     });
 
     it('should skip enqueuing for already verified claims', async () => {
-      const verifiedClaim = { ...mockClaim, status: 'verified' };
+      const verifiedClaim = { ...mockClaim, status: ClaimStatus.verified };
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(verifiedClaim);
@@ -156,8 +157,7 @@ describe('VerificationService', () => {
         .spyOn(prismaService.claim, 'update')
         .mockResolvedValue({
           ...mockClaim,
-          status: 'verified',
-          verificationScore: 0.85,
+          status: ClaimStatus.verified,
         });
 
       const result = await service.processVerification({
@@ -203,7 +203,7 @@ describe('VerificationService', () => {
         .spyOn(prismaService.claim, 'update')
         .mockResolvedValue({
           ...mockClaim,
-          status: 'verified',
+          status: ClaimStatus.verified,
         });
 
       await service.processVerification({

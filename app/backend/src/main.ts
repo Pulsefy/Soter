@@ -119,6 +119,15 @@ When new versions are released:
       },
       'JWT-auth',
     )
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'x-api-key',
+        in: 'header',
+        description: 'API key for external access',
+      },
+      'api-key',
+    )
     .addServer('http://localhost:3000/api/v1', 'Local Development (v1)')
     .addServer('https://api.pulsefy.dev/api/v1', 'Staging (v1)')
     .addServer('https://api.pulsefy.com/api/v1', 'Production (v1)')

@@ -7,6 +7,7 @@ import {
 } from './onchain.module';
 import { OnchainAdapter } from './onchain.adapter';
 import { MockOnchainAdapter } from './onchain.adapter.mock';
+import { SorobanAdapter } from './soroban.adapter';
 
 describe('OnchainModule', () => {
   let module: TestingModule;
@@ -17,7 +18,6 @@ describe('OnchainModule', () => {
       imports: [
         ConfigModule.forRoot({
           isGlobal: false,
-          envFilePath: false,
         }),
         OnchainModule,
       ],
@@ -78,12 +78,12 @@ describe('createOnchainAdapter', () => {
     expect(adapter).toBeInstanceOf(MockOnchainAdapter);
   });
 
-  it('should throw error when ONCHAIN_ADAPTER is soroban (not implemented)', () => {
+  it('should create SorobanAdapter when ONCHAIN_ADAPTER is soroban', () => {
     jest.spyOn(configService, 'get').mockReturnValue('soroban');
 
-    expect(() => createOnchainAdapter(configService)).toThrow(
-      'Soroban adapter not yet implemented. Use ONCHAIN_ADAPTER=mock',
-    );
+    const adapter = createOnchainAdapter(configService);
+
+    expect(adapter).toBeInstanceOf(SorobanAdapter);
   });
 
   it('should throw error when ONCHAIN_ADAPTER is unknown', () => {

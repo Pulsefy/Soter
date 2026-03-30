@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiOkResponse } from '@nestjs/swagger';
 
 @ApiTags('Jobs')
 @Controller('jobs')
@@ -12,7 +12,42 @@ export class JobsController {
     @InjectQueue('onchain') private onchainQueue: Queue,
   ) {}
 
-  @ApiOperation({ summary: 'Get status of all background job queues' })
+  @ApiOperation({
+    summary: 'Get status of all background job queues',
+    description:
+      'Retrieves the count of waiting, active, completed, failed, and delayed jobs for all system queues.',
+  })
+  @ApiOkResponse({
+    description: 'Queue statuses retrieved successfully.',
+    schema: {
+      example: {
+        verification: {
+          name: 'verification',
+          waiting: 0,
+          active: 0,
+          completed: 10,
+          failed: 0,
+          delayed: 0,
+        },
+        notifications: {
+          name: 'notifications',
+          waiting: 0,
+          active: 0,
+          completed: 5,
+          failed: 0,
+          delayed: 0,
+        },
+        onchain: {
+          name: 'onchain',
+          waiting: 0,
+          active: 0,
+          completed: 2,
+          failed: 0,
+          delayed: 0,
+        },
+      },
+    },
+  })
   @Get('status')
   async getStatus() {
     return {

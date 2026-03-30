@@ -7,9 +7,11 @@ import {
   ApiQuery,
   ApiOkResponse,
   ApiUnauthorizedResponse,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
 
 @ApiTags('Audit')
+@ApiBearerAuth('JWT-auth')
 @Controller('audit')
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}

@@ -70,6 +70,7 @@ model Claim {
   id           String      @id @default(cuid())
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
 
   status       ClaimStatus @default(requested)
 
@@ -80,6 +81,11 @@ model Claim {
 
   recipientRef String
   evidenceRef  String?
+
+  @@index([status])
+  @@index([campaignId])
+  @@index([createdAt])
+  @@index([deletedAt])
 }
 
 model WebhookSubscription {
@@ -146,7 +152,10 @@ model Campaign {
 
   metadata    Json?
 
+  ngoId       String?
+
   archivedAt  DateTime?
+  deletedAt   DateTime?
 
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
@@ -155,6 +164,8 @@ model Campaign {
 
   @@index([status])
   @@index([archivedAt])
+  @@index([ngoId])
+  @@index([deletedAt])
 }
 
 model Role {
@@ -173,6 +184,7 @@ model ApiKey {
   id          String   @id @default(cuid())
   key         String   @unique
   role        AppRole
+  ngoId       String?
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

@@ -76,6 +76,7 @@ export class ClaimsService {
 
   async findAll() {
     const claims = await this.prisma.claim.findMany({
+      where: { deletedAt: null },
       include: {
         campaign: true,
       },
@@ -93,7 +94,7 @@ export class ClaimsService {
         campaign: true,
       },
     });
-    if (!claim) {
+    if (!claim || claim.deletedAt) {
       throw new NotFoundException('Claim not found');
     }
     return {
