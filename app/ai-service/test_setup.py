@@ -4,11 +4,10 @@ Run this after installing dependencies to test the basic functionality
 """
 
 import sys
-import subprocess
 
 
-def test_imports():
-    """Test if all required packages can be imported"""
+def _check_imports() -> bool:
+    """Check if all required packages can be imported."""
     print("Testing imports...")
     
     try:
@@ -49,8 +48,13 @@ def test_imports():
     return True
 
 
-def test_config():
-    """Test if configuration loads properly"""
+def test_imports():
+    """Test if all required packages can be imported."""
+    assert _check_imports()
+
+
+def _check_config() -> bool:
+    """Check if configuration loads properly."""
     print("\nTesting configuration...")
     
     try:
@@ -74,8 +78,13 @@ def test_config():
         return False
 
 
-def test_app():
-    """Test if the FastAPI app can be instantiated"""
+def test_config():
+    """Test if configuration loads properly."""
+    assert _check_config()
+
+
+def _check_app() -> bool:
+    """Check if the FastAPI app can be instantiated."""
     print("\nTesting application...")
     
     try:
@@ -96,6 +105,11 @@ def test_app():
         return False
 
 
+def test_app():
+    """Test if the FastAPI app can be instantiated."""
+    assert _check_app()
+
+
 def main():
     """Run all tests"""
     print("=" * 60)
@@ -105,13 +119,13 @@ def main():
     results = []
     
     # Test 1: Imports
-    results.append(("Imports", test_imports()))
+    results.append(("Imports", _check_imports()))
     
     # Test 2: Configuration
-    results.append(("Configuration", test_config()))
+    results.append(("Configuration", _check_config()))
     
     # Test 3: Application
-    results.append(("Application", test_app()))
+    results.append(("Application", _check_app()))
     
     # Summary
     print("\n" + "=" * 60)

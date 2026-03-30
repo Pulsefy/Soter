@@ -21,6 +21,13 @@ from api.routes import router as ocr_router
 from config import settings
 import tasks
 from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
+from schemas.anonymization import AnonymizeRequest, AnonymizeResponse
+from services.pii_scrubber import PIIScrubberService
+from schemas.humanitarian import (
+    HumanitarianVerificationRequest,
+    HumanitarianVerificationResponse,
+)
+from services.humanitarian_verification import HumanitarianVerificationService
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -60,6 +67,8 @@ proof_of_life_analyzer = ProofOfLifeAnalyzer(
         min_face_size=settings.proof_of_life_min_face_size,
     )
 )
+pii_scrubber_service = PIIScrubberService()
+humanitarian_verification_service = HumanitarianVerificationService()
 
 
 # Request/Response models
@@ -229,6 +238,37 @@ async def analyze_proof_of_life(request: ProofOfLifeRequest):
         )
 
 
+@app.post("/ai/anonymize", response_model=AnonymizeResponse)
+async def anonymize_text(request: AnonymizeRequest):
+    """Anonymize names, locations, and dates before text is sent to external LLMs."""
+    logger.info("Processing privacy-preserving anonymization request")
+
+    try:
+        result = pii_scrubber_service.anonymize(request.text)
+        return AnonymizeResponse(success=True, **result)
+    except Exception as e:
+        logger.error(f"Anonymization failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to anonymize text")
+
+
+@app.post("/ai/humanitarian/verify", response_model=HumanitarianVerificationResponse)
+async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
+    """Verify an aid claim against standardized humanitarian criteria."""
+    logger.info("Processing humanitarian verification request")
+
+    try:
+        result = humanitarian_verification_service.verify_claim(
+            aid_claim=request.aid_claim,
+            supporting_evidence=request.supporting_evidence,
+            context_factors=request.context_factors,
+            provider_preference=request.provider_preference,
+        )
+        return HumanitarianVerificationResponse(success=True, **result)
+    except Exception as e:
+        logger.error("Humanitarian verification failed: %s", str(e), exc_info=True)
+        return HumanitarianVerificationResponse(success=False, error=str(e))
+
+
 @app.get("/ai/status/{task_id}", response_model=TaskStatusResponse)
 async def get_task_status(task_id: str):
     """
@@ -281,7 +321,7 @@ async def cancel_task(task_id: str):
     try:
         from celery.result import AsyncResult
 
-        result = AsyncResult(task_id, app=tasks.celery_app)
+        result = AsyncResult(task_id, app=tasks.get_celery_app())
         result.revoke(terminate=True)
 
         tasks.update_task_status(task_id, "cancelled")

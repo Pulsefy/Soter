@@ -1,9 +1,4 @@
-import {
-  Controller,
-  Body,
-  Param,
-  Post,
-} from '@nestjs/common';
+import { Controller, Body, Param, Post } from '@nestjs/common';
 import { AidService } from './aid.service';
 import { AiTaskWebhookDto } from './dto/ai-task-webhook.dto';
 import {

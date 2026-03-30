@@ -3,7 +3,7 @@ Configuration module for Soter AI Service
 Handles environment variables and API key management
 """
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 import logging
 
@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     Environment Variables:
         OPENAI_API_KEY: OpenAI API key for AI model access
         GROQ_API_KEY: Groq API key for AI model access (alternative to OpenAI)
+        OPENAI_MODEL: Default OpenAI model for humanitarian verification
+        GROQ_MODEL: Default Groq model for humanitarian verification
+        LLM_TIMEOUT_SECONDS: Timeout for LLM API requests
         APP_ENV: Application environment (development, staging, production)
         LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         HOST: Server host (default: 0.0.0.0)
@@ -30,6 +33,9 @@ class Settings(BaseSettings):
     # API Keys
     openai_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
+    openai_model: str = "gpt-4o-mini"
+    groq_model: str = "llama-3.3-70b-versatile"
+    llm_timeout_seconds: int = 30
     
     # Application settings
     app_env: str = "development"
@@ -47,10 +53,11 @@ class Settings(BaseSettings):
     proof_of_life_confidence_threshold: float = 0.65
     proof_of_life_min_face_size: int = 80
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
     
     def validate_api_keys(self) -> bool:
         """

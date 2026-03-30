@@ -14,6 +14,7 @@ import {
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompleteVerificationDto } from './dto/complete-verification.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EncryptionService } from '../common/encryption/encryption.service';
 
 const DEFAULT_CODE_LENGTH = 6;
 const DEFAULT_TTL_MINUTES = 10;
@@ -34,6 +35,7 @@ export class VerificationFlowService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly notificationsService: NotificationsService,
+    private readonly encryptionService: EncryptionService,
   ) {
     this.codeLength =
       this.configService.get<number>('VERIFICATION_OTP_LENGTH') ??
@@ -67,9 +69,11 @@ export class VerificationFlowService {
     }
 
     const since = new Date(Date.now() - 60 * 60 * 1000);
+    const encryptedIdentifier =
+      this.encryptionService.encryptDeterministic(identifier);
     const recentCount = await this.prisma.verificationSession.count({
       where: {
-        identifier,
+        identifier: encryptedIdentifier,
         createdAt: { gte: since },
       },
     });
@@ -88,8 +92,8 @@ export class VerificationFlowService {
     const session = await this.prisma.verificationSession.create({
       data: {
         channel: dto.channel as VerificationChannel,
-        identifier,
-        code,
+        identifier: encryptedIdentifier,
+        code: this.encryptionService.encrypt(code),
         expiresAt,
       },
     });
@@ -146,15 +150,19 @@ export class VerificationFlowService {
     await this.prisma.verificationSession.update({
       where: { id: session.id },
       data: {
-        code,
+        code: this.encryptionService.encrypt(code),
         resendCount: session.resendCount + 1,
         expiresAt,
       },
     });
 
+    const decryptedIdentifier = this.encryptionService.decryptDeterministic(
+      session.identifier,
+    );
+
     await this.sendCode(
       session.channel as unknown as VerificationChannelDto,
-      session.identifier,
+      decryptedIdentifier,
       code,
     );
 
@@ -199,7 +207,8 @@ export class VerificationFlowService {
       );
     }
 
-    if (session.code !== dto.code) {
+    const storedCode = this.encryptionService.decrypt(session.code);
+    if (storedCode !== dto.code) {
       await this.prisma.verificationSession.update({
         where: { id: session.id },
         data: { attempts: session.attempts + 1 },

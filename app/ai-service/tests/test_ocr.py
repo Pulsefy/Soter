@@ -76,8 +76,16 @@ class TestOCRService:
     def setup_method(self):
         self.ocr = OCRService()
 
-    def test_process_image_returns_result(self):
+    def test_process_image_returns_result(self, monkeypatch):
         from PIL import Image
+
+        def fake_run_tesseract(_image):
+            return {
+                "text": ["Name:", "John", "Doe", "ID", "AB123456"],
+                "conf": [90, 92, 91, 88, 95],
+            }
+
+        monkeypatch.setattr(self.ocr, "_run_tesseract", fake_run_tesseract)
 
         img = Image.new("RGB", (200, 100), color="white")
         result = self.ocr.process_image(img)

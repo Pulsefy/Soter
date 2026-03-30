@@ -37,5 +37,8 @@ numpy==1.26.4
 pytesseract==0.3.10
 Pillow==11.3.0
 
+# NLP for PII anonymization
+spacy==3.7.4
+
 # Rate limiting
 slowapi==0.1.9

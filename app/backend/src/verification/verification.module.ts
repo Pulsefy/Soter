@@ -10,6 +10,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { AuditModule } from '../audit/audit.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
+import { EncryptionModule } from '../common/encryption/encryption.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
     AuditModule,
     NotificationsModule,
     WebhooksModule,
+    EncryptionModule,
     BullModule.registerQueueAsync({
       name: 'verification',
       imports: [ConfigModule],

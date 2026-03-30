@@ -7,6 +7,7 @@ import { MetricsModule } from '../observability/metrics/metrics.module';
 import { LoggerModule } from '../logger/logger.module';
 import { AuditModule } from '../audit/audit.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
+import { EncryptionModule } from '../common/encryption/encryption.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
     LoggerModule,
     AuditModule,
     WebhooksModule,
+    EncryptionModule,
   ],
   controllers: [ClaimsController],
   providers: [ClaimsService],

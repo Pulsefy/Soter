@@ -5,20 +5,42 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --nav-background: #ffffff;
+  --nav-foreground: #171717;
+  --nav-border: #e5e7eb;
 }
 
+html.dark {
+  --background: #0f172a;
+  --foreground: #f1f5f9;
+  --nav-background: #1e293b;
+  --nav-foreground: #f1f5f9;
+  --nav-border: #334155;
+}
+
+html.light {
+  --background: #ffffff;
+  --foreground: #1e3a8a; /* Changed from blue-800 to blue-900 */
+  --nav-background: #ffffff;
+  --nav-foreground: #1e3a8a; /* Changed from blue-800 to blue-900 */
+  --nav-border: #e5e7eb;
+}
+
+/* Force Navbar background to white in light theme, overriding any conflicts */
+html.light nav {
+  background-color: #ffffff !important;
+  color: var(--nav-foreground) !important;
+}
+
+/* Force body text color in light theme, overriding any conflicts */
+html.light body {
+  color: var(--foreground) !important;
+}
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {

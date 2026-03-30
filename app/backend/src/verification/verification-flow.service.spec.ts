@@ -7,6 +7,7 @@ import { StartVerificationDto } from './dto/start-verification.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompleteVerificationDto } from './dto/complete-verification.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EncryptionService } from '../common/encryption/encryption.service';
 
 describe('VerificationFlowService', () => {
   let service: VerificationFlowService;
@@ -73,6 +74,15 @@ describe('VerificationFlowService', () => {
           useValue: {
             sendEmail: jest.fn().mockResolvedValue({ id: 'job-email' }),
             sendSms: jest.fn().mockResolvedValue({ id: 'job-sms' }),
+          },
+        },
+        {
+          provide: EncryptionService,
+          useValue: {
+            encrypt: jest.fn((v: string) => v),
+            decrypt: jest.fn((v: string) => v),
+            encryptDeterministic: jest.fn((v: string) => v),
+            decryptDeterministic: jest.fn((v: string) => v),
           },
         },
       ],

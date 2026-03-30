@@ -52,8 +52,10 @@ export class AidService {
 
   async handleTaskWebhook(payload: AiTaskWebhookDto) {
     // Log the task notification
-    console.log(`[AI Webhook] Task ${payload.taskId} completed with status: ${payload.status}`);
-    
+    console.log(
+      `[AI Webhook] Task ${payload.taskId} completed with status: ${payload.status}`,
+    );
+
     // Record audit log for the task completion
     await this.auditService.record({
       actorId: 'ai-service',
@@ -72,20 +74,27 @@ export class AidService {
     switch (payload.status) {
       case TaskStatus.COMPLETED:
         // Task completed successfully - trigger any follow-up actions
-        console.log(`[AI Webhook] Task ${payload.taskId} completed successfully`);
+        console.log(
+          `[AI Webhook] Task ${payload.taskId} completed successfully`,
+        );
         if (payload.result) {
           console.log(`[AI Webhook] Result:`, payload.result);
         }
         break;
       case TaskStatus.FAILED:
         // Task failed - log error and potentially trigger alerts
-        console.error(`[AI Webhook] Task ${payload.taskId} failed:`, payload.error);
+        console.error(
+          `[AI Webhook] Task ${payload.taskId} failed:`,
+          payload.error,
+        );
         break;
       case TaskStatus.PROCESSING:
         console.log(`[AI Webhook] Task ${payload.taskId} is still processing`);
         break;
       default:
-        console.log(`[AI Webhook] Task ${payload.taskId} status: ${payload.status}`);
+        console.log(
+          `[AI Webhook] Task ${payload.taskId} status: ${payload.status}`,
+        );
     }
 
     return {
