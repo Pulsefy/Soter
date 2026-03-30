@@ -149,17 +149,19 @@ describe('ClaimsService', () => {
       status: ClaimStatus.requested,
     } as typeof mockClaim);
     type TxClient = { claim: { update: jest.Mock } };
-    jest.spyOn(prismaService, '$transaction').mockImplementation(
-      async (callback: (tx: TxClient) => Promise<unknown>) =>
-        callback({
-          claim: {
-            update: jest.fn().mockResolvedValue({
-              ...mockClaim,
-              status: ClaimStatus.verified,
-            }),
-          },
-        }),
-    );
+    jest
+      .spyOn(prismaService, '$transaction')
+      .mockImplementation(
+        async (callback: (tx: TxClient) => Promise<unknown>) =>
+          callback({
+            claim: {
+              update: jest.fn().mockResolvedValue({
+                ...mockClaim,
+                status: ClaimStatus.verified,
+              }),
+            },
+          }),
+      );
 
     await service.verify('claim-123');
 
@@ -410,19 +412,23 @@ describe('ClaimsService', () => {
     });
 
     it('should enqueue claim.disbursed webhooks after a successful disbursement', async () => {
-      jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
       type TxClient = { claim: { update: jest.Mock } };
-      jest.spyOn(prismaService, '$transaction').mockImplementation(
-        async (callback: (tx: TxClient) => Promise<unknown>) =>
-          callback({
-            claim: {
-              update: jest.fn().mockResolvedValue({
-                ...mockClaim,
-                status: ClaimStatus.disbursed,
-              }),
-            },
-          }),
-      );
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(
+          async (callback: (tx: TxClient) => Promise<unknown>) =>
+            callback({
+              claim: {
+                update: jest.fn().mockResolvedValue({
+                  ...mockClaim,
+                  status: ClaimStatus.disbursed,
+                }),
+              },
+            }),
+        );
 
       await service.disburse('claim-123');
 

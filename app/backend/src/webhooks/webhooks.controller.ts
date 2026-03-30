@@ -52,10 +52,7 @@ export class WebhooksController {
     description: 'Webhook subscription created successfully.',
     type: WebhookSubscriptionResponseDto,
   })
-  async create(
-    @Req() req: Request,
-    @Body() dto: CreateWebhookSubscriptionDto,
-  ) {
+  async create(@Req() req: Request, @Body() dto: CreateWebhookSubscriptionDto) {
     const subscription = await this.webhooksService.createSubscription(
       this.requireApiKeyId(req),
       dto,
@@ -92,7 +89,10 @@ export class WebhooksController {
   @Delete(':id')
   @ApiOkResponse({ description: 'Webhook subscription deleted successfully.' })
   async remove(@Req() req: Request, @Param('id') id: string) {
-    await this.webhooksService.deleteSubscription(this.requireApiKeyId(req), id);
+    await this.webhooksService.deleteSubscription(
+      this.requireApiKeyId(req),
+      id,
+    );
     return ApiResponseDto.ok(null, 'Webhook subscription deleted successfully');
   }
 

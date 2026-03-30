@@ -8,13 +8,15 @@ jest.mock('axios');
 
 describe('WebhooksProcessor', () => {
   const mockedAxios = axios as jest.Mocked<typeof axios>;
+  const findSubscription = jest.fn();
+  const createDeliveryAttempt = jest.fn();
 
   const prisma = {
     webhookSubscription: {
-      findUnique: jest.fn(),
+      findUnique: findSubscription,
     },
     webhookDeliveryAttempt: {
-      create: jest.fn(),
+      create: createDeliveryAttempt,
     },
   } as unknown as PrismaService;
 
@@ -26,13 +28,13 @@ describe('WebhooksProcessor', () => {
   });
 
   it('posts webhook payloads with HMAC signature headers', async () => {
-    prisma.webhookSubscription.findUnique = jest.fn().mockResolvedValue({
+    findSubscription.mockResolvedValue({
       id: 'sub-1',
       url: 'https://ngo.example.com/hooks',
       secret: 'supersecret',
       isActive: true,
     });
-    prisma.webhookDeliveryAttempt.create = jest.fn().mockResolvedValue({});
+    createDeliveryAttempt.mockResolvedValue({});
     mockedAxios.post.mockResolvedValue({
       status: 202,
       data: { accepted: true },
@@ -62,7 +64,7 @@ describe('WebhooksProcessor', () => {
 
     expect(config?.headers?.['x-soter-event']).toBe('claim.disbursed');
     expect(signature).toBe(`sha256=${expected}`);
-    expect(prisma.webhookDeliveryAttempt.create).toHaveBeenCalledWith({
+    expect(createDeliveryAttempt).toHaveBeenCalledWith({
       data: expect.objectContaining({
         subscriptionId: 'sub-1',
         status: 'delivered',
@@ -72,13 +74,13 @@ describe('WebhooksProcessor', () => {
   });
 
   it('records failed delivery attempts for retryable errors', async () => {
-    prisma.webhookSubscription.findUnique = jest.fn().mockResolvedValue({
+    findSubscription.mockResolvedValue({
       id: 'sub-1',
       url: 'https://ngo.example.com/hooks',
       secret: 'supersecret',
       isActive: true,
     });
-    prisma.webhookDeliveryAttempt.create = jest.fn().mockResolvedValue({});
+    createDeliveryAttempt.mockResolvedValue({});
     mockedAxios.post.mockRejectedValue(new Error('socket hang up'));
 
     const job = {
@@ -96,7 +98,7 @@ describe('WebhooksProcessor', () => {
 
     await expect(processor.process(job)).rejects.toThrow('socket hang up');
 
-    expect(prisma.webhookDeliveryAttempt.create).toHaveBeenCalledWith({
+    expect(createDeliveryAttempt).toHaveBeenCalledWith({
       data: expect.objectContaining({
         subscriptionId: 'sub-1',
         attempt: 2,
