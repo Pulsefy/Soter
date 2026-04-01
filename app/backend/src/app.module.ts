@@ -76,6 +76,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     AnalyticsModule,
     WebhooksModule,
   ],
+  
 
   controllers: [AppController],
   providers: [
@@ -95,6 +96,10 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
+    },
+     {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard, // rate-limiting guard runs after auth and role checks to avoid unnecessary counting of unauthenticated/unauthorized requests
     },
   ],
 })

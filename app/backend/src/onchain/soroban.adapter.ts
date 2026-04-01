@@ -22,6 +22,8 @@ import {
   GetAidPackageCountParams,
   GetAidPackageCountResult,
   AidPackage,
+  GetTokenBalanceParams,
+  GetTokenBalanceResult,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 
@@ -330,6 +332,7 @@ export class SorobanAdapter implements OnchainAdapter {
       const _client = await this.getRpcClient();
 
       // Implementation would call contract's get_aggregates method
+      // Returns aggregates for the specified token
       return {
         aggregates: {
           totalCommitted: '5000000000',
@@ -341,6 +344,34 @@ export class SorobanAdapter implements OnchainAdapter {
     } catch (error) {
       const mappedError = this.errorMapper.mapError(error);
       this.logger.error('Failed to get aid package count:', mappedError);
+      throw error;
+    }
+  }
+
+  async getTokenBalance(
+    params: GetTokenBalanceParams,
+  ): Promise<GetTokenBalanceResult> {
+    this.ensureContractId();
+    this.logger.debug('Getting token balance:', {
+      tokenAddress: params.tokenAddress,
+      accountAddress: params.accountAddress,
+    });
+
+    try {
+      const _sdk = await this.loadSorobanSDK();
+      const _client = await this.getRpcClient();
+
+      // Implementation would call token contract's balance method
+      // This is a placeholder showing the expected response
+      return {
+        tokenAddress: params.tokenAddress,
+        accountAddress: params.accountAddress,
+        balance: '10000000000', // Mock balance in stroops
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      const mappedError = this.errorMapper.mapError(error);
+      this.logger.error('Failed to get token balance:', mappedError);
       throw error;
     }
   }

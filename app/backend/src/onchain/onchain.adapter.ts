@@ -107,8 +107,26 @@ export interface AidPackageAggregates {
   totalExpiredCancelled: string; // Sum of Expired/Cancelled/Refunded packages
 }
 
+export interface TokenAggregates {
+  tokenAddress: string;
+  aggregates: AidPackageAggregates;
+}
+
 export interface GetAidPackageCountResult {
   aggregates: AidPackageAggregates;
+  tokenAggregates?: TokenAggregates[]; // Aggregates grouped by token
+  timestamp: Date;
+}
+
+export interface GetTokenBalanceParams {
+  tokenAddress: string;
+  accountAddress: string;
+}
+
+export interface GetTokenBalanceResult {
+  tokenAddress: string;
+  accountAddress: string;
+  balance: string;
   timestamp: Date;
 }
 
@@ -134,6 +152,7 @@ export interface DisburseParams {
   packageId: string;
   recipientAddress?: string;
   amount?: string;
+  tokenAddress: string; // Required for multi-token support
 }
 
 export interface DisburseResult {
@@ -192,6 +211,13 @@ export interface OnchainAdapter {
   getAidPackageCount(
     params: GetAidPackageCountParams,
   ): Promise<GetAidPackageCountResult>;
+
+  /**
+   * Get token balance for a specific account
+   */
+  getTokenBalance(
+    params: GetTokenBalanceParams,
+  ): Promise<GetTokenBalanceResult>;
 
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;

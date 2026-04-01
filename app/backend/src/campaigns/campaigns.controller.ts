@@ -30,6 +30,7 @@ import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { ApiResponseDto } from '../common/dto/api-response.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
+import { Throttle } from '@nestjs/throttler';
 import { OrgOwnershipGuard } from '../common/guards/org-ownership.guard';
 
 @ApiTags('Campaigns')
@@ -57,7 +58,8 @@ export class CampaignsController {
     const campaign = await this.campaigns.create(dto, req.user?.ngoId);
     return ApiResponseDto.ok(campaign, 'Campaigns created successfully');
   }
-
+  
+  @Throttle({ default: { ttl: 60000, limit: 10 } }) // Limit to 10 requests per minute for this endpoint
   @Get()
   @ApiOperation({
     summary: 'List all campaigns',

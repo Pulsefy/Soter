@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsOptional,
   Min,
+  Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -34,6 +35,19 @@ export class CreateClaimDto {
   @IsNotEmpty()
   @IsString()
   recipientRef: string;
+
+  @ApiProperty({
+    description:
+      'Stellar token address (asset issuer or contract ID) for the distribution',
+    example: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+  })
+  @IsNotEmpty()
+  @IsString()
+  @Matches(/^G[A-Z0-9]{55}$|^C[A-Z0-9]{55}$/, {
+    message:
+      'tokenAddress must be a valid Stellar address (G... or C... format)',
+  })
+  tokenAddress: string;
 
   @ApiPropertyOptional({
     description:

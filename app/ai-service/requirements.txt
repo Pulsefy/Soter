@@ -3,6 +3,8 @@
 # Core FastAPI framework
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
+
+# Form data support (required for FastAPI form handling)
 python-multipart==0.0.6
 
 # Data validation and settings management

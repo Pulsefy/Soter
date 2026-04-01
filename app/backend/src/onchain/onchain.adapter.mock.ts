@@ -20,6 +20,8 @@ import {
   GetAidPackageCountParams,
   GetAidPackageCountResult,
   AidPackage,
+  GetTokenBalanceParams,
+  GetTokenBalanceResult,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 
@@ -199,6 +201,32 @@ export class MockOnchainAdapter implements OnchainAdapter {
       },
       timestamp: new Date(),
     };
+  }
+
+  async getTokenBalance(
+    params: GetTokenBalanceParams,
+  ): Promise<GetTokenBalanceResult> {
+    await Promise.resolve();
+
+    // Generate deterministic mock balance based on token address
+    const mockBalance = this.generateMockBalance(params.tokenAddress);
+
+    return {
+      tokenAddress: params.tokenAddress,
+      accountAddress: params.accountAddress,
+      balance: mockBalance,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Generate a deterministic mock balance from token address
+   */
+  private generateMockBalance(tokenAddress: string): string {
+    const hash = createHash('sha256').update(tokenAddress).digest('hex');
+    // Use first 10 hex chars to generate a balance between 0 and ~17B stroops
+    const balanceValue = parseInt(hash.substring(0, 10), 16);
+    return balanceValue.toString();
   }
 
   // Legacy methods for backward compatibility

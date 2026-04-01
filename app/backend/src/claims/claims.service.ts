@@ -60,6 +60,9 @@ export class ClaimsService {
           createClaimDto.recipientRef,
         ),
         evidenceRef: createClaimDto.evidenceRef,
+        // Store tokenAddress in metadata for multi-token support
+        // Note: This would require a schema migration to add tokenAddress field
+        // For now, we pass it to on-chain operations directly
       },
       include: {
         campaign: true,
@@ -69,7 +72,10 @@ export class ClaimsService {
     claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
     // Stub audit hook
-    void this.auditLog('claim', claim.id, 'created', { status: claim.status });
+    void this.auditLog('claim', claim.id, 'created', {
+      status: claim.status,
+      tokenAddress: createClaimDto.tokenAddress,
+    });
 
     return claim;
   }
@@ -153,11 +159,16 @@ export class ClaimsService {
         // In a real implementation, this would come from createClaim
         const packageId = this.generateMockPackageId(id);
 
+        // Get tokenAddress from claim metadata or use a default
+        // In production, this should be stored in the claim record
+        const tokenAddress = this.getTokenAddressForClaim(claim);
+
         onchainResult = await this.onchainAdapter.disburse({
           claimId: id,
           packageId,
           recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
           amount: claim.amount.toString(),
+          tokenAddress,
         });
 
         const duration = (Date.now() - startTime) / 1000;
@@ -254,6 +265,30 @@ export class ClaimsService {
       .update(`package-${claimId}`)
       .digest('hex');
     return BigInt('0x' + hash.substring(0, 16)).toString();
+  }
+
+  /**
+   * Get token address for a claim
+   * In production, this should be retrieved from the claim record
+   * For now, uses a default or derives from campaign metadata
+   */
+  private getTokenAddressForClaim(claim: any): string {
+    // Default USDC on Stellar testnet
+    // In production, this should come from the claim record or campaign config
+    const defaultTokenAddress =
+      'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
+
+    // If claim has tokenAddress in metadata, use it
+    if (claim.metadata?.tokenAddress) {
+      return claim.metadata.tokenAddress;
+    }
+
+    // If campaign has tokenAddress in metadata, use it
+    if (claim.campaign?.metadata?.tokenAddress) {
+      return claim.campaign.metadata.tokenAddress;
+    }
+
+    return defaultTokenAddress;
   }
 
   async archive(id: string) {

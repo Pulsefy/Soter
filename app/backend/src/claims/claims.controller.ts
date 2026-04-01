@@ -54,7 +54,8 @@ export class ClaimsController {
   @Get(':id')
   @ApiOperation({
     summary: 'Get claim details',
-    description: 'Retrieves the current details and status of a specific claim.',
+    description:
+      'Retrieves the current details and status of a specific claim.',
   })
   @ApiOkResponse({
     description: 'Claim details retrieved successfully.',

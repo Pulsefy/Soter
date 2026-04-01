@@ -3,7 +3,10 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { VerificationFlowService } from './verification-flow.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { StartVerificationDto, VerificationChannelDto } from './dto/start-verification.dto';
+import {
+  StartVerificationDto,
+  VerificationChannelDto,
+} from './dto/start-verification.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompleteVerificationDto } from './dto/complete-verification.dto';
 import { NotificationsService } from '../notifications/notifications.service';

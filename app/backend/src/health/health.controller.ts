@@ -12,6 +12,7 @@ import { HealthService } from './health.service';
 import { LivenessResponse, ReadinessResponse } from './health.service';
 import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { Public } from '../common/decorators/public.decorator';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Health')
 @Controller('health')
@@ -20,6 +21,7 @@ export class HealthController {
 
   @Public()
   @Get()
+  @Throttle({ default: { ttl: 60, limit: 100 } }) // Limit to 100 requests per minute for this endpoint
   @Version(API_VERSIONS.V1)
   @ApiOperation({
     summary: 'Check system liveness and basic service metadata',
