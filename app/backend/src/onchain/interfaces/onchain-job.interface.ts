@@ -2,6 +2,7 @@ export enum OnchainOperationType {
   INIT_ESCROW = 'init-escrow',
   CREATE_CLAIM = 'create-claim',
   DISBURSE = 'disburse',
+  REVOKE = 'revoke',
 }
 
 export interface OnchainJobData {

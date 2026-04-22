@@ -130,6 +130,35 @@ export interface GetTokenBalanceResult {
   timestamp: Date;
 }
 
+export interface RevokeAidPackageParams {
+  packageId: string;
+  operatorAddress: string;
+}
+
+export interface RevokeAidPackageResult {
+  packageId: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  amountRefunded: string;
+  metadata?: Record<string, any>;
+}
+
+export interface RefundAidPackageParams {
+  packageId: string;
+  operatorAddress: string;
+  refundAddress?: string;
+}
+
+export interface RefundAidPackageResult {
+  packageId: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  amountRefunded: string;
+  metadata?: Record<string, any>;
+}
+
 // Legacy interfaces kept for backward compatibility
 export interface CreateClaimParams {
   claimId: string;
@@ -218,6 +247,20 @@ export interface OnchainAdapter {
   getTokenBalance(
     params: GetTokenBalanceParams,
   ): Promise<GetTokenBalanceResult>;
+
+  /**
+   * Revoke an expired aid package
+   */
+  revokeAidPackage(
+    params: RevokeAidPackageParams,
+  ): Promise<RevokeAidPackageResult>;
+
+  /**
+   * Refund an expired aid package
+   */
+  refundAidPackage(
+    params: RefundAidPackageParams,
+  ): Promise<RefundAidPackageResult>;
 
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;
