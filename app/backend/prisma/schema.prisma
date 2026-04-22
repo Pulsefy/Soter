@@ -83,6 +83,7 @@ model Claim {
 
   recipientRef String
   evidenceRef  String?
+  expiresAt    DateTime?
 
   @@index([status])
   @@index([campaignId])

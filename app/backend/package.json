@@ -32,6 +32,7 @@
     "@nestjs/axios": "^4.0.1",
     "@nestjs/bull": "^11.0.4",
     "@nestjs/bullmq": "^11.0.4",
+    "@nestjs/schedule": "^4.1.2",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",

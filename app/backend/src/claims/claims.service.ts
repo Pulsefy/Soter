@@ -6,8 +6,8 @@ import {
   Inject,
   Logger,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
@@ -23,6 +23,7 @@ import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { OnchainService } from '../onchain/onchain.service';
 
 @Injectable()
 export class ClaimsService {
@@ -39,6 +40,7 @@ export class ClaimsService {
     private readonly metricsService: MetricsService,
     private readonly auditService: AuditService,
     private readonly encryptionService: EncryptionService,
+    private readonly onchainService: OnchainService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
