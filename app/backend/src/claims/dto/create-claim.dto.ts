@@ -5,6 +5,7 @@ import {
   IsOptional,
   Min,
   Matches,
+  IsDate,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -57,4 +58,13 @@ export class CreateClaimDto {
   @IsOptional()
   @IsString()
   evidenceRef?: string;
+
+  @ApiPropertyOptional({
+    description: 'Expiration date for the claim',
+    example: '2024-12-31T23:59:59.000Z',
+  })
+  @IsOptional()
+  @Type(() => Date)
+  @IsDate()
+  expiresAt?: Date;
 }
