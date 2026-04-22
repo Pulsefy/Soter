@@ -405,6 +405,7 @@ impl AidEscrow {
         let idx_key = (symbol_short!("pidx"), idx);
         env.storage().persistent().set(&idx_key, &id);
         env.storage().instance().set(&KEY_PKG_IDX, &(idx + 1));
+        env.storage().instance().set(&KEY_PKG_COUNTER, &(idx + 1));
 
         PackageCreated {
             package_id: id,
@@ -930,6 +931,32 @@ impl AidEscrow {
             .persistent()
             .get(&key)
             .ok_or(Error::PackageNotFound)
+    }
+
+    /// Returns package IDs for a recipient within a simple paged window.
+    pub fn list_recipient_packages(
+        env: Env,
+        recipient: Address,
+        cursor: u64,
+        limit: u32,
+    ) -> Vec<u64> {
+        let package_count: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        let end = cursor.saturating_add(limit as u64).min(package_count);
+
+        let mut package_ids = Vec::new(&env);
+        for i in cursor..end {
+            let idx_key = (symbol_short!("pidx"), i);
+            if let Some(package_id) = env.storage().persistent().get::<_, u64>(&idx_key) {
+                let package_key = (symbol_short!("pkg"), package_id);
+                if let Some(package) = env.storage().persistent().get::<_, Package>(&package_key)
+                    && package.recipient == recipient
+                {
+                    package_ids.push_back(package_id);
+                }
+            }
+        }
+
+        package_ids
     }
 
     /// Returns only the status of a package.
