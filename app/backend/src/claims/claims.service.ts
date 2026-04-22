@@ -6,6 +6,7 @@ import {
   Inject,
   Logger,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,6 +21,7 @@ import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { OnchainService } from '../onchain/onchain.service';
 
 @Injectable()
 export class ClaimsService {
@@ -36,6 +38,7 @@ export class ClaimsService {
     private readonly metricsService: MetricsService,
     private readonly auditService: AuditService,
     private readonly encryptionService: EncryptionService,
+    private readonly onchainService: OnchainService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
@@ -338,6 +341,59 @@ export class ClaimsService {
     });
 
     return updatedClaim;
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async handleExpiredClaims(): Promise<void> {
+    const now = new Date();
+
+    const expired = await this.prisma.claim.findMany({
+      where: {
+        status: { in: [ClaimStatus.requested, ClaimStatus.verified] },
+        expiresAt: { lt: now },
+        deletedAt: null,
+      },
+      include: { campaign: true },
+    });
+
+    if (expired.length === 0) return;
+
+    this.logger.log(`Expiring ${expired.length} claim(s)`);
+
+    await Promise.allSettled(
+      expired.map(async claim => {
+        try {
+          await this.prisma.claim.update({
+            where: { id: claim.id },
+            data: { status: ClaimStatus.archived },
+          });
+
+          if (this.onchainEnabled) {
+            await this.onchainService.enqueueRevoke({
+              claimId: claim.id,
+              packageId: this.generateMockPackageId(claim.id),
+              tokenAddress: this.getTokenAddressForClaim(claim),
+            });
+          }
+
+          await this.auditService.record({
+            actorId: 'system',
+            entity: 'claim',
+            entityId: claim.id,
+            action: 'expired',
+            metadata: { previousStatus: claim.status, expiredAt: now },
+          });
+        } catch (err) {
+          this.logger.error(
+            `Failed to expire claim ${claim.id}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }),
+    );
+
+    this.logger.log(`Expiration sweep done: ${expired.length} claim(s) archived`);
   }
 
   private auditLog(

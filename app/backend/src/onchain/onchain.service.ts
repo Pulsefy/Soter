@@ -23,6 +23,12 @@ export interface DisburseJobParams {
   tokenAddress: string;
 }
 
+export interface RevokeJobParams {
+  claimId: string;
+  packageId: string;
+  tokenAddress: string;
+}
+
 export interface InitEscrowJobParams {
   adminAddress: string;
   supportedTokens?: string[]; // Optional list of supported token addresses
@@ -52,6 +58,10 @@ export class OnchainService {
       throw new Error('tokenAddress is required for disbursement');
     }
     return this.enqueue(OnchainOperationType.DISBURSE, params);
+  }
+
+  async enqueueRevoke(params: RevokeJobParams) {
+    return this.enqueue(OnchainOperationType.REVOKE, params);
   }
 
   private async enqueue(type: OnchainOperationType, params: unknown) {
