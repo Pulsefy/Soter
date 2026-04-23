@@ -11,7 +11,7 @@ import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { ClaimReceiptDto, SendReceiptShareDto } from './dto/claim-receipt.dto';
-import { ClaimStatus } from '@prisma/client';
+import { ClaimStatus, Prisma } from '@prisma/client';
 import {
   OnchainAdapter,
   DisburseResult,
@@ -523,5 +523,55 @@ export class ClaimsService {
     for (const phone of phoneNumbers) {
       this.logger.debug(`[SMS STUB] Would send to ${phone}: ${smsText}`);
     }
+  }
+
+  async exportToCsv(filters: any) {
+    const where: Prisma.ClaimWhereInput = {
+      deletedAt: null,
+      ...(filters.startDate || filters.endDate
+        ? {
+            createdAt: {
+              ...(filters.startDate ? { gte: new Date(filters.startDate) } : {}),
+              ...(filters.endDate ? { lte: new Date(filters.endDate) } : {}),
+            },
+          }
+        : {}),
+      ...(filters.status ? { status: filters.status as ClaimStatus } : {}),
+      ...(filters.campaignId ? { campaignId: filters.campaignId } : {}),
+      ...(filters.ngoId
+        ? {
+            campaign: {
+              ngoId: filters.ngoId,
+            },
+          }
+        : {}),
+    };
+
+    const claims = await this.prisma.claim.findMany({
+      where,
+      include: {
+        campaign: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return claims
+      .filter((claim) => {
+        // Filter by tokenAddress if provided (derived from metadata as per current implementation)
+        if (filters.tokenAddress) {
+          const tokenAddress = this.getTokenAddressForClaim(claim);
+          return tokenAddress === filters.tokenAddress;
+        }
+        return true;
+      })
+      .map((c) => ({
+        ID: c.id,
+        Campaign: c.campaign.name,
+        Amount: c.amount,
+        Status: c.status,
+        Recipient: this.encryptionService.decrypt(c.recipientRef),
+        TokenAddress: this.getTokenAddressForClaim(c),
+        CreatedAt: c.createdAt.toISOString(),
+      }));
   }
 }

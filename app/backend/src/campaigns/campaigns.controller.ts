@@ -33,11 +33,37 @@ import { AppRole } from 'src/auth/app-role.enum';
 import { Throttle } from '@nestjs/throttler';
 import { OrgOwnershipGuard } from '../common/guards/org-ownership.guard';
 
+import { CsvUtil } from '../common/utils/csv.util';
+import { ExportFiltersDto } from '../common/dto/export-filters.dto';
+import { Response } from 'express';
+import { Res } from '@nestjs/common';
+
 @ApiTags('Campaigns')
 @ApiBearerAuth('JWT-auth')
 @Controller('campaigns')
 export class CampaignsController {
   constructor(private readonly campaigns: CampaignsService) {}
+
+  @Get('export')
+  @Roles(AppRole.admin, AppRole.ngo)
+  @ApiOperation({ summary: 'Export campaigns to CSV' })
+  @ApiOkResponse({ description: 'CSV file containing campaign data.' })
+  async export(
+    @Query() filters: ExportFiltersDto,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const ngoId = req.user?.role === AppRole.ngo ? req.user.ngoId : filters.ngoId;
+    const data = await this.campaigns.exportToCsv({ ...filters, ngoId });
+    const csv = CsvUtil.generateCsv(data);
+
+    res.set({
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="campaigns-export-${Date.now()}.csv"`,
+    });
+
+    return res.send(csv);
+  }
 
   @Post()
   @Roles(AppRole.admin, AppRole.ngo)

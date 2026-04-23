@@ -30,6 +30,10 @@ import { AppRole } from 'src/auth/app-role.enum';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
 import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
+import { CsvUtil } from '../common/utils/csv.util';
+import { ExportFiltersDto } from '../common/dto/export-filters.dto';
+import { Response } from 'express';
+import { Res, Query } from '@nestjs/common';
 
 @ApiTags('Onchain Proxy')
 @ApiBearerAuth('JWT-auth')
@@ -39,6 +43,27 @@ export class ClaimsController {
     private readonly claimsService: ClaimsService,
     private readonly internalNotesService: InternalNotesService,
   ) {}
+
+  @Get('export')
+  @Roles(AppRole.admin, AppRole.operator)
+  @ApiOperation({ summary: 'Export claims to CSV' })
+  @ApiOkResponse({ description: 'CSV file containing claim data.' })
+  async export(
+    @Query() filters: ExportFiltersDto,
+    @Request() req: ExpressRequest,
+    @Res() res: Response,
+  ) {
+    const ngoId = req.user?.role === AppRole.ngo ? req.user.ngoId : filters.ngoId;
+    const data = await this.claimsService.exportToCsv({ ...filters, ngoId });
+    const csv = CsvUtil.generateCsv(data);
+
+    res.set({
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="claims-export-${Date.now()}.csv"`,
+    });
+
+    return res.send(csv);
+  }
 
   @Post()
   @ApiOperation({

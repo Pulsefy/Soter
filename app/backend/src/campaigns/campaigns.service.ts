@@ -90,4 +90,37 @@ export class CampaignsService {
       data: { deletedAt: new Date() },
     });
   }
+
+  async exportToCsv(filters: any) {
+    const where: Prisma.CampaignWhereInput = {
+      deletedAt: null,
+      ...(filters.startDate || filters.endDate
+        ? {
+            createdAt: {
+              ...(filters.startDate ? { gte: new Date(filters.startDate) } : {}),
+              ...(filters.endDate ? { lte: new Date(filters.endDate) } : {}),
+            },
+          }
+        : {}),
+      ...(filters.status ? { status: filters.status as CampaignStatus } : {}),
+      ...(filters.ngoId ? { ngoId: filters.ngoId } : {}),
+    };
+
+    const campaigns = await this.prisma.campaign.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Exclude sensitive fields like metadata if it might contain secrets
+    // For now, we'll export the core campaign data
+    return campaigns.map((c) => ({
+      ID: c.id,
+      Name: c.name,
+      Status: c.status,
+      Budget: c.budget,
+      Organization: c.ngoId || 'N/A',
+      CreatedAt: c.createdAt.toISOString(),
+      UpdatedAt: c.updatedAt.toISOString(),
+    }));
+  }
 }
