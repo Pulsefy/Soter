@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL")
 }
 
 enum CampaignStatus {
@@ -281,4 +280,52 @@ model EvidenceQueueItem {
   @@index([status])
   @@index([ownerId])
   @@index([fileHash])
+}
+
+enum UploadSessionStatus {
+  created
+  uploading
+  completed
+  expired
+  cancelled
+  failed
+}
+
+model UploadSession {
+  id              String              @id @default(cuid())
+  fileName        String
+  mimeType        String
+  totalSize       Int                 // Total file size in bytes
+  chunkSize       Int                 // Size of each chunk in bytes
+  totalChunks     Int                 // Total number of chunks
+  uploadedChunks  Int                 @default(0) // Number of chunks uploaded
+  status          UploadSessionStatus @default(created)
+  ownerId         String              // Actor who owns this session
+  uploadDir       String?             // Directory to store chunks temporarily
+  finalFilePath   String?             // Path to final assembled file
+  expiresAt       DateTime            // Session expiry time
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  completedAt     DateTime?
+
+  chunks          UploadChunk[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model UploadChunk {
+  id          String   @id @default(cuid())
+  sessionId   String
+  chunkIndex  Int      // 0-based index of the chunk
+  chunkHash   String   @unique // Hash of the chunk data
+  filePath    String   // Path to stored chunk
+  size        Int      // Size of this chunk
+  uploadedAt  DateTime @default(now())
+
+  session     UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, chunkIndex])
+  @@index([sessionId])
 }
