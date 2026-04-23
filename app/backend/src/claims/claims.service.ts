@@ -59,6 +59,7 @@ export class ClaimsService {
           createClaimDto.recipientRef,
         ),
         evidenceRef: createClaimDto.evidenceRef,
+        delegateAddress: createClaimDto.delegateAddress,
         // Store tokenAddress in metadata for multi-token support
         // Note: This would require a schema migration to add tokenAddress field
         // For now, we pass it to on-chain operations directly
@@ -307,6 +308,49 @@ export class ClaimsService {
       ClaimStatus.disbursed,
       ClaimStatus.archived,
     );
+  }
+
+  async updateDelegate(id: string, newDelegateAddress: string | null) {
+    const claim = await this.prisma.claim.findUnique({ where: { id } });
+    if (!claim) {
+      throw new NotFoundException('Claim not found');
+    }
+
+    // Prevent delegate reassignment after claim has been finalized
+    if (
+      claim.status === ClaimStatus.disbursed ||
+      claim.status === ClaimStatus.archived
+    ) {
+      throw new BadRequestException(
+        'Cannot update delegate after claim has been finalized',
+      );
+    }
+
+    const updatedClaim = await this.prisma.claim.update({
+      where: { id },
+      data: { delegateAddress: newDelegateAddress },
+    });
+
+    // If on-chain is enabled, sync with contract
+    if (this.onchainEnabled && this.onchainAdapter) {
+      try {
+        await this.onchainAdapter.updateDelegate({
+          packageId: id,
+          operatorAddress: 'system', // Admin-controlled flow
+          newDelegateAddress,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Failed to update delegate on-chain for claim ${id}: ${error.message}`,
+        );
+      }
+    }
+
+    void this.auditLog('claim', id, 'delegate_updated', {
+      newDelegate: newDelegateAddress,
+    });
+
+    return updatedClaim;
   }
 
   private async transitionStatus(

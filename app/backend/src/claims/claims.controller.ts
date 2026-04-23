@@ -34,6 +34,7 @@ import { CsvUtil } from '../common/utils/csv.util';
 import { ExportFiltersDto } from '../common/dto/export-filters.dto';
 import { Response } from 'express';
 import { Res, Query } from '@nestjs/common';
+import { UpdateDelegateDto } from './dto/update-delegate.dto';
 
 @ApiTags('Onchain Proxy')
 @ApiBearerAuth('JWT-auth')
@@ -218,6 +219,23 @@ export class ClaimsController {
   })
   archive(@Param('id') id: string) {
     return this.claimsService.archive(id);
+  }
+
+  @Patch(':id/delegate')
+  @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'Update claim delegate',
+    description:
+      'Assigns or updates a recovery delegate address. Only allowed before finalized.',
+  })
+  @ApiOkResponse({
+    description: 'Delegate updated successfully.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - admin role required.',
+  })
+  updateDelegate(@Param('id') id: string, @Body() dto: UpdateDelegateDto) {
+    return this.claimsService.updateDelegate(id, dto.delegateAddress);
   }
 
   @Get(':id/receipt')
