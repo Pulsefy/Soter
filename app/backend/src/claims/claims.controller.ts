@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Body, Param, Patch } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Request,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -13,12 +21,18 @@ import { ClaimsService } from './claims.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
+import { InternalNotesService } from 'src/common/services/internal-notes.service';
+import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
+import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
 
 @ApiTags('Onchain Proxy')
 @ApiBearerAuth('JWT-auth')
 @Controller('claims')
 export class ClaimsController {
-  constructor(private readonly claimsService: ClaimsService) {}
+  constructor(
+    private readonly claimsService: ClaimsService,
+    private readonly internalNotesService: InternalNotesService,
+  ) {}
 
   @Post()
   @ApiOperation({
@@ -173,5 +187,44 @@ export class ClaimsController {
   })
   archive(@Param('id') id: string) {
     return this.claimsService.archive(id);
+  }
+
+  @Post(':id/notes')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Add an internal note to a claim',
+    description: 'Adds a secure internal note for staff review only.',
+  })
+  @ApiCreatedResponse({
+    description: 'Internal note added successfully.',
+    type: InternalNoteResponseDto,
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - staff role required.',
+  })
+  addNote(
+    @Param('id') id: string,
+    @Body() dto: CreateInternalNoteDto,
+    @Request() req: any,
+  ) {
+    const authorId = req.user?.apiKeyId || req.user?.authType || 'system';
+    return this.internalNotesService.createNote('claim', id, authorId, dto);
+  }
+
+  @Get(':id/notes')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'List internal notes for a claim',
+    description: 'Retrieves all internal notes for a specific claim.',
+  })
+  @ApiOkResponse({
+    description: 'Internal notes retrieved successfully.',
+    type: [InternalNoteResponseDto],
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - staff role required.',
+  })
+  getNotes(@Param('id') id: string) {
+    return this.internalNotesService.findNotesByEntity('claim', id);
   }
 }

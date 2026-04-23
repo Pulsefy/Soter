@@ -18,6 +18,7 @@ import {
   fetchAidDetails,
   getMockAidDetails,
 } from '../services/aidApi';
+import { useSync } from '../contexts/SyncContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidDetails'>;
 
@@ -32,8 +33,26 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
   const [details, setDetails] = useState<AidDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const {
+    getActionsForAid,
+    isConnected,
+    isSyncing,
+    lastCompletedAction,
+    queueClaimConfirmation,
+    queueStatusRefresh,
+  } = useSync();
+  const pendingActions = getActionsForAid(aidId);
+  const hasPendingRefresh = pendingActions.some(
+    (item) => item.type === 'status-refresh' && item.state !== 'failed',
+  );
+  const hasPendingConfirmation = pendingActions.some(
+    (item) => item.type === 'claim-confirmation' && item.state !== 'failed',
+  );
+  const failedActions = pendingActions.filter((item) => item.state === 'failed');
 
   const requestAuth = useCallback(async () => {
     if (!biometricEnabled) {
@@ -78,10 +97,98 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
     }
   }, [authState, loadDetails]);
 
+  // Sync background effect
+  useEffect(() => {
+    if (!lastCompletedAction) {
+      return;
+    }
+
+    const payload = lastCompletedAction.action.payload as { aidId?: string };
+    if (payload.aidId !== aidId) {
+      return;
+    }
+
+    if (lastCompletedAction.action.type === 'status-refresh') {
+      setDetails(lastCompletedAction.result as AidDetails);
+      setError(null);
+      setSyncMessage('Status refreshed after reconnecting.');
+      setLastUpdated(lastCompletedAction.completedAt);
+      return;
+    }
+
+    if (lastCompletedAction.action.type === 'claim-confirmation') {
+      setSyncMessage('Claim confirmation synced successfully.');
+      void loadDetails(false);
+    }
+  }, [aidId, lastCompletedAction, loadDetails]);
+
+  const handleRefreshStatus = useCallback(async () => {
+    setRefreshing(true);
+
+    try {
+      const result = await queueStatusRefresh(aidId);
+
+      if (result.status === 'completed') {
+        setDetails(result.result);
+        setError(null);
+        setSyncMessage('Status is up to date.');
+        setLastUpdated(new Date().toISOString());
+      } else {
+        setSyncMessage(
+          isConnected
+            ? 'Refresh queued. We will retry automatically if the network stays unstable.'
+            : 'Refresh queued. It will sync automatically when connectivity returns.',
+        );
+      }
+    } catch {
+      setError('Status refresh failed. Please try again.');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [aidId, isConnected, queueStatusRefresh]);
+
+  const handleConfirmClaim = useCallback(async () => {
+    if (!details) {
+      return;
+    }
+
+    setConfirming(true);
+
+    try {
+      const result = await queueClaimConfirmation(aidId, details.claimId);
+
+      if (result.status === 'completed') {
+        setSyncMessage('Claim confirmation submitted.');
+        await loadDetails(false);
+      } else {
+        setSyncMessage(
+          isConnected
+            ? 'Claim confirmation queued for automatic retry.'
+            : 'Claim confirmation saved offline and will sync when connectivity returns.',
+        );
+      }
+    } catch {
+      setError('Claim confirmation failed. Please try again.');
+    } finally {
+      setConfirming(false);
+    }
+  }, [aidId, details, isConnected, loadDetails, queueClaimConfirmation]);
+
+  // ── Auth states ──────────────────────────────────────────────────────────
+
   if (authState === 'idle' || authState === 'pending') {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.brand.primary} />
+      <View
+        style={styles.centered}
+        accessible
+        accessibilityLabel="Verifying identity, please wait"
+        accessibilityLiveRegion="polite"
+      >
+        <ActivityIndicator
+          size="large"
+          color={colors.brand.primary}
+          accessibilityElementsHidden
+        />
         <Text style={styles.subtitle}>Verifying identity…</Text>
       </View>
     );
@@ -89,14 +196,19 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
 
   if (authState === 'denied') {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.lockIcon}>🔒</Text>
+      <View
+        style={styles.centered}
+        accessible
+        accessibilityLabel="Authentication required. Biometric verification is needed to view this screen."
+      >
+        <Text style={styles.lockIcon} accessibilityElementsHidden>🔒</Text>
         <Text style={styles.title}>Authentication Required</Text>
         <Text style={styles.subtitle}>
           Biometric verification is needed to view this screen.
         </Text>
         <TouchableOpacity
           accessibilityRole="button"
+          accessibilityLabel="Try biometric authentication again"
           style={[styles.button, { backgroundColor: colors.brand.primary }]}
           onPress={requestAuth}
           activeOpacity={0.8}
@@ -110,8 +222,17 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
   // authState === 'granted'
   if (loading || !details) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.brand.primary} />
+      <View
+        style={styles.centered}
+        accessible
+        accessibilityLabel="Loading aid details, please wait"
+        accessibilityLiveRegion="polite"
+      >
+        <ActivityIndicator
+          size="large"
+          color={colors.brand.primary}
+          accessibilityElementsHidden
+        />
         <Text style={styles.subtitle}>Loading aid details...</Text>
       </View>
     );
@@ -122,30 +243,71 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {/* ── Header ─────────────────────────────────────────────────────── */}
       <View style={styles.header}>
-        <Text style={styles.title}>{details.title}</Text>
+        <Text style={styles.title} accessibilityRole="header">
+          {details.title}
+        </Text>
         <Text style={styles.subtitle}>Package ID: {details.id}</Text>
         <Text style={styles.description}>{details.description}</Text>
-        <View style={[styles.statusPill, { backgroundColor: pillStyle.backgroundColor }]}>
+        <View
+          style={[styles.statusPill, { backgroundColor: pillStyle.backgroundColor }]}
+          accessible
+          accessibilityLabel={`Status: ${statusLabel}`}
+        >
           <Text
-            style={[
-              styles.statusText,
-              { color: pillStyle.textColor },
-            ]}
+            style={[styles.statusText, { color: pillStyle.textColor }]}
+            importantForAccessibility="no-hide-descendants"
           >
             {statusLabel}
           </Text>
         </View>
       </View>
 
+      {/* ── Error notice ────────────────────────────────────────────────── */}
       {error ? (
-        <View style={styles.notice}>
+        <View
+          style={styles.notice}
+          accessible
+          accessibilityRole="alert"
+          accessibilityLabel={error}
+        >
           <Text style={styles.noticeText}>{error}</Text>
         </View>
       ) : null}
 
+      {/* ── Sync UI ──────────────────────────────────────────────────────── */}
+      {syncMessage ? (
+        <View style={styles.syncNotice}>
+          <Text style={styles.syncNoticeText}>{syncMessage}</Text>
+        </View>
+      ) : null}
+
+      {pendingActions.length > 0 ? (
+        <View style={styles.syncCard}>
+          <Text style={styles.sectionTitle}>Sync Status</Text>
+          <Text style={styles.syncCardText}>
+            {pendingActions.length} pending action{pendingActions.length === 1 ? '' : 's'}
+            {isSyncing ? ' are syncing now.' : ' saved locally.'}
+          </Text>
+          {!isConnected ? (
+            <Text style={styles.syncCardMeta}>
+              They will retry automatically when the device reconnects.
+            </Text>
+          ) : null}
+          {failedActions.length > 0 ? (
+            <Text style={styles.syncCardMeta}>
+              {failedActions.length} action{failedActions.length === 1 ? '' : 's'} reached the retry limit.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* ── Recipient ───────────────────────────────────────────────────── */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Recipient</Text>
+        <Text style={styles.sectionTitle} accessibilityRole="header">
+          Recipient
+        </Text>
         <View style={styles.card}>
           <InfoRow label="Name" value={details.recipient.name} colors={colors} />
           <InfoRow label="Recipient ID" value={details.recipient.id} colors={colors} />
@@ -153,8 +315,11 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
         </View>
       </View>
 
+      {/* ── Package Details ─────────────────────────────────────────────── */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Package Details</Text>
+        <Text style={styles.sectionTitle} accessibilityRole="header">
+          Package Details
+        </Text>
         <View style={styles.card}>
           <InfoRow label="Token Type" value={details.tokenType} colors={colors} />
           <InfoRow
@@ -167,38 +332,78 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
         </View>
       </View>
 
+      {/* ── Claim Status ────────────────────────────────────────────────── */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Claim Status</Text>
+        <Text style={styles.sectionTitle} accessibilityRole="header">
+          Claim Status
+        </Text>
         <StepProgress status={details.status} colors={colors} />
         <Text style={styles.statusCaption}>
           Current status: {statusLabel}
         </Text>
       </View>
 
+      {/* ── Refresh Button ──────────────────────────────────────────────── */}
       <TouchableOpacity
         accessibilityRole="button"
+        accessibilityLabel={refreshing ? 'Refreshing status' : 'Refresh status'}
+        accessibilityHint="Fetches the latest aid package status from the server"
+        accessibilityState={{ disabled: refreshing, busy: refreshing }}
         style={[
           styles.button,
           { backgroundColor: colors.brand.primary },
           refreshing ? styles.buttonDisabled : null,
         ]}
-        onPress={() => loadDetails(true)}
-        disabled={refreshing}
+        onPress={handleRefreshStatus}
+        disabled={refreshing || hasPendingRefresh}
         activeOpacity={0.8}
       >
         {refreshing ? (
-          <ActivityIndicator size="small" color="#FFFFFF" />
+          <ActivityIndicator
+            size="small"
+            color="#FFFFFF"
+            accessibilityElementsHidden
+          />
         ) : (
-          <Text style={styles.buttonText}>Refresh Status</Text>
+          <Text style={styles.buttonText}>
+            {hasPendingRefresh ? 'Refresh Queued' : 'Refresh Status'}
+          </Text>
+        )}
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        accessibilityRole="button"
+        style={[
+          styles.button,
+          styles.secondaryButton,
+          confirming || hasPendingConfirmation ? styles.buttonDisabled : null,
+        ]}
+        onPress={handleConfirmClaim}
+        disabled={confirming || hasPendingConfirmation}
+        activeOpacity={0.8}
+      >
+        {confirming ? (
+          <ActivityIndicator size="small" color={colors.brand.primary} />
+        ) : (
+          <Text style={styles.secondaryButtonText}>
+            {hasPendingConfirmation ? 'Claim Confirmation Queued' : 'Confirm Claim'}
+          </Text>
         )}
       </TouchableOpacity>
 
       {lastUpdated ? (
-        <Text style={styles.lastUpdated}>Last updated {formatDateTime(lastUpdated)}</Text>
+        <Text
+          style={styles.lastUpdated}
+          accessibilityLabel={`Last updated ${formatDateTime(lastUpdated)}`}
+        >
+          Last updated {formatDateTime(lastUpdated)}
+        </Text>
       ) : null}
     </ScrollView>
   );
 };
+
+// ── Sub-components ───────────────────────────────────────────────────────────
 
 const InfoRow = ({
   label,
@@ -209,9 +414,23 @@ const InfoRow = ({
   value: string;
   colors: AppColors;
 }) => (
-  <View style={stylesShared.infoRow}>
-    <Text style={[stylesShared.infoLabel, { color: colors.textSecondary }]}>{label}</Text>
-    <Text style={[stylesShared.infoValue, { color: colors.textPrimary }]}>{value}</Text>
+  <View
+    style={stylesShared.infoRow}
+    accessible
+    accessibilityLabel={`${label}: ${value}`}
+  >
+    <Text
+      style={[stylesShared.infoLabel, { color: colors.textSecondary }]}
+      importantForAccessibility="no-hide-descendants"
+    >
+      {label}
+    </Text>
+    <Text
+      style={[stylesShared.infoValue, { color: colors.textPrimary }]}
+      importantForAccessibility="no-hide-descendants"
+    >
+      {value}
+    </Text>
   </View>
 );
 
@@ -230,12 +449,25 @@ const StepProgress = ({
   const activeIndex = steps.findIndex((step) => step.key === status);
 
   return (
-    <View style={stylesShared.progressWrapper}>
+    <View
+      style={stylesShared.progressWrapper}
+      accessible
+      accessibilityLabel={`Claim progress: step ${activeIndex + 1} of ${steps.length}, ${steps[activeIndex]?.label ?? status}`}
+    >
       {steps.map((step, index) => {
         const isComplete = index <= activeIndex;
         const isLast = index === steps.length - 1;
+        const stepLabel = isComplete
+          ? `Step ${index + 1}: ${step.label}, completed`
+          : `Step ${index + 1}: ${step.label}, not yet reached`;
+
         return (
-          <View key={step.key} style={stylesShared.progressItem}>
+          <View
+            key={step.key}
+            style={stylesShared.progressItem}
+            accessible
+            accessibilityLabel={stepLabel}
+          >
             <View
               style={[
                 stylesShared.progressCircle,
@@ -244,6 +476,7 @@ const StepProgress = ({
                   borderColor: isComplete ? colors.brand.primary : colors.border,
                 },
               ]}
+              accessibilityElementsHidden
             >
               <Text
                 style={[
@@ -254,7 +487,10 @@ const StepProgress = ({
                 {index + 1}
               </Text>
             </View>
-            <Text style={[stylesShared.progressLabel, { color: colors.textSecondary }]}>
+            <Text
+              style={[stylesShared.progressLabel, { color: colors.textSecondary }]}
+              accessibilityElementsHidden
+            >
               {step.label}
             </Text>
             {!isLast ? (
@@ -263,6 +499,7 @@ const StepProgress = ({
                   stylesShared.progressLine,
                   { backgroundColor: isComplete ? colors.brand.primary : colors.border },
                 ]}
+                accessibilityElementsHidden
               />
             ) : null}
           </View>
@@ -271,6 +508,8 @@ const StepProgress = ({
     </View>
   );
 };
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 const formatStatus = (status: ClaimStatus) =>
   status.charAt(0).toUpperCase() + status.slice(1);
@@ -307,6 +546,8 @@ const statusPillStyle = (status: ClaimStatus, colors: AppColors) => {
       return { backgroundColor: colors.warningBg, textColor: colors.warning };
   }
 };
+
+// ── Shared styles ─────────────────────────────────────────────────────────────
 
 const stylesShared = StyleSheet.create({
   infoRow: {
@@ -444,9 +685,37 @@ const makeStyles = (colors: AppColors) =>
       color: colors.textSecondary,
       fontSize: 13,
     },
+    syncNotice: {
+      backgroundColor: colors.infoBg,
+      borderRadius: 10,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: colors.info,
+    },
+    syncNoticeText: {
+      color: colors.info,
+      fontSize: 13,
+    },
+    syncCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 6,
+    },
+    syncCardText: {
+      fontSize: 14,
+      color: colors.textPrimary,
+    },
+    syncCardMeta: {
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
     button: {
       paddingVertical: 14,
       paddingHorizontal: 32,
+      minHeight: 44,
       borderRadius: 12,
       alignItems: 'center',
     },
@@ -455,6 +724,16 @@ const makeStyles = (colors: AppColors) =>
     },
     buttonText: {
       color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    secondaryButton: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.brand.primary,
+    },
+    secondaryButtonText: {
+      color: colors.brand.primary,
       fontSize: 16,
       fontWeight: '700',
     },

@@ -8,6 +8,7 @@ import {
   Version,
   HttpStatus,
   HttpCode,
+  Request,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -22,7 +23,7 @@ import {
   ApiBadRequestResponse,
   ApiUnauthorizedResponse,
   ApiNotFoundResponse,
-  ApiQuery,
+  ApiForbiddenResponse,
 } from '@nestjs/swagger';
 import { VerificationService } from './verification.service';
 import { VerificationFlowService } from './verification-flow.service';
@@ -44,6 +45,7 @@ export class VerificationController {
   constructor(
     private readonly verificationService: VerificationService,
     private readonly verificationFlowService: VerificationFlowService,
+    private readonly internalNotesService: InternalNotesService,
   ) {}
 
   @Post('claims/:id/enqueue')
@@ -401,39 +403,6 @@ export class VerificationController {
   })
   update(@Param('id') id: string, @Body() data: Record<string, unknown>) {
     return this.verificationService.update(id, data);
-  }
-
-  @Post(':id/approve')
-  @Version('1')
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({
-    summary: 'Approve verification (operator)',
-    description: 'Operator approves a verification request, marking it verified.',
-  })
-  async approve(@Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return this.verificationService.updateStatus(id, 'approve', body as any);
-  }
-
-  @Post(':id/reject')
-  @Version('1')
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({
-    summary: 'Reject verification (operator)',
-    description: 'Operator rejects a verification request, archiving the claim.',
-  })
-  async reject(@Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return this.verificationService.updateStatus(id, 'reject', body as any);
-  }
-
-  @Post(':id/request-resubmission')
-  @Version('1')
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({
-    summary: 'Request resubmission (operator)',
-    description: 'Operator requests additional evidence and sets claim back to requested.',
-  })
-  async requestResubmission(@Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return this.verificationService.updateStatus(id, 'request_resubmission', body as any);
   }
 
   @Post(':id/notes')

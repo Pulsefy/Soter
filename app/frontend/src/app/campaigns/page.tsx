@@ -1,12 +1,14 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useCampaigns, useCreateCampaign, useUpdateCampaign } from '@/hooks/useCampaigns';
-import type { CampaignStatus } from '@/types/campaign';
 import { ExportControls } from '@/components/dashboard/ExportControls';
-
-const ALLOWED_ROLES = ['ngo', 'admin'];
-const userRole = process.env.NEXT_PUBLIC_USER_ROLE ?? 'guest';
+import { useCampaigns, useCreateCampaign, useUpdateCampaign } from '@/hooks/useCampaigns';
+import {
+  canManageCampaigns,
+  getUserRole,
+  getUserRoleLabel,
+} from '@/lib/user-role';
+import type { CampaignStatus } from '@/types/campaign';
 
 const statusStyles: Record<CampaignStatus, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -16,7 +18,24 @@ const statusStyles: Record<CampaignStatus, string> = {
   archived: 'bg-red-100 text-red-800',
 };
 
+/** Map AidPackageFilters status values to CampaignStatus (best-effort). */
+function toCampaignStatus(value: string): CampaignStatus | '' {
+  const map: Record<string, CampaignStatus> = {
+    Active: 'active',
+    active: 'active',
+    Expired: 'archived',
+    archived: 'archived',
+    Claimed: 'completed',
+    completed: 'completed',
+    paused: 'paused',
+    draft: 'draft',
+  };
+  return map[value] ?? '';
+}
+
 export default function CampaignsPage() {
+  const userRole = getUserRole();
+  const userRoleLabel = getUserRoleLabel(userRole);
   const { data: campaigns = [], isLoading, isError, error } = useCampaigns();
   const createCampaign = useCreateCampaign();
   const updateCampaign = useUpdateCampaign();
@@ -27,18 +46,45 @@ export default function CampaignsPage() {
   const [expiry, setExpiry] = useState('');
   const [formMessage, setFormMessage] = useState<string | null>(null);
 
-  const activeCampaigns = useMemo(
-    () => campaigns.filter(campaign => campaign.status !== 'archived'),
-    [campaigns]
+  // ── Filter helpers ─────────────────────────────────────────────────────────
+
+  function updateParam(key: string, value: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set(key, value);
+    else params.delete(key);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }
+
+  const handleApplyPreset = useCallback(
+    (preset: AidPackageFilters) => {
+      const params = new URLSearchParams();
+      if (preset.status) params.set('status', preset.status);
+      router.replace(params.size ? `?${params.toString()}` : '?', { scroll: false });
+    },
+    [router],
   );
 
-  if (!ALLOWED_ROLES.includes(userRole)) {
+  // Convert URL status param → CampaignStatus for filtering
+  const activeCampaignStatus = toCampaignStatus(urlStatus);
+
+  const activeCampaigns = useMemo(
+    () =>
+      campaigns.filter(campaign => {
+        if (campaign.status === 'archived') return false;
+        if (activeCampaignStatus) return campaign.status === activeCampaignStatus;
+        return true;
+      }),
+    [campaigns, activeCampaignStatus],
+  );
+
+  if (!canManageCampaigns(userRole)) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
-        <div className="max-w-lg mx-auto p-6 bg-white dark:bg-gray-800 rounded-xl border border-red-200 dark:border-red-800">
+      <div className="min-h-screen bg-gray-50 p-8 dark:bg-gray-900">
+        <div className="mx-auto max-w-lg rounded-xl border border-red-200 bg-white p-6 dark:border-red-800 dark:bg-gray-800">
           <h1 className="text-2xl font-semibold text-red-600">Access Denied</h1>
           <p className="mt-2 text-sm text-gray-700 dark:text-gray-200">
-            This page is for NGO or Admin roles only. Your role is <strong>{userRole}</strong>.
+            This page is reserved for NGO and Admin roles. Your role is{' '}
+            <strong>{userRoleLabel}</strong>.
           </p>
         </div>
       </div>
@@ -78,7 +124,9 @@ export default function CampaignsPage() {
     const targetStatus = currentStatus === 'active' ? 'paused' : 'active';
     try {
       await updateCampaign.mutateAsync({ id, data: { status: targetStatus } });
-      setFormMessage(`Campaign ${targetStatus === 'active' ? 'resumed' : 'paused'} successfully.`);
+      setFormMessage(
+        `Campaign ${targetStatus === 'active' ? 'resumed' : 'paused'} successfully.`
+      );
     } catch (err) {
       setFormMessage((err as Error).message ?? 'Failed to update campaign.');
     }
@@ -94,18 +142,18 @@ export default function CampaignsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background to-gray-50 dark:to-gray-950 p-6">
+    <div className="min-h-screen bg-gradient-to-b from-background to-gray-50 p-6 dark:to-gray-950">
       <main className="container mx-auto space-y-8">
-        <div className="flex flex-wrap gap-3 items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-4xl font-bold">NGO Campaigns</h1>
-          <span className="text-sm text-gray-500">Role: {userRole}</span>
+          <span className="text-sm text-gray-500">Role: {userRoleLabel}</span>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
-            <h2 className="text-xl font-semibold mb-4">Create New Campaign</h2>
+          <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="mb-4 text-xl font-semibold">Create New Campaign</h2>
             {formMessage && (
-              <div className="mb-4 rounded-md border p-3 text-sm text-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-200">
+              <div className="mb-4 rounded-md border bg-gray-50 p-3 text-sm text-gray-700 dark:bg-gray-800 dark:text-gray-200">
                 {formMessage}
               </div>
             )}
@@ -114,8 +162,8 @@ export default function CampaignsPage() {
                 <span className="font-medium">Name</span>
                 <input
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={event => setName(event.target.value)}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="e.g. Winter Relief 2026"
                   required
                 />
@@ -127,8 +175,8 @@ export default function CampaignsPage() {
                   type="number"
                   min="0"
                   value={budget}
-                  onChange={(e) => setBudget(e.target.value)}
-                  className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={event => setBudget(event.target.value)}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="e.g. 25000"
                   required
                 />
@@ -138,8 +186,8 @@ export default function CampaignsPage() {
                 <span className="font-medium">Token</span>
                 <input
                   value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={event => setToken(event.target.value)}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="e.g. USDC"
                 />
               </label>
@@ -149,8 +197,8 @@ export default function CampaignsPage() {
                 <input
                   type="date"
                   value={expiry}
-                  onChange={(e) => setExpiry(e.target.value)}
-                  className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={event => setExpiry(event.target.value)}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </label>
 
@@ -159,43 +207,63 @@ export default function CampaignsPage() {
                 disabled={createCampaign.isPending}
                 className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {createCampaign.isPending ? 'Creating…' : 'Create campaign'}
+                {createCampaign.isPending ? 'Creating...' : 'Create campaign'}
               </button>
             </form>
           </section>
 
-          <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
               <h2 className="text-xl font-semibold">Active Campaigns</h2>
               <ExportControls context="Campaigns" filters={{ activeOnly: true }} />
             </div>
 
-            {isLoading && <p>Loading campaigns…</p>}
-            {isError && <p className="text-red-500">Error fetching campaigns: {(error as Error)?.message}</p>}
+            {isLoading && <p>Loading campaigns...</p>}
+            {isError && (
+              <p className="text-red-500">
+                Error fetching campaigns: {(error as Error)?.message}
+              </p>
+            )}
             {!isLoading && !isError && activeCampaigns.length === 0 && (
-              <p className="text-gray-500">No active campaigns available.</p>
+              <p className="text-gray-500">No campaigns match the current filter.</p>
             )}
 
             <div className="space-y-3">
-              {activeCampaigns.map((campaign) => (
+              {activeCampaigns.map(campaign => (
                 <div
                   key={campaign.id}
-                  className="rounded-lg border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-950"
+                  className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950"
                 >
-                  <div className="flex justify-between items-start gap-2">
+                  <div className="flex items-start justify-between gap-2">
                     <div>
                       <h3 className="text-lg font-semibold">{campaign.name}</h3>
-                      <p className="text-sm text-gray-500">Budget: {campaign.budget.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</p>
-                      <p className="text-sm text-gray-500">Token: {campaign.metadata?.token ?? 'N/A'}</p>
-                      <p className="text-sm text-gray-500">Expiry: {campaign.metadata?.expiry ? new Date(campaign.metadata.expiry as string).toLocaleDateString() : 'N/A'}</p>
+                      <p className="text-sm text-gray-500">
+                        Budget:{' '}
+                        {campaign.budget.toLocaleString('en-US', {
+                          style: 'currency',
+                          currency: 'USD',
+                        })}
+                      </p>
+                      <p className="text-sm text-gray-500">
+                        Token: {campaign.metadata?.token ?? 'N/A'}
+                      </p>
+                      <p className="text-sm text-gray-500">
+                        Expiry:{' '}
+                        {campaign.metadata?.expiry
+                          ? new Date(campaign.metadata.expiry as string).toLocaleDateString()
+                          : 'N/A'}
+                      </p>
                     </div>
-                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${statusStyles[campaign.status]}`}>
+                    <span
+                      className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[campaign.status]}`}
+                    >
                       {campaign.status}
                     </span>
                   </div>
 
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
+                      type="button"
                       onClick={() => onPauseResume(campaign.id, campaign.status)}
                       disabled={updateCampaign.isPending}
                       className="rounded-md border border-gray-300 px-3 py-1 text-sm hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
@@ -203,9 +271,10 @@ export default function CampaignsPage() {
                       {campaign.status === 'active' ? 'Pause' : 'Resume'}
                     </button>
                     <button
+                      type="button"
                       onClick={() => onArchive(campaign.id)}
                       disabled={updateCampaign.isPending || campaign.status === 'archived'}
-                      className="rounded-md border border-red-400 text-red-700 px-3 py-1 text-sm hover:bg-red-50 dark:hover:bg-red-900/20"
+                      className="rounded-md border border-red-400 px-3 py-1 text-sm text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
                     >
                       Archive
                     </button>

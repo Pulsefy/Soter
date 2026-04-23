@@ -30,27 +30,55 @@ export const SettingsScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        <Text style={styles.sectionHeader}>Security</Text>
+        <Text
+          style={styles.sectionHeader}
+          accessibilityRole="header"
+        >
+          Security
+        </Text>
 
-        <View style={styles.row}>
+        {/* The row is a single accessible group so VoiceOver/TalkBack reads
+            the label, value, and hint together rather than announcing the
+            Switch and the label text as separate elements. */}
+        <View
+          style={styles.row}
+          accessible
+          accessibilityRole="switch"
+          accessibilityLabel="Biometric Lock"
+          accessibilityHint={
+            biometricSupported
+              ? 'Require Face ID or fingerprint before viewing sensitive aid details'
+              : 'Biometrics are not available or not enrolled on this device'
+          }
+          accessibilityValue={{ text: biometricEnabled ? 'on' : 'off' }}
+          accessibilityState={{ checked: biometricEnabled, disabled: !biometricSupported }}
+          // Tapping the row triggers the same toggle as the Switch
+          onAccessibilityTap={() => void handleToggle(!biometricEnabled)}
+        >
           <View style={styles.rowText}>
             <Text style={styles.rowTitle}>Biometric Lock</Text>
             <Text style={styles.rowSubtitle}>
               Require Face ID / Fingerprint before viewing sensitive aid details
             </Text>
           </View>
+          {/* The Switch is hidden from the accessibility tree because the
+              parent View already exposes the full switch semantics. */}
           <Switch
-            accessibilityLabel="Toggle biometric lock"
             value={biometricEnabled}
             onValueChange={handleToggle}
             trackColor={{ false: colors.border, true: colors.brand.primary }}
             thumbColor="#FFFFFF"
             disabled={!biometricSupported}
+            importantForAccessibility="no-hide-descendants"
+            accessibilityElementsHidden
           />
         </View>
 
         {!biometricSupported && (
-          <Text style={styles.hint}>
+          <Text
+            style={styles.hint}
+            accessibilityRole="alert"
+          >
             Biometrics are not available or not enrolled on this device.
           </Text>
         )}
@@ -82,6 +110,8 @@ const makeStyles = (colors: AppColors) =>
       alignItems: 'center',
       backgroundColor: colors.surface,
       borderRadius: 14,
+      // Minimum 44 pt height (WCAG 2.5.5)
+      minHeight: 44,
       padding: 16,
       borderWidth: 1,
       borderColor: colors.border,

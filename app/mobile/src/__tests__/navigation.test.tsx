@@ -41,11 +41,17 @@ jest.mock('../services/aidApi', () => ({
     id: 'aid-1',
     title: 'Food Aid',
     description: 'Emergency food packages',
-    amount: 500,
-    status: 'active',
-    date: '2026-01-01',
-    recipients: 10,
-    location: 'Test City',
+    recipient: {
+      name: 'Amina Yusuf',
+      id: 'REC-2041',
+      wallet: 'GAKD...Q9X2',
+    },
+    tokenType: 'USDC',
+    amount: '500',
+    expiryDate: '2026-01-10T00:00:00Z',
+    status: 'verified',
+    claimId: 'claim-aid-1',
+    createdAt: '2026-01-01T00:00:00Z',
   }),
   getMockAidDetails: jest.fn(),
 }));
@@ -62,6 +68,24 @@ jest.mock('../hooks/useNetworkStatus', () => ({
 
 jest.mock('../components/OfflineBanner', () => ({
   OfflineBanner: () => null,
+}));
+
+jest.mock('../contexts/SyncContext', () => ({
+  useSync: () => ({
+    items: [],
+    isSyncing: false,
+    lastSyncAt: null,
+    lastSyncError: null,
+    isConnected: true,
+    pendingCount: 0,
+    failedCount: 0,
+    lastCompletedAction: null,
+    flushNow: jest.fn(),
+    queueStatusRefresh: jest.fn(),
+    queueClaimConfirmation: jest.fn(),
+    queueEvidenceUpload: jest.fn(),
+    getActionsForAid: jest.fn().mockReturnValue([]),
+  }),
 }));
 
 const Stack = createNativeStackNavigator<RootStackParamList>();

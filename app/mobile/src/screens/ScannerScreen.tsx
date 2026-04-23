@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Text, View, StyleSheet, Button, Dimensions, TouchableOpacity } from 'react-native';
+import {
+  Text,
+  View,
+  StyleSheet,
+  Dimensions,
+  TouchableOpacity,
+  Alert,
+} from 'react-native';
 import { BarCodeScanner } from 'expo-barcode-scanner';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
@@ -27,7 +34,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
     setScanned(true);
-    
+
     // Check if it's the correct format: soter://package/{id}
     const regex = /^soter:\/\/package\/(.+)$/;
     const match = data.match(regex);
@@ -36,50 +43,95 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
       const aidId = match[1];
       navigation.replace('AidDetails', { aidId });
     } else {
-      alert(`Invalid QR code format: ${data}`);
-      // Allow scanning again after a delay
-      setTimeout(() => setScanned(false), 2000);
+      Alert.alert(
+        'Invalid QR Code',
+        'This QR code is not a valid Soter package link. Please scan a Soter QR code.',
+        [{ text: 'Try Again', onPress: () => setScanned(false) }],
+      );
     }
   };
 
+  // ── Permission: requesting ───────────────────────────────────────────────
   if (hasPermission === null) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.textPrimary }}>Requesting for camera permission</Text>
-      </View>
-    );
-  }
-  if (hasPermission === false) {
-    return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.textPrimary, marginBottom: 20 }}>No access to camera</Text>
-        <Button title={'Go Back'} onPress={() => navigation.goBack()} />
+      <View
+        style={[styles.container, { backgroundColor: colors.background }]}
+        accessible
+        accessibilityLabel="Requesting camera permission to scan QR codes"
+        accessibilityLiveRegion="polite"
+      >
+        <Text style={{ color: colors.textPrimary }}>
+          Requesting camera permission…
+        </Text>
       </View>
     );
   }
 
+  // ── Permission: denied ───────────────────────────────────────────────────
+  if (hasPermission === false) {
+    return (
+      <View
+        style={[styles.container, { backgroundColor: colors.background }]}
+        accessible
+        accessibilityLabel="Camera access denied. Cannot scan QR codes."
+      >
+        <Text style={{ color: colors.textPrimary, marginBottom: 20 }}>
+          No access to camera
+        </Text>
+        <TouchableOpacity
+          style={[styles.permissionButton, { backgroundColor: colors.brand.primary }]}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.permissionButtonText}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // ── Scanner active ───────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       <BarCodeScanner
         onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
         style={StyleSheet.absoluteFillObject}
+        // The camera view itself is not interactive for screen readers;
+        // the overlay controls below provide all necessary actions.
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
       />
-      
-      <View style={styles.overlay}>
-        <View style={styles.unfocusedContainer}></View>
+
+      <View style={styles.overlay} pointerEvents="box-none">
+        {/* Top dim area */}
+        <View style={styles.unfocusedContainer} accessibilityElementsHidden />
+
+        {/* Middle row: dim | viewfinder | dim */}
         <View style={styles.focusedContainer}>
-          <View style={styles.unfocusedContainer}></View>
-          <View style={styles.focusedView}>
-             {/* Scanner viewfinder lines can go here */}
-          </View>
-          <View style={styles.unfocusedContainer}></View>
+          <View style={styles.unfocusedContainer} accessibilityElementsHidden />
+          <View
+            style={styles.focusedView}
+            accessible
+            accessibilityLabel="QR code scan area. Align the QR code within this frame."
+          />
+          <View style={styles.unfocusedContainer} accessibilityElementsHidden />
         </View>
+
+        {/* Bottom dim area with instruction + cancel */}
         <View style={styles.unfocusedContainer}>
-           <Text style={styles.instructionText}>
-            Align QR code within the frame
+          <Text
+            style={styles.instructionText}
+            accessibilityLiveRegion="polite"
+          >
+            {scanned ? 'QR code detected' : 'Align QR code within the frame'}
           </Text>
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.cancelButton}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel scanning"
+            accessibilityHint="Closes the scanner and returns to the previous screen"
             onPress={() => navigation.goBack()}
           >
             <Text style={styles.cancelText}>Cancel</Text>
@@ -87,14 +139,23 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
         </View>
       </View>
 
+      {/* Scan-again button — shown after a failed scan */}
       {scanned && (
         <View style={styles.rescanContainer}>
-           <Button title={'Tap to Scan Again'} onPress={() => setScanned(false)} />
+          <TouchableOpacity
+            style={[styles.rescanButton, { backgroundColor: colors.brand.primary }]}
+            accessibilityRole="button"
+            accessibilityLabel="Scan again"
+            accessibilityHint="Resets the scanner so you can scan another QR code"
+            onPress={() => setScanned(false)}
+          >
+            <Text style={styles.rescanButtonText}>Tap to Scan Again</Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
   );
-}
+};
 
 const { width } = Dimensions.get('window');
 const scannerSize = width * 0.7;
@@ -134,9 +195,17 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     marginBottom: 20,
+    textAlign: 'center',
+    paddingHorizontal: 16,
   },
   cancelButton: {
-    padding: 12,
+    // Minimum 44×44 pt tap target (WCAG 2.5.5)
+    minWidth: 44,
+    minHeight: 44,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   cancelText: {
     color: 'white',
@@ -146,8 +215,31 @@ const styles = StyleSheet.create({
   rescanContainer: {
     position: 'absolute',
     bottom: 50,
-    backgroundColor: 'white',
-    padding: 10,
+  },
+  rescanButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    // Minimum 44 pt height
+    minHeight: 44,
     borderRadius: 8,
-  }
+    alignItems: 'center',
+  },
+  rescanButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  permissionButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    // Minimum 44 pt height
+    minHeight: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  permissionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
 });
