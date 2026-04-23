@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ClaimsService } from './claims.service';
 import { ClaimsController } from './claims.controller';
+import { ArtifactService } from './artifact.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { OnchainModule } from '../onchain/onchain.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
@@ -16,6 +17,6 @@ import { AuditModule } from '../audit/audit.module';
     AuditModule,
   ],
   controllers: [ClaimsController],
-  providers: [ClaimsService],
+  providers: [ClaimsService, ArtifactService],
 })
 export class ClaimsModule {}

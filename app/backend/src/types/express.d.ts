@@ -3,7 +3,7 @@ import { AppRole } from '../auth/app-role.enum';
 declare global {
   namespace Express {
     interface Request {
-      user?: { role: AppRole };
+      user?: { role: AppRole; id?: string; orgId?: string };
     }
   }
 }
