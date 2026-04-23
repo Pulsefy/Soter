@@ -7,6 +7,7 @@ import { AppNavigator } from './src/navigation/AppNavigator';
 import { WalletProvider } from './src/contexts/WalletContext';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { BiometricProvider } from './src/contexts/BiometricContext';
+import { SyncProvider } from './src/contexts/SyncContext';
 
 const linking = {
   prefixes: [ExpoLinking.createURL('/'), 'soter://'],
@@ -18,10 +19,12 @@ const AppInner = () => {
   return (
     <WalletProvider>
       <BiometricProvider>
-        <NavigationContainer linking={linking}>
-          <AppNavigator />
-          <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-        </NavigationContainer>
+        <SyncProvider>
+          <NavigationContainer linking={linking} theme={navTheme}>
+            <AppNavigator />
+            <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+          </NavigationContainer>
+        </SyncProvider>
       </BiometricProvider>
     </WalletProvider>
   );

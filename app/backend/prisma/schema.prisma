@@ -241,3 +241,17 @@ model ApiKey {
   @@index([revokedAt])
   @@index([lastUsedAt])
 }
+
+model InternalNote {
+  id          String   @id @default(cuid())
+  entityType  String   // e.g., "claim", "verification"
+  entityId    String
+  content     String
+  authorId    String
+  category    String?  // optional category metadata
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([authorId])
+}

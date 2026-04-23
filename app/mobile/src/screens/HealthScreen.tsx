@@ -119,9 +119,18 @@ export const HealthScreen = () => {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
+      <View
+        style={styles.centered}
+        accessible
+        accessibilityLabel="Loading system health data"
+        accessibilityLiveRegion="polite"
+      >
         {/* Third-party: ActivityIndicator uses brand.primary for consistent branding */}
-        <ActivityIndicator size="large" color={colors.brand.primary} />
+        <ActivityIndicator
+          size="large"
+          color={colors.brand.primary}
+          accessibilityElementsHidden
+        />
         <Text style={styles.loadingText}>Checking system health...</Text>
       </View>
     );
@@ -137,50 +146,82 @@ export const HealthScreen = () => {
             onRefresh={onRefresh}
             tintColor={colors.brand.primary}
             colors={[colors.brand.primary]}
+            accessibilityLabel="Pull to refresh health data"
           />
         }
       >
         <View style={styles.content}>
-          {/* Header */}
+          {/* ── Header ─────────────────────────────────────────────────── */}
           <View style={styles.header}>
-            <Text style={styles.title}>System Health</Text>
+            <Text style={styles.title} accessibilityRole="header">
+              System Health
+            </Text>
             <View style={styles.headerBadges}>
               {/* Environment badge */}
               <View
                 testID="env-badge"
                 style={[styles.envBadge, { backgroundColor: envBadgeColor }]}
+                accessible
+                accessibilityLabel={`Environment: ${envLabel}`}
               >
-                <Text style={styles.envBadgeText}>
+                <Text
+                  style={styles.envBadgeText}
+                  importantForAccessibility="no-hide-descendants"
+                >
                   {envLabel.toUpperCase()}
                 </Text>
               </View>
               {isMockData && (
-                <View style={styles.mockBadge}>
-                  <Text style={styles.mockBadgeText}>🔧 MOCK</Text>
+                <View
+                  style={styles.mockBadge}
+                  accessible
+                  accessibilityLabel="Using mock data"
+                >
+                  <Text
+                    style={styles.mockBadgeText}
+                    importantForAccessibility="no-hide-descendants"
+                  >
+                    🔧 MOCK
+                  </Text>
                 </View>
               )}
             </View>
           </View>
 
-          {/* Error message if any */}
+          {/* ── Error message ───────────────────────────────────────────── */}
           {error && (
-            <View style={styles.errorContainer}>
+            <View
+              style={styles.errorContainer}
+              accessible
+              accessibilityRole="alert"
+              accessibilityLiveRegion="assertive"
+              accessibilityLabel={error}
+            >
               <Text style={styles.errorText}>{error}</Text>
             </View>
           )}
 
-          {/* Health Data Card */}
+          {/* ── Health Data Card ────────────────────────────────────────── */}
           {healthData && (
             <View
               style={[
                 styles.card,
                 { borderLeftColor: getStatusColor(healthData.status) },
               ]}
+              accessible
+              accessibilityLabel={`Backend status: ${healthData.status.toUpperCase()}. Service: ${healthData.service}. Version: ${healthData.version}. Environment: ${healthData.environment}.`}
             >
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>Backend Status</Text>
-                <View style={styles.statusBadge}>
-                  <Text style={styles.statusIcon}>
+                <View
+                  style={styles.statusBadge}
+                  accessible
+                  accessibilityLabel={`Status: ${healthData.status.toUpperCase()}`}
+                >
+                  <Text
+                    style={styles.statusIcon}
+                    accessibilityElementsHidden
+                  >
                     {getStatusIcon(healthData.status)}
                   </Text>
                   <Text
@@ -194,31 +235,36 @@ export const HealthScreen = () => {
                 </View>
               </View>
 
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Service:</Text>
-                <Text style={styles.infoValue}>{healthData.service}</Text>
+              <View style={styles.infoRow} accessible accessibilityLabel={`Service: ${healthData.service}`}>
+                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">Service:</Text>
+                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">{healthData.service}</Text>
               </View>
 
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Version:</Text>
-                <Text style={styles.infoValue}>{healthData.version}</Text>
+              <View style={styles.infoRow} accessible accessibilityLabel={`Version: ${healthData.version}`}>
+                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">Version:</Text>
+                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">{healthData.version}</Text>
               </View>
 
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Environment:</Text>
-                <Text style={styles.infoValue}>{healthData.environment}</Text>
+              <View style={styles.infoRow} accessible accessibilityLabel={`Environment: ${healthData.environment}`}>
+                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">Environment:</Text>
+                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">{healthData.environment}</Text>
               </View>
 
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Last updated:</Text>
-                <Text style={styles.infoValue}>
+              <View style={styles.infoRow} accessible accessibilityLabel={`Last updated: ${formatTimestamp(healthData.timestamp)}`}>
+                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">Last updated:</Text>
+                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">
                   {formatTimestamp(healthData.timestamp)}
                 </Text>
               </View>
 
               {isMockData && (
-                <View style={styles.insideMockIndicator}>
-                  <Text style={styles.insideMockText}>
+                <View
+                  style={styles.insideMockIndicator}
+                  accessible
+                  accessibilityRole="alert"
+                  accessibilityLabel="Warning: This is simulated data. Backend connection failed."
+                >
+                  <Text style={styles.insideMockText} importantForAccessibility="no-hide-descendants">
                     ⚠️ This is simulated data - backend connection failed
                   </Text>
                 </View>
@@ -226,28 +272,42 @@ export const HealthScreen = () => {
             </View>
           )}
 
-          {/* Quick Stats Section */}
+          {/* ── Quick Stats ─────────────────────────────────────────────── */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Quick Info</Text>
+            <Text style={styles.sectionTitle} accessibilityRole="header">
+              Quick Info
+            </Text>
 
             <View style={styles.statsGrid}>
-              <View style={styles.statItem}>
-                <Text style={styles.statLabel}>API URL</Text>
-                <Text style={styles.statValue} numberOfLines={1}>
+              <View
+                style={styles.statItem}
+                accessible
+                accessibilityLabel={`API URL: ${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}`}
+              >
+                <Text style={styles.statLabel} importantForAccessibility="no-hide-descendants">API URL</Text>
+                <Text style={styles.statValue} numberOfLines={1} importantForAccessibility="no-hide-descendants">
                   {process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}
                 </Text>
               </View>
 
-              <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Platform</Text>
-                <Text style={styles.statValue}>
+              <View
+                style={styles.statItem}
+                accessible
+                accessibilityLabel={`Platform: ${Platform.OS === 'android' ? 'Android' : 'iOS'}`}
+              >
+                <Text style={styles.statLabel} importantForAccessibility="no-hide-descendants">Platform</Text>
+                <Text style={styles.statValue} importantForAccessibility="no-hide-descendants">
                   {Platform.OS === 'android' ? 'Android' : 'iOS'}
                 </Text>
               </View>
 
-              <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Last Check</Text>
-                <Text style={styles.statValue}>
+              <View
+                style={styles.statItem}
+                accessible
+                accessibilityLabel={`Last check: ${healthData ? formatTimestamp(healthData.timestamp).split(',')[0] : 'Not available'}`}
+              >
+                <Text style={styles.statLabel} importantForAccessibility="no-hide-descendants">Last Check</Text>
+                <Text style={styles.statValue} importantForAccessibility="no-hide-descendants">
                   {healthData
                     ? formatTimestamp(healthData.timestamp).split(',')[0]
                     : 'N/A'}
@@ -256,10 +316,12 @@ export const HealthScreen = () => {
             </View>
           </View>
 
-          {/* Troubleshooting Tips */}
+          {/* ── Troubleshooting Tips ────────────────────────────────────── */}
           {isMockData && (
-            <View style={styles.tipsContainer}>
-              <Text style={styles.tipsTitle}>🔍 Troubleshooting Tips</Text>
+            <View style={styles.tipsContainer} accessible accessibilityRole="summary">
+              <Text style={styles.tipsTitle} accessibilityRole="header">
+                🔍 Troubleshooting Tips
+              </Text>
               <Text style={styles.tipText}>
                 • Ensure backend server is running on port 3000
               </Text>
@@ -276,17 +338,20 @@ export const HealthScreen = () => {
             </View>
           )}
 
-          {/* Retry Button */}
+          {/* ── Retry Button ────────────────────────────────────────────── */}
           {error && (
             <TouchableOpacity
               style={styles.retryButton}
+              accessibilityRole="button"
+              accessibilityLabel="Retry connection"
+              accessibilityHint="Attempts to reconnect to the backend server"
               onPress={() => loadHealthData()}
             >
               <Text style={styles.retryButtonText}>🔄 Retry Connection</Text>
             </TouchableOpacity>
           )}
 
-          {/* Footer */}
+          {/* ── Footer ──────────────────────────────────────────────────── */}
           <View style={styles.footer}>
             <Text style={styles.footerText}>
               {isMockData ? '📊 Using simulated data' : '🌐 Live backend data'}
@@ -294,19 +359,30 @@ export const HealthScreen = () => {
             <Text style={styles.footerSubText}>
               {!isMockData && 'Data fetched from /health endpoint'}
             </Text>
-            <View style={styles.footerEnvRow} testID="footer-env-row">
-              <Text style={styles.footerEnvLabel}>Environment: </Text>
+            <View
+              style={styles.footerEnvRow}
+              testID="footer-env-row"
+              accessible
+              accessibilityLabel={`Environment: ${envLabel} · ${shortApiUrl}`}
+            >
+              <Text style={styles.footerEnvLabel} importantForAccessibility="no-hide-descendants">
+                Environment:{' '}
+              </Text>
               <Text
                 testID="footer-env-name"
                 style={[styles.footerEnvValue, { color: envBadgeColor }]}
+                importantForAccessibility="no-hide-descendants"
               >
                 {envLabel}
               </Text>
-              <Text style={styles.footerEnvSeparator}> · </Text>
+              <Text style={styles.footerEnvSeparator} importantForAccessibility="no-hide-descendants">
+                {' '}·{' '}
+              </Text>
               <Text
                 testID="footer-api-url"
                 style={styles.footerEnvUrl}
                 numberOfLines={1}
+                importantForAccessibility="no-hide-descendants"
               >
                 {shortApiUrl}
               </Text>
@@ -493,6 +569,8 @@ const makeStyles = (colors: AppColors) =>
     retryButton: {
       backgroundColor: colors.brand.primary,
       padding: 16,
+      // Minimum 44 pt height (WCAG 2.5.5)
+      minHeight: 44,
       borderRadius: 12,
       alignItems: 'center',
       marginBottom: 20,

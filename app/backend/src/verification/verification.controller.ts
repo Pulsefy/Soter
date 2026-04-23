@@ -7,6 +7,7 @@ import {
   Version,
   HttpStatus,
   HttpCode,
+  Request,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -21,6 +22,7 @@ import {
   ApiBadRequestResponse,
   ApiUnauthorizedResponse,
   ApiNotFoundResponse,
+  ApiForbiddenResponse,
 } from '@nestjs/swagger';
 import { VerificationService } from './verification.service';
 import { VerificationFlowService } from './verification-flow.service';
@@ -29,6 +31,11 @@ import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { StartVerificationDto } from './dto/start-verification.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompleteVerificationDto } from './dto/complete-verification.dto';
+import { Roles } from 'src/auth/roles.decorator';
+import { AppRole } from 'src/auth/app-role.enum';
+import { InternalNotesService } from 'src/common/services/internal-notes.service';
+import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
+import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
 
 @ApiTags('Verification')
 @ApiSecurity('x-api-key')
@@ -37,6 +44,7 @@ export class VerificationController {
   constructor(
     private readonly verificationService: VerificationService,
     private readonly verificationFlowService: VerificationFlowService,
+    private readonly internalNotesService: InternalNotesService,
   ) {}
 
   @Post('claims/:id/enqueue')
@@ -378,5 +386,49 @@ export class VerificationController {
   })
   update(@Param('id') id: string, @Body() data: Record<string, unknown>) {
     return this.verificationService.update(id, data);
+  }
+
+  @Post(':id/notes')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Add an internal note to a verification record',
+    description: 'Adds a secure internal note for staff review only.',
+  })
+  @ApiCreatedResponse({
+    description: 'Internal note added successfully.',
+    type: InternalNoteResponseDto,
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - staff role required.',
+  })
+  addNote(
+    @Param('id') id: string,
+    @Body() dto: CreateInternalNoteDto,
+    @Request() req: any,
+  ) {
+    const authorId = req.user?.apiKeyId || req.user?.authType || 'system';
+    return this.internalNotesService.createNote(
+      'verification',
+      id,
+      authorId,
+      dto,
+    );
+  }
+
+  @Get(':id/notes')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'List internal notes for a verification record',
+    description: 'Retrieves all internal notes for a specific verification.',
+  })
+  @ApiOkResponse({
+    description: 'Internal notes retrieved successfully.',
+    type: [InternalNoteResponseDto],
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - staff role required.',
+  })
+  getNotes(@Param('id') id: string) {
+    return this.internalNotesService.findNotesByEntity('verification', id);
   }
 }

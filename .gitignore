@@ -85,3 +85,5 @@ reports/*
 !reports/.gitkeep
 
 .trae/
+.env.test
+.env

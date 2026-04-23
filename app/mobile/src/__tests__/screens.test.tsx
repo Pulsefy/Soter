@@ -26,6 +26,14 @@ jest.mock('../components/OfflineBanner', () => ({
   OfflineBanner: () => null,
 }));
 
+jest.mock('../contexts/SyncContext', () => ({
+  useSync: jest.fn().mockReturnValue({
+    pendingCount: 0,
+    failedCount: 0,
+    isSyncing: false,
+  }),
+}));
+
 import { getAidPackages } from '../services/api';
 const mockGetAidPackages = getAidPackages as jest.Mock;
 
