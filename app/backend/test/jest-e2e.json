@@ -10,5 +10,8 @@
     "^src/(.*)$": "<rootDir>/src/$1",
     "^@stellar/stellar-sdk$": "<rootDir>/test/mocks/stellar-sdk.mock.ts",
     "^openai$": "<rootDir>/test/mocks/openai.mock.ts"
-  }
+  },
+  "setupFiles": ["<rootDir>/test/jest-e2e-setup.ts"],
+  "globalSetup": "<rootDir>/test/jest-e2e-global-setup.ts",
+  "testTimeout": 30000
 }
