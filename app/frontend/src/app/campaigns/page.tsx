@@ -2,13 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import { ExportControls } from '@/components/dashboard/ExportControls';
-import { useCampaigns, useCreateCampaign, useUpdateCampaign } from '@/hooks/useCampaigns';
+import { useCampaigns, useCreateCampaign, useUpdateCampaign, useArchiveCampaign } from '@/hooks/useCampaigns';
+import { useToast } from '@/components/ToastProvider';
 import {
   canManageCampaigns,
   getUserRole,
   getUserRoleLabel,
 } from '@/lib/user-role';
-import type { CampaignStatus } from '@/types/campaign';
+import type { Campaign, CampaignStatus } from '@/types/campaign';
 
 const statusStyles: Record<CampaignStatus, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -39,42 +40,24 @@ export default function CampaignsPage() {
   const { data: campaigns = [], isLoading, isError, error } = useCampaigns();
   const createCampaign = useCreateCampaign();
   const updateCampaign = useUpdateCampaign();
+  const archiveCampaign = useArchiveCampaign();
+  const { toast } = useToast();
 
   const [name, setName] = useState('');
   const [budget, setBudget] = useState('');
   const [token, setToken] = useState('USDC');
   const [expiry, setExpiry] = useState('');
-  const [formMessage, setFormMessage] = useState<string | null>(null);
 
-  // ── Filter helpers ─────────────────────────────────────────────────────────
-
-  function updateParam(key: string, value: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    if (value) params.set(key, value);
-    else params.delete(key);
-    router.replace(`?${params.toString()}`, { scroll: false });
-  }
-
-  const handleApplyPreset = useCallback(
-    (preset: AidPackageFilters) => {
-      const params = new URLSearchParams();
-      if (preset.status) params.set('status', preset.status);
-      router.replace(params.size ? `?${params.toString()}` : '?', { scroll: false });
-    },
-    [router],
-  );
-
-  // Convert URL status param → CampaignStatus for filtering
-  const activeCampaignStatus = toCampaignStatus(urlStatus);
+  // Track loading state per campaign
+  const [loadingCampaigns, setLoadingCampaigns] = useState<Record<string, string | null>>({});
 
   const activeCampaigns = useMemo(
     () =>
-      campaigns.filter(campaign => {
+      campaigns.filter((campaign: Campaign) => {
         if (campaign.status === 'archived') return false;
-        if (activeCampaignStatus) return campaign.status === activeCampaignStatus;
         return true;
       }),
-    [campaigns, activeCampaignStatus],
+    [campaigns],
   );
 
   if (!canManageCampaigns(userRole)) {
@@ -94,7 +77,7 @@ export default function CampaignsPage() {
   const handleCreate = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!name.trim() || !budget.trim()) {
-      setFormMessage('Name and budget are required.');
+      toast('Validation Error', 'Name and budget are required.', 'warning');
       return;
     }
 
@@ -114,30 +97,42 @@ export default function CampaignsPage() {
       setBudget('');
       setToken('USDC');
       setExpiry('');
-      setFormMessage('Campaign created successfully.');
+      toast('Campaign Created', 'Your campaign has been created successfully.', 'success');
     } catch (err) {
-      setFormMessage((err as Error).message ?? 'Failed to create campaign.');
+      toast('Creation Failed', (err as Error).message ?? 'Failed to create campaign.', 'error');
     }
   };
 
   const onPauseResume = async (id: string, currentStatus: CampaignStatus) => {
     const targetStatus = currentStatus === 'active' ? 'paused' : 'active';
+    const action = targetStatus === 'paused' ? 'Pausing' : 'Resuming';
+    
+    setLoadingCampaigns(prev => ({ ...prev, [id]: action }));
+    
     try {
       await updateCampaign.mutateAsync({ id, data: { status: targetStatus } });
-      setFormMessage(
-        `Campaign ${targetStatus === 'active' ? 'resumed' : 'paused'} successfully.`
+      toast(
+        `Campaign ${targetStatus === 'active' ? 'Resumed' : 'Paused'}`,
+        `Campaign has been ${targetStatus === 'active' ? 'resumed' : 'paused'} successfully.`,
+        'success'
       );
     } catch (err) {
-      setFormMessage((err as Error).message ?? 'Failed to update campaign.');
+      toast('Update Failed', (err as Error).message ?? 'Failed to update campaign.', 'error');
+    } finally {
+      setLoadingCampaigns(prev => ({ ...prev, [id]: null }));
     }
   };
 
   const onArchive = async (id: string) => {
+    setLoadingCampaigns(prev => ({ ...prev, [id]: 'Archiving' }));
+    
     try {
-      await updateCampaign.mutateAsync({ id, data: { status: 'archived' } });
-      setFormMessage('Campaign archived successfully.');
+      await archiveCampaign.mutateAsync(id);
+      toast('Campaign Archived', 'Campaign has been archived successfully.', 'success');
     } catch (err) {
-      setFormMessage((err as Error).message ?? 'Failed to archive campaign.');
+      toast('Archive Failed', (err as Error).message ?? 'Failed to archive campaign.', 'error');
+    } finally {
+      setLoadingCampaigns(prev => ({ ...prev, [id]: null }));
     }
   };
 
@@ -152,11 +147,6 @@ export default function CampaignsPage() {
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <h2 className="mb-4 text-xl font-semibold">Create New Campaign</h2>
-            {formMessage && (
-              <div className="mb-4 rounded-md border bg-gray-50 p-3 text-sm text-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                {formMessage}
-              </div>
-            )}
             <form onSubmit={handleCreate} className="space-y-3">
               <label className="block">
                 <span className="font-medium">Name</span>
@@ -229,7 +219,7 @@ export default function CampaignsPage() {
             )}
 
             <div className="space-y-3">
-              {activeCampaigns.map(campaign => (
+              {activeCampaigns.map((campaign: Campaign) => (
                 <div
                   key={campaign.id}
                   className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950"
@@ -255,7 +245,7 @@ export default function CampaignsPage() {
                       </p>
                     </div>
                     <span
-                      className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[campaign.status]}`}
+                      className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[campaign.status as CampaignStatus]}`}
                     >
                       {campaign.status}
                     </span>
@@ -264,19 +254,19 @@ export default function CampaignsPage() {
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => onPauseResume(campaign.id, campaign.status)}
-                      disabled={updateCampaign.isPending}
-                      className="rounded-md border border-gray-300 px-3 py-1 text-sm hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+                      onClick={() => onPauseResume(campaign.id, campaign.status as CampaignStatus)}
+                      disabled={loadingCampaigns[campaign.id] !== null}
+                      className="rounded-md border border-gray-300 px-3 py-1 text-sm hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800"
                     >
-                      {campaign.status === 'active' ? 'Pause' : 'Resume'}
+                      {loadingCampaigns[campaign.id] || (campaign.status === 'active' ? 'Pause' : 'Resume')}
                     </button>
                     <button
                       type="button"
                       onClick={() => onArchive(campaign.id)}
-                      disabled={updateCampaign.isPending || campaign.status === 'archived'}
-                      className="rounded-md border border-red-400 px-3 py-1 text-sm text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                      disabled={loadingCampaigns[campaign.id] !== null || campaign.status === 'archived'}
+                      className="rounded-md border border-red-400 px-3 py-1 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-900/20"
                     >
-                      Archive
+                      {loadingCampaigns[campaign.id] === 'Archiving' ? 'Archiving...' : 'Archive'}
                     </button>
                   </div>
                 </div>
