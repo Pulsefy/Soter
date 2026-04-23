@@ -20,7 +20,7 @@ import OpenAI from 'openai';
 interface OCRFieldResult {
   value: string;
   confidence: number;
-}
+CLASSEND
 
 interface OCRResponse {
   success: boolean;
@@ -31,7 +31,7 @@ interface OCRResponse {
   };
   error?: Record<string, string>;
   processing_time_ms: number;
-}
+CLASSEND
 
 // ---------------------------------------------------------------------------
 // Internal claim shape used by verification logic
@@ -44,7 +44,7 @@ interface Claim {
   amount: unknown;
   recipientRef: string;
   evidenceRef?: string | null;
-}
+CLASSEND
 
 // ---------------------------------------------------------------------------
 // Structured JSON that the AI model must return
@@ -57,7 +57,7 @@ interface AIVerificationResponse {
   factors: string[]; // positive verification signals
   riskFactors: string[]; // identified concerns / red-flags
   recommendations: string[]; // next steps if human review needed
-}
+CLASSEND
 
 // ---------------------------------------------------------------------------
 // Service
@@ -330,7 +330,7 @@ The JSON object must have exactly these keys:
   "factors": [<string>, ...],
   "riskFactors": [<string>, ...],
   "recommendations": [<string>, ...]
-}
+CLASSEND
 `.trim();
 
     const userPrompt = `
@@ -647,4 +647,107 @@ the JSON verdict.
       total: waiting + active + completed + failed,
     };
   }
-}
+
+  // -------------------------------------------------------------------------
+  // Manual Review Workflow
+  // -------------------------------------------------------------------------
+
+  async getReviewQueue(
+    status?: string,
+    page = 1,
+    limit = 20,
+  ): Promise<{
+    data: unknown[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const skip = (page - 1) * limit;
+
+    const where: {
+      reviewStatus?: string;
+      deletedAt: null;
+    } = {
+      deletedAt: null,
+    };
+
+    if (status) {
+      where.reviewStatus = status;
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.claim.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [
+          { reviewSlaStartedAt: 'asc' },
+          { createdAt: 'asc' },
+        ],
+        include: {
+          campaign: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      }),
+      this.prisma.claim.count({ where }),
+    ]);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+    };
+  }
+
+  async submitReview(
+    claimId: string,
+    reviewerId: string,
+    decision: 'approved' | 'rejected',
+    reason: string,
+    note?: string,
+  ): Promise<unknown> {
+    const claim = await this.prisma.claim.findUnique({
+      where: { id: claimId },
+    });
+
+    if (!claim) {
+      throw new NotFoundException(`Claim with ID ${claimId} not found`);
+    }
+
+    const updatedClaim = await this.prisma.claim.update({
+      where: { id: claimId },
+      data: {
+        reviewStatus: decision,
+        reviewedBy: reviewerId,
+        reviewedAt: new Date(),
+        reviewReason: reason,
+        reviewNote: note,
+        status: decision === 'approved' ? 'verified' : 'requested',
+      },
+    });
+
+    await this.auditService.record({
+      actorId: reviewerId,
+      entity: 'claim_review',
+      entityId: claimId,
+      action: decision,
+      metadata: {
+        reason,
+        note: note || null,
+        previousStatus: claim.status,
+        newStatus: updatedClaim.status,
+      },
+    });
+
+    this.logger.log(
+      `Claim ${claimId} reviewed by ${reviewerId}: ${decision}`,
+    );
+
+    return updatedClaim;
+  }
+CLASSEND

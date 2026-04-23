@@ -7,6 +7,9 @@ import {
   Version,
   HttpStatus,
   HttpCode,
+  Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -21,6 +24,7 @@ import {
   ApiBadRequestResponse,
   ApiUnauthorizedResponse,
   ApiNotFoundResponse,
+  ApiForbiddenResponse,
 } from '@nestjs/swagger';
 import { VerificationService } from './verification.service';
 import { VerificationFlowService } from './verification-flow.service';
@@ -29,6 +33,11 @@ import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { StartVerificationDto } from './dto/start-verification.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompleteVerificationDto } from './dto/complete-verification.dto';
+import { ReviewQueryDto } from './dto/review-query.dto';
+import { SubmitReviewDto } from './dto/submit-review.dto';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
+import { AppRole } from '../auth/app-role.enum';
 
 @ApiTags('Verification')
 @ApiSecurity('x-api-key')
@@ -378,5 +387,107 @@ export class VerificationController {
   })
   update(@Param('id') id: string, @Body() data: Record<string, unknown>) {
     return this.verificationService.update(id, data);
+  }
+}
+
+  // -------------------------------------------------------------------------
+  // Manual Review Endpoints
+  // -------------------------------------------------------------------------
+
+  @Get('reviews/queue')
+  @Version('1')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Get review queue',
+    description:
+      'Retrieve paginated list of claims pending review, approved, or rejected. Supports filtering by review status and includes SLA tracking timestamps.',
+  })
+  @ApiOkResponse({
+    description: 'Review queue retrieved successfully.',
+    schema: {
+      example: {
+        data: [
+          {
+            id: 'clv789xyz123',
+            status: 'requested',
+            reviewStatus: 'pending_review',
+            amount: '500.00',
+            recipientRef: 'REF-12345',
+            verificationScore: 0.65,
+            reviewSlaStartedAt: '2025-01-23T10:00:00.000Z',
+            createdAt: '2025-01-23T09:00:00.000Z',
+            campaign: {
+              id: 'camp123',
+              name: 'Emergency Relief 2025',
+            },
+          },
+        ],
+        total: 42,
+        page: 1,
+        limit: 20,
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
+  })
+  async getReviewQueue(@Query() query: ReviewQueryDto) {
+    return this.verificationService.getReviewQueue(
+      query.status,
+      query.page || 1,
+      query.limit || 20,
+    );
+  }
+
+  @Post('reviews/:claimId/submit')
+  @Version('1')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Submit review decision',
+    description:
+      'Submit a manual review decision (approve/reject) for a claim. Records the decision, reason, and optional internal note in the audit trail.',
+  })
+  @ApiParam({
+    name: 'claimId',
+    description: 'Unique identifier of the claim to review',
+    example: 'clv789xyz123',
+  })
+  @ApiOkResponse({
+    description: 'Review submitted successfully.',
+    schema: {
+      example: {
+        id: 'clv789xyz123',
+        status: 'verified',
+        reviewStatus: 'approved',
+        reviewedBy: 'reviewer123',
+        reviewedAt: '2025-01-23T15:30:00.000Z',
+        reviewReason: 'All documents verified successfully',
+        reviewNote: 'Contacted applicant for additional verification',
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid review data or claim not eligible for review.',
+  })
+  @ApiNotFoundResponse({
+    description: 'The specified claim could not be found.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
+  })
+  async submitReview(
+    @Param('claimId') claimId: string,
+    @Body() dto: SubmitReviewDto,
+    @Req() req: { user?: { id: string } },
+  ) {
+    const reviewerId = req.user?.id || 'system';
+    return this.verificationService.submitReview(
+      claimId,
+      reviewerId,
+      dto.decision,
+      dto.reason,
+      dto.note,
+    );
   }
 }

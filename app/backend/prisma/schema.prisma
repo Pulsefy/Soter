@@ -23,6 +23,12 @@ enum ClaimStatus {
   archived
 }
 
+enum ReviewStatus {
+  pending_review
+  approved
+  rejected
+}
+
 model AidPackage {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -82,10 +88,21 @@ model Claim {
   recipientRef String
   evidenceRef  String?
 
+  verificationScore      Float?
+  verificationResult     Json?
+  reviewStatus           ReviewStatus?
+  reviewedBy             String?
+  reviewedAt             DateTime?
+  reviewReason           String?
+  reviewNote             String?
+  reviewSlaStartedAt     DateTime?
+
   @@index([status])
   @@index([campaignId])
   @@index([createdAt])
   @@index([deletedAt])
+  @@index([reviewStatus])
+  @@index([reviewSlaStartedAt])
 }
 
 model AuditLog {
