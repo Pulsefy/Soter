@@ -38,7 +38,7 @@ const createTestApp = async ({ enableDocs }: TestAppOptions) => {
   });
 
   const configService = app.get(ConfigService);
-  app.use(createHelmetMiddleware());
+  app.use(createHelmetMiddleware(configService));
   app.use(createCorsOriginValidator(configService));
   app.enableCors(buildCorsOptions(configService));
   app.use(createRateLimiter(configService));
@@ -63,6 +63,9 @@ describe('Security (e2e)', () => {
     API_RATE_LIMIT: process.env.API_RATE_LIMIT,
     THROTTLE_TTL: process.env.THROTTLE_TTL,
     CORS_ORIGINS: process.env.CORS_ORIGINS,
+    CORS_ORIGINS_DEVELOPMENT: process.env.CORS_ORIGINS_DEVELOPMENT,
+    CORS_ORIGINS_TEST: process.env.CORS_ORIGINS_TEST,
+    CORS_ORIGINS_PRODUCTION: process.env.CORS_ORIGINS_PRODUCTION,
     CORS_ALLOW_CREDENTIALS: process.env.CORS_ALLOW_CREDENTIALS,
   };
 
@@ -81,6 +84,12 @@ describe('Security (e2e)', () => {
     setEnvValue('API_RATE_LIMIT', originalEnv.API_RATE_LIMIT);
     setEnvValue('THROTTLE_TTL', originalEnv.THROTTLE_TTL);
     setEnvValue('CORS_ORIGINS', originalEnv.CORS_ORIGINS);
+    setEnvValue(
+      'CORS_ORIGINS_DEVELOPMENT',
+      originalEnv.CORS_ORIGINS_DEVELOPMENT,
+    );
+    setEnvValue('CORS_ORIGINS_TEST', originalEnv.CORS_ORIGINS_TEST);
+    setEnvValue('CORS_ORIGINS_PRODUCTION', originalEnv.CORS_ORIGINS_PRODUCTION);
     setEnvValue('CORS_ALLOW_CREDENTIALS', originalEnv.CORS_ALLOW_CREDENTIALS);
   });
 
@@ -117,6 +126,52 @@ describe('Security (e2e)', () => {
 
       expect(response.status).toBe(403);
       expect(response.text).toBe('Not allowed by CORS');
+    });
+
+    it('should use environment-specific CORS allowlist when configured', async () => {
+      process.env.CORS_ORIGINS = 'https://fallback.example.com';
+      process.env.CORS_ORIGINS_TEST = 'http://localhost:3000';
+      const scopedApp = await createTestApp({ enableDocs: false });
+      const server = scopedApp.getHttpServer();
+
+      const allowed = await request(server)
+        .get('/api/v1/health')
+        .set('Origin', 'http://localhost:3000');
+      expect(allowed.status).toBe(200);
+      expect(allowed.headers['access-control-allow-origin']).toBe(
+        'http://localhost:3000',
+      );
+
+      const blocked = await request(server)
+        .get('/api/v1/health')
+        .set('Origin', 'https://fallback.example.com');
+      expect(blocked.status).toBe(403);
+
+      await scopedApp.close();
+      process.env.CORS_ORIGINS = 'http://localhost:3000';
+      delete process.env.CORS_ORIGINS_TEST;
+    });
+
+    it('should deny browser origins by default in production without an allowlist', () => {
+      const config = {
+        get: (key: string) => (key === 'NODE_ENV' ? 'production' : undefined),
+      } as unknown as ConfigService;
+
+      const validator = createCorsOriginValidator(config);
+      const req = {
+        headers: { origin: 'https://frontend.pulsefy.com' },
+      } as any;
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn(),
+      } as any;
+      const next = jest.fn();
+
+      validator(req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.send).toHaveBeenCalledWith('Not allowed by CORS');
+      expect(next).not.toHaveBeenCalled();
     });
 
     it('should handle preflight requests for allowed origins', async () => {

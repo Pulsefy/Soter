@@ -69,29 +69,54 @@ const isRateLimitExempt = (req: Request): boolean => {
   return RATE_LIMIT_EXEMPT_PATHS.some(pattern => pattern.test(normalizedPath));
 };
 
-// Explicit Helmet configuration: only the required headers are enabled.
-const buildHelmetOptions = (): HelmetOptions => ({
-  contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false,
-  crossOriginOpenerPolicy: false,
-  crossOriginResourcePolicy: false,
-  originAgentCluster: false,
-  referrerPolicy: { policy: 'no-referrer' },
-  strictTransportSecurity: false,
-  xContentTypeOptions: true,
-  xDnsPrefetchControl: false,
-  xDownloadOptions: false,
-  xFrameOptions: { action: 'deny' },
-  xPermittedCrossDomainPolicies: false,
-  xPoweredBy: false,
-  xXssProtection: false,
-});
+const resolveNodeEnv = (config: ConfigService): string =>
+  (config.get<string>('NODE_ENV') ?? 'development').toLowerCase();
 
-export const createHelmetMiddleware = () => helmet(buildHelmetOptions());
+// Explicit Helmet configuration: only required API security headers are enabled.
+const buildHelmetOptions = (config: ConfigService): HelmetOptions => {
+  const nodeEnv = resolveNodeEnv(config);
+  const strictTransportSecurity =
+    nodeEnv === 'production'
+      ? {
+          maxAge: 15_552_000,
+          includeSubDomains: true,
+          preload: true,
+        }
+      : false;
+
+  return {
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
+    crossOriginResourcePolicy: false,
+    originAgentCluster: false,
+    permissionsPolicy: {
+      features: {
+        camera: [],
+        geolocation: [],
+        microphone: [],
+      },
+    },
+    referrerPolicy: { policy: 'no-referrer' },
+    strictTransportSecurity,
+    xContentTypeOptions: true,
+    xDnsPrefetchControl: false,
+    xDownloadOptions: false,
+    xFrameOptions: { action: 'deny' },
+    xPermittedCrossDomainPolicies: false,
+    xPoweredBy: false,
+    xXssProtection: false,
+  };
+};
+
+export const createHelmetMiddleware = (config: ConfigService) =>
+  helmet(buildHelmetOptions(config));
 
 const resolveAllowedOrigins = (config: ConfigService): string[] => {
-  const rawOrigins = config.get<string>('CORS_ORIGINS');
-  const nodeEnv = config.get<string>('NODE_ENV');
+  const nodeEnv = resolveNodeEnv(config);
+  const envSpecificKey = `CORS_ORIGINS_${nodeEnv.toUpperCase()}`;
+  const rawOrigins =
+    config.get<string>(envSpecificKey) ?? config.get<string>('CORS_ORIGINS');
   if (rawOrigins === undefined) {
     if (nodeEnv === 'development' || nodeEnv === 'test') {
       return DEFAULT_ALLOWED_ORIGINS;
