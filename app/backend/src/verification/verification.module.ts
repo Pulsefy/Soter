@@ -10,6 +10,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { AuditModule } from '../audit/audit.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { EncryptionModule } from '../common/encryption/encryption.module';
+import { JobsModule } from '../jobs/jobs.module';
 
 @Module({
   imports: [
@@ -28,12 +29,22 @@ import { EncryptionModule } from '../common/encryption/encryption.module';
           port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
         },
         defaultJobOptions: {
-          removeOnComplete: 100,
-          removeOnFail: 50,
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 2000,
+          },
+          removeOnComplete: {
+            count: 100,  // keep last 100 completed verification jobs
+            age: 86400,  // and no older than 24 h
+          },
+          removeOnFail: false, // keep all failed jobs for audit / DLQ inspection
         },
       }),
       inject: [ConfigService],
     }),
+    // Import JobsModule to get access to DeadLetterService
+    JobsModule,
   ],
   controllers: [VerificationController],
   providers: [

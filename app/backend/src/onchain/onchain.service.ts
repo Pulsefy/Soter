@@ -61,14 +61,11 @@ export class OnchainService {
       timestamp: Date.now(),
     };
 
-    const job = await this.onchainQueue.add(type, data, {
-      attempts: 5,
-      backoff: {
-        type: 'exponential',
-        delay: 10000,
-      },
-      removeOnComplete: true,
-    });
+    // Job-level options intentionally omit attempts/backoff/removeOn* so that
+    // the queue-level defaultJobOptions (set in OnchainModule) are the single
+    // source of truth.  Override here only when a specific job needs different
+    // behaviour (e.g. a one-shot fire-and-forget).
+    const job = await this.onchainQueue.add(type, data);
 
     this.logger.log(`Enqueued onchain job: ${job.id} for ${type}`);
     return job;

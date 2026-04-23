@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { NotificationsService } from './notifications.service';
 import { NotificationProcessor } from './notifications.processor';
+import { JobsModule } from '../jobs/jobs.module';
 
 @Module({
   imports: [
@@ -16,12 +17,22 @@ import { NotificationProcessor } from './notifications.processor';
           port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
         },
         defaultJobOptions: {
-          removeOnComplete: 100,
-          removeOnFail: 50,
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 5000,
+          },
+          removeOnComplete: {
+            count: 100,  // keep last 100 completed notification jobs
+            age: 86400,  // and no older than 24 h
+          },
+          removeOnFail: false, // keep all failed jobs for audit / DLQ inspection
         },
       }),
       inject: [ConfigService],
     }),
+    // Import JobsModule to get access to DeadLetterService
+    JobsModule,
   ],
   providers: [NotificationsService, NotificationProcessor],
   exports: [NotificationsService],
