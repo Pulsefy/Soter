@@ -5,6 +5,7 @@ import { OnchainAdapter, ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
 export { ONCHAIN_ADAPTER_TOKEN };
 import { MockOnchainAdapter } from './onchain.adapter.mock';
 import { SorobanAdapter } from './soroban.adapter';
+import { SorobanOnchainAdapter } from './soroban-onchain.adapter';
 import { OnchainProcessor } from './onchain.processor';
 import { OnchainService } from './onchain.service';
 
@@ -21,7 +22,7 @@ export const createOnchainAdapter = (
     case 'mock':
       return new MockOnchainAdapter();
     case 'soroban':
-      return new SorobanAdapter(configService);
+      return new SorobanOnchainAdapter(configService);
     default:
       throw new Error(
         `Unknown ONCHAIN_ADAPTER: ${adapterType}. Supported values: mock, soroban`,
@@ -53,6 +54,7 @@ const onchainAdapterProvider: Provider = {
   providers: [
     MockOnchainAdapter,
     SorobanAdapter,
+    SorobanOnchainAdapter,
     onchainAdapterProvider,
     OnchainProcessor,
     OnchainService,
