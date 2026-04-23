@@ -97,6 +97,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
     }
   }, [authState, loadDetails]);
 
+  // Sync background effect
   useEffect(() => {
     if (!lastCompletedAction) {
       return;
@@ -173,25 +174,41 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
     }
   }, [aidId, details, isConnected, loadDetails, queueClaimConfirmation]);
 
+  // ── Auth states ──────────────────────────────────────────────────────────
+
   if (authState === 'idle' || authState === 'pending') {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.brand.primary} />
-        <Text style={styles.subtitle}>Verifying identity...</Text>
+      <View
+        style={styles.centered}
+        accessible
+        accessibilityLabel="Verifying identity, please wait"
+        accessibilityLiveRegion="polite"
+      >
+        <ActivityIndicator
+          size="large"
+          color={colors.brand.primary}
+          accessibilityElementsHidden
+        />
+        <Text style={styles.subtitle}>Verifying identity…</Text>
       </View>
     );
   }
 
   if (authState === 'denied') {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.lockIcon}>Locked</Text>
+      <View
+        style={styles.centered}
+        accessible
+        accessibilityLabel="Authentication required. Biometric verification is needed to view this screen."
+      >
+        <Text style={styles.lockIcon} accessibilityElementsHidden>🔒</Text>
         <Text style={styles.title}>Authentication Required</Text>
         <Text style={styles.subtitle}>
           Biometric verification is needed to view this screen.
         </Text>
         <TouchableOpacity
           accessibilityRole="button"
+          accessibilityLabel="Try biometric authentication again"
           style={[styles.button, { backgroundColor: colors.brand.primary }]}
           onPress={requestAuth}
           activeOpacity={0.8}
@@ -205,8 +222,17 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
   // authState === 'granted'
   if (loading || !details) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.brand.primary} />
+      <View
+        style={styles.centered}
+        accessible
+        accessibilityLabel="Loading aid details, please wait"
+        accessibilityLiveRegion="polite"
+      >
+        <ActivityIndicator
+          size="large"
+          color={colors.brand.primary}
+          accessibilityElementsHidden
+        />
         <Text style={styles.subtitle}>Loading aid details...</Text>
       </View>
     );
@@ -217,28 +243,40 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {/* ── Header ─────────────────────────────────────────────────────── */}
       <View style={styles.header}>
-        <Text style={styles.title}>{details.title}</Text>
+        <Text style={styles.title} accessibilityRole="header">
+          {details.title}
+        </Text>
         <Text style={styles.subtitle}>Package ID: {details.id}</Text>
         <Text style={styles.description}>{details.description}</Text>
-        <View style={[styles.statusPill, { backgroundColor: pillStyle.backgroundColor }]}>
+        <View
+          style={[styles.statusPill, { backgroundColor: pillStyle.backgroundColor }]}
+          accessible
+          accessibilityLabel={`Status: ${statusLabel}`}
+        >
           <Text
-            style={[
-              styles.statusText,
-              { color: pillStyle.textColor },
-            ]}
+            style={[styles.statusText, { color: pillStyle.textColor }]}
+            importantForAccessibility="no-hide-descendants"
           >
             {statusLabel}
           </Text>
         </View>
       </View>
 
+      {/* ── Error notice ────────────────────────────────────────────────── */}
       {error ? (
-        <View style={styles.notice}>
+        <View
+          style={styles.notice}
+          accessible
+          accessibilityRole="alert"
+          accessibilityLabel={error}
+        >
           <Text style={styles.noticeText}>{error}</Text>
         </View>
       ) : null}
 
+      {/* ── Sync UI ──────────────────────────────────────────────────────── */}
       {syncMessage ? (
         <View style={styles.syncNotice}>
           <Text style={styles.syncNoticeText}>{syncMessage}</Text>
@@ -265,8 +303,11 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
         </View>
       ) : null}
 
+      {/* ── Recipient ───────────────────────────────────────────────────── */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Recipient</Text>
+        <Text style={styles.sectionTitle} accessibilityRole="header">
+          Recipient
+        </Text>
         <View style={styles.card}>
           <InfoRow label="Name" value={details.recipient.name} colors={colors} />
           <InfoRow label="Recipient ID" value={details.recipient.id} colors={colors} />
@@ -274,8 +315,11 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
         </View>
       </View>
 
+      {/* ── Package Details ─────────────────────────────────────────────── */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Package Details</Text>
+        <Text style={styles.sectionTitle} accessibilityRole="header">
+          Package Details
+        </Text>
         <View style={styles.card}>
           <InfoRow label="Token Type" value={details.tokenType} colors={colors} />
           <InfoRow
@@ -288,16 +332,23 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
         </View>
       </View>
 
+      {/* ── Claim Status ────────────────────────────────────────────────── */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Claim Status</Text>
+        <Text style={styles.sectionTitle} accessibilityRole="header">
+          Claim Status
+        </Text>
         <StepProgress status={details.status} colors={colors} />
         <Text style={styles.statusCaption}>
           Current status: {statusLabel}
         </Text>
       </View>
 
+      {/* ── Refresh Button ──────────────────────────────────────────────── */}
       <TouchableOpacity
         accessibilityRole="button"
+        accessibilityLabel={refreshing ? 'Refreshing status' : 'Refresh status'}
+        accessibilityHint="Fetches the latest aid package status from the server"
+        accessibilityState={{ disabled: refreshing, busy: refreshing }}
         style={[
           styles.button,
           { backgroundColor: colors.brand.primary },
@@ -308,7 +359,11 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
         activeOpacity={0.8}
       >
         {refreshing ? (
-          <ActivityIndicator size="small" color="#FFFFFF" />
+          <ActivityIndicator
+            size="small"
+            color="#FFFFFF"
+            accessibilityElementsHidden
+          />
         ) : (
           <Text style={styles.buttonText}>
             {hasPendingRefresh ? 'Refresh Queued' : 'Refresh Status'}
@@ -337,11 +392,18 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
       </TouchableOpacity>
 
       {lastUpdated ? (
-        <Text style={styles.lastUpdated}>Last updated {formatDateTime(lastUpdated)}</Text>
+        <Text
+          style={styles.lastUpdated}
+          accessibilityLabel={`Last updated ${formatDateTime(lastUpdated)}`}
+        >
+          Last updated {formatDateTime(lastUpdated)}
+        </Text>
       ) : null}
     </ScrollView>
   );
 };
+
+// ── Sub-components ───────────────────────────────────────────────────────────
 
 const InfoRow = ({
   label,
@@ -352,9 +414,23 @@ const InfoRow = ({
   value: string;
   colors: AppColors;
 }) => (
-  <View style={stylesShared.infoRow}>
-    <Text style={[stylesShared.infoLabel, { color: colors.textSecondary }]}>{label}</Text>
-    <Text style={[stylesShared.infoValue, { color: colors.textPrimary }]}>{value}</Text>
+  <View
+    style={stylesShared.infoRow}
+    accessible
+    accessibilityLabel={`${label}: ${value}`}
+  >
+    <Text
+      style={[stylesShared.infoLabel, { color: colors.textSecondary }]}
+      importantForAccessibility="no-hide-descendants"
+    >
+      {label}
+    </Text>
+    <Text
+      style={[stylesShared.infoValue, { color: colors.textPrimary }]}
+      importantForAccessibility="no-hide-descendants"
+    >
+      {value}
+    </Text>
   </View>
 );
 
@@ -373,12 +449,25 @@ const StepProgress = ({
   const activeIndex = steps.findIndex((step) => step.key === status);
 
   return (
-    <View style={stylesShared.progressWrapper}>
+    <View
+      style={stylesShared.progressWrapper}
+      accessible
+      accessibilityLabel={`Claim progress: step ${activeIndex + 1} of ${steps.length}, ${steps[activeIndex]?.label ?? status}`}
+    >
       {steps.map((step, index) => {
         const isComplete = index <= activeIndex;
         const isLast = index === steps.length - 1;
+        const stepLabel = isComplete
+          ? `Step ${index + 1}: ${step.label}, completed`
+          : `Step ${index + 1}: ${step.label}, not yet reached`;
+
         return (
-          <View key={step.key} style={stylesShared.progressItem}>
+          <View
+            key={step.key}
+            style={stylesShared.progressItem}
+            accessible
+            accessibilityLabel={stepLabel}
+          >
             <View
               style={[
                 stylesShared.progressCircle,
@@ -387,6 +476,7 @@ const StepProgress = ({
                   borderColor: isComplete ? colors.brand.primary : colors.border,
                 },
               ]}
+              accessibilityElementsHidden
             >
               <Text
                 style={[
@@ -397,7 +487,10 @@ const StepProgress = ({
                 {index + 1}
               </Text>
             </View>
-            <Text style={[stylesShared.progressLabel, { color: colors.textSecondary }]}>
+            <Text
+              style={[stylesShared.progressLabel, { color: colors.textSecondary }]}
+              accessibilityElementsHidden
+            >
               {step.label}
             </Text>
             {!isLast ? (
@@ -406,6 +499,7 @@ const StepProgress = ({
                   stylesShared.progressLine,
                   { backgroundColor: isComplete ? colors.brand.primary : colors.border },
                 ]}
+                accessibilityElementsHidden
               />
             ) : null}
           </View>
@@ -414,6 +508,8 @@ const StepProgress = ({
     </View>
   );
 };
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 const formatStatus = (status: ClaimStatus) =>
   status.charAt(0).toUpperCase() + status.slice(1);
@@ -450,6 +546,8 @@ const statusPillStyle = (status: ClaimStatus, colors: AppColors) => {
       return { backgroundColor: colors.warningBg, textColor: colors.warning };
   }
 };
+
+// ── Shared styles ─────────────────────────────────────────────────────────────
 
 const stylesShared = StyleSheet.create({
   infoRow: {
@@ -617,6 +715,7 @@ const makeStyles = (colors: AppColors) =>
     button: {
       paddingVertical: 14,
       paddingHorizontal: 32,
+      minHeight: 44,
       borderRadius: 12,
       alignItems: 'center',
     },
