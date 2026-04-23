@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsEnum, IsDateString } from 'class-validator';
 
 export enum TaskStatus {
   PENDING = 'pending',
@@ -16,6 +16,22 @@ export class AiTaskWebhookDto {
   @IsString()
   @IsNotEmpty()
   taskId!: string;
+
+  @ApiProperty({
+    description: 'Unique delivery ID to prevent duplicate processing',
+    example: 'del_12345abcde',
+  })
+  @IsString()
+  @IsNotEmpty()
+  deliveryId!: string;
+
+  @ApiProperty({
+    description: 'Timestamp of the event generation for state ordering',
+    example: '2024-03-24T10:30:00Z',
+  })
+  @IsDateString()
+  @IsNotEmpty()
+  timestamp!: string;
 
   @ApiProperty({
     description: 'Status of the task',
