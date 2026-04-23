@@ -15,27 +15,38 @@ export class CampaignsService {
     return metadata as Prisma.InputJsonValue;
   }
 
-  async create(dto: CreateCampaignDto) {
+  async create(dto: CreateCampaignDto, ngoId?: string | null) {
     return this.prisma.campaign.create({
       data: {
         name: dto.name,
         status: dto.status ?? CampaignStatus.draft,
         budget: dto.budget,
         metadata: this.sanitizeMetadata(dto.metadata),
+        ngoId: ngoId ?? null,
       },
     });
   }
 
-  async findAll(includeArchived = false) {
+  async findAll(includeArchived = false, ngoId?: string | null) {
+    const where: Prisma.CampaignWhereInput = {
+      deletedAt: null,
+      ...(includeArchived ? {} : { archivedAt: null }),
+      ...(ngoId ? { ngoId } : {}),
+    };
+
     return this.prisma.campaign.findMany({
-      where: includeArchived ? undefined : { archivedAt: null },
+      where,
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async findOne(id: string) {
-    const campaign = await this.prisma.campaign.findUnique({ where: { id } });
-    if (!campaign) throw new NotFoundException('Campaign not found');
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id },
+    });
+    if (!campaign || campaign.deletedAt) {
+      throw new NotFoundException('Campaign not found');
+    }
     return campaign;
   }
 
@@ -69,5 +80,14 @@ export class CampaignsService {
     });
 
     return { campaign: updated, alreadyArchived: false };
+  }
+
+  /** Soft-delete a campaign (sets deletedAt). */
+  async softDelete(id: string) {
+    await this.findOne(id);
+    return this.prisma.campaign.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
   }
 }

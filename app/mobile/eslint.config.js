@@ -1,5 +1,9 @@
-import expo from 'eslint-config-expo';
+import { defineConfig } from 'eslint/config';
+import expo from 'eslint-config-expo/flat.js';
 
-export default [
-    ...Array.isArray(expo) ? expo : [expo],
-];
+export default defineConfig([
+  ...expo,
+  {
+    ignores: ['dist/**'],
+  },
+]);

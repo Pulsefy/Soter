@@ -1,8 +1,8 @@
 #![cfg(test)]
 
-use aid_escrow::{AidEscrow, AidEscrowClient, Error, PackageStatus};
+use aid_escrow::{AidEscrow, AidEscrowClient, Config, Error, PackageStatus};
 use soroban_sdk::{
-    Address, Env,
+    Address, Env, Vec,
     testutils::{Address as _, Ledger},
     token::{StellarAssetClient, TokenClient},
 };
@@ -44,6 +44,7 @@ fn test_integration_flow() {
     let expires_at = env.ledger().timestamp() + 86400; // 1 day from now
 
     let returned_id = client.create_package(
+        &admin,
         &pkg_id,
         &recipient,
         &1000,
@@ -99,8 +100,22 @@ fn test_multiple_packages() {
     let id2 = 101;
     let expiry = env.ledger().timestamp() + 86400;
 
-    client.create_package(&id1, &recipient1, &500, &token_client.address, &expiry);
-    client.create_package(&id2, &recipient2, &1000, &token_client.address, &expiry);
+    client.create_package(
+        &admin,
+        &id1,
+        &recipient1,
+        &500,
+        &token_client.address,
+        &expiry,
+    );
+    client.create_package(
+        &admin,
+        &id2,
+        &recipient2,
+        &1000,
+        &token_client.address,
+        &expiry,
+    );
 
     // Verify each package is independent
     let p1 = client.get_package(&id1);
@@ -137,12 +152,20 @@ fn test_error_cases() {
     client.fund(&token_client.address, &admin, &5000);
 
     // Test invalid amount (0)
-    let result = client.try_create_package(&0, &recipient, &0, &token_client.address, &86400);
+    let result =
+        client.try_create_package(&admin, &0, &recipient, &0, &token_client.address, &86400);
     assert_eq!(result, Err(Ok(Error::InvalidAmount)));
 
     // Create valid package first to establish state
     let pkg_id = 1;
-    client.create_package(&pkg_id, &recipient, &1000, &token_client.address, &86400);
+    client.create_package(
+        &admin,
+        &pkg_id,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &86400,
+    );
 
     // Try to claim non-existent package
     let result = client.try_claim(&999);
@@ -152,6 +175,131 @@ fn test_error_cases() {
     let result = client.try_get_package(&999);
     assert_eq!(result, Err(Ok(Error::PackageNotFound)));
 }
+
+#[test]
+fn test_set_get_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let allowed_token_admin = Address::generate(&env);
+    let (allowed_token_client, _) = setup_token(&env, &allowed_token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let mut allowed_tokens = Vec::new(&env);
+    allowed_tokens.push_back(allowed_token_client.address.clone());
+
+    let config = Config {
+        min_amount: 50,
+        max_expires_in: 3600,
+        allowed_tokens,
+    };
+    client.set_config(&config);
+
+    let stored = client.get_config();
+    assert_eq!(stored, config);
+}
+
+#[test]
+fn test_config_constraints_on_create_package() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let allowed_token_admin = Address::generate(&env);
+    let blocked_token_admin = Address::generate(&env);
+    let (allowed_token_client, allowed_token_admin_client) =
+        setup_token(&env, &allowed_token_admin);
+    let (blocked_token_client, _) = setup_token(&env, &blocked_token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    allowed_token_admin_client.mint(&admin, &10_000);
+    client.fund(&allowed_token_client.address, &admin, &5000);
+
+    let mut allowed_tokens = Vec::new(&env);
+    allowed_tokens.push_back(allowed_token_client.address.clone());
+    client.set_config(&Config {
+        min_amount: 100,
+        max_expires_in: 1000,
+        allowed_tokens,
+    });
+
+    let now = env.ledger().timestamp();
+    let too_small = client.try_create_package(
+        &admin,
+        &1,
+        &recipient,
+        &99,
+        &allowed_token_client.address,
+        &(now + 10),
+    );
+    assert_eq!(too_small, Err(Ok(Error::InvalidAmount)));
+
+    let blocked_token = client.try_create_package(
+        &admin,
+        &2,
+        &recipient,
+        &200,
+        &blocked_token_client.address,
+        &(now + 10),
+    );
+    assert_eq!(blocked_token, Err(Ok(Error::InvalidState)));
+
+    let too_far = client.try_create_package(
+        &admin,
+        &3,
+        &recipient,
+        &200,
+        &allowed_token_client.address,
+        &(now + 2000),
+    );
+    assert_eq!(too_far, Err(Ok(Error::InvalidState)));
+}
+
+#[test]
+fn test_config_constraints_on_extend_expiration() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &10_000);
+    client.fund(&token_client.address, &admin, &5000);
+
+    client.set_config(&Config {
+        min_amount: 1,
+        max_expires_in: 1000,
+        allowed_tokens: Vec::new(&env),
+    });
+
+    let now = env.ledger().timestamp();
+    let pkg_id = 1;
+    client.create_package(
+        &admin,
+        &pkg_id,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &(now + 500),
+    );
+
+    let result = client.try_extend_expiration(&pkg_id, &700);
+    assert_eq!(result, Err(Ok(Error::InvalidState)));
+}
+
 #[test]
 fn test_extend_expiration_success() {
     let env = Env::default();
@@ -173,6 +321,7 @@ fn test_extend_expiration_success() {
     let pkg_id = 1;
     let initial_expiry = env.ledger().timestamp() + 1000;
     client.create_package(
+        &admin,
         &pkg_id,
         &recipient,
         &1000,
@@ -236,7 +385,14 @@ fn test_extend_expiration_claimed_package() {
     // Create and claim package
     let pkg_id = 1;
     let expiry = env.ledger().timestamp() + 1000;
-    client.create_package(&pkg_id, &recipient, &1000, &token_client.address, &expiry);
+    client.create_package(
+        &admin,
+        &pkg_id,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &expiry,
+    );
     client.claim(&pkg_id);
 
     // Try to extend claimed package
@@ -266,7 +422,14 @@ fn test_extend_expiration_expired_package() {
     env.ledger().set_timestamp(start_time);
     let pkg_id = 1;
     let expiry = start_time + 100;
-    client.create_package(&pkg_id, &recipient, &1000, &token_client.address, &expiry);
+    client.create_package(
+        &admin,
+        &pkg_id,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &expiry,
+    );
 
     env.ledger().set_timestamp(expiry + 1);
 
@@ -295,7 +458,14 @@ fn test_extend_expiration_zero_additional_time() {
     // Create package
     let pkg_id = 1;
     let expiry = env.ledger().timestamp() + 1000;
-    client.create_package(&pkg_id, &recipient, &1000, &token_client.address, &expiry);
+    client.create_package(
+        &admin,
+        &pkg_id,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &expiry,
+    );
 
     // Try to extend with zero additional time
     let result = client.try_extend_expiration(&pkg_id, &0);
@@ -321,7 +491,14 @@ fn test_extend_expiration_unbounded_package() {
 
     // Create package with unbounded expiration (expires_at = 0)
     let pkg_id = 1;
-    client.create_package(&pkg_id, &recipient, &1000, &token_client.address, &0);
+    client.create_package(
+        &admin,
+        &pkg_id,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &0,
+    );
 
     // Try to extend unbounded package
     let result = client.try_extend_expiration(&pkg_id, &500);
@@ -349,6 +526,7 @@ fn test_extend_expiration_multiple_extends() {
     let pkg_id = 1;
     let initial_expiry = env.ledger().timestamp() + 1000;
     client.create_package(
+        &admin,
         &pkg_id,
         &recipient,
         &1000,
@@ -390,7 +568,14 @@ fn test_extend_expiration_cancelled_package() {
     // Create and cancel package
     let pkg_id = 1;
     let expiry = env.ledger().timestamp() + 1000;
-    client.create_package(&pkg_id, &recipient, &1000, &token_client.address, &expiry);
+    client.create_package(
+        &admin,
+        &pkg_id,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &expiry,
+    );
     client.cancel_package(&pkg_id);
 
     // Try to extend cancelled package

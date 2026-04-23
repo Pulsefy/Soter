@@ -108,18 +108,25 @@ When new versions are released:
 - Clients should monitor the API documentation for version updates`,
     )
     .setVersion('1.0')
-    .addTag('health', 'Health check endpoints (v1)')
-    .addTag('aid', 'Aid request management (v1)')
-    .addTag('verification', 'Identity and document verification (v1)')
-    .addTag('app', 'Application root endpoints (v1)')
     .addBearerAuth(
       {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'JWT',
+        name: 'Authorization',
+        in: 'header',
         description: 'Enter JWT token',
       },
       'JWT-auth',
+    )
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'x-api-key',
+        in: 'header',
+        description: 'API key for external access',
+      },
+      'api-key',
     )
     .addServer('http://localhost:3000/api/v1', 'Local Development (v1)')
     .addServer('https://api.pulsefy.dev/api/v1', 'Staging (v1)')
@@ -136,6 +143,8 @@ When new versions are released:
       docExpansion: 'none',
       filter: true,
       showRequestDuration: true,
+      tagsSorter: 'alpha',
+      operationsSorter: 'alpha',
     },
   });
 

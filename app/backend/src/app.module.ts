@@ -14,6 +14,8 @@ import { VerificationModule } from './verification/verification.module';
 import { TestErrorModule } from './test-error/test-error.module';
 import { LoggerModule } from './logger/logger.module';
 import { AuditModule } from './audit/audit.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { JobsModule } from './jobs/jobs.module';
 import { RequestCorrelationMiddleware } from './middleware/request-correlation.middleware';
 import {
   SecurityModule,
@@ -28,6 +30,9 @@ import { ClaimsModule } from './claims/claims.module';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { LoggerService } from './logger/logger.service';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { AidEscrowModule } from './onchain/aid-escrow.module';
 
 @Module({
   imports: [
@@ -67,7 +72,18 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
     CampaignsModule,
     ObservabilityModule,
     ClaimsModule,
+    NotificationsModule,
+    JobsModule,
+    AnalyticsModule,
+    AidEscrowModule,
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,       // 60 seconds window
+        limit: 20,     // default: 20 req/min
+      },
+    ]),
   ],
+  
 
   controllers: [AppController],
   providers: [
@@ -87,6 +103,10 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
+    },
+     {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard, // rate-limiting guard runs after auth and role checks to avoid unnecessary counting of unauthenticated/unauthorized requests
     },
   ],
 })

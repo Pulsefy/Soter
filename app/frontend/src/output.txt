@@ -1,0 +1,35 @@
+C:\Users\USER\OneDrive\Desktop\Open Source Projects\Soter\app\frontend\src
+├── app
+|  ├── api
+|  ├── dashboard
+|  ├── favicon.ico
+|  ├── globals.css
+|  ├── layout.tsx
+|  └── page.tsx
+├── components
+|  ├── AidPackageList.tsx
+|  ├── dashboard
+|  ├── EnvironmentIndicator.tsx
+|  ├── HealthBadge.tsx
+|  ├── Navbar.tsx
+|  ├── ToastProvider.tsx
+|  ├── VerificationFlow.tsx
+|  ├── WalletConnect.tsx
+|  └── __tests__
+├── hooks
+|  ├── useAidPackages.ts
+|  └── useHealthStatus.ts
+├── lib
+|  ├── env.ts
+|  ├── mock-api
+|  ├── query-provider.tsx
+|  ├── stellarUtils.ts
+|  ├── verification-api.ts
+|  └── walletStore.ts
+└── types
+   ├── aid-package.ts
+   ├── health.ts
+   └── verification.ts
+
+directory: 10 file: 21
+

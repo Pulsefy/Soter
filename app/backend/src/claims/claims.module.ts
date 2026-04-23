@@ -7,6 +7,7 @@ import { OnchainModule } from '../onchain/onchain.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
 import { LoggerModule } from '../logger/logger.module';
 import { AuditModule } from '../audit/audit.module';
+import { EncryptionModule } from '../common/encryption/encryption.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { AuditModule } from '../audit/audit.module';
     MetricsModule,
     LoggerModule,
     AuditModule,
+    EncryptionModule,
   ],
   controllers: [ClaimsController],
   providers: [ClaimsService, ArtifactService],

@@ -74,6 +74,7 @@ Soter uses a monorepo under the `app` parent folder for streamlined development:
 ### Prerequisites
 
 - Node.js ≥ 18
+- pnpm ≥ 9 (Required)
 - Rust (for Soroban contracts)
 - Stellar wallet (e.g., Freighter for testing)
 - PostgreSQL (local or Supabase)

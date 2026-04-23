@@ -13,6 +13,8 @@ import {
 } from './dto/start-verification.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompleteVerificationDto } from './dto/complete-verification.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import { EncryptionService } from '../common/encryption/encryption.service';
 
 const DEFAULT_CODE_LENGTH = 6;
 const DEFAULT_TTL_MINUTES = 10;
@@ -32,6 +34,8 @@ export class VerificationFlowService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly notificationsService: NotificationsService,
+    private readonly encryptionService: EncryptionService,
   ) {
     this.codeLength =
       this.configService.get<number>('VERIFICATION_OTP_LENGTH') ??
@@ -65,9 +69,11 @@ export class VerificationFlowService {
     }
 
     const since = new Date(Date.now() - 60 * 60 * 1000);
+    const encryptedIdentifier =
+      this.encryptionService.encryptDeterministic(identifier);
     const recentCount = await this.prisma.verificationSession.count({
       where: {
-        identifier,
+        identifier: encryptedIdentifier,
         createdAt: { gte: since },
       },
     });
@@ -86,13 +92,13 @@ export class VerificationFlowService {
     const session = await this.prisma.verificationSession.create({
       data: {
         channel: dto.channel as VerificationChannel,
-        identifier,
-        code,
+        identifier: encryptedIdentifier,
+        code: this.encryptionService.encrypt(code),
         expiresAt,
       },
     });
 
-    this.sendCode(dto.channel, identifier, code);
+    await this.sendCode(dto.channel, identifier, code);
 
     this.logger.log(
       `Verification session started: ${session.id} for ${dto.channel}:${identifier}`,
@@ -144,13 +150,21 @@ export class VerificationFlowService {
     await this.prisma.verificationSession.update({
       where: { id: session.id },
       data: {
-        code,
+        code: this.encryptionService.encrypt(code),
         resendCount: session.resendCount + 1,
         expiresAt,
       },
     });
 
-    this.sendCode(session.channel, session.identifier, code);
+    const decryptedIdentifier = this.encryptionService.decryptDeterministic(
+      session.identifier,
+    );
+
+    await this.sendCode(
+      session.channel as unknown as VerificationChannelDto,
+      decryptedIdentifier,
+      code,
+    );
 
     this.logger.log(`Verification code resent for session ${session.id}`);
 
@@ -193,7 +207,8 @@ export class VerificationFlowService {
       );
     }
 
-    if (session.code !== dto.code) {
+    const storedCode = this.encryptionService.decrypt(session.code);
+    if (storedCode !== dto.code) {
       await this.prisma.verificationSession.update({
         where: { id: session.id },
         data: { attempts: session.attempts + 1 },
@@ -232,10 +247,21 @@ export class VerificationFlowService {
     return String(code);
   }
 
-  private sendCode(channel: string, identifier: string, code: string): void {
-    // Mock: in production, integrate with email/SMS provider
-    this.logger.debug(
-      `[Mock] Sending ${channel} verification code to ${identifier}: ${code}`,
-    );
+  private async sendCode(
+    channel: VerificationChannelDto,
+    identifier: string,
+    code: string,
+  ): Promise<void> {
+    const message = `Your verification code is: ${code}`;
+
+    if (channel === VerificationChannelDto.email) {
+      await this.notificationsService.sendEmail(
+        identifier,
+        'Verification Code',
+        message,
+      );
+    } else if (channel === VerificationChannelDto.phone) {
+      await this.notificationsService.sendSms(identifier, message);
+    }
   }
 }

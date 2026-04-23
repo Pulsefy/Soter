@@ -31,6 +31,20 @@ pnpm --filter backend prisma:generate
 pnpm --filter backend prisma:migrate
 ```
 
+3. Seed demo data for local testing:
+
+```bash
+pnpm --filter backend prisma:seed
+```
+
+This creates:
+- 3 roles (admin, ngo, user)
+- 4 development API keys for testing different app roles
+- 2 demo campaigns (Emergency Relief Fund and Community Health Program)
+- 4 demo claims (2 per campaign with different statuses)
+
+Perfect for local testing and e2e runs without manual setup.
+
 Notes for tests
 
 - The backend includes e2e tests that exercise the verification flow and verify

@@ -3,8 +3,8 @@ import { IsString, IsNotEmpty, Length, Matches } from 'class-validator';
 
 export class CompleteVerificationDto {
   @ApiProperty({
-    description: 'Verification session ID',
-    example: 'clv789xyz123',
+    description: 'Unique identifier for the current verification session.',
+    example: 'ses_123abc456def',
   })
   @IsString()
   @IsNotEmpty()

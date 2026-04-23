@@ -19,7 +19,10 @@ export class CreateVerificationDto {
   @IsNotEmpty()
   documentType!: string;
 
-  @ApiPropertyOptional({ description: 'Optional submission timestamp' })
+  @ApiPropertyOptional({
+    description: 'Timestamp when the verification request was submitted.',
+    example: '2025-01-23T11:00:00.000Z',
+  })
   @IsOptional()
   @Type(() => Date)
   @IsDate()

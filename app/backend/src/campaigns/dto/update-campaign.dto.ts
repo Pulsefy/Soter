@@ -12,13 +12,20 @@ import {
 import { Type } from 'class-transformer';
 
 export class UpdateCampaignDto {
-  @ApiPropertyOptional({ example: 'Winter Relief 2026' })
+  @ApiPropertyOptional({
+    description: 'Updated campaign title/name.',
+    example: 'Winter Relief 2026 - Extended',
+  })
   @IsOptional()
   @IsString()
   @IsNotEmpty()
   name?: string;
 
-  @ApiPropertyOptional({ example: 25000.5, minimum: 0 })
+  @ApiPropertyOptional({
+    description: 'Updated campaign budget.',
+    example: 30000.0,
+    minimum: 0,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -26,14 +33,19 @@ export class UpdateCampaignDto {
   budget?: number;
 
   @ApiPropertyOptional({
-    example: { region: 'Lagos', partner: 'NGO-A' },
-    description: 'Arbitrary JSON object; must be an object (not array/string).',
+    description: 'Updated campaign metadata.',
+    example: { region: 'Lagos', partner: 'NGO-B' },
   })
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
 
-  @ApiPropertyOptional({ enum: CampaignStatus })
+  @ApiPropertyOptional({
+    description: 'Updated campaign status.',
+    enum: CampaignStatus,
+    enumName: 'CampaignStatus',
+    example: CampaignStatus.active,
+  })
   @IsOptional()
   @IsEnum(CampaignStatus)
   status?: CampaignStatus;

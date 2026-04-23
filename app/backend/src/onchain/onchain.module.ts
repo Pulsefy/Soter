@@ -1,9 +1,12 @@
 import { Module, Provider } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { OnchainAdapter } from './onchain.adapter';
+import { BullModule } from '@nestjs/bullmq';
+import { OnchainAdapter, ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
+export { ONCHAIN_ADAPTER_TOKEN };
 import { MockOnchainAdapter } from './onchain.adapter.mock';
-
-export const ONCHAIN_ADAPTER_TOKEN = 'ONCHAIN_ADAPTER';
+import { SorobanAdapter } from './soroban.adapter';
+import { OnchainProcessor } from './onchain.processor';
+import { OnchainService } from './onchain.service';
 
 /**
  * Factory function to create the appropriate adapter based on configuration
@@ -18,10 +21,7 @@ export const createOnchainAdapter = (
     case 'mock':
       return new MockOnchainAdapter();
     case 'soroban':
-      // TODO: Implement SorobanOnchainAdapter when ready
-      throw new Error(
-        'Soroban adapter not yet implemented. Use ONCHAIN_ADAPTER=mock',
-      );
+      return new SorobanAdapter(configService);
     default:
       throw new Error(
         `Unknown ONCHAIN_ADAPTER: ${adapterType}. Supported values: mock, soroban`,
@@ -36,8 +36,27 @@ const onchainAdapterProvider: Provider = {
 };
 
 @Module({
-  imports: [ConfigModule],
-  providers: [MockOnchainAdapter, onchainAdapterProvider],
-  exports: [ONCHAIN_ADAPTER_TOKEN],
+  imports: [
+    ConfigModule,
+    BullModule.registerQueueAsync({
+      name: 'onchain',
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get<string>('REDIS_HOST') || 'localhost',
+          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+        },
+      }),
+      inject: [ConfigService],
+    }),
+  ],
+  providers: [
+    MockOnchainAdapter,
+    SorobanAdapter,
+    onchainAdapterProvider,
+    OnchainProcessor,
+    OnchainService,
+  ],
+  exports: [ONCHAIN_ADAPTER_TOKEN, OnchainService],
 })
 export class OnchainModule {}

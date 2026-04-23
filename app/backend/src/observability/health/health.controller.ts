@@ -5,8 +5,15 @@ import {
   TypeOrmHealthIndicator,
   MemoryHealthIndicator,
 } from '@nestjs/terminus';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiOkResponse,
+  ApiServiceUnavailableResponse,
+} from '@nestjs/swagger';
 import { HealthService } from './health.service';
 
+@ApiTags('Observability')
 @Controller('health')
 export class HealthController {
   private readonly startTime: Date;
@@ -22,6 +29,15 @@ export class HealthController {
 
   @Get()
   @HealthCheck()
+  @ApiOperation({
+    summary: 'Detailed health check',
+    description:
+      'Performs connectivity checks for database, redis, queues and memory usage.',
+  })
+  @ApiOkResponse({ description: 'All systems operational.' })
+  @ApiServiceUnavailableResponse({
+    description: 'One or more systems are failing health checks.',
+  })
   async check() {
     const uptime = this.getUptime();
     const version = process.env.APP_VERSION || '1.0.0';

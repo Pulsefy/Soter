@@ -3,9 +3,14 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { VerificationFlowService } from './verification-flow.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { StartVerificationDto } from './dto/start-verification.dto';
+import {
+  StartVerificationDto,
+  VerificationChannelDto,
+} from './dto/start-verification.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompleteVerificationDto } from './dto/complete-verification.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import { EncryptionService } from '../common/encryption/encryption.service';
 
 describe('VerificationFlowService', () => {
   let service: VerificationFlowService;
@@ -67,6 +72,22 @@ describe('VerificationFlowService', () => {
             }),
           },
         },
+        {
+          provide: NotificationsService,
+          useValue: {
+            sendEmail: jest.fn().mockResolvedValue({ id: 'job-email' }),
+            sendSms: jest.fn().mockResolvedValue({ id: 'job-sms' }),
+          },
+        },
+        {
+          provide: EncryptionService,
+          useValue: {
+            encrypt: jest.fn((v: string) => v),
+            decrypt: jest.fn((v: string) => v),
+            encryptDeterministic: jest.fn((v: string) => v),
+            decryptDeterministic: jest.fn((v: string) => v),
+          },
+        },
       ],
     }).compile();
 
@@ -80,7 +101,7 @@ describe('VerificationFlowService', () => {
   describe('start', () => {
     it('should start a verification session for email', async () => {
       const dto: StartVerificationDto = {
-        channel: 'email',
+        channel: VerificationChannelDto.email,
         email: 'user@example.com',
       };
 
@@ -108,7 +129,7 @@ describe('VerificationFlowService', () => {
 
     it('should start a verification session for phone', async () => {
       const dto: StartVerificationDto = {
-        channel: 'phone',
+        channel: VerificationChannelDto.phone,
         phone: '+15551234567',
       };
 
@@ -138,7 +159,7 @@ describe('VerificationFlowService', () => {
       prisma.verificationSession.count.mockResolvedValue(5);
 
       const dto: StartVerificationDto = {
-        channel: 'email',
+        channel: VerificationChannelDto.email,
         email: 'user@example.com',
       };
 

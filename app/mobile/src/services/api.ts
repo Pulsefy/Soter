@@ -29,3 +29,25 @@ export const fetchHealthStatus = async (): Promise<HealthStatus> => {
     throw error;
   }
 };
+
+export interface AidPackage {
+  id: string;
+  title: string;
+  amount: number;
+  status: string;
+  date: string;
+}
+
+export const getAidPackages = async (): Promise<AidPackage[]> => {
+  try {
+    const response = await fetch(`${API_URL}/aid`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Failed to fetch aid packages:', error);
+    throw error;
+  }
+};

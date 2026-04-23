@@ -11,6 +11,19 @@ describe('CampaignsService', () => {
 
   const now = new Date('2026-01-25T00:00:00.000Z');
 
+  const baseCampaign: Campaign = {
+    id: 'c1',
+    name: 'Winter Relief 2026',
+    status: CampaignStatus.draft,
+    budget: new Prisma.Decimal('1000.00'),
+    metadata: { region: 'Lagos' } as Prisma.JsonValue,
+    ngoId: null,
+    archivedAt: null,
+    deletedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     prismaMock = mockDeep<PrismaService>();
@@ -26,18 +39,7 @@ describe('CampaignsService', () => {
   });
 
   it('create(): creates a campaign with Decimal budget', async () => {
-    const mockCreated: Campaign = {
-      id: 'c1',
-      name: 'Winter Relief 2026',
-      status: CampaignStatus.draft,
-      budget: new Prisma.Decimal('1000.00'),
-      metadata: { region: 'Lagos' } as Prisma.JsonValue,
-      archivedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    prismaMock.campaign.create.mockResolvedValue(mockCreated);
+    prismaMock.campaign.create.mockResolvedValue(baseCampaign);
 
     const created = await service.create({
       name: 'Winter Relief 2026',
@@ -46,7 +48,6 @@ describe('CampaignsService', () => {
       status: CampaignStatus.draft,
     });
 
-    // Avoid @typescript-eslint/unbound-method: inspect calls instead of asserting on method ref
     const createArgs = prismaMock.campaign.create.mock.calls[0]?.[0];
     expect(createArgs).toEqual(
       expect.objectContaining({
@@ -58,21 +59,37 @@ describe('CampaignsService', () => {
       }),
     );
 
-    expect(created).toEqual(mockCreated);
-    expect(created.id).toBe('c1');
+    expect(created).toEqual(baseCampaign);
   });
 
-  it('findAll(): excludes archived campaigns by default', async () => {
+  it('create(): attaches ngoId when provided', async () => {
+    prismaMock.campaign.create.mockResolvedValue({
+      ...baseCampaign,
+      ngoId: 'ngo-1',
+    });
+
+    await service.create({ name: 'Test', budget: 100 }, 'ngo-1');
+
+    const createArgs = prismaMock.campaign.create.mock.calls[0]?.[0];
+    expect(createArgs?.data).toMatchObject({ ngoId: 'ngo-1' });
+  });
+
+  it('findAll(): excludes archived and deleted campaigns by default', async () => {
     prismaMock.campaign.findMany.mockResolvedValue([]);
 
     await service.findAll(false);
 
     const args = prismaMock.campaign.findMany.mock.calls[0]?.[0];
-    expect(args).toEqual(
-      expect.objectContaining({
-        where: { archivedAt: null },
-      }),
-    );
+    expect(args?.where).toMatchObject({ archivedAt: null, deletedAt: null });
+  });
+
+  it('findAll(): scopes by ngoId when provided', async () => {
+    prismaMock.campaign.findMany.mockResolvedValue([]);
+
+    await service.findAll(false, 'ngo-42');
+
+    const args = prismaMock.campaign.findMany.mock.calls[0]?.[0];
+    expect(args?.where).toMatchObject({ ngoId: 'ngo-42' });
   });
 
   it('findAll(true): includes archived campaigns', async () => {
@@ -81,11 +98,7 @@ describe('CampaignsService', () => {
     await service.findAll(true);
 
     const args = prismaMock.campaign.findMany.mock.calls[0]?.[0];
-    expect(args).toEqual(
-      expect.objectContaining({
-        where: undefined,
-      }),
-    );
+    expect(args?.where).not.toHaveProperty('archivedAt');
   });
 
   it('findOne(): throws NotFoundException when missing', async () => {
@@ -94,12 +107,16 @@ describe('CampaignsService', () => {
     await expect(service.findOne('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
 
-    const args = prismaMock.campaign.findUnique.mock.calls[0]?.[0];
-    expect(args).toEqual(
-      expect.objectContaining({
-        where: { id: 'missing' },
-      }),
+  it('findOne(): throws NotFoundException when soft-deleted', async () => {
+    prismaMock.campaign.findUnique.mockResolvedValue({
+      ...baseCampaign,
+      deletedAt: now,
+    });
+
+    await expect(service.findOne('c1')).rejects.toBeInstanceOf(
+      NotFoundException,
     );
   });
 
@@ -113,30 +130,30 @@ describe('CampaignsService', () => {
     expect(prismaMock.campaign.update.mock.calls.length).toBe(0);
   });
 
-  it('archive(): idempotent when already archived (does not call update)', async () => {
-    const alreadyArchived: Campaign = {
-      id: 'c1',
-      name: 'A',
+  it('archive(): idempotent when already archived', async () => {
+    prismaMock.campaign.findUnique.mockResolvedValue({
+      ...baseCampaign,
       status: CampaignStatus.archived,
-      budget: new Prisma.Decimal('10.00'),
-      metadata: null,
       archivedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    prismaMock.campaign.findUnique.mockResolvedValue(alreadyArchived);
+    });
 
     const result = await service.archive('c1');
 
     expect(result.alreadyArchived).toBe(true);
     expect(prismaMock.campaign.update.mock.calls.length).toBe(0);
+  });
 
-    const args = prismaMock.campaign.findUnique.mock.calls[0]?.[0];
-    expect(args).toEqual(
-      expect.objectContaining({
-        where: { id: 'c1' },
-      }),
-    );
+  it('softDelete(): sets deletedAt on the campaign', async () => {
+    prismaMock.campaign.findUnique.mockResolvedValue(baseCampaign);
+    prismaMock.campaign.update.mockResolvedValue({
+      ...baseCampaign,
+      deletedAt: now,
+    });
+
+    const result = await service.softDelete('c1');
+
+    const updateArgs = prismaMock.campaign.update.mock.calls[0]?.[0];
+    expect(updateArgs?.data).toMatchObject({ deletedAt: expect.any(Date) });
+    expect(result.deletedAt).not.toBeNull();
   });
 });

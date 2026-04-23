@@ -29,6 +29,13 @@ export async function fetchClient(
       await new Promise((resolve) => setTimeout(resolve, 500));
       return handler(urlString, init);
     }
+
+    // Support dynamic campaign endpoints like /campaigns/:id
+    if (pathWithoutQuery.startsWith('/campaigns/') && handlers['/campaigns/:id']) {
+      console.log(`[Mock API] Intercepting dynamic campaign request to: ${urlString}`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return handlers['/campaigns/:id'](urlString, init);
+    }
   }
 
   // Fallback to real fetch

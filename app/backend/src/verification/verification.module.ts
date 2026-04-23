@@ -1,18 +1,24 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { HttpModule } from '@nestjs/axios';
 import { VerificationController } from './verification.controller';
 import { VerificationService } from './verification.service';
 import { VerificationFlowService } from './verification-flow.service';
 import { VerificationProcessor } from './verification.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuditModule } from '../audit/audit.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { EncryptionModule } from '../common/encryption/encryption.module';
 
 @Module({
   imports: [
     ConfigModule,
+    HttpModule,
     PrismaModule,
     AuditModule,
+    NotificationsModule,
+    EncryptionModule,
     BullModule.registerQueueAsync({
       name: 'verification',
       imports: [ConfigModule],

@@ -9,12 +9,20 @@ export class CreateAidDto {
   @IsNotEmpty()
   campaignId!: string;
 
-  @ApiPropertyOptional({ example: 'Immediate food relief' })
+  @ApiPropertyOptional({
+    description: 'Human-readable title for the aid packet.',
+    example: 'Immediate food relief',
+  })
   @IsOptional()
   @IsString()
   title?: string;
 
-  @ApiPropertyOptional({ example: 1000 })
+  @ApiProperty({
+    description: 'Amount requested in the aid packet.',
+    example: 1000,
+    minimum: 0,
+    required: false,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

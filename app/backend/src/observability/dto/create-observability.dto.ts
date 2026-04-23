@@ -10,7 +10,10 @@ export class CreateObservabilityDto {
   @IsNotEmpty()
   name!: string;
 
-  @ApiPropertyOptional({ description: 'Payload for the observability event' })
+  @ApiPropertyOptional({
+    description: 'Arbitrary payload data associated with the event.',
+    example: { durationMs: 150, endpoint: '/api/v1/verify' },
+  })
   @IsOptional()
   @IsObject()
   payload?: Record<string, unknown>;

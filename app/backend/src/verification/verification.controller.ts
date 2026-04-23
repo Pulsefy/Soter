@@ -11,11 +11,16 @@ import {
 import {
   ApiTags,
   ApiOperation,
-  ApiResponse,
   ApiParam,
   ApiBearerAuth,
   ApiConsumes,
   ApiSecurity,
+  ApiOkResponse,
+  ApiCreatedResponse,
+  ApiAcceptedResponse,
+  ApiBadRequestResponse,
+  ApiUnauthorizedResponse,
+  ApiNotFoundResponse,
 } from '@nestjs/swagger';
 import { VerificationService } from './verification.service';
 import { VerificationFlowService } from './verification-flow.service';
@@ -25,7 +30,7 @@ import { StartVerificationDto } from './dto/start-verification.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompleteVerificationDto } from './dto/complete-verification.dto';
 
-@ApiTags('verification')
+@ApiTags('Verification')
 @ApiSecurity('x-api-key')
 @Controller('verification')
 export class VerificationController {
@@ -47,9 +52,8 @@ export class VerificationController {
     description: 'Unique identifier of the claim to verify',
     example: 'clv789xyz123',
   })
-  @ApiResponse({
-    status: HttpStatus.ACCEPTED,
-    description: 'Verification job enqueued successfully',
+  @ApiAcceptedResponse({
+    description: 'Verification job enqueued successfully.',
     schema: {
       example: {
         jobId: '12345',
@@ -59,9 +63,14 @@ export class VerificationController {
       },
     },
   })
-  @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
-    description: 'Claim not found',
+  @ApiNotFoundResponse({
+    description: 'The requested claim could not be found.',
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid claim ID or malformed request.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Invalid or missing API key.',
   })
   async enqueueVerification(@Param('id') id: string) {
     const { jobId } = await this.verificationService.enqueueVerification(id);
@@ -80,9 +89,8 @@ export class VerificationController {
     description:
       'Retrieve current queue statistics including waiting, active, completed, and failed job counts',
   })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Queue metrics retrieved successfully',
+  @ApiOkResponse({
+    description: 'Queue metrics retrieved successfully.',
     schema: {
       example: {
         waiting: 5,
@@ -92,6 +100,9 @@ export class VerificationController {
         total: 160,
       },
     },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Invalid or missing API key.',
   })
   async getMetrics() {
     return this.verificationService.getQueueMetrics();
@@ -105,21 +116,38 @@ export class VerificationController {
     description:
       'Start a verification session. Sends an OTP to the given email or phone. Rate-limited per identifier.',
   })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Verification started; code sent to channel',
-    schema: {
-      example: {
-        sessionId: 'clv789xyz123',
-        channel: 'email',
-        expiresAt: '2025-02-19T12:10:00.000Z',
-        message: 'Verification code sent to email. Code expires in 10 minutes.',
+  @ApiOkResponse({
+    description: 'Verification started; code sent to channel.',
+    content: {
+      'application/json': {
+        examples: {
+          email: {
+            summary: 'Email verification started',
+            value: {
+              sessionId: 'ses_email_123',
+              channel: 'email',
+              expiresAt: '2025-02-19T12:10:00.000Z',
+              message:
+                'Verification code sent to email. Code expires in 10 minutes.',
+            },
+          },
+          phone: {
+            summary: 'Phone verification started',
+            value: {
+              sessionId: 'ses_phone_456',
+              channel: 'phone',
+              expiresAt: '2025-02-19T12:10:00.000Z',
+              message:
+                'Verification code sent to phone. Code expires in 10 minutes.',
+            },
+          },
+        },
       },
     },
   })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Invalid input or rate limit exceeded',
+  @ApiBadRequestResponse({
+    description:
+      'Invalid input parameters or rate limit exceeded for this identifier.',
   })
   async startVerification(@Body() dto: StartVerificationDto) {
     return this.verificationFlowService.start(dto);
@@ -133,9 +161,8 @@ export class VerificationController {
     description:
       'Resend OTP for an existing pending session. Limited resends per session.',
   })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'New code sent',
+  @ApiOkResponse({
+    description: 'New verification code sent successfully.',
     schema: {
       example: {
         sessionId: 'clv789xyz123',
@@ -144,13 +171,12 @@ export class VerificationController {
       },
     },
   })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Session inactive, expired, or resend limit exceeded',
+  @ApiBadRequestResponse({
+    description:
+      'Session is inactive, expired, or resend limit has been reached.',
   })
-  @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
-    description: 'Verification session not found',
+  @ApiNotFoundResponse({
+    description: 'The specified verification session was not found.',
   })
   async resendVerification(@Body() dto: ResendVerificationDto) {
     return this.verificationFlowService.resend(dto);
@@ -164,9 +190,8 @@ export class VerificationController {
     description:
       'Submit the OTP code to complete the verification. Attempts are rate-limited per session.',
   })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Verification completed successfully',
+  @ApiOkResponse({
+    description: 'Verification completed successfully.',
     schema: {
       example: {
         sessionId: 'clv789xyz123',
@@ -175,13 +200,11 @@ export class VerificationController {
       },
     },
   })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Invalid code, session expired, or too many attempts',
+  @ApiBadRequestResponse({
+    description: 'Invalid code, session expired, or too many failed attempts.',
   })
-  @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
-    description: 'Verification session not found',
+  @ApiNotFoundResponse({
+    description: 'The specified verification session was not found.',
   })
   async completeVerification(@Body() dto: CompleteVerificationDto) {
     return this.verificationFlowService.complete(dto);
@@ -195,9 +218,8 @@ export class VerificationController {
       'Submit identity documents and information for verification. Supports document uploads and biometric data. Part of v1 API.',
   })
   @ApiConsumes('application/json', 'multipart/form-data')
-  @ApiResponse({
-    status: HttpStatus.CREATED,
-    description: 'Verification request submitted successfully',
+  @ApiCreatedResponse({
+    description: 'Verification request submitted successfully.',
     schema: {
       example: {
         id: 'clv789xyz123',
@@ -209,13 +231,11 @@ export class VerificationController {
       },
     },
   })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Invalid verification data or document format',
+  @ApiBadRequestResponse({
+    description: 'Invalid verification data or unsupported document format.',
   })
-  @ApiResponse({
-    status: HttpStatus.UNAUTHORIZED,
-    description: 'Authentication required',
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid authentication credentials.',
   })
   create(@Body() createVerificationDto: CreateVerificationDto) {
     return this.verificationService.create(createVerificationDto);
@@ -234,9 +254,8 @@ export class VerificationController {
     description: 'Unique identifier of the claim',
     example: 'clv789xyz123',
   })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Claim verification status retrieved successfully',
+  @ApiOkResponse({
+    description: 'Claim verification status retrieved successfully.',
     schema: {
       example: {
         id: 'clv789xyz123',
@@ -258,13 +277,11 @@ export class VerificationController {
       },
     },
   })
-  @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
-    description: 'Claim not found',
+  @ApiNotFoundResponse({
+    description: 'The specified claim could not be found.',
   })
-  @ApiResponse({
-    status: HttpStatus.UNAUTHORIZED,
-    description: 'Unauthorized - authentication required',
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
   })
   findClaim(@Param('id') id: string) {
     return this.verificationService.findOne(id);
@@ -283,9 +300,8 @@ export class VerificationController {
     description: 'Unique identifier of the verification request',
     example: 'clv789xyz123',
   })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Verification status retrieved successfully',
+  @ApiOkResponse({
+    description: 'Verification status retrieved successfully.',
     schema: {
       example: {
         id: 'clv789xyz123',
@@ -299,13 +315,11 @@ export class VerificationController {
       },
     },
   })
-  @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
-    description: 'Verification request not found',
+  @ApiNotFoundResponse({
+    description: 'The specified verification request was not found.',
   })
-  @ApiResponse({
-    status: HttpStatus.UNAUTHORIZED,
-    description: 'Unauthorized - authentication required',
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
   })
   findOne(@Param('id') id: string) {
     return this.verificationService.findOne(id);
@@ -324,9 +338,8 @@ export class VerificationController {
     description: 'Unique identifier of the user',
     example: 'clu456def789',
   })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'User verification history retrieved successfully',
+  @ApiOkResponse({
+    description: 'User verification history retrieved successfully.',
     schema: {
       example: [
         {
@@ -339,9 +352,8 @@ export class VerificationController {
       ],
     },
   })
-  @ApiResponse({
-    status: HttpStatus.UNAUTHORIZED,
-    description: 'Unauthorized - authentication required',
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
   })
   findByUser(@Param('userId') userId: string) {
     return this.verificationService.findByUser(userId);
@@ -357,6 +369,12 @@ export class VerificationController {
   @ApiParam({
     name: 'id',
     description: 'Unique identifier of the verification request',
+  })
+  @ApiOkResponse({
+    description: 'Verification status updated successfully.',
+  })
+  @ApiNotFoundResponse({
+    description: 'The specified verification request was not found.',
   })
   update(@Param('id') id: string, @Body() data: Record<string, unknown>) {
     return this.verificationService.update(id, data);

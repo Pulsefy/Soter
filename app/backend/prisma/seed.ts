@@ -1,4 +1,4 @@
-import { PrismaClient, AppRole } from '@prisma/client';
+import { PrismaClient, AppRole, Campaign } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function main() {
@@ -48,6 +48,91 @@ async function main() {
   }
 
   console.log('Seeded API keys for development');
+
+  // Seed demo campaigns and claims for local testing
+  const campaigns = [
+    {
+      name: 'Emergency Relief Fund',
+      budget: '10000.00',
+      status: 'active' as const,
+      description: 'Emergency response campaign for affected communities',
+    },
+    {
+      name: 'Community Health Program',
+      budget: '5000.00',
+      status: 'active' as const,
+      description: 'Healthcare support initiative for underserved regions',
+    },
+  ];
+
+  const createdCampaigns: Campaign[] = [];
+
+  for (const campaignData of campaigns) {
+    const campaign = await prisma.campaign.upsert({
+      where: { id: `demo-campaign-${campaigns.indexOf(campaignData)}` },
+      update: {
+        name: campaignData.name,
+        budget: campaignData.budget,
+        status: campaignData.status,
+      },
+      create: {
+        id: `demo-campaign-${campaigns.indexOf(campaignData)}`,
+        name: campaignData.name,
+        budget: campaignData.budget,
+        status: campaignData.status,
+        metadata: {
+          description: campaignData.description,
+          demo: true,
+        },
+      },
+    });
+    createdCampaigns.push(campaign);
+  }
+
+  console.log(`Seeded ${createdCampaigns.length} demo campaigns`);
+
+  // Seed demo claims for each campaign
+  for (let i = 0; i < createdCampaigns.length; i++) {
+    const campaign = createdCampaigns[i];
+    const claims = [
+      {
+        amount: '500.00',
+        status: 'verified' as const,
+        recipientRef: `recipient-${i}-1`,
+        evidenceRef: `evidence-${i}-1`,
+      },
+      {
+        amount: '750.00',
+        status: 'approved' as const,
+        recipientRef: `recipient-${i}-2`,
+        evidenceRef: `evidence-${i}-2`,
+      },
+    ];
+
+    for (const claimData of claims) {
+      await prisma.claim.upsert({
+        where: {
+          id: `demo-claim-${campaign.id}-${claims.indexOf(claimData)}`,
+        },
+        update: {
+          amount: claimData.amount,
+          status: claimData.status,
+        },
+        create: {
+          id: `demo-claim-${campaign.id}-${claims.indexOf(claimData)}`,
+          campaignId: campaign.id,
+          amount: claimData.amount,
+          status: claimData.status,
+          recipientRef: claimData.recipientRef,
+          evidenceRef: claimData.evidenceRef,
+        },
+      });
+    }
+
+    console.log(`Seeded 2 demo claims for campaign: ${campaign.name}`);
+  }
+
+  console.log('Demo data seeding completed successfully');
 }
 
 main()
