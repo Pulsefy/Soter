@@ -36,10 +36,26 @@ export class OnchainProcessor extends WorkerHost {
           result = await this.onchainAdapter.initEscrow(job.data.params);
           break;
         case OnchainOperationType.CREATE_CLAIM:
-          result = await this.onchainAdapter.createClaim(job.data.params);
+          // Map legacy/job params to createAidPackage
+          result = await this.onchainAdapter.createAidPackage({
+            operatorAddress: job.data.params.operatorAddress || 'system',
+            packageId: job.data.params.claimId || job.data.params.packageId,
+            recipientAddress: job.data.params.recipientAddress,
+            amount: job.data.params.amount,
+            tokenAddress: job.data.params.tokenAddress,
+            expiresAt: job.data.params.expiresAt || 0,
+            delegateAddress: job.data.params.delegateAddress,
+          });
           break;
         case OnchainOperationType.DISBURSE:
-          result = await this.onchainAdapter.disburse(job.data.params);
+          // Use the newer disburseAidPackage method
+          result = await this.onchainAdapter.disburseAidPackage({
+            packageId: job.data.params.packageId || job.data.params.claimId,
+            operatorAddress: job.data.params.operatorAddress || 'system',
+          });
+          break;
+        case OnchainOperationType.UPDATE_DELEGATE:
+          result = await this.onchainAdapter.updateDelegate(job.data.params);
           break;
         default:
           throw new Error(

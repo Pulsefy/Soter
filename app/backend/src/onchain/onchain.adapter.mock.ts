@@ -22,6 +22,8 @@ import {
   AidPackage,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
+  UpdateDelegateParams,
+  UpdateDelegateResult,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 
@@ -125,7 +127,7 @@ export class MockOnchainAdapter implements OnchainAdapter {
   ): Promise<ClaimAidPackageResult> {
     await Promise.resolve();
     const transactionHash = this.generateMockHash(
-      `claim-package-${params.packageId}-${params.recipientAddress}-${Date.now()}`,
+      `claim-package-${params.packageId}-${params.claimerAddress}-${Date.now()}`,
     );
 
     return {
@@ -136,7 +138,7 @@ export class MockOnchainAdapter implements OnchainAdapter {
       amountClaimed: '1000000000', // Mock amount
       metadata: {
         packageId: params.packageId,
-        recipientAddress: params.recipientAddress,
+        claimerAddress: params.claimerAddress,
         adapter: 'mock',
       },
     };
@@ -227,6 +229,21 @@ export class MockOnchainAdapter implements OnchainAdapter {
     // Use first 10 hex chars to generate a balance between 0 and ~17B stroops
     const balanceValue = parseInt(hash.substring(0, 10), 16);
     return balanceValue.toString();
+  }
+  async updateDelegate(
+    params: UpdateDelegateParams,
+  ): Promise<UpdateDelegateResult> {
+    await Promise.resolve();
+    const transactionHash = this.generateMockHash(
+      `update-delegate-${params.packageId}-${params.newDelegateAddress}-${Date.now()}`,
+    );
+
+    return {
+      packageId: params.packageId,
+      transactionHash,
+      timestamp: new Date(),
+      status: 'success',
+    };
   }
 
   // Legacy methods for backward compatibility

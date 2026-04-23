@@ -33,6 +33,7 @@ pub enum PackageStatus {
 pub struct Package {
     pub id: u64,
     pub recipient: Address,
+    pub delegate: Option<Address>,
     pub amount: i128,
     pub token: Address,
     pub status: PackageStatus,
@@ -94,6 +95,7 @@ pub struct EscrowFunded {
 pub struct PackageCreated {
     pub package_id: u64,
     pub recipient: Address,
+    pub delegate: Option<Address>,
     pub amount: i128,
     pub actor: Address,
     pub timestamp: u64,
@@ -135,6 +137,15 @@ pub struct PackageRefunded {
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub actor: Address,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+pub struct PackageDelegateUpdated {
+    pub package_id: u64,
+    pub old_delegate: Option<Address>,
+    pub new_delegate: Option<Address>,
     pub actor: Address,
     pub timestamp: u64,
 }
@@ -332,6 +343,7 @@ impl AidEscrow {
         operator: Address,
         id: u64,
         recipient: Address,
+        delegate: Option<Address>,
         amount: i128,
         token: Address,
         expires_at: u64,
@@ -390,6 +402,7 @@ impl AidEscrow {
         let package = Package {
             id,
             recipient: recipient.clone(),
+            delegate: delegate.clone(),
             amount,
             token: token.clone(),
             status: PackageStatus::Created,
@@ -409,6 +422,7 @@ impl AidEscrow {
         PackageCreated {
             package_id: id,
             recipient: recipient.clone(),
+            delegate,
             amount,
             actor: operator,
             timestamp: created_at,
@@ -424,6 +438,7 @@ impl AidEscrow {
         env: Env,
         operator: Address,
         recipients: Vec<Address>,
+        delegates: Vec<Option<Address>>,
         amounts: Vec<i128>,
         token: Address,
         expires_in: u64,
@@ -432,7 +447,7 @@ impl AidEscrow {
         Self::require_admin_or_distributor(&env, &operator)?;
 
         // Validate array lengths match
-        if recipients.len() != amounts.len() {
+        if recipients.len() != amounts.len() || recipients.len() != delegates.len() {
             return Err(Error::MismatchedArrays);
         }
 
@@ -477,10 +492,13 @@ impl AidEscrow {
 
             let key = (symbol_short!("pkg"), id);
 
+            let delegate = delegates.get(i).unwrap();
+
             // Create package
             let package = Package {
                 id,
                 recipient: recipient.clone(),
+                delegate: delegate.clone(),
                 amount,
                 token: token.clone(),
                 status: PackageStatus::Created,
@@ -503,6 +521,7 @@ impl AidEscrow {
             PackageCreated {
                 package_id: id,
                 recipient: recipient.clone(),
+                delegate,
                 amount,
                 actor: operator.clone(),
                 timestamp: created_at,
@@ -532,7 +551,7 @@ impl AidEscrow {
     // --- Recipient Actions ---
 
     /// Recipient claims the package.
-    pub fn claim(env: Env, id: u64) -> Result<(), Error> {
+    pub fn claim(env: Env, claimer: Address, id: u64) -> Result<(), Error> {
         Self::check_paused(&env)?;
         let key = (symbol_short!("pkg"), id);
         let mut package: Package = env
@@ -554,7 +573,10 @@ impl AidEscrow {
         }
 
         // Auth
-        package.recipient.require_auth();
+        claimer.require_auth();
+        if claimer != package.recipient && Some(claimer.clone()) != package.delegate {
+            return Err(Error::NotAuthorized);
+        }
 
         // State Transition: Created -> Claimed
         // Checks passed, update state FIRST (Re-entrancy protection)
@@ -577,7 +599,7 @@ impl AidEscrow {
             package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
-            actor: package.recipient.clone(),
+            actor: claimer,
             timestamp,
         }
         .publish(&env);
@@ -821,6 +843,39 @@ impl AidEscrow {
             admin: admin.clone(),
             old_expires_at,
             new_expires_at,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Admin-only delegate update.
+    /// Requirements: Admin auth, existing package, status must be 'Created'.
+    pub fn update_delegate(env: Env, package_id: u64, new_delegate: Option<Address>) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let key = (symbol_short!("pkg"), package_id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        if package.status != PackageStatus::Created {
+            return Err(Error::PackageNotActive);
+        }
+
+        let old_delegate = package.delegate;
+        package.delegate = new_delegate.clone();
+        env.storage().persistent().set(&key, &package);
+
+        PackageDelegateUpdated {
+            package_id,
+            old_delegate,
+            new_delegate,
+            actor: admin,
+            timestamp: env.ledger().timestamp(),
         }
         .publish(&env);
 

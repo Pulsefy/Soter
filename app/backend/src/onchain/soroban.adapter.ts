@@ -24,6 +24,8 @@ import {
   AidPackage,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
+  UpdateDelegateParams,
+  UpdateDelegateResult,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 
@@ -174,6 +176,7 @@ export class SorobanAdapter implements OnchainAdapter {
         metadata: {
           contractId: this.contractId,
           operator: params.operatorAddress,
+          delegate: params.delegateAddress,
         },
       };
     } catch (error) {
@@ -226,7 +229,7 @@ export class SorobanAdapter implements OnchainAdapter {
     this.ensureContractId();
     this.logger.debug('Claiming aid package:', {
       packageId: params.packageId,
-      recipient: params.recipientAddress,
+      claimer: params.claimerAddress,
     });
 
     try {
@@ -247,7 +250,7 @@ export class SorobanAdapter implements OnchainAdapter {
         amountClaimed: '1000000000', // Would come from contract
         metadata: {
           contractId: this.contractId,
-          recipient: params.recipientAddress,
+          claimer: params.claimerAddress,
         },
       };
     } catch (error) {
@@ -384,6 +387,36 @@ export class SorobanAdapter implements OnchainAdapter {
     } catch (error) {
       const mappedError = this.errorMapper.mapError(error);
       this.logger.error('Failed to get token balance:', mappedError);
+      throw error;
+    }
+  }
+
+  async updateDelegate(
+    params: UpdateDelegateParams,
+  ): Promise<UpdateDelegateResult> {
+    this.ensureContractId();
+    this.logger.debug('Updating delegate for aid package:', {
+      packageId: params.packageId,
+      newDelegate: params.newDelegateAddress,
+    });
+
+    try {
+      const _sdk = await this.loadSorobanSDK();
+      const _client = await this.getRpcClient();
+
+      const transactionHash = this.generateMockHash(
+        `update-delegate-${params.packageId}-${Date.now()}`,
+      );
+
+      return {
+        packageId: params.packageId,
+        transactionHash,
+        timestamp: new Date(),
+        status: 'success',
+      };
+    } catch (error) {
+      const mappedError = this.errorMapper.mapError(error);
+      this.logger.error('Failed to update delegate:', mappedError);
       throw error;
     }
   }

@@ -156,6 +156,7 @@ model Claim {
   amount       Float
 
   recipientRef String
+  delegateAddress String?
   evidenceRef  String?
 
   @@index([status])

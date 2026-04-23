@@ -50,11 +50,21 @@ export class CreateClaimDto {
   tokenAddress: string;
 
   @ApiPropertyOptional({
-    description:
-      'Reference or link to evidence supporting the claim (e.g., photo, document hash).',
+    description: 'Reference or link to evidence supporting the claim (e.g., photo, document hash).',
     example: 'evidence-456',
   })
   @IsOptional()
   @IsString()
   evidenceRef?: string;
+
+  @ApiPropertyOptional({
+    description: 'Stellar address for an approved delegate or recovery path',
+    example: 'GB...RECOVERY',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^G[A-Z0-9]{55}$|^C[A-Z0-9]{55}$/, {
+    message: 'delegateAddress must be a valid Stellar address',
+  })
+  delegateAddress?: string;
 }

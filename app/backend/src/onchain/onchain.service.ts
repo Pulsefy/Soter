@@ -13,6 +13,13 @@ export interface CreateClaimJobParams {
   tokenAddress: string;
   expiresAt?: number;
   campaignId?: string;
+  delegateAddress?: string;
+}
+
+export interface UpdateDelegateJobParams {
+  packageId: string;
+  operatorAddress: string;
+  newDelegateAddress: string | null;
 }
 
 export interface DisburseJobParams {
@@ -52,6 +59,10 @@ export class OnchainService {
       throw new Error('tokenAddress is required for disbursement');
     }
     return this.enqueue(OnchainOperationType.DISBURSE, params);
+  }
+
+  async enqueueUpdateDelegate(params: UpdateDelegateJobParams) {
+    return this.enqueue(OnchainOperationType.UPDATE_DELEGATE, params);
   }
 
   private async enqueue(type: OnchainOperationType, params: unknown) {

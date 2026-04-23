@@ -23,6 +23,7 @@ export interface CreateAidPackageParams {
   amount: string; // Amount as string to preserve precision (i128)
   tokenAddress: string;
   expiresAt: number; // Unix timestamp
+  delegateAddress?: string;
 }
 
 export interface CreateAidPackageResult {
@@ -39,6 +40,7 @@ export interface BatchCreateAidPackagesParams {
   amounts: string[]; // Array of amounts as strings
   tokenAddress: string;
   expiresIn: number; // Duration in seconds from now
+  delegateAddresses?: (string | null)[];
 }
 
 export interface BatchCreateAidPackagesResult {
@@ -51,7 +53,7 @@ export interface BatchCreateAidPackagesResult {
 
 export interface ClaimAidPackageParams {
   packageId: string;
-  recipientAddress: string;
+  claimerAddress: string; // Either recipient or approved delegate
 }
 
 export interface ClaimAidPackageResult {
@@ -89,6 +91,7 @@ export interface AidPackage {
   status: 'Created' | 'Claimed' | 'Expired' | 'Cancelled' | 'Refunded';
   createdAt: number;
   expiresAt: number;
+  delegate?: string;
   metadata?: Record<string, string>;
 }
 
@@ -128,6 +131,19 @@ export interface GetTokenBalanceResult {
   accountAddress: string;
   balance: string;
   timestamp: Date;
+}
+
+export interface UpdateDelegateParams {
+  packageId: string;
+  operatorAddress: string;
+  newDelegateAddress: string | null;
+}
+
+export interface UpdateDelegateResult {
+  packageId: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
 }
 
 // Legacy interfaces kept for backward compatibility
@@ -218,6 +234,11 @@ export interface OnchainAdapter {
   getTokenBalance(
     params: GetTokenBalanceParams,
   ): Promise<GetTokenBalanceResult>;
+
+  /**
+   * Update the delegate address for an aid package
+   */
+  updateDelegate(params: UpdateDelegateParams): Promise<UpdateDelegateResult>;
 
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;
