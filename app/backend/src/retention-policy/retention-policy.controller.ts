@@ -6,12 +6,10 @@ import {
   Delete,
   Body,
   Param,
-  Query,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
-  ApiOkResponse,
   ApiBearerAuth,
   ApiParam,
   ApiQuery,

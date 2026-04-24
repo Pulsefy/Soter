@@ -9,7 +9,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateRetentionPolicyDto } from './dto/create-retention-policy.dto';
 import { UpdateRetentionPolicyDto } from './dto/update-retention-policy.dto';
-import { Prisma } from '@prisma/client';
 
 type PurgeStrategy = 'soft_delete' | 'hard_delete' | 'anonymize';
 
