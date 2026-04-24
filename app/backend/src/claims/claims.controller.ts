@@ -19,12 +19,15 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { ClaimsService } from './claims.service';
+import { CancelAndReissueService } from './cancel-and-reissue.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import {
   ClaimReceiptDto,
   ClaimShareResponseDto,
   SendReceiptShareDto,
 } from './dto/claim-receipt.dto';
+import { CancelClaimDto } from './dto/cancel-claim.dto';
+import { ReissueClaimDto } from './dto/reissue-claim.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
@@ -37,6 +40,7 @@ import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.d
 export class ClaimsController {
   constructor(
     private readonly claimsService: ClaimsService,
+    private readonly cancelAndReissueService: CancelAndReissueService,
     private readonly internalNotesService: InternalNotesService,
   ) {}
 
@@ -271,5 +275,88 @@ export class ClaimsController {
   })
   getNotes(@Param('id') id: string) {
     return this.internalNotesService.findNotesByEntity('claim', id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cancel-and-Reissue
+  // ---------------------------------------------------------------------------
+
+  @Post(':id/cancel')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Cancel a claim',
+    description:
+      'Cancels an active claim (requested / verified / approved). ' +
+      'Releases the locked budget back to the campaign and records a full audit trail. ' +
+      'Disbursed claims cannot be cancelled.',
+  })
+  @ApiOkResponse({ description: 'Claim cancelled successfully.' })
+  @ApiBadRequestResponse({
+    description: 'Claim is already cancelled or in a non-cancellable status.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - operator role required.',
+  })
+  @ApiNotFoundResponse({ description: 'Claim not found.' })
+  cancel(@Param('id') id: string, @Body() dto: CancelClaimDto) {
+    return this.cancelAndReissueService.cancel(id, dto);
+  }
+
+  @Post(':id/reissue')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Cancel and reissue a claim',
+    description:
+      'Atomically cancels the original claim and creates a replacement. ' +
+      'The replacement is linked to the original via `reissuedFromId`, ' +
+      'preserving the full audit chain. Locked balances are transferred to ' +
+      'the new claim — no double-counting occurs. ' +
+      'Returns both the cancelled original and the new replacement.',
+  })
+  @ApiCreatedResponse({
+    description: 'Original claim cancelled and replacement created.',
+    schema: {
+      properties: {
+        original: {
+          type: 'object',
+          description: 'The cancelled original claim.',
+        },
+        replacement: {
+          type: 'object',
+          description: 'The newly created replacement claim.',
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'Original claim is not in a cancellable status.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - operator role required.',
+  })
+  @ApiNotFoundResponse({ description: 'Original claim not found.' })
+  reissue(@Param('id') id: string, @Body() dto: ReissueClaimDto) {
+    return this.cancelAndReissueService.reissue(id, dto);
+  }
+
+  @Get(':id/reissue-history')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Get reissue chain for a claim',
+    description:
+      'Returns the full lineage of a claim — the original and every ' +
+      'replacement — ordered from oldest to newest. Pass any claim ID in ' +
+      'the chain to retrieve the complete history.',
+  })
+  @ApiOkResponse({
+    description: 'Reissue chain retrieved successfully.',
+    schema: { type: 'array', items: { type: 'object' } },
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - operator role required.',
+  })
+  @ApiNotFoundResponse({ description: 'Claim not found.' })
+  getReissueHistory(@Param('id') id: string) {
+    return this.cancelAndReissueService.getReissueHistory(id);
   }
 }

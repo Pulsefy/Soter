@@ -178,6 +178,13 @@ pub struct AidEscrow;
 impl AidEscrow {
     // --- Admin & Config ---
 
+    /// Initializes the contract.
+    ///
+    /// # Arguments
+    /// * `admin` — The address that will own the contract (can pause, config, disburse, etc.).
+    ///
+    /// # Errors
+    /// Returns `Error::AlreadyInitialized` if called more than once.
     pub fn init(env: Env, admin: Address) -> Result<(), Error> {
         if env.storage().instance().has(&KEY_ADMIN) {
             return Err(Error::AlreadyInitialized);
@@ -193,6 +200,10 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Returns the admin address stored at initialization.
+    ///
+    /// # Errors
+    /// Returns `Error::NotInitialized` if the contract has not been initialized.
     pub fn get_admin(env: Env) -> Result<Address, Error> {
         env.storage()
             .instance()
@@ -200,10 +211,19 @@ impl AidEscrow {
             .ok_or(Error::NotInitialized)
     }
 
+    /// Returns the current contract version.
+    /// Defaults to `0` if the contract has never been initialized.
     pub fn get_version(env: Env) -> u32 {
         env.storage().instance().get(&KEY_VERSION).unwrap_or(0)
     }
 
+    /// Admin-only. Bumps the contract version and runs any required migration logic.
+    ///
+    /// # Arguments
+    /// * `new_version` — Target version number.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
     pub fn migrate(env: Env, new_version: u32) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -224,6 +244,11 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Admin-only. Grants distributor privileges to `addr`.
+    /// Distributors can create packages but cannot pause, config, or disburse.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
     pub fn add_distributor(env: Env, addr: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -241,6 +266,10 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Admin-only. Revokes distributor privileges from `addr`.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
     pub fn remove_distributor(env: Env, addr: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -258,6 +287,14 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Admin-only. Updates the global contract configuration.
+    ///
+    /// # Arguments
+    /// * `config` — New config values (`min_amount`, `max_expires_in`, `allowed_tokens`).
+    ///
+    /// # Errors
+    /// Returns `Error::InvalidAmount` if `config.min_amount` is zero or negative.
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
     pub fn set_config(env: Env, config: Config) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -270,6 +307,12 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Admin-only. Pauses the contract.
+    /// While paused, package creation and claims are blocked.
+    /// Emits a `ContractPausedEvent`.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
     pub fn pause(env: Env) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -278,6 +321,11 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Admin-only. Unpauses the contract, resuming normal operation.
+    /// Emits a `ContractUnpausedEvent`.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
     pub fn unpause(env: Env) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -286,10 +334,14 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Returns `true` if the contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
         env.storage().instance().get(&KEY_PAUSED).unwrap_or(false)
     }
 
+    /// Returns the current contract configuration.
+    /// Falls back to defaults (`min_amount: 1`, `max_expires_in: 0`, empty token list)
+    /// if no config has been explicitly set.
     pub fn get_config(env: Env) -> Config {
         env.storage().instance().get(&KEY_CONFIG).unwrap_or(Config {
             min_amount: 1,
@@ -924,6 +976,10 @@ impl AidEscrow {
         }
     }
 
+    /// Retrieves the full details of a package by its ID.
+    ///
+    /// # Errors
+    /// Returns `Error::PackageNotFound` if no package exists with the given `id`.
     pub fn get_package(env: Env, id: u64) -> Result<Package, Error> {
         let key = (symbol_short!("pkg"), id);
         env.storage()

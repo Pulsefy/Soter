@@ -114,6 +114,9 @@ pytest
 
 # Run with coverage
 pytest --cov=. --cov-report=html
+
+# Run deterministic AI mode for stable CI-style verification tests
+AI_DETERMINISTIC_MODE=true pytest
 ```
 
 ### Security Scans

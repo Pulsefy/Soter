@@ -21,6 +21,7 @@ enum ClaimStatus {
   approved
   disbursed
   archived
+  cancelled
 }
 
 model AidPackage {
@@ -29,6 +30,31 @@ model AidPackage {
   updatedAt DateTime @updatedAt
 
   status    String   @default("draft")
+}
+
+/// Tracks every balance event (lock / unlock / disburse) for a campaign.
+/// The running sum of all rows for a campaign gives the current locked balance.
+model BalanceLedger {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+
+  claimId    String?
+  claim      Claim?   @relation(fields: [claimId], references: [id])
+
+  /// 'lock' when a claim is created/approved, 'unlock' when cancelled, 'disburse' when disbursed
+  eventType  String
+
+  /// Positive for lock/disburse, negative for unlock
+  amount     Float
+
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([claimId])
+  @@index([eventType])
+  @@index([createdAt])
 }
 
 enum VerificationChannel {
@@ -158,10 +184,23 @@ model Claim {
   recipientRef String
   evidenceRef  String?
 
+  /// Set when this claim is cancelled
+  cancelledAt    DateTime?
+  cancelledBy    String?
+  cancelReason   String?
+
+  /// Points to the original claim this one replaces (reissue chain)
+  reissuedFromId String?
+  reissuedFrom   Claim?    @relation("ReissueChain", fields: [reissuedFromId], references: [id])
+  reissuedTo     Claim[]   @relation("ReissueChain")
+
+  balanceLedger  BalanceLedger[]
+
   @@index([status])
   @@index([campaignId])
   @@index([createdAt])
   @@index([deletedAt])
+  @@index([reissuedFromId])
 }
 
 model AuditLog {
@@ -197,6 +236,7 @@ model Campaign {
   updatedAt   DateTime       @updatedAt
 
   claims      Claim[]
+  balanceLedger BalanceLedger[]
 
   @@index([status])
   @@index([archivedAt])
