@@ -20,6 +20,7 @@ import {
   subscribeToSyncSuccess,
 } from '../services/syncQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
+import { useSaverMode } from './SaverModeContext';
 
 interface SyncContextValue extends SyncQueueState {
   isConnected: boolean;
@@ -77,10 +78,11 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
     await flushPendingNetworkActions({ online: true });
   }, []);
   const { isConnected } = useNetworkStatus(handleReconnect);
+  const { active: saverModeActive } = useSaverMode();
 
   const flushNow = useCallback(async () => {
-    await flushPendingNetworkActions({ online: isConnected });
-  }, [isConnected]);
+    await flushPendingNetworkActions({ online: isConnected, saverMode: saverModeActive });
+  }, [isConnected, saverModeActive]);
 
   useEffect(() => {
     void getSyncQueueState().then(setSyncState);
@@ -99,18 +101,24 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active' && isConnected) {
-        void flushNow();
+        // In saver mode, skip the automatic flush when returning to the app
+        // to reduce background data usage. The user can still pull-to-refresh.
+        if (!saverModeActive) {
+          void flushNow();
+        }
       }
     });
 
     return () => subscription.remove();
-  }, [flushNow, isConnected]);
+  }, [flushNow, isConnected, saverModeActive]);
 
   useEffect(() => {
-    if (isConnected) {
+    // In saver mode, don't auto-flush on mount/reconnect – let the user
+    // explicitly trigger refreshes to save data.
+    if (isConnected && !saverModeActive) {
       void flushNow();
     }
-  }, [flushNow, isConnected]);
+  }, [flushNow, isConnected, saverModeActive]);
 
   const value = useMemo<SyncContextValue>(() => {
     const pendingCount = syncState.items.filter((item) => item.state !== 'failed').length;

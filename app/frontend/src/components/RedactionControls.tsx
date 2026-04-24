@@ -38,7 +38,7 @@ export const RedactionControls: React.FC<RedactionControlsProps> = ({
     return (
       <div className={`border-t border-gray-200 dark:border-gray-700 p-4 ${className}`}>
         <div className="text-sm text-gray-500 dark:text-gray-400">
-          You don't have permission to modify redactions for this artifact.
+          You don&apos;t have permission to modify redactions for this artifact.
         </div>
       </div>
     );

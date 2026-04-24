@@ -94,9 +94,11 @@ model VerificationSession {
   expiresAt   DateTime
   createdAt   DateTime                 @default(now())
   updatedAt   DateTime                 @updatedAt
+  deletedAt   DateTime?
 
   @@index([identifier, createdAt])
   @@index([status, expiresAt])
+  @@index([deletedAt])
 }
 
 model Session {
@@ -110,6 +112,7 @@ model Session {
   updatedAt   DateTime                 @updatedAt
   completedAt DateTime?
   failedAt    DateTime?
+  deletedAt   DateTime?
 
   steps       SessionStep[]
   submissions SessionSubmission[]
@@ -118,6 +121,7 @@ model Session {
   @@index([contextId])
   @@index([expiresAt])
   @@index([createdAt])
+  @@index([deletedAt])
 }
 
 model SessionStep {
@@ -152,20 +156,25 @@ model SessionSubmission {
   payload       Json
   response      Json?
   createdAt     DateTime  @default(now())
+  deletedAt     DateTime?
 
   session       Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   step          SessionStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
 
   @@index([sessionId])
   @@index([stepId])
+  @@index([deletedAt])
 }
 
 model VerificationRequest {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
-  status    String   @default("pending")
+  status    String    @default("pending")
+
+  @@index([deletedAt])
 }
 
 model Claim {
@@ -203,17 +212,39 @@ model Claim {
   @@index([reissuedFromId])
 }
 
+enum PurgeStrategy {
+  soft_delete
+  hard_delete
+  anonymize
+}
+
+model RetentionPolicy {
+  id            String        @id @default(cuid())
+  entity        String        @unique // e.g. "AuditLog", "VerificationSession", "Session", "Claim"
+  retentionDays Int          // number of days to retain before purge
+  strategy      PurgeStrategy @default(soft_delete)
+  enabled       Boolean       @default(true)
+  description   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([entity])
+  @@index([enabled])
+}
+
 model AuditLog {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   actorId   String
   entity    String
   entityId  String
   action    String
-  timestamp DateTime @default(now())
+  timestamp DateTime  @default(now())
   metadata  Json?
+  deletedAt DateTime?
 
   @@index([entity, entityId])
   @@index([timestamp])
+  @@index([deletedAt])
 }
 
 model Campaign {

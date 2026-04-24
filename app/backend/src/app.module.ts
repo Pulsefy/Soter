@@ -37,6 +37,7 @@ import { ApiKeysModule } from './api-keys/api-keys.module';
 import { SessionModule } from './session/session.module';
 import { CommonServicesModule } from './common/services/common-services.module';
 import { EvidenceModule } from './evidence/evidence.module';
+import { RetentionPolicyModule } from './retention-policy/retention-policy.module';
 
 @Module({
   imports: [
@@ -84,6 +85,7 @@ import { EvidenceModule } from './evidence/evidence.module';
     SessionModule,
     CommonServicesModule,
     EvidenceModule,
+    RetentionPolicyModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60000, // 60 seconds window

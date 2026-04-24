@@ -124,7 +124,6 @@ export const RedactionOverlay: React.FC<RedactionOverlayProps> = ({
 // Redaction region drawing component for creating new regions
 interface RedactionRegionDrawingProps {
   isDrawing: boolean;
-  startRegion: { x: number; y: number } | null;
   currentRegion: { x: number; y: number; width: number; height: number } | null;
   tool: RedactionTool;
   className?: string;
@@ -132,7 +131,6 @@ interface RedactionRegionDrawingProps {
 
 export const RedactionRegionDrawing: React.FC<RedactionRegionDrawingProps> = ({
   isDrawing,
-  startRegion,
   currentRegion,
   tool,
   className = '',

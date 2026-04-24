@@ -19,6 +19,8 @@ import {
   getMockAidDetails,
 } from '../services/aidApi';
 import { useSync } from '../contexts/SyncContext';
+import { useSaverMode } from '../contexts/SaverModeContext';
+import { SaverModeBanner } from '../components/SaverModeBanner';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidDetails'>;
 
@@ -27,6 +29,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { biometricEnabled, authenticate } = useBiometric();
+  const { active: saverModeActive, source: saverModeSource } = useSaverMode();
 
   // null = not yet attempted, true = granted, false = denied
   const [authState, setAuthState] = useState<'idle' | 'pending' | 'granted' | 'denied'>('idle');
@@ -96,6 +99,17 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
       void loadDetails(false);
     }
   }, [authState, loadDetails]);
+
+  // ── Periodic auto-refresh (normal mode only) ──────────────────────────────
+  // In normal mode, refresh every 30 s while the screen is focused.
+  // In saver mode this is disabled – the user must pull-to-refresh.
+  useEffect(() => {
+    if (authState !== 'granted' || saverModeActive) return;
+    const id = setInterval(() => {
+      void loadDetails(true);
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [authState, loadDetails, saverModeActive]);
 
   // Sync background effect
   useEffect(() => {
@@ -243,6 +257,9 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {/* ── Saver Mode Banner ──────────────────────────────────────────── */}
+      <SaverModeBanner visible={saverModeActive} source={saverModeSource} />
+
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <View style={styles.header}>
         <Text style={styles.title} accessibilityRole="header">

@@ -4,13 +4,12 @@ import React, { useState } from 'react';
 import { Download, Check, AlertCircle, Loader2 } from 'lucide-react';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { ChevronDown } from 'lucide-react';
-import type { AidPackageFilters } from '@/types/aid-package';
 
 type ExportFormat = 'CSV' | 'PDF' | 'JSON';
 
 interface ExportControlsProps {
   context: string;
-  filters?: Record<string, any>;
+  filters?: object;
   label?: string;
 }
 

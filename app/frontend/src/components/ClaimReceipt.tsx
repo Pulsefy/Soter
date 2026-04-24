@@ -2,7 +2,7 @@
 
 import React, { useMemo } from 'react';
 import { Share2, Download, Copy, Check } from 'lucide-react';
-import { useTheme } from '@/lib/theme';
+import { useTheme } from 'next-themes';
 import { format } from 'date-fns';
 
 export interface ClaimReceiptData {

@@ -2,6 +2,8 @@
 
 import React from 'react';
 import { useAidPackages } from '@/hooks/useAidPackages';
+import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
+import { getAppUserRole, isOperationsRole } from '@/lib/app-role';
 import type { AidPackage, AidPackageFilters, AidPackageStatus } from '@/types/aid-package';
 
 const STATUS_STYLES: Record<AidPackageStatus, string> = {
@@ -61,6 +63,8 @@ interface FilteredPackageListProps {
 
 export function FilteredPackageList({ filters }: FilteredPackageListProps) {
   const { data: packages, isLoading, error } = useAidPackages(filters);
+  const role = getAppUserRole();
+  const hasFilters = Boolean(filters.search || filters.status || filters.token);
 
   if (error) {
     return (
@@ -118,12 +122,42 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
             ) : (
               <tr>
                 <td colSpan={TABLE_HEADERS.length} className="py-12 text-center">
-                  <p className="text-gray-500 dark:text-gray-400 font-medium">
-                    No packages match your filters.
-                  </p>
-                  <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-                    Try adjusting your search or filters.
-                  </p>
+                  <div className="mx-auto max-w-3xl text-left">
+                    <AppEmptyState
+                      compact
+                      eyebrow={hasFilters ? 'No Matches' : 'No Packages Yet'}
+                      title={
+                        hasFilters
+                          ? 'No aid packages match the current filters'
+                          : isOperationsRole(role)
+                            ? 'No aid packages have been published yet'
+                            : 'No aid packages are available to browse yet'
+                      }
+                      description={
+                        hasFilters
+                          ? 'Try widening the search, clearing filters, or switching token and status selections.'
+                          : isOperationsRole(role)
+                            ? 'This workspace does not have package data yet. Contributors can switch on mock responses or create campaign data to populate downstream views.'
+                            : 'There is no live distribution data in this environment yet, but you can still explore verification and sample workflows.'
+                      }
+                      actions={
+                        hasFilters
+                          ? [
+                              { href: '/dashboard', label: 'Reset dashboard filters', icon: 'next' },
+                              { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                            ]
+                          : isOperationsRole(role)
+                            ? [
+                                { href: '/campaigns', label: 'Create sample campaign', icon: 'sample' },
+                                { href: '/help', label: 'Open contributor help', icon: 'docs', variant: 'secondary' },
+                              ]
+                            : [
+                                { href: '/', label: 'Try verification flow', icon: 'next' },
+                                { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                              ]
+                      }
+                    />
+                  </div>
                 </td>
               </tr>
             )}
@@ -149,14 +183,35 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
         ) : packages && packages.length > 0 ? (
           packages.map(pkg => <PackageCard key={pkg.id} pkg={pkg} />)
         ) : (
-          <div className="py-12 text-center">
-            <p className="text-gray-500 dark:text-gray-400 font-medium">
-              No packages match your filters.
-            </p>
-            <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-              Try adjusting your search or filters.
-            </p>
-          </div>
+          <AppEmptyState
+            compact
+            eyebrow={hasFilters ? 'No Matches' : 'No Packages Yet'}
+            title={
+              hasFilters
+                ? 'No aid packages match the current filters'
+                : isOperationsRole(role)
+                  ? 'No aid packages have been published yet'
+                  : 'No aid packages are available to browse yet'
+            }
+            description={
+              hasFilters
+                ? 'Try widening the search, clearing filters, or switching token and status selections.'
+                : isOperationsRole(role)
+                  ? 'Create a sample campaign or enable mock responses to make the dashboard easier to review.'
+                  : 'This environment does not have live aid packages yet, but the rest of the product can still be explored with sample flows.'
+            }
+            actions={
+              isOperationsRole(role)
+                ? [
+                    { href: '/campaigns', label: 'Create sample campaign', icon: 'sample' },
+                    { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                  ]
+                : [
+                    { href: '/', label: 'Try verification flow', icon: 'next' },
+                    { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                  ]
+            }
+          />
         )}
       </div>
     </>

@@ -1,6 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import Link from 'next/link';
+import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
+import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
 import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
 import type {
     PiiDetectionResult,
@@ -8,6 +11,7 @@ import type {
     VerificationResult,
     VerificationStep,
 } from '@/types/verification';
+import { useActivity } from '@/hooks/useActivity';
 
 /* ─── Accepted image MIME types ─────────────────────────────────────────── */
 
@@ -187,6 +191,7 @@ function initialState(): FlowState {
  */
 export const VerificationFlow: React.FC = () => {
     const uid = useId();
+    const { trackJob } = useActivity();
 
     const [step, setStep] = useState<VerificationStep>('upload');
     const [imageFile, setImageFile] = useState<File | null>(null);
@@ -277,24 +282,31 @@ export const VerificationFlow: React.FC = () => {
 
         let cancelled = false;
 
-        startEvidenceVerification(payload)
-            .then((data) => {
-                if (cancelled) return;
-                setResult(data);
-                setStep('result');
-            })
-            .catch((err: unknown) => {
-                if (cancelled) return;
-                if (err instanceof VerificationApiError) {
-                    setApiError(err.message);
-                } else {
-                    setApiError(
-                        'An unexpected error occurred. Please try again.',
-                    );
-                }
-                pendingPayload.current = null;
-                setStep('upload');
-            });
+        let cancelled = false;
+
+        (async () => {
+          try {
+            const data = await trackJob(
+              'Evidence Verification',
+              'Analyzing submitted evidence for authenticity',
+              () => startEvidenceVerification(payload)
+            );
+            if (cancelled) return;
+            setResult(data);
+            setStep('result');
+          } catch (err) {
+            if (cancelled) return;
+            if (err instanceof VerificationApiError) {
+              setApiError(err.message);
+            } else {
+              setApiError(
+                'An unexpected error occurred. Please try again.',
+              );
+            }
+            pendingPayload.current = null;
+            setStep('upload');
+          }
+        })();
 
         return () => {
             cancelled = true;
@@ -382,6 +394,7 @@ function StepUpload({
     onTextChange,
     onSubmit,
 }: StepUploadProps) {
+    const role = getAppUserRole();
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0] ?? null;
         onImageChange(file);
@@ -390,6 +403,33 @@ function StepUpload({
     return (
         <form onSubmit={onSubmit} noValidate aria-label="Evidence upload form">
             <h2 className="text-lg font-semibold mb-4">Submit Evidence for Verification</h2>
+
+            {!imageFile && textInput.trim().length === 0 && (
+                <div className="mb-6">
+                    <AppEmptyState
+                        compact
+                        eyebrow="No Evidence Added"
+                        title={
+                            isOperationsRole(role)
+                                ? 'Start with sample evidence to review the verification experience'
+                                : 'Start with a sample request if you want to explore the flow first'
+                        }
+                        description={
+                            isOperationsRole(role)
+                                ? 'Contributors can preload example text, attach a small test image, and walk through validation and result states without needing a live claimant record.'
+                                : 'You can type your own request or use sample text to understand how verification behaves before real data is connected.'
+                        }
+                        actions={[
+                            {
+                                onClick: () => onTextChange(getSampleVerificationText(role)),
+                                label: 'Insert sample evidence',
+                                icon: 'sample',
+                            },
+                            { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                        ]}
+                    />
+                </div>
+            )}
 
             {/* API error from a previous attempt */}
             {apiError && (
@@ -577,6 +617,13 @@ function StepResult({ result, onReset }: StepResultProps) {
             >
                 Start New Verification
             </button>
+
+            <Link
+                href="/help"
+                className="inline-flex items-center rounded-lg text-sm font-medium text-blue-600 hover:text-blue-700"
+            >
+                Review contributor help
+            </Link>
         </div>
     );
 }
