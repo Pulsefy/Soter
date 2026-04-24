@@ -8,6 +8,8 @@ import {
   HttpStatus,
   HttpCode,
   Request,
+  Query,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import {
@@ -37,6 +39,7 @@ import { AppRole } from 'src/auth/app-role.enum';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
 import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
+import { ReviewCaseActionDto } from './dto/review-case-action.dto';
 
 @ApiTags('Verification')
 @ApiSecurity('x-api-key')
@@ -294,6 +297,142 @@ export class VerificationController {
   })
   findClaim(@Param('id') id: string) {
     return this.verificationService.findOne(id);
+  }
+
+  // -------------------------------------------------------------------------
+  // Review queue
+  // -------------------------------------------------------------------------
+
+  @Get('review-queue')
+  @Version('1')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'List review queue cases',
+    description:
+      'Retrieve claims flagged for manual review with optional filters.',
+  })
+  @ApiOkResponse({
+    description: 'Review queue retrieved successfully.',
+    schema: {
+      example: {
+        items: [
+          {
+            id: 'rc_123',
+            claimId: 'clm_456',
+            status: 'pending',
+            aiScore: 0.55,
+            riskLevel: 'medium',
+            createdAt: '2025-01-23T11:00:00.000Z',
+            claim: {
+              id: 'clm_456',
+              amount: 100,
+              recipientRef: 'recipient_1',
+              campaign: { id: 'camp_1', name: 'Emergency Relief' },
+            },
+          },
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+      },
+    },
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - staff role required.',
+  })
+  async getReviewQueue(
+    @Query('status') status?: string,
+    @Query('riskLevel') riskLevel?: string,
+    @Query('fromDate') fromDate?: string,
+    @Query('toDate') toDate?: string,
+    @Query('page', new ParseIntPipe({ optional: true })) page?: number,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    return this.verificationService.getReviewQueue({
+      status,
+      riskLevel,
+      fromDate,
+      toDate,
+      page,
+      limit,
+    });
+  }
+
+  @Get('review-queue/:id')
+  @Version('1')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Get a single review case',
+    description:
+      'Retrieve full details of a review case including claim info and audit history.',
+  })
+  @ApiOkResponse({ description: 'Review case retrieved successfully.' })
+  @ApiNotFoundResponse({ description: 'Review case not found.' })
+  @ApiForbiddenResponse({
+    description: 'Access denied - staff role required.',
+  })
+  async getReviewCase(@Param('id') id: string) {
+    return this.verificationService.getReviewCase(id);
+  }
+
+  @Post('review-queue/:id/approve')
+  @Version('1')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Approve a review case',
+    description:
+      'Marks the review case as approved and transitions the linked claim to verified.',
+  })
+  @ApiOkResponse({ description: 'Review case approved successfully.' })
+  @ApiBadRequestResponse({
+    description: 'Review case is not in a pending state.',
+  })
+  @ApiNotFoundResponse({ description: 'Review case not found.' })
+  @ApiForbiddenResponse({
+    description: 'Access denied - staff role required.',
+  })
+  async approveReviewCase(
+    @Param('id') id: string,
+    @Body() dto: ReviewCaseActionDto,
+    @Request() req: ExpressRequest,
+  ) {
+    const reviewerId =
+      req.user?.apiKeyId || req.user?.authType || 'system';
+    return this.verificationService.approveReviewCase(
+      id,
+      reviewerId,
+      dto.notes,
+    );
+  }
+
+  @Post('review-queue/:id/reject')
+  @Version('1')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Reject a review case',
+    description:
+      'Marks the review case as rejected and archives the linked claim.',
+  })
+  @ApiOkResponse({ description: 'Review case rejected successfully.' })
+  @ApiBadRequestResponse({
+    description: 'Review case is not in a pending state.',
+  })
+  @ApiNotFoundResponse({ description: 'Review case not found.' })
+  @ApiForbiddenResponse({
+    description: 'Access denied - staff role required.',
+  })
+  async rejectReviewCase(
+    @Param('id') id: string,
+    @Body() dto: ReviewCaseActionDto,
+    @Request() req: ExpressRequest,
+  ) {
+    const reviewerId =
+      req.user?.apiKeyId || req.user?.authType || 'system';
+    return this.verificationService.rejectReviewCase(
+      id,
+      reviewerId,
+      dto.notes,
+    );
   }
 
   @Get(':id')

@@ -12,6 +12,7 @@ export type NavigationItem = {
 const DEFAULT_ROLE: UserRole = 'guest';
 const ALL_NAVIGATION_ROLES: readonly UserRole[] = USER_ROLES;
 const CAMPAIGN_MANAGER_ROLES: readonly UserRole[] = ['ngo', 'admin'];
+const STAFF_ROLES: readonly UserRole[] = ['operator', 'admin'];
 
 const ROLE_LABELS: Record<UserRole, string> = {
   guest: 'Guest',
@@ -39,6 +40,12 @@ const NAVIGATION_ITEMS: readonly NavigationItem[] = [
     label: 'Campaigns',
     description: 'Create and manage NGO funding campaigns.',
     allowedRoles: CAMPAIGN_MANAGER_ROLES,
+  },
+  {
+    href: '/staff/review-queue',
+    label: 'Review Queue',
+    description: 'Review flagged verification cases.',
+    allowedRoles: STAFF_ROLES,
   },
 ];
 

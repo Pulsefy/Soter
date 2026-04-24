@@ -195,6 +195,7 @@ model Claim {
   reissuedTo     Claim[]   @relation("ReissueChain")
 
   balanceLedger  BalanceLedger[]
+  reviewCase     ReviewCase?
 
   @@index([status])
   @@index([campaignId])
@@ -321,4 +322,37 @@ model EvidenceQueueItem {
   @@index([status])
   @@index([ownerId])
   @@index([fileHash])
+}
+
+enum ReviewCaseStatus {
+  pending
+  approved
+  rejected
+}
+
+model ReviewCase {
+  id              String           @id @default(cuid())
+  claimId         String           @unique
+  claim           Claim            @relation(fields: [claimId], references: [id])
+
+  status          ReviewCaseStatus @default(pending)
+
+  aiScore         Float
+  confidence      Float
+  riskLevel       String           // low, medium, high
+  factors         Json?            // string[]
+  recommendations Json?            // string[]
+  evidenceSummary String?
+
+  reviewerId      String?
+  reviewerNotes   String?
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  reviewedAt      DateTime?
+
+  @@index([status])
+  @@index([riskLevel])
+  @@index([createdAt])
+  @@index([claimId])
 }

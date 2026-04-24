@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
@@ -10,6 +15,7 @@ import {
   VerificationResult,
 } from './interfaces/verification-job.interface';
 import { AuditService } from '../audit/audit.service';
+import { Prisma } from '@prisma/client';
 import { firstValueFrom } from 'rxjs';
 import OpenAI from 'openai';
 
@@ -191,6 +197,39 @@ export class VerificationService {
         status: shouldVerify ? 'verified' : 'requested',
       },
     });
+
+    // Create or update a review case for claims that were not auto-verified
+    if (!shouldVerify) {
+      await this.prisma.reviewCase.upsert({
+        where: { claimId },
+        update: {
+          aiScore: result.score,
+          confidence: result.confidence,
+          riskLevel: result.details.riskLevel,
+          factors: result.details.factors as unknown as Prisma.InputJsonValue,
+          recommendations: (result.details.recommendations ?? []) as unknown as Prisma.InputJsonValue,
+          evidenceSummary: claim.evidenceRef ?? undefined,
+          status: 'pending',
+        },
+        create: {
+          claimId,
+          aiScore: result.score,
+          confidence: result.confidence,
+          riskLevel: result.details.riskLevel,
+          factors: result.details.factors as unknown as Prisma.InputJsonValue,
+          recommendations: (result.details.recommendations ?? []) as unknown as Prisma.InputJsonValue,
+          evidenceSummary: claim.evidenceRef ?? undefined,
+        },
+      });
+      this.logger.log(`Review case created/updated for claim ${claimId}`);
+    } else {
+      // If claim was auto-verified, remove any pending review case
+      await this.prisma.reviewCase
+        .deleteMany({ where: { claimId } })
+        .catch(() => {
+          // Ignore errors if no review case existed
+        });
+    }
 
     this.logger.log(
       `Claim ${claimId} verification completed – score ${result.score} ` +
@@ -646,5 +685,191 @@ the JSON verdict.
       failed,
       total: waiting + active + completed + failed,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Review queue
+  // -------------------------------------------------------------------------
+
+  async getReviewQueue(query: {
+    status?: string;
+    riskLevel?: string;
+    fromDate?: string;
+    toDate?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.ReviewCaseWhereInput = {};
+
+    if (query.status) {
+      where.status = query.status as Prisma.EnumReviewCaseStatusFilter;
+    }
+    if (query.riskLevel) {
+      where.riskLevel = query.riskLevel;
+    }
+    if (query.fromDate || query.toDate) {
+      where.createdAt = {};
+      if (query.fromDate) where.createdAt.gte = new Date(query.fromDate);
+      if (query.toDate) where.createdAt.lte = new Date(query.toDate);
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.reviewCase.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          claim: {
+            select: {
+              id: true,
+              status: true,
+              amount: true,
+              recipientRef: true,
+              evidenceRef: true,
+              createdAt: true,
+              campaign: { select: { id: true, name: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.reviewCase.count({ where }),
+    ]);
+
+    return { items, total, page, limit };
+  }
+
+  async getReviewCase(id: string) {
+    const reviewCase = await this.prisma.reviewCase.findUnique({
+      where: { id },
+      include: {
+        claim: {
+          select: {
+            id: true,
+            status: true,
+            amount: true,
+            recipientRef: true,
+            evidenceRef: true,
+            createdAt: true,
+            campaign: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!reviewCase) {
+      throw new NotFoundException(`Review case with ID ${id} not found`);
+    }
+
+    const [claimHistory, caseHistory] = await Promise.all([
+      this.auditService.findLogs({ entityId: reviewCase.claimId }),
+      this.auditService.findLogs({ entityId: reviewCase.id }),
+    ]);
+
+    const history = [...claimHistory, ...caseHistory].sort(
+      (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
+    );
+
+    return { ...reviewCase, history };
+  }
+
+  async approveReviewCase(
+    id: string,
+    reviewerId: string,
+    notes?: string,
+  ) {
+    const reviewCase = await this.prisma.reviewCase.findUnique({
+      where: { id },
+    });
+
+    if (!reviewCase) {
+      throw new NotFoundException(`Review case with ID ${id} not found`);
+    }
+
+    if (reviewCase.status !== 'pending') {
+      throw new BadRequestException(
+        `Review case is already ${reviewCase.status}`,
+      );
+    }
+
+    const [updatedCase] = await this.prisma.$transaction([
+      this.prisma.reviewCase.update({
+        where: { id },
+        data: {
+          status: 'approved',
+          reviewerId,
+          reviewerNotes: notes ?? null,
+          reviewedAt: new Date(),
+        },
+      }),
+      this.prisma.claim.update({
+        where: { id: reviewCase.claimId },
+        data: { status: 'verified' },
+      }),
+    ]);
+
+    await this.auditService.record({
+      actorId: reviewerId,
+      entity: 'review_case',
+      entityId: id,
+      action: 'approve',
+      metadata: { notes, claimId: reviewCase.claimId },
+    });
+
+    this.logger.log(`Review case ${id} approved by ${reviewerId}`);
+
+    return updatedCase;
+  }
+
+  async rejectReviewCase(
+    id: string,
+    reviewerId: string,
+    notes?: string,
+  ) {
+    const reviewCase = await this.prisma.reviewCase.findUnique({
+      where: { id },
+    });
+
+    if (!reviewCase) {
+      throw new NotFoundException(`Review case with ID ${id} not found`);
+    }
+
+    if (reviewCase.status !== 'pending') {
+      throw new BadRequestException(
+        `Review case is already ${reviewCase.status}`,
+      );
+    }
+
+    const [updatedCase] = await this.prisma.$transaction([
+      this.prisma.reviewCase.update({
+        where: { id },
+        data: {
+          status: 'rejected',
+          reviewerId,
+          reviewerNotes: notes ?? null,
+          reviewedAt: new Date(),
+        },
+      }),
+      this.prisma.claim.update({
+        where: { id: reviewCase.claimId },
+        data: { status: 'archived' },
+      }),
+    ]);
+
+    await this.auditService.record({
+      actorId: reviewerId,
+      entity: 'review_case',
+      entityId: id,
+      action: 'reject',
+      metadata: { notes, claimId: reviewCase.claimId },
+    });
+
+    this.logger.log(`Review case ${id} rejected by ${reviewerId}`);
+
+    return updatedCase;
   }
 }
