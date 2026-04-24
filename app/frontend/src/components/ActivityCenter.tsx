@@ -21,15 +21,27 @@ const statusColors: Record<ActivityStatus, string> = {
 
 export function ActivityCenter() {
   const [isOpen, setIsOpen] = useState(false);
-  const { activities, removeActivity, clearCompleted } = useActivityStore();
+  const { activities, removeActivity, clearCompleted, updateActivity } = useActivityStore();
 
   const pendingCount = activities.filter(a => a.status === 'pending' || a.status === 'processing').length;
 
   const handleRetry = async (activity: any) => {
     if (activity.retryAction) {
+      // Reset activity to pending state
+      updateActivity(activity.id, {
+        status: 'pending',
+        currentStep: 'Retrying...',
+        errorMessage: undefined,
+      });
+
       try {
-        await activity.retryAction();
+        if (activity.type === 'transaction') {
+          await activity.retryAction();
+        } else {
+          await activity.retryAction();
+        }
       } catch (error) {
+        // Error handling is done in the retryAction itself
         console.error('Retry failed:', error);
       }
     }
@@ -89,7 +101,7 @@ export function ActivityCenter() {
                   return (
                     <div
                       key={activity.id}
-                      className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 mb-2 last:mb-0 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                      className="group p-3 rounded-lg border border-slate-200 dark:border-slate-700 mb-2 last:mb-0 hover:bg-slate-50 dark:hover:bg-slate-700/50"
                     >
                       <div className="flex items-start gap-3">
                         <StatusIcon

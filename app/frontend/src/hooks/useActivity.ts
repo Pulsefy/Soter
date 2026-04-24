@@ -7,11 +7,12 @@ import type { ActivityItem } from '@/types/activity';
 export function useActivity() {
   const { addActivity, updateActivity } = useActivityStore();
 
-  const trackTransaction = (
+  const trackTransaction = async (
     title: string,
     description: string,
     action: () => Promise<{ transactionHash?: string; explorerUrl?: string }>,
     options?: {
+      retryAction?: () => Promise<{ transactionHash?: string; explorerUrl?: string }>;
       onSuccess?: (result: any) => void;
       onError?: (error: Error) => void;
     }
@@ -26,34 +27,36 @@ export function useActivity() {
       title,
       description,
       currentStep: 'Preparing transaction...',
+      retryAction: options?.retryAction,
     });
 
-    // Execute the action
-    action()
-      .then((result) => {
-        updateActivity(activityId, {
-          status: 'succeeded',
-          currentStep: 'Transaction completed',
-          transactionHash: result.transactionHash,
-          explorerUrl: result.explorerUrl,
-        });
-        options?.onSuccess?.(result);
-      })
-      .catch((error) => {
-        updateActivity(activityId, {
-          status: 'failed',
-          currentStep: 'Transaction failed',
-          errorMessage: error.message,
-        });
-        options?.onError?.(error);
+    try {
+      const result = await action();
+      updateActivity(activityId, {
+        status: 'succeeded',
+        currentStep: 'Transaction completed',
+        transactionHash: result.transactionHash,
+        explorerUrl: result.explorerUrl,
       });
+      options?.onSuccess?.(result);
+      return result;
+    } catch (error) {
+      updateActivity(activityId, {
+        status: 'failed',
+        currentStep: 'Transaction failed',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      });
+      options?.onError?.(error);
+      throw error;
+    }
   };
 
-  const trackJob = (
+  const trackJob = async (
     title: string,
     description: string,
     action: () => Promise<any>,
     options?: {
+      retryAction?: () => Promise<any>;
       onSuccess?: (result: any) => void;
       onError?: (error: Error) => void;
     }
@@ -68,25 +71,26 @@ export function useActivity() {
       title,
       description,
       currentStep: 'Processing...',
+      retryAction: options?.retryAction,
     });
 
-    // Execute the action
-    action()
-      .then((result) => {
-        updateActivity(activityId, {
-          status: 'succeeded',
-          currentStep: 'Completed successfully',
-        });
-        options?.onSuccess?.(result);
-      })
-      .catch((error) => {
-        updateActivity(activityId, {
-          status: 'failed',
-          currentStep: 'Failed',
-          errorMessage: error.message,
-        });
-        options?.onError?.(error);
+    try {
+      const result = await action();
+      updateActivity(activityId, {
+        status: 'succeeded',
+        currentStep: 'Completed successfully',
       });
+      options?.onSuccess?.(result);
+      return result;
+    } catch (error) {
+      updateActivity(activityId, {
+        status: 'failed',
+        currentStep: 'Failed',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      });
+      options?.onError?.(error);
+      throw error;
+    }
   };
 
   return { trackTransaction, trackJob };

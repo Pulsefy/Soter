@@ -281,30 +281,29 @@ export const VerificationFlow: React.FC = () => {
 
         let cancelled = false;
 
-        trackJob(
-            'Evidence Verification',
-            'Analyzing submitted evidence for authenticity',
-            () => startEvidenceVerification(payload),
-            {
-                onSuccess: (data) => {
-                    if (cancelled) return;
-                    setResult(data);
-                    setStep('result');
-                },
-                onError: (err) => {
-                    if (cancelled) return;
-                    if (err instanceof VerificationApiError) {
-                        setApiError(err.message);
-                    } else {
-                        setApiError(
-                            'An unexpected error occurred. Please try again.',
-                        );
-                    }
-                    pendingPayload.current = null;
-                    setStep('upload');
-                },
+        (async () => {
+          try {
+            const data = await trackJob(
+              'Evidence Verification',
+              'Analyzing submitted evidence for authenticity',
+              () => startEvidenceVerification(payload)
+            );
+            if (cancelled) return;
+            setResult(data);
+            setStep('result');
+          } catch (err) {
+            if (cancelled) return;
+            if (err instanceof VerificationApiError) {
+              setApiError(err.message);
+            } else {
+              setApiError(
+                'An unexpected error occurred. Please try again.',
+              );
             }
-        );
+            pendingPayload.current = null;
+            setStep('upload');
+          }
+        })();
 
         return () => {
             cancelled = true;
