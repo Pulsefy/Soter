@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { AppModule } from '../src/app.module';
 import { RateLimitService } from '../src/common/rate-limit/rate-limit.service';
+import { RateLimitGuard } from '../src/common/guards/rate-limit.guard';
 
 describe('Rate Limiting Integration', () => {
   let app: INestApplication;
@@ -30,8 +31,8 @@ describe('Rate Limiting Integration', () => {
 
   describe('Rate Limit Guard', () => {
     it('should be defined', () => {
-      const { RateLimitGuard } = require('../src/common/guards/rate-limit.guard');
-      expect(RateLimitGuard).toBeDefined();
+      const rateLimitGuard = moduleFixture.get(RateLimitGuard);
+      expect(rateLimitGuard).toBeDefined();
     });
   });
 });
