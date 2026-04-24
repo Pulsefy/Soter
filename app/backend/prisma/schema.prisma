@@ -30,6 +30,16 @@ model AidPackage {
   updatedAt DateTime @updatedAt
 
   status    String   @default("draft")
+
+  campaignId    String?
+  campaign      Campaign? @relation(fields: [campaignId], references: [id])
+
+  totalAmount     Float @default(0)
+  claimedAmount   Float @default(0)
+  remainingAmount Float @default(0)
+
+  @@index([campaignId])
+  @@index([campaignId, status])
 }
 
 /// Tracks every balance event (lock / unlock / disburse) for a campaign.
@@ -268,6 +278,7 @@ model Campaign {
 
   claims      Claim[]
   balanceLedger BalanceLedger[]
+  packages      AidPackage[]
 
   @@index([status])
   @@index([archivedAt])
