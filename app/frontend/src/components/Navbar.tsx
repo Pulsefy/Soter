@@ -8,6 +8,7 @@ import { WalletConnect } from './WalletConnect';
 import { EnvironmentIndicator } from './EnvironmentIndicator';
 import { HealthBadge } from './HealthBadge';
 import { ThemeToggle } from './ThemeToggle';
+import { ActivityCenter } from './ActivityCenter';
 import { useWalletStore } from '@/lib/walletStore';
 import {
   getNavigationItems,
@@ -86,6 +87,7 @@ export function Navbar() {
           <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-blue-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
             Role: {userRoleLabel}
           </span>
+          <ActivityCenter />
           <EnvironmentIndicator />
           {walletPreview && <span className="text-sm">Wallet: {walletPreview}</span>}
           <HealthBadge />

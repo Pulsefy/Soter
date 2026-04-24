@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { Bell, X, ExternalLink, RefreshCw, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
 import { useActivityStore } from '@/lib/activityStore';
 import type { ActivityStatus } from '@/types/activity';
-import { formatDistanceToNow } from 'date-fns';
 
 const statusIcons: Record<ActivityStatus, React.ComponentType<{ size?: number; className?: string }>> = {
   pending: Clock,
@@ -129,7 +128,7 @@ export function ActivityCenter() {
 
                           <div className="flex items-center justify-between mt-2">
                             <span className="text-xs text-slate-500 dark:text-slate-400">
-                              {formatDistanceToNow(activity.timestamp, { addSuffix: true })}
+                              {activity.timestamp.toLocaleString()}
                             </span>
                             <div className="flex items-center gap-2">
                               {activity.retryAction && activity.status === 'failed' && (
