@@ -14,30 +14,30 @@ const ALL_NAVIGATION_ROLES: readonly UserRole[] = USER_ROLES;
 const CAMPAIGN_MANAGER_ROLES: readonly UserRole[] = ['ngo', 'admin'];
 
 const ROLE_LABELS: Record<UserRole, string> = {
-  guest: 'Guest',
-  client: 'Client',
-  operator: 'Operator',
-  ngo: 'NGO',
-  admin: 'Admin',
+  guest: 'roles.guest',
+  client: 'roles.client',
+  operator: 'roles.operator',
+  ngo: 'roles.ngo',
+  admin: 'roles.admin',
 };
 
 const NAVIGATION_ITEMS: readonly NavigationItem[] = [
   {
     href: '/',
-    label: 'Home',
-    description: 'Platform overview and aid highlights.',
+    label: 'navigation.home',
+    description: 'navigation.homeDescription',
     allowedRoles: ALL_NAVIGATION_ROLES,
   },
   {
     href: '/dashboard',
-    label: 'Dashboard',
-    description: 'Track aid packages and distribution activity.',
+    label: 'navigation.dashboard',
+    description: 'navigation.dashboardDescription',
     allowedRoles: ALL_NAVIGATION_ROLES,
   },
   {
     href: '/campaigns',
-    label: 'Campaigns',
-    description: 'Create and manage NGO funding campaigns.',
+    label: 'navigation.campaigns',
+    description: 'navigation.campaignsDescription',
     allowedRoles: CAMPAIGN_MANAGER_ROLES,
   },
 ];

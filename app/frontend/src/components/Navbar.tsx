@@ -4,11 +4,13 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { WalletConnect } from './WalletConnect';
 import { EnvironmentIndicator } from './EnvironmentIndicator';
 import { HealthBadge } from './HealthBadge';
 import { ThemeToggle } from './ThemeToggle';
 import { ActivityCenter } from './ActivityCenter';
+import { LanguageSelector } from './LanguageSelector';
 import { useWalletStore } from '@/lib/walletStore';
 import {
   getNavigationItems,
@@ -29,10 +31,11 @@ function isActiveRoute(href: string, pathname: string): boolean {
 
 export function Navbar() {
   const pathname = usePathname();
+  const t = useTranslations();
   const { publicKey } = useWalletStore();
   const [isOpen, setIsOpen] = useState(false);
   const userRole = getUserRole();
-  const userRoleLabel = getUserRoleLabel(userRole);
+  const userRoleLabel = t(getUserRoleLabel(userRole));
   const navigationItems = getNavigationItems(userRole);
   const walletPreview = publicKey
     ? `${publicKey.substring(0, 6)}...${publicKey.substring(publicKey.length - 6)}`
@@ -65,7 +68,7 @@ export function Navbar() {
                       : 'text-slate-600 hover:bg-slate-100 hover:text-blue-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50'
                   }`}
                 >
-                  {item.label}
+                  {t(item.label)}
                 </Link>
               );
             })}
@@ -85,12 +88,13 @@ export function Navbar() {
 
         <div className="hidden md:flex items-center justify-end gap-3 flex-wrap">
           <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-blue-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-            Role: {userRoleLabel}
+            {t('navigation.role')}: {userRoleLabel}
           </span>
           <ActivityCenter />
           <EnvironmentIndicator />
           {walletPreview && <span className="text-sm">Wallet: {walletPreview}</span>}
           <HealthBadge />
+          <LanguageSelector />
           <ThemeToggle />
           <WalletConnect />
         </div>
@@ -104,7 +108,7 @@ export function Navbar() {
           <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-3">
               <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-blue-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                Role: {userRoleLabel}
+                {t('navigation.role')}: {userRoleLabel}
               </span>
               <ThemeToggle />
             </div>
@@ -124,9 +128,9 @@ export function Navbar() {
                         : 'border-slate-200 text-slate-700 dark:border-slate-700 dark:text-slate-200'
                     }`}
                   >
-                    <span className="block text-sm font-semibold">{item.label}</span>
+                    <span className="block text-sm font-semibold">{t(item.label)}</span>
                     <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
-                      {item.description}
+                      {t(item.description)}
                     </span>
                   </Link>
                 );
@@ -135,14 +139,14 @@ export function Navbar() {
 
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                Activity
+                {t('navigation.activity')}
               </span>
               <ActivityCenter />
             </div>
 
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                Environment
+                {t('navigation.environment')}
               </span>
               <EnvironmentIndicator />
             </div>
@@ -150,7 +154,7 @@ export function Navbar() {
             {walletPreview && (
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                  Wallet
+                  {t('navigation.wallet')}
                 </span>
                 <span className="text-sm">{walletPreview}</span>
               </div>
@@ -158,7 +162,7 @@ export function Navbar() {
 
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                Status
+                {t('common.status')}
               </span>
               <HealthBadge />
             </div>
