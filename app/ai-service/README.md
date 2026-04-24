@@ -181,6 +181,7 @@ app/ai-service/
 - ✅ Structured logging
 - ✅ Auto-generated API documentation
 - ✅ Startup/shutdown event handlers
+- ✅ Deterministic AI test mode for stable verification outputs in CI
 - ✅ OpenCV face detection and basic liveness verification (blink/head movement)
 - ✅ Tesseract OCR for identity document verification
 - ✅ Image preprocessing (grayscale, thresholding, denoising)

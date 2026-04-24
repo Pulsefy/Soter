@@ -1,5 +1,6 @@
 import pytest
 
+from config import settings
 from services.humanitarian_verification import HumanitarianVerificationService
 import metrics
 from unittest.mock import patch, MagicMock
@@ -63,3 +64,47 @@ class TestHumanitarianVerificationService:
 
         assert parsed["verdict"] == "credible"
         assert parsed["confidence"] == 0.9
+
+    def test_verify_claim_returns_deterministic_response_when_enabled(self, monkeypatch):
+        monkeypatch.setattr(settings, "ai_deterministic_mode", True)
+        monkeypatch.setattr(settings, "openai_api_key", "test-api-key")
+
+        monkeypatch.setattr(self.service, "_provider_attempt_order", lambda provider_preference: ["openai"])
+        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda provider: "test-model")
+
+        result = self.service.verify_claim(
+            aid_claim="Aid package reached all households.",
+            supporting_evidence=["monitoring sheet"],
+            context_factors={"weather": "flooding"},
+            provider_preference="openai",
+        )
+
+        assert result["provider"] == "openai"
+        assert result["prompt_variant"] == "primary"
+        assert result["verification"] == {
+            "confidence": 0.74,
+            "summary": "Deterministic verification output for testing",
+            "verdict": "credible",
+        }
+
+    def test_deterministic_verify_claim_outputs_remain_stable_across_runs(self, monkeypatch):
+        monkeypatch.setattr(settings, "ai_deterministic_mode", True)
+        monkeypatch.setattr(settings, "openai_api_key", "test-api-key")
+
+        monkeypatch.setattr(self.service, "_provider_attempt_order", lambda provider_preference: ["openai"])
+        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda provider: "test-model")
+
+        first_result = self.service.verify_claim(
+            aid_claim="Emergency medical supplies delivered.",
+            supporting_evidence=["field report"],
+            context_factors={"region": "coastal"},
+            provider_preference="openai",
+        )
+        second_result = self.service.verify_claim(
+            aid_claim="Emergency medical supplies delivered.",
+            supporting_evidence=["field report"],
+            context_factors={"region": "coastal"},
+            provider_preference="openai",
+        )
+
+        assert first_result == second_result

@@ -199,7 +199,10 @@ export class SessionUsageExamples {
       console.log('Step completed successfully:', result);
       return result;
     } catch (error) {
-      console.error('Step failed:', error.message);
+      console.error(
+        'Step failed:',
+        error instanceof Error ? error.message : 'Unknown error',
+      );
 
       // Check session status
       const session = await this.sessionService.getSession(sessionId);

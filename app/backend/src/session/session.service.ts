@@ -122,8 +122,8 @@ export class SessionService {
         sessionId: existingSubmission.sessionId,
         stepId: existingSubmission.stepId ?? undefined,
         submissionKey: existingSubmission.submissionKey,
-        payload: existingSubmission.payload as Record<string, any>,
-        response: existingSubmission.response as Record<string, any>,
+        payload: existingSubmission.payload as Record<string, unknown>,
+        response: existingSubmission.response as Record<string, unknown>,
         createdAt: existingSubmission.createdAt,
         isIdempotent: true,
       };
@@ -157,8 +157,10 @@ export class SessionService {
         sessionId,
         stepId,
         submissionKey: dto.submissionKey,
-        payload: dto.payload,
-        response: result,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        payload: dto.payload as any,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        response: result as any,
       },
     });
 
@@ -171,8 +173,8 @@ export class SessionService {
       sessionId: submission.sessionId,
       stepId: submission.stepId ?? undefined,
       submissionKey: submission.submissionKey,
-      payload: submission.payload as Record<string, any>,
-      response: submission.response as Record<string, any>,
+      payload: submission.payload as Record<string, unknown>,
+      response: submission.response as Record<string, unknown>,
       createdAt: submission.createdAt,
       isIdempotent: false,
     };
@@ -185,7 +187,7 @@ export class SessionService {
     sessionId: string,
     stepId: string,
     dto: SubmitStepDto,
-  ): Promise<Record<string, any>> {
+  ): Promise<Record<string, unknown>> {
     const step = await this.prisma.sessionStep.findUnique({
       where: { id: stepId },
     });
@@ -222,7 +224,8 @@ export class SessionService {
         where: { id: stepId },
         data: {
           status: SessionStepStatus.completed,
-          output: result,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          output: result as any,
           completedAt: new Date(),
         },
       });
@@ -268,8 +271,8 @@ export class SessionService {
    */
   private executeStepLogic(
     stepName: string,
-    payload: Record<string, any>,
-  ): Record<string, any> {
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
     switch (stepName) {
       case 'otp_validation':
         return this.validateOtp(payload);
@@ -292,8 +295,13 @@ export class SessionService {
   /**
    * OTP validation logic
    */
-  private validateOtp(payload: Record<string, any>): Record<string, any> {
-    const { code, expectedCode } = payload;
+  private validateOtp(
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const { code, expectedCode } = payload as {
+      code: string;
+      expectedCode: string;
+    };
 
     if (!code || !expectedCode) {
       throw new BadRequestException('Code and expectedCode are required');
@@ -314,9 +322,12 @@ export class SessionService {
    * Document upload processing
    */
   private processDocumentUpload(
-    payload: Record<string, any>,
-  ): Record<string, any> {
-    const { documentUrl, documentType } = payload;
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const { documentUrl, documentType } = payload as {
+      documentUrl: string;
+      documentType?: string;
+    };
 
     if (!documentUrl) {
       throw new BadRequestException('Document URL is required');
@@ -334,8 +345,13 @@ export class SessionService {
   /**
    * Identity verification logic
    */
-  private verifyIdentity(payload: Record<string, any>): Record<string, any> {
-    const { identityDocument, personalInfo } = payload;
+  private verifyIdentity(
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const { identityDocument, personalInfo } = payload as {
+      identityDocument: unknown;
+      personalInfo: unknown;
+    };
 
     if (!identityDocument || !personalInfo) {
       throw new BadRequestException(
@@ -358,8 +374,10 @@ export class SessionService {
   /**
    * Claim verification logic
    */
-  private verifyClaim(payload: Record<string, any>): Record<string, any> {
-    const { claimId } = payload;
+  private verifyClaim(
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const { claimId } = payload as { claimId: string };
 
     if (!claimId) {
       throw new BadRequestException('Claim ID is required');
@@ -494,8 +512,8 @@ export class SessionService {
       stepName: step.stepName,
       stepOrder: step.stepOrder,
       status: step.status,
-      input: step.input as Record<string, any>,
-      output: step.output as Record<string, any>,
+      input: step.input as Record<string, unknown>,
+      output: step.output as Record<string, unknown>,
       error: step.error ?? undefined,
       attempts: step.attempts,
       maxAttempts: step.maxAttempts,
@@ -522,7 +540,7 @@ export class SessionService {
       type: session.type,
       status: session.status,
       contextId: session.contextId ?? undefined,
-      metadata: session.metadata as Record<string, any>,
+      metadata: session.metadata as Record<string, unknown>,
       expiresAt: session.expiresAt ?? undefined,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,

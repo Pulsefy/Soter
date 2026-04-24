@@ -40,34 +40,41 @@ export class SorobanErrorMapper {
   mapError(error: any): {
     statusCode: number;
     message: string;
-    details?: any;
+    details?: Record<string, unknown>;
   } {
     // Handle RPC/Network errors
-    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    if (error?.code === 'ECONNREFUSED' || error?.code === 'ENOTFOUND') {
       return {
         statusCode: 503,
         message: 'Blockchain network unreachable',
         details: {
           error_type: 'network_error',
-          original_error: error.message,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          original_error: error?.message,
         },
       };
     }
 
     // Handle JSON-RPC errors (Soroban RPC Server responses)
-    if (error.response?.data?.error) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    if (error?.response?.data?.error) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
       const jsonRpcError = error.response.data.error;
       return this.mapJsonRpcError(jsonRpcError);
     }
 
     // Handle Soroban SDK errors with specific error codes
-    if (error.errorCode !== undefined) {
-      const mapping = this.contractErrors[error.errorCode];
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    if (error?.errorCode !== undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const mapping = this.contractErrors[error.errorCode as number];
       if (mapping) {
         return {
           statusCode: mapping.code,
           message: mapping.message,
           details: {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
             error_code: error.errorCode,
             error_type: 'contract_error',
           },
@@ -76,37 +83,40 @@ export class SorobanErrorMapper {
     }
 
     // Handle contract invocation errors
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const message = error?.message as string | undefined;
     if (
-      error.message &&
-      (error.message.includes('NotInitialized') ||
-        error.message.includes('AlreadyInitialized') ||
-        error.message.includes('NotAuthorized') ||
-        error.message.includes('PackageNotFound') ||
-        error.message.includes('PackageExpired'))
+      message &&
+      (message.includes('NotInitialized') ||
+        message.includes('AlreadyInitialized') ||
+        message.includes('NotAuthorized') ||
+        message.includes('PackageNotFound') ||
+        message.includes('PackageExpired'))
     ) {
-      return this.mapContractErrorMessage(error.message);
+      return this.mapContractErrorMessage(message);
     }
 
     // Handle timeout errors
-    if (error.code === 'ETIMEDOUT' || error.message?.includes('timeout')) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    if (error?.code === 'ETIMEDOUT' || message?.includes('timeout')) {
       return {
         statusCode: 504,
         message: 'Blockchain operation timed out',
         details: {
           error_type: 'timeout',
-          original_error: error.message,
+          original_error: message,
         },
       };
     }
 
     // Handle transaction submission errors
-    if (error.message?.includes('transaction')) {
+    if (message?.includes('transaction')) {
       return {
         statusCode: 400,
         message: 'Transaction submission failed',
         details: {
           error_type: 'transaction_error',
-          original_error: error.message,
+          original_error: message,
         },
       };
     }
@@ -117,7 +127,7 @@ export class SorobanErrorMapper {
       message: 'An error occurred while communicating with the blockchain',
       details: {
         error_type: 'unknown_error',
-        original_message: error.message,
+        original_message: message,
       },
     };
   }
@@ -128,10 +138,12 @@ export class SorobanErrorMapper {
   private mapJsonRpcError(jsonRpcError: any): {
     statusCode: number;
     message: string;
-    details?: any;
+    details?: Record<string, unknown>;
   } {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
     const code = jsonRpcError.code;
-    const message = jsonRpcError.message || '';
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const message = (jsonRpcError.message as string) || '';
 
     // JSON-RPC error codes mapping
     switch (code) {
@@ -154,7 +166,7 @@ export class SorobanErrorMapper {
         return {
           statusCode: 500,
           message: 'Blockchain RPC internal error',
-          details: { error_code: code, rpc_message: message },
+          details: { error_code: code as number, rpc_message: message },
         };
 
       default:
@@ -163,13 +175,13 @@ export class SorobanErrorMapper {
           return {
             statusCode: 500,
             message: 'Blockchain RPC server error',
-            details: { error_code: code, rpc_message: message },
+            details: { error_code: code as number, rpc_message: message },
           };
         }
         return {
           statusCode: 500,
           message: 'Blockchain RPC error',
-          details: { error_code: code, rpc_message: message },
+          details: { error_code: code as number, rpc_message: message },
         };
     }
   }
@@ -180,7 +192,7 @@ export class SorobanErrorMapper {
   private mapContractErrorMessage(message: string): {
     statusCode: number;
     message: string;
-    details?: any;
+    details?: Record<string, unknown>;
   } {
     const errorMap: Record<string, { code: number; message: string }> = {
       NotInitialized: { code: 400, message: 'Escrow not initialized' },
@@ -232,7 +244,7 @@ export class SorobanErrorMapper {
   /**
    * Throws an appropriate NestJS exception based on the mapped error
    */
-  throwMappedError(error: any): never {
+  throwMappedError(error: unknown): never {
     const mapped = this.mapError(error);
 
     if (mapped.statusCode === 400) {

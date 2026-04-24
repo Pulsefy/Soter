@@ -141,6 +141,10 @@ class HumanitarianVerificationService:
         system_prompt: str,
         user_prompt: str,
     ) -> str:
+        if settings.ai_deterministic_mode:
+            logger.info("Deterministic AI mode enabled: returning stable response")
+            return self._get_deterministic_response(model, system_prompt, user_prompt)
+
         payload = {
             "model": model,
             "temperature": 0.1,
@@ -171,6 +175,14 @@ class HumanitarianVerificationService:
             raise RuntimeError("LLM returned empty content")
 
         return str(content)
+
+    def _get_deterministic_response(self, model: str, system_prompt: str, user_prompt: str) -> str:
+        stable_response = {
+            "verdict": "credible",
+            "confidence": 0.74,
+            "summary": "Deterministic verification output for testing",
+        }
+        return json.dumps(stable_response, separators=(",", ":"), sort_keys=True)
 
     def _parse_json_response(self, content: str) -> Dict[str, Any]:
         normalized = content.strip()

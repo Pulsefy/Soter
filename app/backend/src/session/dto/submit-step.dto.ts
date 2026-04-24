@@ -8,7 +8,7 @@ export class SubmitStepDto {
 
   @ApiProperty({ description: 'Step input data' })
   @IsObject()
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
 
   @ApiPropertyOptional({
     description: 'Optional step name to target specific step',

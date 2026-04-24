@@ -89,7 +89,8 @@ export class EnhancedVerificationFlowService {
       );
     }
 
-    const otpSessionId = session.metadata?.originalOtpSessionId;
+    const metadata = session.metadata;
+    const otpSessionId = metadata?.originalOtpSessionId as string | undefined;
     if (!otpSessionId) {
       throw new BadRequestException('Original OTP session ID not found');
     }
@@ -126,7 +127,9 @@ export class EnhancedVerificationFlowService {
       };
     } catch (error) {
       this.logger.error(
-        `OTP step failed for session ${sessionId}: ${error.message}`,
+        `OTP step failed for session ${sessionId}: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
       );
       throw error;
     }
@@ -141,7 +144,7 @@ export class EnhancedVerificationFlowService {
     documentData: {
       documentUrl: string;
       documentType: string;
-      metadata?: Record<string, any>;
+      metadata?: Record<string, unknown>;
     },
   ) {
     const session = await this.sessionService.getSession(sessionId);
@@ -173,7 +176,7 @@ export class EnhancedVerificationFlowService {
     return {
       success: true,
       stepCompleted: 'document_upload',
-      documentId: stepResult.response?.documentId,
+      documentId: (stepResult.response as Record<string, unknown>)?.documentId,
       submission: stepResult,
     };
   }
@@ -185,9 +188,9 @@ export class EnhancedVerificationFlowService {
     sessionId: string,
     submissionKey: string,
     identityData: {
-      identityDocument: Record<string, any>;
-      personalInfo: Record<string, any>;
-      biometricData?: Record<string, any>;
+      identityDocument: Record<string, unknown>;
+      personalInfo: Record<string, unknown>;
+      biometricData?: Record<string, unknown>;
     },
   ) {
     const session = await this.sessionService.getSession(sessionId);
@@ -219,8 +222,10 @@ export class EnhancedVerificationFlowService {
     return {
       success: true,
       stepCompleted: 'identity_verification',
-      verificationScore: stepResult.response?.score,
-      verificationId: stepResult.response?.verificationId,
+      verificationScore: (stepResult.response as Record<string, unknown>)
+        ?.score,
+      verificationId: (stepResult.response as Record<string, unknown>)
+        ?.verificationId,
       submission: stepResult,
     };
   }

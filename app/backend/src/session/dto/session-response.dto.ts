@@ -19,10 +19,10 @@ export class SessionStepResponseDto {
   status: SessionStepStatus;
 
   @ApiPropertyOptional()
-  input?: Record<string, any>;
+  input?: Record<string, unknown>;
 
   @ApiPropertyOptional()
-  output?: Record<string, any>;
+  output?: Record<string, unknown>;
 
   @ApiPropertyOptional()
   error?: string;
@@ -60,7 +60,7 @@ export class SessionResponseDto {
   contextId?: string;
 
   @ApiPropertyOptional()
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 
   @ApiPropertyOptional()
   expiresAt?: Date;
@@ -101,10 +101,10 @@ export class SubmissionResponseDto {
   submissionKey: string;
 
   @ApiProperty()
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
 
   @ApiPropertyOptional()
-  response?: Record<string, any>;
+  response?: Record<string, unknown>;
 
   @ApiProperty()
   createdAt: Date;

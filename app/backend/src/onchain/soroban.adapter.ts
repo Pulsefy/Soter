@@ -41,7 +41,7 @@ export class SorobanAdapter implements OnchainAdapter {
 
   // Note: The actual Soroban SDK will be lazily imported when needed
   // to avoid bundle size issues in development builds
-  private sorobanLib: any = null;
+  private sorobanLib: Record<string, any> | null = null;
 
   constructor(private configService: ConfigService) {
     this.contractId = this.configService.get<string>('SOROBAN_CONTRACT_ID', '');
@@ -70,11 +70,14 @@ export class SorobanAdapter implements OnchainAdapter {
     try {
       // Dynamically import stellar/cli SDK
       // @ts-expect-error - stellar is optional, only required in production
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const mod = await import('stellar');
       this.sorobanLib = {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         rpc: mod,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         api: mod,
-        ...mod,
+        ...(mod as Record<string, any>),
       };
       return this.sorobanLib;
     } catch (error) {
@@ -90,6 +93,7 @@ export class SorobanAdapter implements OnchainAdapter {
    */
   private async getRpcClient() {
     const sdk = await this.loadSorobanSDK();
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return
     return new sdk.SorobanRpc.Server(this.rpcUrl, {
       allowHttp: this.rpcUrl.startsWith('http://'),
     });
@@ -112,7 +116,8 @@ export class SorobanAdapter implements OnchainAdapter {
 
     try {
       const _sdk = await this.loadSorobanSDK();
-      const _client = await this.getRpcClient();
+
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
 
       // Note: Actual implementation would require signing the transaction
       // with the contract owner's keypair and submitting to the network.
@@ -151,7 +156,8 @@ export class SorobanAdapter implements OnchainAdapter {
 
     try {
       const _sdk = await this.loadSorobanSDK();
-      const _client = await this.getRpcClient();
+
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
 
       // Implementation would call contract's create_package method
       // This is a placeholder showing the expected response
@@ -188,7 +194,8 @@ export class SorobanAdapter implements OnchainAdapter {
 
     try {
       const _sdk = await this.loadSorobanSDK();
-      const _client = await this.getRpcClient();
+
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
 
       // Implementation would call contract's batch_create_packages method
       const packageIds = params.recipientAddresses.map((_, index) =>
@@ -224,7 +231,8 @@ export class SorobanAdapter implements OnchainAdapter {
 
     try {
       const _sdk = await this.loadSorobanSDK();
-      const _client = await this.getRpcClient();
+
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
 
       // Implementation would call contract's claim method
       const transactionHash = this.generateMockHash(
@@ -260,7 +268,8 @@ export class SorobanAdapter implements OnchainAdapter {
 
     try {
       const _sdk = await this.loadSorobanSDK();
-      const _client = await this.getRpcClient();
+
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
 
       // Implementation would call contract's disburse method
       const transactionHash = this.generateMockHash(
@@ -293,7 +302,8 @@ export class SorobanAdapter implements OnchainAdapter {
 
     try {
       const _sdk = await this.loadSorobanSDK();
-      const _client = await this.getRpcClient();
+
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
 
       // Implementation would call contract's get_package method
       // For now, returning a mock response structure
@@ -329,7 +339,8 @@ export class SorobanAdapter implements OnchainAdapter {
 
     try {
       const _sdk = await this.loadSorobanSDK();
-      const _client = await this.getRpcClient();
+
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
 
       // Implementation would call contract's get_aggregates method
       // Returns aggregates for the specified token
@@ -359,7 +370,8 @@ export class SorobanAdapter implements OnchainAdapter {
 
     try {
       const _sdk = await this.loadSorobanSDK();
-      const _client = await this.getRpcClient();
+
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
 
       // Implementation would call token contract's balance method
       // This is a placeholder showing the expected response
