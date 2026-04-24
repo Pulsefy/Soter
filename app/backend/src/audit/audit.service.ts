@@ -11,6 +11,7 @@ export interface AuditLogParams {
   entity: string;
   entityId: string;
   action: string;
+  orgId?: string;
   metadata?: Record<string, any>;
 }
 
@@ -26,6 +27,12 @@ export class ExportAuditQuery {
   from?: string;
   to?: string;
   entity?: string;
+  /** Filter by actor ID */
+  actorId?: string;
+  /** Filter by action name */
+  action?: string;
+  /** Filter by organization (ngoId) */
+  orgId?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -73,6 +80,7 @@ export class AuditService {
         entity: params.entity,
         entityId: params.entityId,
         action: params.action,
+        orgId: params.orgId,
         metadata: (params.metadata as Prisma.InputJsonValue) ?? {},
       },
     });
@@ -99,14 +107,24 @@ export class AuditService {
     });
   }
 
-  async exportLogs(query: ExportAuditQuery): Promise<ExportAuditResult> {
+  async exportLogs(
+    query: ExportAuditQuery,
+    /** When set, restricts results to this org (enforced for NGO role) */
+    enforcedOrgId?: string,
+  ): Promise<ExportAuditResult> {
     const page = Math.max(1, query.page ?? 1);
     const limit = Math.min(200, Math.max(1, query.limit ?? 50));
     const skip = (page - 1) * limit;
 
     const where: Prisma.AuditLogWhereInput = {};
 
+    // Org-ownership enforcement: NGO callers can only see their own org's logs
+    const orgId = enforcedOrgId ?? query.orgId;
+    if (orgId) where.orgId = orgId;
+
     if (query.entity) where.entity = query.entity;
+    if (query.actorId) where.actorId = query.actorId;
+    if (query.action) where.action = query.action;
 
     if (query.from || query.to) {
       if (query.from && isNaN(Date.parse(query.from))) {

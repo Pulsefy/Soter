@@ -28,6 +28,7 @@ import { RolesGuard } from './auth/roles.guard';
 import { ObservabilityModule } from './observability/observability.module';
 import { ClaimsModule } from './claims/claims.module';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
+import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
 import { LoggerService } from './logger/logger.service';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -112,6 +113,10 @@ import { RetentionPolicyModule } from './retention-policy/retention-policy.modul
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: IdempotencyInterceptor,
     },
     {
       provide: APP_GUARD,

@@ -248,6 +248,7 @@ model AuditLog {
   entity    String
   entityId  String
   action    String
+  orgId     String?
   timestamp DateTime  @default(now())
   metadata  Json?
   deletedAt DateTime?
@@ -255,6 +256,25 @@ model AuditLog {
   @@index([entity, entityId])
   @@index([timestamp])
   @@index([deletedAt])
+  @@index([orgId])
+  @@index([actorId])
+  @@index([action])
+}
+
+model IdempotencyKey {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  /// SHA-256 of the request body to detect body mismatches
+  bodyHash    String
+  /// HTTP status code of the original response
+  statusCode  Int
+  /// Serialized response body
+  response    Json
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([key])
+  @@index([expiresAt])
 }
 
 model Campaign {

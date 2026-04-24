@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { AuditService } from './audit.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,6 +14,7 @@ describe('AuditService', () => {
     entity: 'campaign',
     entityId: 'c-1',
     action: 'create',
+    orgId: 'org-1',
     timestamp: new Date('2024-01-01T00:00:00Z'),
     metadata: { name: 'test' },
   };
@@ -20,25 +22,30 @@ describe('AuditService', () => {
   const mockPrisma = {
     auditLog: {
       create: jest.fn().mockResolvedValue({ id: '1' }),
-      findMany: jest.fn().mockResolvedValue([]),
-      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([mockRow]),
+      count: jest.fn().mockResolvedValue(1),
     },
-    $transaction: jest.fn().mockResolvedValue([[mockRow], 1]),
+    $transaction: jest.fn().mockImplementation((queries: Promise<unknown>[]) =>
+      Promise.all(queries),
+    ),
   };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuditService,
-        {
-          provide: PrismaService,
-          useValue: mockPrisma,
-        },
+        { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
 
     service = module.get<AuditService>(AuditService);
     prisma = module.get<PrismaService>(PrismaService);
+    jest.clearAllMocks();
+    mockPrisma.auditLog.findMany.mockResolvedValue([mockRow]);
+    mockPrisma.auditLog.count.mockResolvedValue(1);
+    mockPrisma.$transaction.mockImplementation((queries: Promise<unknown>[]) =>
+      Promise.all(queries),
+    );
   });
 
   it('should be defined', () => {
@@ -46,12 +53,13 @@ describe('AuditService', () => {
   });
 
   describe('record', () => {
-    it('should call prisma.auditLog.create', async () => {
+    it('should call prisma.auditLog.create with orgId', async () => {
       const params = {
         actorId: 'user-1',
         entity: 'campaign',
         entityId: 'c-1',
         action: 'create',
+        orgId: 'org-1',
         metadata: { name: 'test' },
       };
       await service.record(params);
@@ -62,6 +70,7 @@ describe('AuditService', () => {
           entity: 'campaign',
           entityId: 'c-1',
           action: 'create',
+          orgId: 'org-1',
           metadata: { name: 'test' },
         },
       });
@@ -136,6 +145,39 @@ describe('AuditService', () => {
     it('should throw BadRequestException for invalid to date', async () => {
       await expect(service.exportLogs({ to: 'not-a-date' })).rejects.toThrow(
         BadRequestException,
+      );
+    });
+
+    it('should filter by actorId when provided', async () => {
+      await service.exportLogs({ actorId: 'user-1' });
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ actorId: 'user-1' }) }),
+      );
+    });
+
+    it('should filter by action when provided', async () => {
+      await service.exportLogs({ action: 'create' });
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ action: 'create' }) }),
+      );
+    });
+
+    it('should filter by orgId from query when provided', async () => {
+      await service.exportLogs({ orgId: 'org-1' });
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ orgId: 'org-1' }) }),
+      );
+    });
+
+    it('should enforce orgId when enforcedOrgId is provided (NGO scoping)', async () => {
+      await service.exportLogs({ orgId: 'org-other' }, 'org-enforced');
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+        // enforcedOrgId takes precedence over query orgId
+        expect.objectContaining({ where: expect.objectContaining({ orgId: 'org-enforced' }) }),
       );
     });
   });
