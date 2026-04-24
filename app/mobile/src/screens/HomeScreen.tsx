@@ -248,15 +248,13 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           <TouchableOpacity
             style={styles.secondaryButton}
             accessibilityRole="button"
-            accessibilityLabel="View Aid Overview, coming soon"
-            accessibilityHint="This feature is not yet available"
-            onPress={() =>
-              Alert.alert('Coming Soon', 'Coming in a future wave')
-            }
+            accessibilityLabel="View Operator Task List"
+            accessibilityHint="Navigates to the Operator Task List screen"
+            onPress={() => navigation.navigate('TaskList')}
             activeOpacity={0.7}
           >
             <Text style={styles.secondaryButtonText}>
-              View Aid Overview (Coming Soon)
+              Operator Task List
             </Text>
           </TouchableOpacity>
 

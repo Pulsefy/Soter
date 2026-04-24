@@ -19,6 +19,8 @@ import { OfflineBanner } from '../components/OfflineBanner';
 import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
 import { useSync } from '../contexts/SyncContext';
+import { useSaverMode } from '../contexts/SaverModeContext';
+import { SaverModeBanner } from '../components/SaverModeBanner';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidOverview'>;
 
@@ -47,6 +49,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
   const [syncing, setSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const { pendingCount, failedCount, isSyncing: isQueueSyncing } = useSync();
+  const { active: saverModeActive, source: saverModeSource } = useSaverMode();
 
   const loadData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -153,6 +156,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <SaverModeBanner visible={saverModeActive} source={saverModeSource} />
       <OfflineBanner visible={!isConnected} cachedAt={cachedAt} pendingCount={pendingCount} />
 
       {/* Resolved sync banner: dynamic condition + accessibility */}

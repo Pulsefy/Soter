@@ -1,8 +1,11 @@
 'use client';
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import Link from 'next/link';
+import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { EvidenceArtifactViewer } from './EvidenceArtifactViewer';
 import { RedactionControls } from './RedactionControls';
+import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
 import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
 import type {
     PiiDetectionResult,
@@ -87,6 +90,7 @@ function createMockEvidenceArtifact(
 
 export const EnhancedVerificationFlow: React.FC = () => {
     const uid = useId();
+    const role = getAppUserRole();
 
     const [flowState, setFlowState] = useState<EnhancedFlowState>({
         step: 'upload',
@@ -105,9 +109,11 @@ export const EnhancedVerificationFlow: React.FC = () => {
     });
 
     const pendingPayload = useRef<FormData | null>(null);
+    const { imageFile, textInput } = flowState;
 
     /* ── Reset Flow ───────────────────────────────────────────────────────── */
 
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const resetFlow = useCallback(() => {
         setFlowState({
             step: 'upload',
@@ -172,10 +178,9 @@ export const EnhancedVerificationFlow: React.FC = () => {
 
     /* ── Form Submission ───────────────────────────────────────────────────── */
 
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const handleSubmit = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-
-        const { imageFile, textInput } = flowState;
         
         // 1. Client-side validation
         const validationErrors = validateUploadForm(imageFile, textInput);
@@ -219,7 +224,7 @@ export const EnhancedVerificationFlow: React.FC = () => {
             showArtifactViewer: true,
             step: 'analysing',
         }));
-    }, [flowState.imageFile, flowState.textInput, validateUploadForm, detectPII]);
+    }, [imageFile, textInput, validateUploadForm, detectPII]);
 
     /* ── API Verification ─────────────────────────────────────────────────── */
 
@@ -258,6 +263,7 @@ export const EnhancedVerificationFlow: React.FC = () => {
 
     /* ── Redaction Handlers ───────────────────────────────────────────────── */
 
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const handleRedactionChange = useCallback((regions: RedactionRegion[]) => {
         if (!flowState.evidenceArtifact) return;
 
@@ -274,10 +280,12 @@ export const EnhancedVerificationFlow: React.FC = () => {
         setFlowState(prev => ({ ...prev, evidenceArtifact: updatedArtifact }));
     }, [flowState.evidenceArtifact]);
 
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const handleArtifactUpdate = useCallback((artifact: EvidenceArtifact) => {
         setFlowState(prev => ({ ...prev, evidenceArtifact: artifact }));
     }, []);
 
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const handleRedactionLevelChange = useCallback((level: RedactionLevel) => {
         if (!flowState.evidenceArtifact) return;
 
@@ -334,6 +342,33 @@ export const EnhancedVerificationFlow: React.FC = () => {
             {flowState.step === 'upload' && (
                 <div>
                     <h2 className="text-lg font-semibold mb-4">Submit Evidence for Verification</h2>
+
+                    {!flowState.imageFile && flowState.textInput.trim().length === 0 && (
+                        <div className="mb-6">
+                            <AppEmptyState
+                                compact
+                                eyebrow="No Evidence Added"
+                                title={
+                                    isOperationsRole(role)
+                                        ? 'Seed the review flow with sample evidence'
+                                        : 'Start with sample evidence if you want to explore before submitting real details'
+                                }
+                                description={
+                                    isOperationsRole(role)
+                                        ? 'This enhanced flow is easiest to review with a short sample note and a small image so contributors can inspect upload, redaction, and result states.'
+                                        : 'You can provide your own text and image, or insert sample evidence to learn the flow safely.'
+                                }
+                                actions={[
+                                    {
+                                        onClick: () => setFlowState(prev => ({ ...prev, textInput: getSampleVerificationText(role) })),
+                                        label: 'Insert sample evidence',
+                                        icon: 'sample',
+                                    },
+                                    { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                                ]}
+                            />
+                        </div>
+                    )}
                     
                     {flowState.apiError && (
                         <div
@@ -547,6 +582,13 @@ export const EnhancedVerificationFlow: React.FC = () => {
                     >
                         Start New Verification
                     </button>
+
+                    <Link
+                        href="/help"
+                        className="inline-flex items-center rounded-lg text-sm font-medium text-blue-600 hover:text-blue-700"
+                    >
+                        Review contributor help
+                    </Link>
                 </div>
             )}
         </div>

@@ -11,6 +11,13 @@ const DEFAULT_MAX_RETRIES = 5;
 const BASE_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_DELAY_MS = 15 * 60 * 1000;
 
+/** In saver mode, backoff delays are multiplied by this factor to reduce
+ *  how often the queue retries over the network. */
+const SAVER_BACKOFF_MULTIPLIER = 3;
+
+/** In saver mode, limit concurrent flush actions to this many per cycle. */
+const SAVER_MAX_ACTIONS_PER_FLUSH = 2;
+
 export type SyncActionType = 'status-refresh' | 'claim-confirmation' | 'evidence-upload';
 export type SyncActionState = 'pending' | 'retrying' | 'failed';
 
@@ -295,12 +302,14 @@ export const dispatchNetworkAction = async <T extends SyncActionType>(
   }
 };
 
-export const flushPendingNetworkActions = async (options?: { online?: boolean }) => {
+export const flushPendingNetworkActions = async (options?: { online?: boolean; saverMode?: boolean }) => {
   await hydrateQueue();
 
   if (options?.online === false || syncingPromise) {
     return syncingPromise ?? Promise.resolve();
   }
+
+  const isSaverMode = options?.saverMode === true;
 
   syncingPromise = (async () => {
     setQueueState({
@@ -310,11 +319,19 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean })
 
     let items = [...queueState.items];
     const now = Date.now();
+    let actionsProcessed = 0;
 
     for (const action of items) {
       if (new Date(action.nextRetryAt).getTime() > now) {
         continue;
       }
+
+      // In saver mode, limit the number of actions processed per flush
+      // to reduce data consumption
+      if (isSaverMode && actionsProcessed >= SAVER_MAX_ACTIONS_PER_FLUSH) {
+        break;
+      }
+      actionsProcessed++;
 
       try {
         const result = await runAction(action);
@@ -339,6 +356,9 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean })
         const nextState: SyncActionState =
           retryCount >= action.maxRetries || !isRetryableError(error) ? 'failed' : 'retrying';
 
+        // In saver mode, use a longer backoff to reduce network usage
+        const backoffMultiplier = isSaverMode ? SAVER_BACKOFF_MULTIPLIER : 1;
+
         items = items.map((item) =>
           item.id === action.id
             ? {
@@ -346,7 +366,7 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean })
                 state: nextState,
                 retryCount,
                 nextRetryAt: new Date(
-                  Date.now() + backoffDelayMs(retryCount),
+                  Date.now() + backoffDelayMs(retryCount) * backoffMultiplier,
                 ).toISOString(),
                 updatedAt: new Date().toISOString(),
                 lastError: toErrorMessage(error),

@@ -21,6 +21,7 @@ export function DashboardContent() {
 
   // Sync localSearch if URL changes externally (e.g. browser back/forward)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalSearch(urlSearch);
   }, [urlSearch]);
 

@@ -2,7 +2,6 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { EvidenceArtifactViewer } from '../EvidenceArtifactViewer';
 import type { EvidenceArtifact } from '@/types/evidence-artifact';
 
-// Mock artifact for testing
 const mockArtifact: EvidenceArtifact = {
   id: 'test-artifact-1',
   metadata: {
@@ -36,7 +35,7 @@ const mockArtifact: EvidenceArtifact = {
 describe('EvidenceArtifactViewer', () => {
   it('renders artifact information correctly', () => {
     render(<EvidenceArtifactViewer artifact={mockArtifact} />);
-    
+
     expect(screen.getByText('test-image.jpg')).toBeInTheDocument();
     expect(screen.getByText('image')).toBeInTheDocument();
     expect(screen.getByText('0.98 MB')).toBeInTheDocument();
@@ -44,7 +43,7 @@ describe('EvidenceArtifactViewer', () => {
 
   it('displays view mode controls based on permissions', () => {
     render(<EvidenceArtifactViewer artifact={mockArtifact} />);
-    
+
     expect(screen.getByText('Original')).toBeInTheDocument();
     expect(screen.getByText('Redacted')).toBeInTheDocument();
     expect(screen.getByText('Compare')).toBeInTheDocument();
@@ -52,36 +51,35 @@ describe('EvidenceArtifactViewer', () => {
 
   it('shows redaction controls when user has modify permissions', () => {
     render(<EvidenceArtifactViewer artifact={mockArtifact} />);
-    
+
     expect(screen.getByText('Edit Redactions')).toBeInTheDocument();
   });
 
   it('displays metadata correctly', () => {
     render(<EvidenceArtifactViewer artifact={mockArtifact} />);
-    
+
     expect(screen.getByText('1/1/2024')).toBeInTheDocument();
     expect(screen.getByText('none')).toBeInTheDocument();
-    expect(screen.getByText('No')).toBeInTheDocument(); // PII detected
-    expect(screen.getByText('0')).toBeInTheDocument(); // Regions count
+    expect(screen.getByText('No')).toBeInTheDocument();
+    expect(screen.getByText('0')).toBeInTheDocument();
   });
 
   it('handles view mode changes', () => {
     render(<EvidenceArtifactViewer artifact={mockArtifact} />);
-    
+
     const redactedButton = screen.getByText('Redacted');
     fireEvent.click(redactedButton);
-    
-    // Should update view mode to redacted
+
     expect(redactedButton).toHaveClass('bg-blue-500');
   });
 
   it('handles zoom controls', () => {
     render(<EvidenceArtifactViewer artifact={mockArtifact} />);
-    
+
     const zoomInButton = screen.getByRole('button', { name: /zoom in/i });
     const zoomOutButton = screen.getByRole('button', { name: /zoom out/i });
     const resetButton = screen.getByRole('button', { name: /reset/i });
-    
+
     expect(zoomInButton).toBeInTheDocument();
     expect(zoomOutButton).toBeInTheDocument();
     expect(resetButton).toBeInTheDocument();
@@ -101,14 +99,14 @@ describe('EvidenceArtifactViewer', () => {
 
     it('hides original view when no permission', () => {
       render(<EvidenceArtifactViewer artifact={restrictedArtifact} />);
-      
+
       expect(screen.queryByText('Original')).not.toBeInTheDocument();
       expect(screen.getByText('Redacted')).toBeInTheDocument();
     });
 
     it('hides edit controls when no modify permission', () => {
       render(<EvidenceArtifactViewer artifact={restrictedArtifact} />);
-      
+
       expect(screen.queryByText('Edit Redactions')).not.toBeInTheDocument();
     });
   });
@@ -136,9 +134,9 @@ describe('EvidenceArtifactViewer', () => {
 
     it('displays redaction statistics correctly', () => {
       render(<EvidenceArtifactViewer artifact={artifactWithRedactions} />);
-      
+
       expect(screen.getByText('partial')).toBeInTheDocument();
-      expect(screen.getByText('1')).toBeInTheDocument(); // Regions count
+      expect(screen.getByText('1')).toBeInTheDocument();
     });
   });
 
@@ -154,8 +152,8 @@ describe('EvidenceArtifactViewer', () => {
 
     it('shows PII detected status', () => {
       render(<EvidenceArtifactViewer artifact={artifactWithPII} />);
-      
-      expect(screen.getByText('Yes')).toBeInTheDocument(); // PII detected
+
+      expect(screen.getByText('Yes')).toBeInTheDocument();
     });
   });
 });

@@ -101,5 +101,5 @@ export type RedactionEvent = {
   artifactId: string;
   userId: string;
   timestamp: Date;
-  data: any;
+  data: Record<string, unknown>;
 };

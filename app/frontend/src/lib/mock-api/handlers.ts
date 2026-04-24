@@ -226,9 +226,111 @@ const campaignUpdateHandler: MockHandler = async (url, options) => {
   });
 };
 
+const recipientsImportValidateHandler: MockHandler = async (_url, options) => {
+  const body = options?.body;
+
+  if (!(body instanceof FormData)) {
+    return new Response(JSON.stringify({ success: false, message: 'Form data is required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const file = body.get('file');
+  if (!(file instanceof File)) {
+    return new Response(JSON.stringify({ success: false, message: 'CSV file is required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const csvText = await file.text();
+  const lines = csvText
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  const [headerLine, ...dataLines] = lines;
+  const headers = (headerLine ?? '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+
+  const normalizedHeaders = headers.map(header => header.toLowerCase().replace(/[_\s-]+/g, ''));
+  const nameIndex = normalizedHeaders.findIndex(header => ['name', 'fullname', 'recipientname'].includes(header));
+  const walletIndex = normalizedHeaders.findIndex(header => ['wallet', 'walletaddress', 'stellarwallet', 'publickey'].includes(header));
+  const phoneIndex = normalizedHeaders.findIndex(header => ['phone', 'phonenumber', 'mobile'].includes(header));
+
+  const rows = dataLines.map((line, index) => {
+    const values = line.split(',').map(value => value.trim());
+    const name = nameIndex >= 0 ? (values[nameIndex] ?? '') : '';
+    const wallet = walletIndex >= 0 ? (values[walletIndex] ?? '') : '';
+    const phone = phoneIndex >= 0 ? (values[phoneIndex] ?? '') : '';
+    const messages: Array<{ severity: 'warning' | 'error'; field?: string; message: string }> = [];
+
+    if (!name) {
+      messages.push({ severity: 'error', field: 'fullName', message: 'Recipient name is required.' });
+    }
+
+    if (!wallet) {
+      messages.push({ severity: 'error', field: 'wallet', message: 'Wallet address is required.' });
+    } else if (wallet.length < 10) {
+      messages.push({ severity: 'warning', field: 'wallet', message: 'Wallet address looks shorter than expected.' });
+    }
+
+    if (!phone) {
+      messages.push({ severity: 'warning', field: 'phone', message: 'Phone number is missing.' });
+    }
+
+    const status =
+      messages.some(message => message.severity === 'error')
+        ? 'error'
+        : messages.some(message => message.severity === 'warning')
+          ? 'warning'
+          : 'valid';
+
+    return {
+      rowNumber: index + 1,
+      status,
+      messages,
+    };
+  });
+
+  return new Response(JSON.stringify({ success: true, rows }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+const recipientsImportConfirmHandler: MockHandler = async (_url, options) => {
+  const body = options?.body;
+
+  if (!(body instanceof FormData)) {
+    return new Response(JSON.stringify({ success: false, message: 'Form data is required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const file = body.get('file');
+  if (!(file instanceof File)) {
+    return new Response(JSON.stringify({ success: false, message: 'CSV file is required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  return new Response(JSON.stringify({ success: true, message: `Recipient import queued successfully for ${file.name}.` }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
 export const handlers: Record<string, MockHandler> = {
   '/health': healthHandler,
   '/aid-packages': aidPackagesHandler,
+  '/recipients/import/validate': recipientsImportValidateHandler,
+  '/recipients/import/confirm': recipientsImportConfirmHandler,
   '/campaigns': async (url, options) => {
     const method = options?.method?.toUpperCase() ?? 'GET';
     if (method === 'POST') {
