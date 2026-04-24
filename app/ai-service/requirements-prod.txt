@@ -42,3 +42,7 @@ spacy==3.7.4
 
 # Rate limiting
 slowapi==0.1.9
+
+# System monitoring
+psutil==5.9.8
+prometheus-client==0.20.0

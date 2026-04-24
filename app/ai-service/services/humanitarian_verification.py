@@ -3,6 +3,8 @@
 import json
 import logging
 from typing import Any, Dict, List, Optional
+import time
+import metrics
 
 import httpx
 
@@ -25,56 +27,61 @@ class HumanitarianVerificationService:
         context_factors: Optional[Dict[str, Any]] = None,
         provider_preference: str = "auto",
     ) -> Dict[str, Any]:
-        evidence = supporting_evidence or []
-        context = context_factors or {}
+        start_time = time.time()
+        try:
+            evidence = supporting_evidence or []
+            context = context_factors or {}
 
-        primary_prompt = self.prompt_engine.build_primary_prompt(
-            aid_claim=aid_claim,
-            supporting_evidence=evidence,
-            context_factors=context,
-        )
-        fallback_prompt = self.prompt_engine.build_fallback_prompt(
-            aid_claim=aid_claim,
-            supporting_evidence=evidence,
-            context_factors=context,
-        )
+            primary_prompt = self.prompt_engine.build_primary_prompt(
+                aid_claim=aid_claim,
+                supporting_evidence=evidence,
+                context_factors=context,
+            )
+            fallback_prompt = self.prompt_engine.build_fallback_prompt(
+                aid_claim=aid_claim,
+                supporting_evidence=evidence,
+                context_factors=context,
+            )
 
-        providers = self._provider_attempt_order(provider_preference)
-        if not providers:
-            raise RuntimeError("No LLM providers configured for humanitarian verification")
+            providers = self._provider_attempt_order(provider_preference)
+            if not providers:
+                raise RuntimeError("No LLM providers configured for humanitarian verification")
 
-        errors: List[str] = []
+            errors: List[str] = []
 
-        for provider in providers:
-            model = self._get_model_for_provider(provider)
-            for prompt_variant, prompt in (("primary", primary_prompt), ("fallback", fallback_prompt)):
-                try:
-                    logger.info(
-                        "Attempting humanitarian verification with provider=%s model=%s prompt=%s",
-                        provider,
-                        model,
-                        prompt_variant,
-                    )
-                    raw_content = self._call_provider(
-                        provider=provider,
-                        model=model,
-                        system_prompt=prompt["system"],
-                        user_prompt=prompt["user"],
-                    )
-                    parsed = self._parse_json_response(raw_content)
-                    return {
-                        "provider": provider,
-                        "model": model,
-                        "prompt_variant": prompt_variant,
-                        "verification": parsed,
-                        "raw_response": raw_content,
-                    }
-                except Exception as exc:
-                    err = f"provider={provider}, model={model}, prompt={prompt_variant}, error={exc}"
-                    errors.append(err)
-                    logger.warning("Humanitarian verification attempt failed: %s", err)
+            for provider in providers:
+                model = self._get_model_for_provider(provider)
+                for prompt_variant, prompt in (("primary", primary_prompt), ("fallback", fallback_prompt)):
+                    try:
+                        logger.info(
+                            "Attempting humanitarian verification with provider=%s model=%s prompt=%s",
+                            provider,
+                            model,
+                            prompt_variant,
+                        )
+                        raw_content = self._call_provider(
+                            provider=provider,
+                            model=model,
+                            system_prompt=prompt["system"],
+                            user_prompt=prompt["user"],
+                        )
+                        parsed = self._parse_json_response(raw_content)
+                        return {
+                            "provider": provider,
+                            "model": model,
+                            "prompt_variant": prompt_variant,
+                            "verification": parsed,
+                            "raw_response": raw_content,
+                        }
+                    except Exception as exc:
+                        err = f"provider={provider}, model={model}, prompt={prompt_variant}, error={exc}"
+                        errors.append(err)
+                        logger.warning("Humanitarian verification attempt failed: %s", err)
 
-        raise RuntimeError("All humanitarian verification attempts failed: " + " | ".join(errors))
+            raise RuntimeError("All humanitarian verification attempts failed: " + " | ".join(errors))
+        finally:
+            latency = time.time() - start_time
+            metrics.PIPELINE_STEP_LATENCY.labels(step_name='verify').observe(latency)
 
     def _provider_attempt_order(self, provider_preference: str) -> List[str]:
         available: List[str] = []
@@ -134,6 +141,10 @@ class HumanitarianVerificationService:
         system_prompt: str,
         user_prompt: str,
     ) -> str:
+        if settings.ai_deterministic_mode:
+            logger.info("Deterministic AI mode enabled: returning stable response")
+            return self._get_deterministic_response(model, system_prompt, user_prompt)
+
         payload = {
             "model": model,
             "temperature": 0.1,
@@ -164,6 +175,14 @@ class HumanitarianVerificationService:
             raise RuntimeError("LLM returned empty content")
 
         return str(content)
+
+    def _get_deterministic_response(self, model: str, system_prompt: str, user_prompt: str) -> str:
+        stable_response = {
+            "verdict": "credible",
+            "confidence": 0.74,
+            "summary": "Deterministic verification output for testing",
+        }
+        return json.dumps(stable_response, separators=(",", ":"), sort_keys=True)
 
     def _parse_json_response(self, content: str) -> Dict[str, Any]:
         normalized = content.strip()

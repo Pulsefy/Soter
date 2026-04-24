@@ -19,6 +19,7 @@ class Settings(BaseSettings):
         GROQ_API_KEY: Groq API key for AI model access (alternative to OpenAI)
         OPENAI_MODEL: Default OpenAI model for humanitarian verification
         GROQ_MODEL: Default Groq model for humanitarian verification
+        AI_DETERMINISTIC_MODE: Enable deterministic AI results for verification and classification during tests/CI
         LLM_TIMEOUT_SECONDS: Timeout for LLM API requests
         APP_ENV: Application environment (development, staging, production)
         LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -35,6 +36,7 @@ class Settings(BaseSettings):
     groq_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
     groq_model: str = "llama-3.3-70b-versatile"
+    ai_deterministic_mode: bool = False
     llm_timeout_seconds: int = 30
     
     # Application settings

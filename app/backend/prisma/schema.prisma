@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -21,6 +21,7 @@ enum ClaimStatus {
   approved
   disbursed
   archived
+  cancelled
 }
 
 enum ReviewStatus {
@@ -37,6 +38,31 @@ model AidPackage {
   status    String   @default("draft")
 }
 
+/// Tracks every balance event (lock / unlock / disburse) for a campaign.
+/// The running sum of all rows for a campaign gives the current locked balance.
+model BalanceLedger {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+
+  claimId    String?
+  claim      Claim?   @relation(fields: [claimId], references: [id])
+
+  /// 'lock' when a claim is created/approved, 'unlock' when cancelled, 'disburse' when disbursed
+  eventType  String
+
+  /// Positive for lock/disburse, negative for unlock
+  amount     Float
+
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([claimId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
 enum VerificationChannel {
   email
   phone
@@ -46,6 +72,21 @@ enum VerificationSessionStatus {
   pending
   completed
   expired
+  failed
+}
+
+enum SessionType {
+  otp_verification
+  claim_verification
+  multi_step_verification
+}
+
+enum SessionStepStatus {
+  pending
+  in_progress
+  completed
+  failed
+  skipped
 }
 
 model VerificationSession {
@@ -62,6 +103,67 @@ model VerificationSession {
 
   @@index([identifier, createdAt])
   @@index([status, expiresAt])
+}
+
+model Session {
+  id          String                   @id @default(cuid())
+  type        SessionType
+  status      VerificationSessionStatus @default(pending)
+  contextId   String?
+  metadata    Json?
+  expiresAt   DateTime?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  completedAt DateTime?
+  failedAt    DateTime?
+
+  steps       SessionStep[]
+  submissions SessionSubmission[]
+
+  @@index([type, status])
+  @@index([contextId])
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
+model SessionStep {
+  id          String            @id @default(cuid())
+  sessionId   String
+  stepName    String
+  stepOrder   Int
+  status      SessionStepStatus @default(pending)
+  input       Json?
+  output      Json?
+  error       String?
+  attempts    Int               @default(0)
+  maxAttempts Int               @default(3)
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  session     Session           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  submissions SessionSubmission[]
+
+  @@index([sessionId, stepOrder])
+  @@index([status])
+  @@index([stepName])
+}
+
+model SessionSubmission {
+  id            String    @id @default(cuid())
+  sessionId     String
+  stepId        String?
+  submissionKey String    @unique
+  payload       Json
+  response      Json?
+  createdAt     DateTime  @default(now())
+
+  session       Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  step          SessionStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([stepId])
 }
 
 model VerificationRequest {
@@ -83,26 +185,28 @@ model Claim {
   campaignId   String
   campaign     Campaign    @relation(fields: [campaignId], references: [id])
 
-  amount       Decimal     @db.Decimal(14, 2)
+  amount       Float
 
   recipientRef String
   evidenceRef  String?
 
-  verificationScore      Float?
-  verificationResult     Json?
-  reviewStatus           ReviewStatus?
-  reviewedBy             String?
-  reviewedAt             DateTime?
-  reviewReason           String?
-  reviewNote             String?
-  reviewSlaStartedAt     DateTime?
+  /// Set when this claim is cancelled
+  cancelledAt    DateTime?
+  cancelledBy    String?
+  cancelReason   String?
+
+  /// Points to the original claim this one replaces (reissue chain)
+  reissuedFromId String?
+  reissuedFrom   Claim?    @relation("ReissueChain", fields: [reissuedFromId], references: [id])
+  reissuedTo     Claim[]   @relation("ReissueChain")
+
+  balanceLedger  BalanceLedger[]
 
   @@index([status])
   @@index([campaignId])
   @@index([createdAt])
   @@index([deletedAt])
-  @@index([reviewStatus])
-  @@index([reviewSlaStartedAt])
+  @@index([reissuedFromId])
 }
 
 model AuditLog {
@@ -125,7 +229,7 @@ model Campaign {
 
   status      CampaignStatus @default(draft)
 
-  budget      Decimal        @db.Decimal(14, 2)
+  budget      Float
 
   metadata    Json?
 
@@ -138,6 +242,7 @@ model Campaign {
   updatedAt   DateTime       @updatedAt
 
   claims      Claim[]
+  balanceLedger BalanceLedger[]
 
   @@index([status])
   @@index([archivedAt])
@@ -159,12 +264,67 @@ enum AppRole {
 
 model ApiKey {
   id          String   @id @default(cuid())
-  key         String   @unique
+  // `key` is a legacy plaintext column. New keys should use `keyHash` and
+  // `keyPreview` and never store raw secrets.
+  key         String?  @unique
+  keyHash     String?  @unique
+  keyPreview  String?
   role        AppRole
   ngoId       String?
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  lastUsedAt  DateTime?
+  createdBy   String?
+  revokedAt   DateTime?
+  revokedBy   String?
+  revokedReason String?
+  replacedById String?
+  replacedBy   ApiKey?  @relation("ApiKeyReplacement", fields: [replacedById], references: [id])
+  replacedFrom ApiKey[] @relation("ApiKeyReplacement")
 
   @@index([ngoId])
+  @@index([revokedAt])
+  @@index([lastUsedAt])
+}
+
+model InternalNote {
+  id          String   @id @default(cuid())
+  entityType  String   // e.g., "claim", "verification"
+  entityId    String
+  content     String
+  authorId    String
+  category    String?  // optional category metadata
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([authorId])
+}
+
+enum EvidenceStatus {
+  pending
+  uploading
+  completed
+  failed
+}
+
+model EvidenceQueueItem {
+  id          String         @id @default(cuid())
+  fileName    String
+  filePath    String?        // Path to local encrypted file
+  fileHash    String         @unique // To prevent duplicate uploads
+  mimeType    String
+  size        Int
+  status      EvidenceStatus @default(pending)
+  retryCount  Int            @default(0)
+  lastError   String?
+  ownerId     String         // Actor who queued this
+  metadata    Json?          // Additional info (e.g., associated claimId)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([status])
+  @@index([ownerId])
+  @@index([fileHash])
 }

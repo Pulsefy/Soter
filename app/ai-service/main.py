@@ -1,6 +1,7 @@
 """
 Soter AI Service - FastAPI Application
-Main entry point for the AI service layer
+Main entry point for the AI service layer.
+
 """
 
 from contextlib import asynccontextmanager
@@ -9,7 +10,7 @@ from typing import Any, Dict, List, Optional
 import logging
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 import time
 import metrics
 
@@ -17,7 +18,12 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+
 from api.routes import router as ocr_router
+
+# New versioned router
+from api.v1.router import v1_router
+
 from config import settings
 import tasks
 from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
@@ -37,6 +43,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Legacy -> v1 redirect map
+# Only routes that were previously registered directly on the app (not via
+# the ocr_router) need an explicit redirect entry here.  The OCR route is
+# still served by the legacy router above so no redirect is needed for it.
+# ---------------------------------------------------------------------------
+_LEGACY_TO_V1: dict = {
+    "/ai/inference": "/v1/ai/inference",
+    "/ai/proof-of-life": "/v1/ai/proof-of-life",
+    "/ai/anonymize": "/v1/ai/anonymize",
+    "/ai/humanitarian/verify": "/v1/ai/humanitarian/verify",
+}
+
+# Prefix-based redirects for parameterised routes (matched in order).
+_LEGACY_PREFIX_MAP: list = [
+    ("/ai/status/", "/v1/ai/status/"),
+    ("/ai/task/", "/v1/ai/task/"),
+]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up Soter AI Service...")
@@ -46,7 +72,6 @@ async def lifespan(app: FastAPI):
         provider = settings.get_active_provider()
         logger.info(f"AI provider configured: {provider}")
 
-    # Log Redis configuration
     logger.info(f"Redis configured: {settings.redis_url}")
     logger.info(f"Backend webhook URL: {settings.backend_webhook_url}")
 
@@ -57,7 +82,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Soter AI Service",
     description="AI service layer for Soter platform using FastAPI",
-    version="0.1.0",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -71,7 +96,6 @@ pii_scrubber_service = PIIScrubberService()
 humanitarian_verification_service = HumanitarianVerificationService()
 
 
-# Request/Response models
 class InferenceRequest(BaseModel):
     """Request model for AI inference endpoints"""
 
@@ -107,25 +131,91 @@ class ProofOfLifeResponse(BaseModel):
     reason: str
 
 
+# Middleware
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-app.include_router(ocr_router)
+
+@app.middleware("http")
+async def legacy_redirect_middleware(request: Request, call_next):
+    """
+    Transparently redirect un-versioned /ai/* paths to their /v1
+    equivalents with a 308 Permanent Redirect so that HTTP clients
+    preserve the original request method and body.
+
+    The /ai/ocr route is intentionally excluded because it is still
+    served directly by the legacy router; the redirect would send clients
+    to a /v1/ai/ocr path that also works, but the legacy path remains
+    fully functional during the transition period.
+
+    The /ai/metrics path is also excluded - it has no v1 equivalent.
+    """
+    path = request.url.path
+
+    # Exact-match redirects
+    if path in _LEGACY_TO_V1:
+        target = _LEGACY_TO_V1[path]
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        logger.debug(f"Legacy redirect: {path} -> {target}")
+        return RedirectResponse(url=target, status_code=308)
+
+    # Prefix-based redirects (parameterised routes)
+    for legacy_prefix, v1_prefix in _LEGACY_PREFIX_MAP:
+        if path.startswith(legacy_prefix):
+            target = v1_prefix + path[len(legacy_prefix) :]
+            if request.url.query:
+                target = f"{target}?{request.url.query}"
+            logger.debug(f"Legacy prefix redirect: {path} -> {target}")
+            return RedirectResponse(url=target, status_code=308)
+
+    return await call_next(request)
 
 
 @app.middleware("http")
 async def monitor_requests(request: Request, call_next):
-    # Skip checking metrics endpoint to avoid infinite loop / log spam
-    if request.url.path == "/ai/metrics":
+    path = request.url.path
+
+    # Paths that must NEVER be throttled:
+    #   /health        – load-balancer probes must always succeed
+    #   /              – root discovery endpoint
+    #   /docs, /redoc, /openapi.json – API docs
+    #   /ai/metrics    – Prometheus scrape (also avoids infinite loop)
+    #   Any path in _LEGACY_TO_V1 or matching _LEGACY_PREFIX_MAP – these are
+    #     cheap 308 redirects issued by legacy_redirect_middleware; the actual
+    #     work happens on the /v1/* destination, which IS subject to throttling.
+    _NEVER_THROTTLE = {
+        "/health",
+        "/",
+        "/ai/metrics",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+    }
+
+    is_redirect_path = path in _LEGACY_TO_V1 or any(
+        path.startswith(pfx) for pfx, _ in _LEGACY_PREFIX_MAP
+    )
+
+    if path in _NEVER_THROTTLE or is_redirect_path:
         return await call_next(request)
 
-    # Automatically Throttle if over 90%
+    # Gracefully throttle if memory pressure is critical.
     if not metrics.check_system_resources(memory_threshold_percent=90.0):
-        # Gracefully throttle requests if exhausting resources
-        metrics.REQUEST_COUNT.labels(method=request.method, endpoint=request.url.path, http_status=503).inc()
+        metrics.REQUEST_COUNT.labels(
+            method=request.method,
+            endpoint=path,
+            http_status=503,
+        ).inc()
         return JSONResponse(
             status_code=503,
-            content={"detail": "Service unavailable: System resources (RAM/VRAM) exhausted, gracefully throttling."}
+            content={
+                "detail": (
+                    "Service unavailable: System resources (RAM/VRAM) exhausted, "
+                    "gracefully throttling."
+                )
+            },
         )
 
     start_time = time.time()
@@ -137,59 +227,68 @@ async def monitor_requests(request: Request, call_next):
         raise e
     finally:
         latency = time.time() - start_time
-        metrics.REQUEST_COUNT.labels(method=request.method, endpoint=request.url.path, http_status=status_code).inc()
-        metrics.REQUEST_LATENCY.labels(method=request.method, endpoint=request.url.path).observe(latency)
-        
-        # General API request latency logging (model inference logging happens inside the service / tasks layer)
-        if request.url.path.startswith("/ai/") and request.url.path != "/ai/metrics":
-            metrics.logger.info(f"API route {request.url.path} latency: {latency:.4f}s")
-            
+        metrics.REQUEST_COUNT.labels(
+            method=request.method,
+            endpoint=path,
+            http_status=status_code,
+        ).inc()
+        metrics.REQUEST_LATENCY.labels(method=request.method, endpoint=path).observe(
+            latency
+        )
+
+        monitored_prefixes = ("/ai/", "/v1/ai/")
+        if any(path.startswith(p) for p in monitored_prefixes):
+            metrics.logger.info(f"API route {path} latency: {latency:.4f}s")
+
     return response
+
+
+# ---------------------------------------------------------------------------
+# Routers
+# ---------------------------------------------------------------------------
+
+# Legacy OCR router - still live for backward compatibility (no redirect).
+app.include_router(ocr_router)
+
+# Versioned router - canonical home for all routes going forward.
+app.include_router(v1_router)
 
 
 @app.get("/ai/metrics")
 async def get_metrics():
     """Endpoint for Prometheus metrics."""
     from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "soter-ai-service", "version": "0.1.0"}
+    return {"status": "healthy", "service": "soter-ai-service", "version": "1.0.0"}
 
 
 @app.get("/")
 async def root():
     return {
         "service": "Soter AI Service",
-        "version": "0.1.0",
+        "version": "1.0.0",
         "docs": "/docs",
         "health": "/health",
+        "api_v1": "/v1",
     }
 
 
-@app.post("/ai/inference")
-async def create_inference_task(
+# Legacy inline handlers
+
+
+@app.post("/ai/inference", include_in_schema=False, deprecated=True)
+async def _legacy_create_inference_task(
     request: InferenceRequest, background_tasks: BackgroundTasks
 ):
-    """
-    Create a background task for heavy AI inference
-
-    This endpoint offloads time-consuming AI tasks to background workers,
-    keeping the API responsive. Use the returned task_id to poll for results.
-
-    Args:
-        request: Inference request containing task type and data
-        background_tasks: FastAPI background tasks (for internal use)
-
-    Returns:
-        dict: Task ID and status
-    """
-    logger.info(f"Creating inference task of type: {request.type}")
+    """Deprecated - use /v1/ai/inference instead."""
+    logger.info(f"[legacy] Creating inference task of type: {request.type}")
 
     try:
-        # Create background task
         task_id = tasks.create_task(
             task_type=request.type,
             payload={
@@ -197,30 +296,27 @@ async def create_inference_task(
                 "priority": request.priority or "normal",
             },
         )
-
         return {
             "success": True,
             "task_id": task_id,
             "status": "pending",
             "message": "Task queued for processing",
-            "status_url": f"/ai/status/{task_id}",
+            "status_url": f"/v1/ai/status/{task_id}",
         }
-
     except Exception as e:
         logger.error(f"Failed to create inference task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")
 
 
-@app.post("/ai/proof-of-life", response_model=ProofOfLifeResponse)
-async def analyze_proof_of_life(request: ProofOfLifeRequest):
-    """
-    Analyze a selfie image with optional burst frames for proof-of-life.
-
-    The endpoint returns a boolean `is_real_person` and confidence score.
-    If burst frames are provided, the service also checks for basic liveness
-    signals such as blink and head movement.
-    """
-    logger.info("Processing proof-of-life verification request")
+@app.post(
+    "/ai/proof-of-life",
+    response_model=ProofOfLifeResponse,
+    include_in_schema=False,
+    deprecated=True,
+)
+async def _legacy_analyze_proof_of_life(request: ProofOfLifeRequest):
+    """Deprecated - use /v1/ai/proof-of-life instead."""
+    logger.info("[legacy] Processing proof-of-life verification request")
 
     try:
         result = proof_of_life_analyzer.analyze(
@@ -238,10 +334,15 @@ async def analyze_proof_of_life(request: ProofOfLifeRequest):
         )
 
 
-@app.post("/ai/anonymize", response_model=AnonymizeResponse)
-async def anonymize_text(request: AnonymizeRequest):
-    """Anonymize names, locations, and dates before text is sent to external LLMs."""
-    logger.info("Processing privacy-preserving anonymization request")
+@app.post(
+    "/ai/anonymize",
+    response_model=AnonymizeResponse,
+    include_in_schema=False,
+    deprecated=True,
+)
+async def _legacy_anonymize_text(request: AnonymizeRequest):
+    """Deprecated - use /v1/ai/anonymize instead."""
+    logger.info("[legacy] Processing privacy-preserving anonymization request")
 
     try:
         result = pii_scrubber_service.anonymize(request.text)
@@ -251,10 +352,15 @@ async def anonymize_text(request: AnonymizeRequest):
         raise HTTPException(status_code=500, detail="Failed to anonymize text")
 
 
-@app.post("/ai/humanitarian/verify", response_model=HumanitarianVerificationResponse)
-async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
-    """Verify an aid claim against standardized humanitarian criteria."""
-    logger.info("Processing humanitarian verification request")
+@app.post(
+    "/ai/humanitarian/verify",
+    response_model=HumanitarianVerificationResponse,
+    include_in_schema=False,
+    deprecated=True,
+)
+async def _legacy_verify_humanitarian_claim(request: HumanitarianVerificationRequest):
+    """Deprecated - use /v1/ai/humanitarian/verify instead."""
+    logger.info("[legacy] Processing humanitarian verification request")
 
     try:
         result = humanitarian_verification_service.verify_claim(
@@ -269,24 +375,15 @@ async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
         return HumanitarianVerificationResponse(success=False, error=str(e))
 
 
-@app.get("/ai/status/{task_id}", response_model=TaskStatusResponse)
-async def get_task_status(task_id: str):
-    """
-    Get the status of a background task
-
-    Poll this endpoint to check if a task has completed. Returns the
-    current status: pending, processing, completed, or failed.
-
-    Args:
-        task_id: Unique identifier for the task
-
-    Returns:
-        TaskStatusResponse: Current task status and result if completed
-
-    Raises:
-        HTTPException: If task_id is not found
-    """
-    logger.info(f"Checking status for task: {task_id}")
+@app.get(
+    "/ai/status/{task_id}",
+    response_model=TaskStatusResponse,
+    include_in_schema=False,
+    deprecated=True,
+)
+async def _legacy_get_task_status(task_id: str):
+    """Deprecated - use /v1/ai/status/{task_id} instead."""
+    logger.info(f"[legacy] Checking status for task: {task_id}")
 
     try:
         status_info = tasks.get_task_status(task_id)
@@ -305,18 +402,10 @@ async def get_task_status(task_id: str):
         )
 
 
-@app.post("/ai/task/{task_id}/cancel")
-async def cancel_task(task_id: str):
-    """
-    Cancel a pending or processing task
-
-    Args:
-        task_id: Unique identifier for the task
-
-    Returns:
-        dict: Cancellation result
-    """
-    logger.info(f"Attempting to cancel task: {task_id}")
+@app.post("/ai/task/{task_id}/cancel", include_in_schema=False, deprecated=True)
+async def _legacy_cancel_task(task_id: str):
+    """Deprecated - use /v1/ai/task/{task_id}/cancel instead."""
+    logger.info(f"[legacy] Attempting to cancel task: {task_id}")
 
     try:
         from celery.result import AsyncResult
@@ -338,7 +427,11 @@ async def cancel_task(task_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to cancel task: {str(e)}")
 
 
-# Global error handler for HTTP exceptions
+# ---------------------------------------------------------------------------
+# Global error handlers
+# ---------------------------------------------------------------------------
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc: HTTPException):
     logger.error(f"HTTP Exception: {exc.status_code} - {exc.detail}")

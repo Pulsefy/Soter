@@ -18,6 +18,9 @@ import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { OfflineBanner } from '../components/OfflineBanner';
 import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
+import { useSync } from '../contexts/SyncContext';
+import { useSaverMode } from '../contexts/SaverModeContext';
+import { SaverModeBanner } from '../components/SaverModeBanner';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidOverview'>;
 
@@ -25,6 +28,13 @@ const STATUS_COLORS: Record<string, string> = {
   active: '#16A34A',
   pending: '#D97706',
   closed: '#6B7280',
+};
+
+// Human-readable status labels for screen readers
+const STATUS_LABELS: Record<string, string> = {
+  active: 'Active',
+  pending: 'Pending',
+  closed: 'Closed',
 };
 
 export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
@@ -38,6 +48,8 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const { pendingCount, failedCount, isSyncing: isQueueSyncing } = useSync();
+  const { active: saverModeActive, source: saverModeSource } = useSaverMode();
 
   const loadData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -84,32 +96,59 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
     if (!searchQuery) return aidList;
     const lowerQuery = searchQuery.toLowerCase();
     return aidList.filter(
-      (item) => item.id.toLowerCase().includes(lowerQuery) || item.title.toLowerCase().includes(lowerQuery)
+      (item) =>
+        item.id.toLowerCase().includes(lowerQuery) ||
+        item.title.toLowerCase().includes(lowerQuery),
     );
   }, [aidList, searchQuery]);
 
-  const renderItem = ({ item }: { item: AidPackage }) => (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => navigation.navigate('AidDetails', { aidId: item.id })}
-      accessibilityRole="button"
-      accessibilityLabel={`View details for ${item.title}`}
-    >
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{item.title} <Text style={styles.idText}>(#{item.id})</Text></Text>
-        <View style={[styles.badge, { backgroundColor: STATUS_COLORS[item.status.toLowerCase()] || '#16A34A' }]}>
-          <Text style={styles.badgeText}>{item.status.toUpperCase()}</Text>
+  const renderItem = ({ item }: { item: AidPackage }) => {
+    const statusKey = item.status.toLowerCase();
+    const statusLabel = STATUS_LABELS[statusKey] ?? item.status;
+    const formattedDate = new Date(item.date).toLocaleDateString();
+
+    return (
+      <TouchableOpacity
+        style={styles.card}
+        onPress={() => navigation.navigate('AidDetails', { aidId: item.id })}
+        accessibilityRole="button"
+        accessibilityLabel={`${item.title}, ID ${item.id}, status ${statusLabel}, amount $${item.amount}, date ${formattedDate}`}
+        accessibilityHint="Opens the full details for this aid package"
+      >
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>
+            {item.title}{' '}
+            <Text style={styles.idText}>(#{item.id})</Text>
+          </Text>
+          {/* Badge is decorative — the parent button label already includes status */}
+          <View
+            style={[
+              styles.badge,
+              {
+                backgroundColor:
+                  STATUS_COLORS[statusKey] || '#16A34A',
+              },
+            ]}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Text style={styles.badgeText}>{item.status.toUpperCase()}</Text>
+          </View>
         </View>
-      </View>
-      <Text style={styles.cardDescription}>Amount: ${item.amount}</Text>
-      <Text style={styles.cardLocation}>Date: {new Date(item.date).toLocaleDateString()}</Text>
-    </TouchableOpacity>
-  );
+        <Text style={styles.cardDescription}>Amount: ${item.amount}</Text>
+        <Text style={styles.cardLocation}>Date: {formattedDate}</Text>
+      </TouchableOpacity>
+    );
+  };
 
   if (loading) {
     return (
       <SafeAreaView style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.textPrimary} />
+        <ActivityIndicator
+          size="large"
+          color={colors.textPrimary}
+          accessibilityElementsHidden
+        />
         <Text style={styles.loadingText}>Loading aid operations...</Text>
       </SafeAreaView>
     );
@@ -117,14 +156,45 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <OfflineBanner visible={!isConnected} cachedAt={cachedAt} />
+      <SaverModeBanner visible={saverModeActive} source={saverModeSource} />
+      <OfflineBanner visible={!isConnected} cachedAt={cachedAt} pendingCount={pendingCount} />
 
-      {syncing && (
-        <View style={styles.syncBanner}>
-          <ActivityIndicator size="small" color={colors.brand.primary} />
-          <Text style={styles.syncText}>Syncing latest data...</Text>
+      {/* Resolved sync banner: dynamic condition + accessibility */}
+      {(syncing || isQueueSyncing) && (
+        <View
+          style={styles.syncBanner}
+          accessible
+          accessibilityLiveRegion="polite"
+          accessibilityLabel="Syncing latest data"
+        >
+          <ActivityIndicator
+            size="small"
+            color={colors.brand.primary}
+            accessibilityElementsHidden
+          />
+          <Text style={styles.syncText}>
+            {pendingCount > 0
+              ? `Syncing ${pendingCount} pending action${pendingCount === 1 ? '' : 's'}...`
+              : 'Syncing latest data...'}
+          </Text>
         </View>
       )}
+
+      {pendingCount > 0 && isConnected && !isQueueSyncing ? (
+        <View style={styles.queueBanner}>
+          <Text style={styles.queueText}>
+            {pendingCount} action{pendingCount === 1 ? '' : 's'} queued for retry.
+          </Text>
+        </View>
+      ) : null}
+
+      {failedCount > 0 ? (
+        <View style={styles.failedBanner}>
+          <Text style={styles.failedText}>
+            {failedCount} sync action{failedCount === 1 ? '' : 's'} need attention.
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.searchContainer}>
         <TextInput
@@ -133,6 +203,10 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
           placeholderTextColor={colors.textSecondary}
           value={searchQuery}
           onChangeText={setSearchQuery}
+          accessibilityLabel="Search aid packages"
+          accessibilityHint="Filter the list by entering an ID or title"
+          returnKeyType="search"
+          clearButtonMode="while-editing"
         />
       </View>
 
@@ -146,19 +220,25 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
             refreshing={refreshing}
             onRefresh={() => loadData(true)}
             tintColor={colors.textPrimary}
+            accessibilityLabel="Pull to refresh aid packages"
           />
         }
         ListHeaderComponent={
           isCached && isConnected ? (
-            <View style={styles.staleNotice}>
+            <View
+              style={styles.staleNotice}
+              accessible
+              accessibilityRole="alert"
+              accessibilityLabel="Showing cached data. Pull down to refresh."
+            >
               <Text style={styles.staleText}>
-                ⚠️ Showing cached data. Pull to refresh.
+                Showing cached data. Pull to refresh.
               </Text>
             </View>
           ) : null
         }
         ListEmptyComponent={
-          <View style={styles.centered}>
+          <View style={styles.centered} accessible accessibilityLabel="No aid operations found">
             <Text style={styles.emptyText}>No aid operations found.</Text>
           </View>
         }
@@ -192,10 +272,13 @@ const makeStyles = (colors: AppColors) =>
     searchInput: {
       backgroundColor: colors.surface,
       borderRadius: 8,
+      // Minimum 44 pt height (WCAG 2.5.5)
+      minHeight: 44,
       padding: 12,
       color: colors.textPrimary,
       borderWidth: 1,
       borderColor: colors.border,
+      fontSize: 16,
     },
     list: {
       padding: 16,
@@ -207,6 +290,7 @@ const makeStyles = (colors: AppColors) =>
       padding: 16,
       marginBottom: 12,
       elevation: 2,
+      // Minimum 44 pt height satisfied by content padding
     },
     cardHeader: {
       flexDirection: 'row',
@@ -267,6 +351,26 @@ const makeStyles = (colors: AppColors) =>
     staleText: {
       fontSize: 13,
       color: colors.textSecondary,
+      textAlign: 'center',
+    },
+    queueBanner: {
+      backgroundColor: colors.infoBg,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+    },
+    queueText: {
+      fontSize: 13,
+      color: colors.info,
+      textAlign: 'center',
+    },
+    failedBanner: {
+      backgroundColor: colors.warningBg,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+    },
+    failedText: {
+      fontSize: 13,
+      color: colors.warning,
       textAlign: 'center',
     },
     emptyText: {

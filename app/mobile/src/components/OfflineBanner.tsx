@@ -4,23 +4,33 @@ import { View, Text, StyleSheet } from 'react-native';
 interface Props {
   visible: boolean;
   cachedAt?: string | null;
+  pendingCount?: number;
 }
 
 /**
  * Displays a banner when the device is offline.
  * Optionally shows when the data was last cached.
  */
-export const OfflineBanner: React.FC<Props> = ({ visible, cachedAt }) => {
+export const OfflineBanner: React.FC<Props> = ({
+  visible,
+  cachedAt,
+  pendingCount = 0,
+}) => {
   if (!visible) return null;
 
   return (
     <View style={styles.banner}>
-      <Text style={styles.icon}>📡</Text>
+      <Text style={styles.icon}>Offline</Text>
       <View>
         <Text style={styles.title}>Offline</Text>
-        {cachedAt && (
+        {cachedAt ? (
           <Text style={styles.subtitle}>Showing cached data from {cachedAt}</Text>
-        )}
+        ) : null}
+        {pendingCount > 0 ? (
+          <Text style={styles.subtitle}>
+            {pendingCount} action{pendingCount === 1 ? '' : 's'} waiting to sync
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -38,7 +48,10 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   icon: {
-    fontSize: 18,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#92400E',
+    textTransform: 'uppercase',
   },
   title: {
     fontSize: 14,

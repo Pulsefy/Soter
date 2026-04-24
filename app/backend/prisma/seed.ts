@@ -53,13 +53,13 @@ async function main() {
   const campaigns = [
     {
       name: 'Emergency Relief Fund',
-      budget: '10000.00',
+      budget: 10000.00,
       status: 'active' as const,
       description: 'Emergency response campaign for affected communities',
     },
     {
       name: 'Community Health Program',
-      budget: '5000.00',
+      budget: 5000.00,
       status: 'active' as const,
       description: 'Healthcare support initiative for underserved regions',
     },
@@ -96,13 +96,13 @@ async function main() {
     const campaign = createdCampaigns[i];
     const claims = [
       {
-        amount: '500.00',
+        amount: 500.00,
         status: 'verified' as const,
         recipientRef: `recipient-${i}-1`,
         evidenceRef: `evidence-${i}-1`,
       },
       {
-        amount: '750.00',
+        amount: 750.00,
         status: 'approved' as const,
         recipientRef: `recipient-${i}-2`,
         evidenceRef: `evidence-${i}-2`,

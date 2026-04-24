@@ -2,6 +2,8 @@ import pytest
 import numpy as np
 from PIL import Image
 from services.preprocessing import ImagePreprocessor
+import metrics
+from unittest.mock import patch, MagicMock
 
 
 class TestImagePreprocessor:
@@ -41,7 +43,11 @@ class TestImagePreprocessor:
         denoised = self.preprocessor.denoise(img)
         assert denoised.mode == "L"
 
-    def test_preprocess_pipeline(self):
+    @patch('metrics.PIPELINE_STEP_LATENCY.labels')
+    def test_preprocess_pipeline(self, mock_labels):
+        mock_observe = MagicMock()
+        mock_labels.return_value.observe = mock_observe
+        
         img = Image.new("RGB", (1000, 1000), color="blue")
         result = self.preprocessor.preprocess(
             img, threshold_method="otsu", denoise=True
@@ -49,6 +55,9 @@ class TestImagePreprocessor:
         assert result.mode == "L"
         assert result.size[0] <= 2000
         assert result.size[1] <= 2000
+        
+        mock_labels.assert_called_with(step_name='preprocess')
+        mock_observe.assert_called_once()
 
     def test_preprocess_with_custom_threshold(self):
         img = Image.new("RGB", (500, 500), color="green")

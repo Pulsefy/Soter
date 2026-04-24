@@ -32,12 +32,16 @@ import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
 import { Throttle } from '@nestjs/throttler';
 import { OrgOwnershipGuard } from '../common/guards/org-ownership.guard';
+import { CancelAndReissueService } from '../claims/cancel-and-reissue.service';
 
 @ApiTags('Campaigns')
 @ApiBearerAuth('JWT-auth')
 @Controller('campaigns')
 export class CampaignsController {
-  constructor(private readonly campaigns: CampaignsService) {}
+  constructor(
+    private readonly campaigns: CampaignsService,
+    private readonly cancelAndReissueService: CancelAndReissueService,
+  ) {}
 
   @Post()
   @Roles(AppRole.admin, AppRole.ngo)
@@ -58,7 +62,7 @@ export class CampaignsController {
     const campaign = await this.campaigns.create(dto, req.user?.ngoId);
     return ApiResponseDto.ok(campaign, 'Campaigns created successfully');
   }
-  
+
   @Throttle({ default: { ttl: 60000, limit: 10 } }) // Limit to 10 requests per minute for this endpoint
   @Get()
   @ApiOperation({
@@ -141,5 +145,44 @@ export class CampaignsController {
       ? 'Campaign already archived'
       : 'Campaign archived successfully';
     return ApiResponseDto.ok(campaign, msg);
+  }
+
+  @Get(':id/balance')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Get campaign balance summary',
+    description:
+      'Returns the current locked, disbursed, and available budget for a campaign. ' +
+      'Locked balance accounts for all active (non-cancelled, non-disbursed) claims. ' +
+      'Cancelled claims release their locked amount back to available.',
+  })
+  @ApiOkResponse({
+    description: 'Campaign balance retrieved successfully.',
+    schema: {
+      properties: {
+        campaignId: { type: 'string' },
+        budget: { type: 'number', description: 'Total campaign budget.' },
+        lockedAmount: {
+          type: 'number',
+          description: 'Amount locked by active claims.',
+        },
+        disbursedAmount: {
+          type: 'number',
+          description: 'Amount already disbursed.',
+        },
+        availableBudget: {
+          type: 'number',
+          description: 'Remaining available budget.',
+        },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Campaign not found.' })
+  @ApiForbiddenResponse({
+    description: 'Access denied - operator role required.',
+  })
+  async getBalance(@Param('id') id: string) {
+    const balance = await this.cancelAndReissueService.getCampaignBalance(id);
+    return ApiResponseDto.ok(balance, 'Campaign balance fetched successfully');
   }
 }

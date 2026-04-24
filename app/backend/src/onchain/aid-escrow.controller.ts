@@ -10,6 +10,7 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { Request } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -73,7 +74,7 @@ export class AidEscrowController {
   })
   async createAidPackage(
     @Body() dto: CreateAidPackageDto,
-    @Req() req: any,
+    @Req() req: Request & { user?: { address?: string } },
   ): Promise<any> {
     try {
       const operatorAddress = req.user?.address || 'admin';
@@ -119,7 +120,7 @@ export class AidEscrowController {
   })
   async batchCreateAidPackages(
     @Body() dto: BatchCreateAidPackagesDto,
-    @Req() req: any,
+    @Req() req: Request & { user?: { address?: string } },
   ): Promise<any> {
     if (dto.recipientAddresses.length !== dto.amounts.length) {
       throw new BadRequestException(
@@ -174,7 +175,7 @@ export class AidEscrowController {
   })
   async claimAidPackage(
     @Param('id') packageId: string,
-    @Req() req: any,
+    @Req() req: Request & { user?: { address?: string } },
   ): Promise<any> {
     const recipientAddress = req.user?.address;
     if (!recipientAddress) {
@@ -229,7 +230,7 @@ export class AidEscrowController {
   })
   async disburseAidPackage(
     @Param('id') packageId: string,
-    @Req() req: any,
+    @Req() req: Request & { user?: { address?: string } },
   ): Promise<any> {
     try {
       const operatorAddress = req.user?.address || 'admin';

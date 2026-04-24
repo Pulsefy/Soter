@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { DashboardFilters } from './DashboardFilters';
 import { FilteredPackageList } from './FilteredPackageList';
+import { FilterPresets } from './FilterPresets';
+import { ExportControls } from './ExportControls';
 import type { AidPackageFilters } from '@/types/aid-package';
 
 export function DashboardContent() {
@@ -19,6 +21,7 @@ export function DashboardContent() {
 
   // Sync localSearch if URL changes externally (e.g. browser back/forward)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalSearch(urlSearch);
   }, [urlSearch]);
 
@@ -53,6 +56,23 @@ export function DashboardContent() {
     updateParam('token', value);
   }
 
+  /**
+   * Apply a preset (or restore defaults) by rebuilding the URL from scratch.
+   * This avoids stale params lingering from the previous filter state.
+   */
+  const handleApplyPreset = useCallback(
+    (preset: AidPackageFilters) => {
+      const params = new URLSearchParams();
+      if (preset.search) params.set('search', preset.search);
+      if (preset.status) params.set('status', preset.status);
+      if (preset.token) params.set('token', preset.token);
+      // Also update the local search field immediately
+      setLocalSearch(preset.search ?? '');
+      router.replace(params.size ? `?${params.toString()}` : '?', { scroll: false });
+    },
+    [router],
+  );
+
   const filters: AidPackageFilters = {
     search: urlSearch,
     status: urlStatus as AidPackageFilters['status'],
@@ -64,9 +84,7 @@ export function DashboardContent() {
       {/* Header row */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h2 className="text-lg font-semibold">Aid Packages</h2>
-        <span className="text-xs text-gray-400 dark:text-gray-500 italic">
-          Placeholder — live data in a future wave
-        </span>
+        <ExportControls context="Aid Packages" filters={filters} />
       </div>
 
       {/* Filters */}
@@ -77,6 +95,13 @@ export function DashboardContent() {
         onSearchChange={handleSearchChange}
         onStatusChange={handleStatusChange}
         onTokenChange={handleTokenChange}
+      />
+
+      {/* Preset bar — save/apply/delete/copy/restore */}
+      <FilterPresets
+        filters={filters}
+        scope="dashboard"
+        onApply={handleApplyPreset}
       />
 
       {/* Package list */}

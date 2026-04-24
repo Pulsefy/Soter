@@ -42,33 +42,19 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   const isAwaitingApproval = status === 'awaiting-approval';
 
   const walletButtonLabel = (() => {
-    if (isConnected) {
-      return 'Disconnect Wallet';
-    }
-
-    if (isBusy) {
-      return 'Preparing WalletConnect...';
-    }
-
-    if (isAwaitingApproval) {
-      return 'Waiting for Wallet Approval';
-    }
-
+    if (isConnected) return 'Disconnect Wallet';
+    if (isBusy) return 'Preparing WalletConnect…';
+    if (isAwaitingApproval) return 'Waiting for Wallet Approval';
     return 'Connect Wallet';
   })();
 
   const walletStatusLabel = (() => {
     switch (status) {
-      case 'connected':
-        return 'Connected';
-      case 'connecting':
-        return 'Preparing';
-      case 'awaiting-approval':
-        return 'Approve in Wallet';
-      case 'error':
-        return 'Needs Attention';
-      default:
-        return 'Not Connected';
+      case 'connected':        return 'Connected';
+      case 'connecting':       return 'Preparing';
+      case 'awaiting-approval': return 'Approve in Wallet';
+      case 'error':            return 'Needs Attention';
+      default:                 return 'Not Connected';
     }
   })();
 
@@ -81,22 +67,35 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.scrollContainer}>
+        {/* ── Header ─────────────────────────────────────────────────────── */}
         <View style={styles.header}>
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel="Open Settings"
+            accessibilityHint="Navigates to the Settings screen"
             style={styles.settingsButton}
             onPress={() => navigation.navigate('Settings')}
             activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <Text style={styles.settingsIcon}>⚙️</Text>
+            <Text style={styles.settingsIcon} accessibilityElementsHidden>⚙️</Text>
           </TouchableOpacity>
-          <Text style={styles.title}>Soter</Text>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>Powered by Stellar</Text>
+
+          {/* App title — decorative, not interactive */}
+          <Text style={styles.title} accessibilityRole="header">Soter</Text>
+
+          <View
+            style={styles.badge}
+            accessible
+            accessibilityLabel="Powered by Stellar"
+          >
+            <Text style={styles.badgeText} importantForAccessibility="no-hide-descendants">
+              Powered by Stellar
+            </Text>
           </View>
         </View>
 
+        {/* ── Hero ───────────────────────────────────────────────────────── */}
         <View style={styles.heroSection}>
           <Text style={styles.heroTitle}>
             Transparent aid, directly delivered.
@@ -109,9 +108,12 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           </Text>
         </View>
 
+        {/* ── Wallet Card ────────────────────────────────────────────────── */}
         <View style={styles.walletCard}>
           <View style={styles.walletHeaderRow}>
             <Text style={styles.walletTitle}>Mobile Wallet</Text>
+            {/* Status badge — announced as a live region so VoiceOver/TalkBack
+                reads it when the wallet status changes */}
             <View
               style={[
                 styles.walletStatusBadge,
@@ -121,8 +123,13 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
                     ? styles.walletStatusPending
                     : styles.walletStatusIdle,
               ]}
+              accessible
+              accessibilityLabel={`Wallet status: ${walletStatusLabel}`}
+              accessibilityLiveRegion="polite"
             >
-              <Text style={styles.walletStatusText}>{walletStatusLabel}</Text>
+              <Text style={styles.walletStatusText} importantForAccessibility="no-hide-descendants">
+                {walletStatusLabel}
+              </Text>
             </View>
           </View>
 
@@ -133,12 +140,22 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           </Text>
 
           {publicKey ? (
-            <View style={styles.walletKeyCard}>
-              <Text style={styles.walletKeyLabel}>Connected Public Key</Text>
-              <Text style={styles.walletKeyValue} selectable>
+            <View
+              style={styles.walletKeyCard}
+              accessible
+              accessibilityLabel={`Connected public key: ${publicKey}. Active wallet: ${walletName ?? 'WalletConnect session'}`}
+            >
+              <Text style={styles.walletKeyLabel} importantForAccessibility="no-hide-descendants">
+                Connected Public Key
+              </Text>
+              <Text
+                style={styles.walletKeyValue}
+                selectable
+                importantForAccessibility="no-hide-descendants"
+              >
                 {publicKey}
               </Text>
-              <Text style={styles.walletHint}>
+              <Text style={styles.walletHint} importantForAccessibility="no-hide-descendants">
                 Active wallet: {walletName || 'WalletConnect session'}
               </Text>
             </View>
@@ -149,7 +166,15 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
             </Text>
           )}
 
-          {error ? <Text style={styles.walletError}>{error}</Text> : null}
+          {error ? (
+            <Text
+              style={styles.walletError}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="assertive"
+            >
+              {error}
+            </Text>
+          ) : null}
 
           {!publicKey && pairingUri ? (
             <Text style={styles.walletMeta} numberOfLines={1}>
@@ -165,6 +190,13 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
 
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityLabel={walletButtonLabel}
+            accessibilityHint={
+              isConnected
+                ? 'Disconnects the currently connected wallet'
+                : 'Opens WalletConnect to pair a Stellar wallet'
+            }
+            accessibilityState={{ disabled: isBusy, busy: isBusy }}
             style={[
               styles.walletButton,
               isConnected
@@ -178,7 +210,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           >
             <Text style={styles.walletButtonText}>{walletButtonLabel}</Text>
             {formattedPublicKey ? (
-              <Text style={styles.walletButtonSubtext}>
+              <Text style={styles.walletButtonSubtext} accessibilityElementsHidden>
                 {formattedPublicKey}
               </Text>
             ) : null}
@@ -187,6 +219,8 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           {isAwaitingApproval && pairingUri ? (
             <TouchableOpacity
               accessibilityRole="button"
+              accessibilityLabel="Reopen Wallet App"
+              accessibilityHint="Switches back to your wallet app to approve the connection"
               style={styles.walletSecondaryButton}
               onPress={reopenWallet}
               activeOpacity={0.7}
@@ -198,9 +232,13 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           ) : null}
         </View>
 
+        {/* ── Action Buttons ─────────────────────────────────────────────── */}
         <View style={styles.actionContainer}>
           <TouchableOpacity
             style={styles.primaryButton}
+            accessibilityRole="button"
+            accessibilityLabel="Check Backend Health"
+            accessibilityHint="Navigates to the System Health screen"
             onPress={() => navigation.navigate('Health')}
             activeOpacity={0.8}
           >
@@ -209,18 +247,22 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
 
           <TouchableOpacity
             style={styles.secondaryButton}
-            onPress={() =>
-              Alert.alert('Coming Soon', 'Coming in a future wave')
-            }
+            accessibilityRole="button"
+            accessibilityLabel="View Operator Task List"
+            accessibilityHint="Navigates to the Operator Task List screen"
+            onPress={() => navigation.navigate('TaskList')}
             activeOpacity={0.7}
           >
             <Text style={styles.secondaryButtonText}>
-              View Aid Overview (Coming Soon)
+              Operator Task List
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.secondaryButton}
+            accessibilityRole="button"
+            accessibilityLabel="View Aid Details"
+            accessibilityHint="Navigates to the Aid Details screen"
             onPress={() => navigation.navigate('AidDetails', { aidId: '1' })}
             activeOpacity={0.7}
           >
@@ -231,15 +273,16 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         </View>
       </ScrollView>
 
-      {/* QR Scanner FAB */}
+      {/* ── QR Scanner FAB ─────────────────────────────────────────────── */}
       <TouchableOpacity
         style={styles.scannerFab}
         onPress={() => navigation.navigate('Scanner')}
         activeOpacity={0.8}
         accessibilityRole="button"
         accessibilityLabel="Scan QR Code"
+        accessibilityHint="Opens the camera to scan a Soter QR code"
       >
-        <Text style={styles.scannerFabIcon}>📷</Text>
+        <Text style={styles.scannerFabIcon} accessibilityElementsHidden>📷</Text>
       </TouchableOpacity>
     </SafeAreaView>
   );
@@ -264,7 +307,12 @@ const makeStyles = (colors: AppColors) =>
       position: 'absolute',
       top: 0,
       right: 0,
+      // Minimum 44×44 pt tap target (WCAG 2.5.5)
+      minWidth: 44,
+      minHeight: 44,
       padding: 8,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
     settingsIcon: {
       fontSize: 22,
@@ -340,6 +388,8 @@ const makeStyles = (colors: AppColors) =>
     walletStatusBadge: {
       borderRadius: 999,
       paddingHorizontal: 10,
+      // Minimum 44 pt height for tap-target compliance (badge is not tappable
+      // but we keep vertical padding generous for readability at large text)
       paddingVertical: 6,
     },
     walletStatusIdle: {
@@ -400,10 +450,12 @@ const makeStyles = (colors: AppColors) =>
     },
     walletButton: {
       borderRadius: 14,
+      // Minimum 44 pt height (WCAG 2.5.5)
       paddingVertical: 16,
       paddingHorizontal: 20,
       alignItems: 'center',
       justifyContent: 'center',
+      minHeight: 44,
     },
     walletConnectButton: {
       backgroundColor: '#0F766E',
@@ -430,7 +482,9 @@ const makeStyles = (colors: AppColors) =>
       borderRadius: 14,
       borderWidth: 1,
       borderColor: '#BFDBFE',
+      // Minimum 44 pt height
       paddingVertical: 14,
+      minHeight: 44,
       alignItems: 'center',
       backgroundColor: '#F8FAFC',
     },
@@ -441,7 +495,9 @@ const makeStyles = (colors: AppColors) =>
     },
     primaryButton: {
       backgroundColor: colors.brand.primary,
+      // Minimum 44 pt height
       paddingVertical: 16,
+      minHeight: 44,
       borderRadius: 12,
       alignItems: 'center',
       shadowColor: colors.brand.primary,
@@ -457,7 +513,9 @@ const makeStyles = (colors: AppColors) =>
     },
     secondaryButton: {
       backgroundColor: colors.surface,
+      // Minimum 44 pt height
       paddingVertical: 16,
+      minHeight: 44,
       borderRadius: 12,
       alignItems: 'center',
       borderWidth: 2,
@@ -472,6 +530,7 @@ const makeStyles = (colors: AppColors) =>
       position: 'absolute',
       right: 24,
       bottom: 24,
+      // 64×64 — well above the 44 pt minimum
       width: 64,
       height: 64,
       borderRadius: 32,
