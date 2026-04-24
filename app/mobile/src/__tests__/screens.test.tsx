@@ -7,6 +7,7 @@ import { AidOverviewScreen } from '../screens/AidOverviewScreen';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
+import { ThemeProvider } from '../theme/ThemeContext';
 
 jest.mock('../services/api', () => ({
   getAidPackages: jest.fn(),
@@ -39,18 +40,22 @@ const mockGetAidPackages = getAidPackages as jest.Mock;
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+const NullScreen = () => null;
+
 function Wrapper() {
   return (
-    <NavigationContainer>
-      <Stack.Navigator>
-        <Stack.Screen name="AidOverview" component={AidOverviewScreen} />
-        <Stack.Screen name="AidDetails" component={() => null} />
-        <Stack.Screen name="Home" component={() => null} />
-        <Stack.Screen name="Settings" component={() => null} />
-        <Stack.Screen name="Health" component={() => null} />
-        <Stack.Screen name="Scanner" component={() => null} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <ThemeProvider>
+      <NavigationContainer>
+        <Stack.Navigator>
+          <Stack.Screen name="AidOverview" component={AidOverviewScreen} />
+          <Stack.Screen name="AidDetails" component={NullScreen} />
+          <Stack.Screen name="Home" component={NullScreen} />
+          <Stack.Screen name="Settings" component={NullScreen} />
+          <Stack.Screen name="Health" component={NullScreen} />
+          <Stack.Screen name="Scanner" component={NullScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </ThemeProvider>
   );
 }
 

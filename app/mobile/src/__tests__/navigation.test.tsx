@@ -9,6 +9,7 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { AidOverviewScreen } from '../screens/AidOverviewScreen';
 import { AidDetailsScreen } from '../screens/AidDetailsScreen';
 import type { RootStackParamList } from '../navigation/types';
+import { ThemeProvider } from '../theme/ThemeContext';
 
 // Mock heavy dependencies
 jest.mock('../contexts/WalletContext', () => ({
@@ -90,18 +91,22 @@ jest.mock('../contexts/SyncContext', () => ({
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+const NullScreen = () => null;
+
 function TestNavigator({ initialRoute = 'Home' }: { initialRoute?: keyof RootStackParamList }) {
   return (
-    <NavigationContainer>
-      <Stack.Navigator initialRouteName={initialRoute as any}>
-        <Stack.Screen name="Home" component={HomeScreen} />
-        <Stack.Screen name="AidOverview" component={AidOverviewScreen} />
-        <Stack.Screen name="AidDetails" component={AidDetailsScreen} />
-        <Stack.Screen name="Settings" component={() => null} />
-        <Stack.Screen name="Health" component={() => null} />
-        <Stack.Screen name="Scanner" component={() => null} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <ThemeProvider>
+      <NavigationContainer>
+        <Stack.Navigator initialRouteName={initialRoute as any}>
+          <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen name="AidOverview" component={AidOverviewScreen} />
+          <Stack.Screen name="AidDetails" component={AidDetailsScreen} />
+          <Stack.Screen name="Settings" component={NullScreen} />
+          <Stack.Screen name="Health" component={NullScreen} />
+          <Stack.Screen name="Scanner" component={NullScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </ThemeProvider>
   );
 }
 

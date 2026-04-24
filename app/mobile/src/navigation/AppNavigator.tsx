@@ -7,6 +7,7 @@ import { AidOverviewScreen } from '../screens/AidOverviewScreen';
 import { AidDetailsScreen } from '../screens/AidDetailsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ScannerScreen } from '../screens/ScannerScreen';
+import { BulkScanSessionScreen } from '../screens/BulkScanSessionScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -41,6 +42,11 @@ export const AppNavigator = () => {
         name="Scanner"
         component={ScannerScreen}
         options={{ title: 'Scan QR Code', presentation: 'modal' }}
+      />
+      <Stack.Screen
+        name="BulkScanSession"
+        component={BulkScanSessionScreen}
+        options={{ title: 'Bulk Scan Session', presentation: 'modal' }}
       />
       <Stack.Screen
         name="Settings"

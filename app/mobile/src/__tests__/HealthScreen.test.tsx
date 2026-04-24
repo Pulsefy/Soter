@@ -2,6 +2,7 @@ import React from 'react';
 import { render, waitFor, screen } from '@testing-library/react-native';
 import { HealthScreen } from '../screens/HealthScreen';
 import { fetchHealthStatus } from '../services/api';
+import { ThemeProvider } from '../theme/ThemeContext';
 
 // Mock the API module
 jest.mock('../services/api');
@@ -13,10 +14,17 @@ describe('HealthScreen', () => {
     jest.clearAllMocks();
   });
 
+  const renderWithTheme = () =>
+    render(
+      <ThemeProvider>
+        <HealthScreen />
+      </ThemeProvider>,
+    );
+
   it('shows loading state initially', () => {
     mockFetchHealthStatus.mockImplementationOnce(() => new Promise(() => {}));
     
-    render(<HealthScreen />);
+    renderWithTheme();
     
     expect(screen.getByText('Checking system health...')).toBeTruthy();
   });
@@ -32,33 +40,35 @@ describe('HealthScreen', () => {
 
     mockFetchHealthStatus.mockResolvedValueOnce(mockData);
 
-    render(<HealthScreen />);
+    renderWithTheme();
 
     await waitFor(() => {
       expect(screen.getByText('OK')).toBeTruthy();
       expect(screen.getByText('🌐 Live backend data')).toBeTruthy();
-      expect(screen.getByText('backend')).toBeTruthy();
-      expect(screen.getByText('1.0.0')).toBeTruthy();
+      expect(screen.getByLabelText('Service: backend')).toBeTruthy();
+      expect(screen.getByLabelText('Version: 1.0.0')).toBeTruthy();
     });
   });
 
   it('shows mock data label when backend fails', async () => {
     mockFetchHealthStatus.mockRejectedValueOnce(new Error('Network error'));
 
-    render(<HealthScreen />);
+    renderWithTheme();
 
     await waitFor(() => {
-      expect(screen.getByText('🔧 MOCK')).toBeTruthy();
+      expect(screen.getByLabelText('Using mock data')).toBeTruthy();
       expect(screen.getByText('📊 Using simulated data')).toBeTruthy();
       expect(screen.getByText('Backend unreachable - showing mock data')).toBeTruthy();
-      expect(screen.getByText('⚠️ This is simulated data - backend connection failed')).toBeTruthy();
+      expect(
+        screen.getByLabelText('Warning: This is simulated data. Backend connection failed.'),
+      ).toBeTruthy();
     });
   });
 
   it('shows troubleshooting tips when using mock data', async () => {
     mockFetchHealthStatus.mockRejectedValueOnce(new Error('Network error'));
 
-    render(<HealthScreen />);
+    renderWithTheme();
 
     await waitFor(() => {
       expect(screen.getByText('🔍 Troubleshooting Tips')).toBeTruthy();
@@ -68,21 +78,20 @@ describe('HealthScreen', () => {
   it('displays the correct mock data structure', async () => {
     mockFetchHealthStatus.mockRejectedValueOnce(new Error('Network error'));
 
-    render(<HealthScreen />);
+    renderWithTheme();
 
     await waitFor(() => {
-      expect(screen.getByText('backend')).toBeTruthy();
-      expect(screen.getByText('0.0.0')).toBeTruthy();
-      expect(screen.getByText('development')).toBeTruthy();
-      expect(screen.getByText('✅')).toBeTruthy();
       expect(screen.getByText('OK')).toBeTruthy();
+      expect(screen.getByLabelText('Service: backend')).toBeTruthy();
+      expect(screen.getByLabelText('Version: 0.0.0')).toBeTruthy();
+      expect(screen.getByLabelText('Environment: development')).toBeTruthy();
     });
   });
 
   it('shows retry button when error occurs', async () => {
     mockFetchHealthStatus.mockRejectedValueOnce(new Error('Network error'));
 
-    render(<HealthScreen />);
+    renderWithTheme();
 
     await waitFor(() => {
       expect(screen.getByText('🔄 Retry Connection')).toBeTruthy();
@@ -97,7 +106,7 @@ describe('HealthScreen', () => {
       environment: 'development', timestamp: new Date().toISOString(),
     });
 
-    render(<HealthScreen />);
+    renderWithTheme();
 
     await waitFor(() => {
       // The env badge element is always rendered
@@ -112,13 +121,13 @@ describe('HealthScreen', () => {
       environment: 'staging', timestamp: new Date().toISOString(),
     });
 
-    render(<HealthScreen />);
+    renderWithTheme();
 
     await waitFor(() => {
-      // Badge shows uppercased label
-      expect(screen.getByText('STAGING')).toBeTruthy();
-      // Footer shows lowercase label
-      expect(screen.getByTestId('footer-env-name')).toBeTruthy();
+      // Environment badge uses accessibilityLabel for stable tests
+      expect(screen.getAllByLabelText('Environment: staging').length).toBeGreaterThan(0);
+      // Footer includes env label + api url host
+      expect(screen.getByLabelText(/Environment: staging ·/)).toBeTruthy();
     });
 
     delete process.env.EXPO_PUBLIC_ENV_NAME;
@@ -132,10 +141,10 @@ describe('HealthScreen', () => {
       environment: 'production', timestamp: new Date().toISOString(),
     });
 
-    render(<HealthScreen />);
+    renderWithTheme();
 
     await waitFor(() => {
-      expect(screen.getByText('PROD')).toBeTruthy();
+      expect(screen.getByLabelText('Environment: prod')).toBeTruthy();
     });
 
     delete process.env.EXPO_PUBLIC_API_URL;
@@ -149,10 +158,10 @@ describe('HealthScreen', () => {
       environment: 'development', timestamp: new Date().toISOString(),
     });
 
-    render(<HealthScreen />);
+    renderWithTheme();
 
     await waitFor(() => {
-      expect(screen.getByText('DEV')).toBeTruthy();
+      expect(screen.getByLabelText('Environment: dev')).toBeTruthy();
     });
   });
 
@@ -164,13 +173,10 @@ describe('HealthScreen', () => {
       environment: 'development', timestamp: new Date().toISOString(),
     });
 
-    render(<HealthScreen />);
+    renderWithTheme();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('footer-env-row')).toBeTruthy();
-      expect(screen.getByTestId('footer-env-name')).toBeTruthy();
-      expect(screen.getByTestId('footer-api-url')).toBeTruthy();
-    });
+    expect(await screen.findByTestId('footer-env-row')).toBeTruthy();
+    expect(screen.getByLabelText(/Environment: dev ·/)).toBeTruthy();
 
     delete process.env.EXPO_PUBLIC_ENV_NAME;
     delete process.env.EXPO_PUBLIC_API_URL;

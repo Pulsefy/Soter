@@ -248,6 +248,19 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           <TouchableOpacity
             style={styles.secondaryButton}
             accessibilityRole="button"
+            accessibilityLabel="Start bulk scan session"
+            accessibilityHint="Opens session mode optimized for repeated package scans"
+            onPress={() => navigation.navigate('BulkScanSession')}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.secondaryButtonText}>
+              Start Bulk Scan Session
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            accessibilityRole="button"
             accessibilityLabel="View Aid Overview, coming soon"
             accessibilityHint="This feature is not yet available"
             onPress={() =>

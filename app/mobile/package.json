@@ -41,7 +41,7 @@
   "devDependencies": {
     "@testing-library/react-native": "^13.3.3",
     "@types/jest": "^29.5.14",
-    "@types/react": "~19.1.0",
+    "@types/react": "^19.2.0",
     "babel-jest": "^29.7.0",
     "babel-preset-expo": "^54.0.10",
     "eslint": "^9.25.0",

@@ -127,6 +127,18 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
             {scanned ? 'QR code detected' : 'Align QR code within the frame'}
           </Text>
 
+          {!scanned ? (
+            <TouchableOpacity
+              style={styles.sessionButton}
+              accessibilityRole="button"
+              accessibilityLabel="Switch to bulk scan session"
+              accessibilityHint="Opens session mode optimized for repeated package scans"
+              onPress={() => navigation.replace('BulkScanSession')}
+            >
+              <Text style={styles.sessionText}>Bulk Scan Session</Text>
+            </TouchableOpacity>
+          ) : null}
+
           <TouchableOpacity
             style={styles.cancelButton}
             accessibilityRole="button"
@@ -211,6 +223,24 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  sessionButton: {
+    minWidth: 44,
+    minHeight: 44,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    marginBottom: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sessionText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '700',
   },
   rescanContainer: {
     position: 'absolute',

@@ -4,9 +4,14 @@ import { createNavigationContainerRef, NavigationContainer } from '@react-naviga
 import { AppNavigator } from '../navigation/AppNavigator';
 import { useWallet } from '../contexts/WalletContext';
 import type { RootStackParamList } from '../navigation/types';
+import { ThemeProvider } from '../theme/ThemeContext';
 
 jest.mock('../contexts/WalletContext', () => ({
   useWallet: jest.fn(),
+}));
+
+jest.mock('../contexts/BiometricContext', () => ({
+  useBiometric: () => ({ biometricEnabled: false, authenticate: jest.fn().mockResolvedValue(true) }),
 }));
 
 jest.mock('@react-native-community/netinfo', () => ({
@@ -33,9 +38,11 @@ describe('AppNavigator', () => {
 
   it('renders Home by default and navigates to Health route', async () => {
     const { getByText, findByText } = render(
-      <NavigationContainer>
-        <AppNavigator />
-      </NavigationContainer>
+      <ThemeProvider>
+        <NavigationContainer>
+          <AppNavigator />
+        </NavigationContainer>
+      </ThemeProvider>,
     );
 
     expect(getByText('Soter')).toBeTruthy();
@@ -49,9 +56,11 @@ describe('AppNavigator', () => {
   it('declares AidOverview and AidDetails routes in navigator config', async () => {
     const navigationRef = createNavigationContainerRef<RootStackParamList>();
     render(
-      <NavigationContainer ref={navigationRef}>
-        <AppNavigator />
-      </NavigationContainer>
+      <ThemeProvider>
+        <NavigationContainer ref={navigationRef}>
+          <AppNavigator />
+        </NavigationContainer>
+      </ThemeProvider>,
     );
 
     await waitFor(() => expect(navigationRef.isReady()).toBe(true));
