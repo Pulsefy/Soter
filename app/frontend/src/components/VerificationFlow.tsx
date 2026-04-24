@@ -159,6 +159,9 @@ interface FlowState {
     step: VerificationStep;
     imageFile: File | null;
     textInput: string;
+    includeLocation: boolean;
+    locationPermission: LocationPermissionState;
+    locationData: CapturedLocation | null;
     errors: ValidationErrors;
     apiError: string | null;
     result: VerificationResult | null;
@@ -170,10 +173,27 @@ function initialState(): FlowState {
         step: 'upload',
         imageFile: null,
         textInput: '',
+        includeLocation: false,
+        locationPermission: 'idle',
+        locationData: null,
         errors: {},
         apiError: null,
         result: null,
     };
+}
+
+type LocationPermissionState =
+    | 'idle'
+    | 'requesting'
+    | 'granted'
+    | 'denied'
+    | 'unsupported'
+    | 'error';
+
+interface CapturedLocation {
+    latitude: number;
+    longitude: number;
+    accuracy: number;
 }
 
 /* ─── VerificationFlow component ────────────────────────────────────────── */
@@ -196,6 +216,10 @@ export const VerificationFlow: React.FC = () => {
     const [step, setStep] = useState<VerificationStep>('upload');
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [textInput, setTextInput] = useState('');
+    const [includeLocation, setIncludeLocation] = useState(false);
+    const [locationPermission, setLocationPermission] =
+        useState<LocationPermissionState>('idle');
+    const [locationData, setLocationData] = useState<CapturedLocation | null>(null);
     const [errors, setErrors] = useState<ValidationErrors>({});
     const [apiError, setApiError] = useState<string | null>(null);
     const [result, setResult] = useState<VerificationResult | null>(null);
@@ -214,10 +238,52 @@ export const VerificationFlow: React.FC = () => {
         setStep(s.step);
         setImageFile(s.imageFile);
         setTextInput(s.textInput);
+        setIncludeLocation(s.includeLocation);
+        setLocationPermission(s.locationPermission);
+        setLocationData(s.locationData);
         setErrors(s.errors);
         setApiError(s.apiError);
         setResult(s.result);
         pendingPayload.current = null;
+    }, []);
+
+    const handleLocationConsentToggle = useCallback((checked: boolean) => {
+        setIncludeLocation(checked);
+        if (!checked) {
+            setLocationPermission('idle');
+            setLocationData(null);
+        }
+    }, []);
+
+    const handleRequestLocation = useCallback(() => {
+        if (typeof navigator === 'undefined' || !navigator.geolocation) {
+            setLocationPermission('unsupported');
+            return;
+        }
+
+        setLocationPermission('requesting');
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                setLocationData({
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    accuracy: position.coords.accuracy,
+                });
+                setLocationPermission('granted');
+            },
+            (positionError) => {
+                if (positionError.code === positionError.PERMISSION_DENIED) {
+                    setLocationPermission('denied');
+                } else {
+                    setLocationPermission('error');
+                }
+            },
+            {
+                enableHighAccuracy: false,
+                timeout: 8000,
+                maximumAge: 5 * 60 * 1000,
+            },
+        );
     }, []);
 
     /* ── Step 1 → submission handler ────────────────────────────────────────── */
@@ -259,13 +325,18 @@ export const VerificationFlow: React.FC = () => {
             if (trimmedText.length > 0) {
                 form.append('text', trimmedText);
             }
+            if (includeLocation && locationPermission === 'granted' && locationData) {
+                form.append('location_latitude', locationData.latitude.toString());
+                form.append('location_longitude', locationData.longitude.toString());
+                form.append('location_accuracy_meters', locationData.accuracy.toString());
+            }
             pendingPayload.current = form;
 
             // 4. Advance to Step 2; the API call fires via useEffect below
             setApiError(null);
             setStep('analysing');
         },
-        [imageFile, textInput],
+        [imageFile, includeLocation, locationData, locationPermission, textInput],
     );
 
     /* ── Step 2 → API call ───────────────────────────────────────────────────── */
@@ -279,8 +350,6 @@ export const VerificationFlow: React.FC = () => {
             setTimeout(() => setStep('upload'), 0);
             return;
         }
-
-        let cancelled = false;
 
         let cancelled = false;
 
@@ -311,7 +380,7 @@ export const VerificationFlow: React.FC = () => {
         return () => {
             cancelled = true;
         };
-    }, [step]);
+    }, [step, trackJob]);
 
     /* ── Derived IDs ─────────────────────────────────────────────────────────── */
 
@@ -344,6 +413,11 @@ export const VerificationFlow: React.FC = () => {
                     onImageChange={setImageFile}
                     onTextChange={setTextInput}
                     onSubmit={handleSubmit}
+                    includeLocation={includeLocation}
+                    locationPermission={locationPermission}
+                    locationData={locationData}
+                    onLocationConsentToggle={handleLocationConsentToggle}
+                    onRequestLocation={handleRequestLocation}
                 />
             )}
 
@@ -372,6 +446,11 @@ interface StepUploadProps {
     onImageChange: (file: File | null) => void;
     onTextChange: (text: string) => void;
     onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
+    includeLocation: boolean;
+    locationPermission: LocationPermissionState;
+    locationData: CapturedLocation | null;
+    onLocationConsentToggle: (checked: boolean) => void;
+    onRequestLocation: () => void;
 }
 
 /**
@@ -393,6 +472,11 @@ function StepUpload({
     onImageChange,
     onTextChange,
     onSubmit,
+    includeLocation,
+    locationPermission,
+    locationData,
+    onLocationConsentToggle,
+    onRequestLocation,
 }: StepUploadProps) {
     const role = getAppUserRole();
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -517,6 +601,61 @@ function StepUpload({
                     >
                         {errors.text}
                     </span>
+                )}
+            </div>
+
+            <div className="mb-6 rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800/50">
+                <label className="flex items-start gap-3">
+                    <input
+                        type="checkbox"
+                        checked={includeLocation}
+                        onChange={(e) => onLocationConsentToggle(e.target.checked)}
+                        className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100">
+                            Share approximate location (optional)
+                        </span>
+                        <span className="block text-xs text-gray-600 dark:text-gray-400 mt-1">
+                            We use this only to add context for field verification and delivery routing. Your request still works if you choose not to share.
+                        </span>
+                    </span>
+                </label>
+
+                {includeLocation && (
+                    <div className="mt-3 space-y-2">
+                        <button
+                            type="button"
+                            onClick={onRequestLocation}
+                            disabled={locationPermission === 'requesting'}
+                            className="px-3 py-1.5 text-xs font-medium rounded-md border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-60 disabled:cursor-not-allowed dark:border-blue-700 dark:bg-blue-900/40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                        >
+                            {locationPermission === 'requesting'
+                                ? 'Requesting location...'
+                                : 'Allow location access'}
+                        </button>
+
+                        {locationPermission === 'granted' && locationData && (
+                            <p className="text-xs text-green-700 dark:text-green-300">
+                                Location added (accuracy: ±{Math.round(locationData.accuracy)}m).
+                            </p>
+                        )}
+                        {locationPermission === 'denied' && (
+                            <p className="text-xs text-amber-700 dark:text-amber-300">
+                                Location permission was denied. You can continue without it.
+                            </p>
+                        )}
+                        {locationPermission === 'unsupported' && (
+                            <p className="text-xs text-amber-700 dark:text-amber-300">
+                                Location is not supported in this browser. You can continue without it.
+                            </p>
+                        )}
+                        {locationPermission === 'error' && (
+                            <p className="text-xs text-amber-700 dark:text-amber-300">
+                                We couldn&apos;t capture your location right now. You can continue without it.
+                            </p>
+                        )}
+                    </div>
                 )}
             </div>
 
