@@ -1,6 +1,9 @@
-
-
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import Redis from 'ioredis';
 
 @Injectable()
@@ -13,11 +16,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       host: process.env.REDIS_HOST ?? 'localhost',
       port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
       maxRetriesPerRequest: 3,
-      retryStrategy: (times) => (times <= 3 ? 200 : null),
+      retryStrategy: times => (times <= 3 ? 200 : null),
     });
 
     this.client.on('connect', () => this.logger.log('Redis connected'));
-    this.client.on('error', (err) => this.logger.error('Redis error', err));
+    this.client.on('error', err => this.logger.error('Redis error', err));
   }
 
   onModuleDestroy() {
@@ -53,12 +56,45 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-
-  async del(key: string): Promise<void> {
+  async del(keys: string | string[]): Promise<number> {
     try {
-      await this.client.del(key);
+      const keysToDelete = Array.isArray(keys) ? keys : [keys];
+
+      if (keysToDelete.length === 0) {
+        return 0;
+      }
+
+      return await this.client.del(...keysToDelete);
     } catch (err) {
-      this.logger.warn(`Redis DEL failed for key "${key}": ${String(err)}`);
+      this.logger.warn(`Redis DEL failed: ${String(err)}`);
+      return 0;
+    }
+  }
+
+  async scanKeys(pattern: string): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor = '0';
+
+    try {
+      do {
+        const [nextCursor, matchedKeys] = await this.client.scan(
+          cursor,
+          'MATCH',
+          pattern,
+          'COUNT',
+          100,
+        );
+
+        cursor = nextCursor;
+        keys.push(...matchedKeys);
+      } while (cursor !== '0');
+
+      return keys;
+    } catch (err) {
+      this.logger.warn(
+        `Redis SCAN failed for pattern "${pattern}": ${String(err)}`,
+      );
+      return [];
     }
   }
 }

@@ -154,4 +154,18 @@ export class AnalyticsController {
     this.logger.log(`GET /analytics/map-anonymized ${JSON.stringify(query)}`);
     return this.analyticsService.getMapAnonymizedData(query);
   }
+
+  @Public()
+  @Get('cache-metrics')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get analytics cache metrics',
+    description: 'Returns cache hit/miss statistics for analytics endpoints',
+  })
+  @ApiOkResponse({
+    description: 'Cache metrics retrieved successfully',
+  })
+  getCacheMetrics() {
+    return this.analyticsService.getCacheMetrics();
+  }
 }

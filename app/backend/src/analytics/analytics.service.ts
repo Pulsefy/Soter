@@ -73,6 +73,9 @@ import { PrivacyService } from './privacy.service';
 
 // }
 
+const ANALYTICS_CACHE_PREFIX = 'analytics';
+const ANALYTICS_CACHE_PATTERN = `${ANALYTICS_CACHE_PREFIX}:*`;
+
 const CACHE_TTL_SECONDS = 300; // 5 minutes
 
 const DEFAULT_LOOKBACK_DAYS = 30;
@@ -93,6 +96,10 @@ interface CampaignMetadata {
 @Injectable()
 export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
+
+  private cacheHits = 0;
+  private cacheMisses = 0;
+  private cacheInvalidations = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -116,17 +123,7 @@ export class AnalyticsService {
       query as Record<string, unknown>,
     );
 
-    const cached = await this.redis.get<GlobalStatsDto>(cacheKey);
-    if (cached) {
-      this.logger.debug(`Cache hit: ${cacheKey}`);
-      return cached;
-    }
-
-    this.logger.debug(`Cache miss: ${cacheKey} — querying database`);
-    const result = await this.computeGlobalStats(query);
-
-    await this.redis.set(cacheKey, result, CACHE_TTL_SECONDS);
-    return result;
+    return this.getOrSetCache(cacheKey, () => this.computeGlobalStats(query));
   }
 
   /**
@@ -145,17 +142,7 @@ export class AnalyticsService {
       query as Record<string, unknown>,
     );
 
-    const cached = await this.redis.get<MapDataDto>(cacheKey);
-    if (cached) {
-      this.logger.debug(`Cache hit: ${cacheKey}`);
-      return cached;
-    }
-
-    this.logger.debug(`Cache miss: ${cacheKey} — querying database`);
-    const result = await this.computeMapData(query);
-
-    await this.redis.set(cacheKey, result, CACHE_TTL_SECONDS);
-    return result;
+    return this.getOrSetCache(cacheKey, () => this.computeMapData(query));
   }
 
   /**
@@ -183,6 +170,39 @@ export class AnalyticsService {
       type: 'FeatureCollection',
       features,
       computedAt: rawData.computedAt,
+    };
+  }
+
+  async invalidateAnalyticsCache(reason = 'analytics dependency changed') {
+    const keys = await this.redis.scanKeys(ANALYTICS_CACHE_PATTERN);
+
+    if (!keys.length) {
+      this.logger.debug(
+        `No analytics cache keys found to invalidate: ${reason}`,
+      );
+      return { deletedKeys: 0, reason };
+    }
+
+    await this.redis.del(keys);
+    this.cacheInvalidations += 1;
+
+    this.logger.log(
+      `Invalidated ${keys.length} analytics cache key(s): ${reason}`,
+    );
+
+    return { deletedKeys: keys.length, reason };
+  }
+
+  getCacheMetrics() {
+    const totalRequests = this.cacheHits + this.cacheMisses;
+
+    return {
+      hits: this.cacheHits,
+      misses: this.cacheMisses,
+      invalidations: this.cacheInvalidations,
+      totalRequests,
+      hitRate: totalRequests === 0 ? 0 : this.cacheHits / totalRequests,
+      ttlSeconds: CACHE_TTL_SECONDS,
     };
   }
 
@@ -342,6 +362,28 @@ export class AnalyticsService {
     return { points, computedAt: new Date().toISOString() };
   }
 
+  private async getOrSetCache<T>(
+    cacheKey: string,
+    compute: () => Promise<T>,
+  ): Promise<T> {
+    const cached = await this.redis.get<T>(cacheKey);
+
+    if (cached) {
+      this.cacheHits += 1;
+      this.logger.debug(`Analytics cache hit: ${cacheKey}`);
+      return cached;
+    }
+
+    this.cacheMisses += 1;
+    this.logger.debug(`Analytics cache miss: ${cacheKey}`);
+
+    const result = await compute();
+
+    await this.redis.set(cacheKey, result, CACHE_TTL_SECONDS);
+
+    return result;
+  }
+
   private buildMetadataFilter(
     region?: string,
     token?: string,
@@ -399,7 +441,7 @@ export class AnalyticsService {
       .map(([k, v]) => `${k}=${String(v)}`)
       .join(':');
 
-    return `analytics:${endpoint}${sorted ? ':' + sorted : ''}`;
+    return `${ANALYTICS_CACHE_PREFIX}:${endpoint}${sorted ? ':' + sorted : ''}`;
   }
 
   private anonymiseId(id: string): string {

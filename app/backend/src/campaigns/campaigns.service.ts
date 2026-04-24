@@ -3,10 +3,14 @@ import { CampaignStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 @Injectable()
 export class CampaignsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly analyticsService: AnalyticsService,
+  ) {}
 
   private sanitizeMetadata(
     metadata?: Record<string, unknown>,
@@ -16,7 +20,7 @@ export class CampaignsService {
   }
 
   async create(dto: CreateCampaignDto, ngoId?: string | null) {
-    return this.prisma.campaign.create({
+    const campaign = await this.prisma.campaign.create({
       data: {
         name: dto.name,
         status: dto.status ?? CampaignStatus.draft,
@@ -25,6 +29,10 @@ export class CampaignsService {
         ngoId: ngoId ?? null,
       },
     });
+
+    await this.analyticsService.invalidateAnalyticsCache('campaign created');
+
+    return campaign;
   }
 
   async findAll(includeArchived = false, ngoId?: string | null) {
@@ -44,16 +52,18 @@ export class CampaignsService {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id },
     });
+
     if (!campaign || campaign.deletedAt) {
       throw new NotFoundException('Campaign not found');
     }
+
     return campaign;
   }
 
   async update(id: string, dto: UpdateCampaignDto) {
     await this.findOne(id);
 
-    return this.prisma.campaign.update({
+    const updated = await this.prisma.campaign.update({
       where: { id },
       data: {
         name: dto.name,
@@ -65,6 +75,10 @@ export class CampaignsService {
             : this.sanitizeMetadata(dto.metadata),
       },
     });
+
+    await this.analyticsService.invalidateAnalyticsCache('campaign updated');
+
+    return updated;
   }
 
   async archive(id: string) {
@@ -76,8 +90,13 @@ export class CampaignsService {
 
     const updated = await this.prisma.campaign.update({
       where: { id },
-      data: { archivedAt: new Date(), status: CampaignStatus.archived },
+      data: {
+        archivedAt: new Date(),
+        status: CampaignStatus.archived,
+      },
     });
+
+    await this.analyticsService.invalidateAnalyticsCache('campaign archived');
 
     return { campaign: updated, alreadyArchived: false };
   }
@@ -85,9 +104,14 @@ export class CampaignsService {
   /** Soft-delete a campaign (sets deletedAt). */
   async softDelete(id: string) {
     await this.findOne(id);
-    return this.prisma.campaign.update({
+
+    const deleted = await this.prisma.campaign.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
+
+    await this.analyticsService.invalidateAnalyticsCache('campaign deleted');
+
+    return deleted;
   }
 }

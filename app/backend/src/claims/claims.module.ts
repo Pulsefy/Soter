@@ -7,6 +7,7 @@ import { MetricsModule } from '../observability/metrics/metrics.module';
 import { LoggerModule } from '../logger/logger.module';
 import { AuditModule } from '../audit/audit.module';
 import { EncryptionModule } from '../common/encryption/encryption.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { EncryptionModule } from '../common/encryption/encryption.module';
     LoggerModule,
     AuditModule,
     EncryptionModule,
+    AnalyticsModule,
   ],
   controllers: [ClaimsController],
   providers: [ClaimsService],

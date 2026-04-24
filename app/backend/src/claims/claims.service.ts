@@ -21,6 +21,7 @@ import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 @Injectable()
 export class ClaimsService {
@@ -37,16 +38,17 @@ export class ClaimsService {
     private readonly metricsService: MetricsService,
     private readonly auditService: AuditService,
     private readonly encryptionService: EncryptionService,
+    private readonly analyticsService: AnalyticsService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
   }
 
   async create(createClaimDto: CreateClaimDto) {
-    // Check if campaign exists
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: createClaimDto.campaignId },
     });
+
     if (!campaign) {
       throw new NotFoundException('Campaign not found');
     }
@@ -59,9 +61,6 @@ export class ClaimsService {
           createClaimDto.recipientRef,
         ),
         evidenceRef: createClaimDto.evidenceRef,
-        // Store tokenAddress in metadata for multi-token support
-        // Note: This would require a schema migration to add tokenAddress field
-        // For now, we pass it to on-chain operations directly
       },
       include: {
         campaign: true,
@@ -70,7 +69,8 @@ export class ClaimsService {
 
     claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
-    // Stub audit hook
+    await this.analyticsService.invalidateAnalyticsCache('claim created');
+
     void this.auditLog('claim', claim.id, 'created', {
       status: claim.status,
       tokenAddress: createClaimDto.tokenAddress,
@@ -86,6 +86,7 @@ export class ClaimsService {
         campaign: true,
       },
     });
+
     return claims.map(claim => ({
       ...claim,
       recipientRef: this.encryptionService.decrypt(claim.recipientRef),
@@ -99,9 +100,11 @@ export class ClaimsService {
         campaign: true,
       },
     });
+
     if (!claim || claim.deletedAt) {
       throw new NotFoundException('Claim not found');
     }
+
     return {
       ...claim,
       recipientRef: this.encryptionService.decrypt(claim.recipientRef),
@@ -140,8 +143,8 @@ export class ClaimsService {
       );
     }
 
-    // Call on-chain adapter if enabled
     let onchainResult: DisburseResult | null = null;
+
     if (this.onchainEnabled && this.onchainAdapter) {
       const startTime = Date.now();
       const adapterType =
@@ -154,12 +157,7 @@ export class ClaimsService {
           adapter: adapterType,
         });
 
-        // Generate a mock package ID for the disburse call
-        // In a real implementation, this would come from createClaim
         const packageId = this.generateMockPackageId(id);
-
-        // Get tokenAddress from claim metadata or use a default
-        // In production, this should be stored in the claim record
         const tokenAddress = this.getTokenAddressForClaim(claim);
 
         onchainResult = await this.onchainAdapter.disburse({
@@ -172,12 +170,12 @@ export class ClaimsService {
 
         const duration = (Date.now() - startTime) / 1000;
 
-        // Record metrics
         this.metricsService.incrementOnchainOperation(
           'disburse',
           adapterType,
           onchainResult.status,
         );
+
         this.metricsService.recordOnchainDuration(
           'disburse',
           adapterType,
@@ -191,7 +189,6 @@ export class ClaimsService {
           duration,
         });
 
-        // Audit log for on-chain operation
         await this.auditService.record({
           actorId: 'system',
           entity: 'onchain',
@@ -216,19 +213,18 @@ export class ClaimsService {
           { claimId: id, adapter: adapterType },
         );
 
-        // Record failed metric
         this.metricsService.incrementOnchainOperation(
           'disburse',
           adapterType,
           'failed',
         );
+
         this.metricsService.recordOnchainDuration(
           'disburse',
           adapterType,
           duration,
         );
 
-        // Audit log for failed operation
         await this.auditService.record({
           actorId: 'system',
           entity: 'onchain',
@@ -239,66 +235,15 @@ export class ClaimsService {
             adapter: adapterType,
           },
         });
-
-        // Don't throw - allow disbursement to proceed even if on-chain call fails
-        // This is configurable behavior for resilience
       }
     }
 
-    // Proceed with status transition
     return this.transitionStatus(
       id,
       ClaimStatus.approved,
       ClaimStatus.disbursed,
       onchainResult,
     );
-  }
-
-  /**
-   * Generate a deterministic mock package ID from claim ID
-   * In production, this would come from the createClaim on-chain call
-   */
-  private generateMockPackageId(claimId: string): string {
-    // Simple hash-based approach for mock
-    const hash = createHash('sha256')
-      .update(`package-${claimId}`)
-      .digest('hex');
-    return BigInt('0x' + hash.substring(0, 16)).toString();
-  }
-
-  /**
-   * Get token address for a claim
-   * In production, this should be retrieved from the claim record
-   * For now, uses a default or derives from campaign metadata
-   */
-  private getTokenAddressForClaim(
-    claim: {
-      metadata?: any;
-      campaign?: { metadata?: any } | null;
-    } & Record<string, any>,
-  ): string {
-    // Default USDC on Stellar testnet
-    // In production, this should come from the claim record or campaign config
-    const defaultTokenAddress =
-      'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
-
-    // If claim has tokenAddress in metadata, use it
-
-    const claimMetadata = claim.metadata as Record<string, unknown> | undefined;
-    if (claimMetadata?.tokenAddress) {
-      return claimMetadata.tokenAddress as string;
-    }
-
-    // If campaign has tokenAddress in metadata, use it
-
-    const campaignMetadata = claim.campaign?.metadata as
-      | Record<string, unknown>
-      | undefined;
-    if (campaignMetadata?.tokenAddress) {
-      return campaignMetadata.tokenAddress as string;
-    }
-
-    return defaultTokenAddress;
   }
 
   async archive(id: string) {
@@ -316,16 +261,16 @@ export class ClaimsService {
     onchainResult?: DisburseResult | null,
   ) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
+
     if (!claim) {
       throw new NotFoundException('Claim not found');
     }
+
     if (claim.status !== fromStatus) {
       throw new BadRequestException(
         `Cannot transition from ${claim.status} to ${toStatus}`,
       );
     }
-
-    // For disburse, check budget? But for now, skip as per requirements.
 
     const updatedClaim = await this.prisma.$transaction(async tx => {
       const updated = await tx.claim.update({
@@ -334,7 +279,6 @@ export class ClaimsService {
         include: { campaign: true },
       });
 
-      // Audit log for status change
       void this.auditLog('claim', id, `status_changed_to_${toStatus}`, {
         from: fromStatus,
         to: toStatus,
@@ -349,7 +293,45 @@ export class ClaimsService {
       return updated;
     });
 
+    await this.analyticsService.invalidateAnalyticsCache(
+      `claim status changed to ${toStatus}`,
+    );
+
     return updatedClaim;
+  }
+
+  private generateMockPackageId(claimId: string): string {
+    const hash = createHash('sha256')
+      .update(`package-${claimId}`)
+      .digest('hex');
+
+    return BigInt(`0x${hash.substring(0, 16)}`).toString();
+  }
+
+  private getTokenAddressForClaim(
+    claim: {
+      metadata?: any;
+      campaign?: { metadata?: any } | null;
+    } & Record<string, any>,
+  ): string {
+    const defaultTokenAddress =
+      'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
+
+    const claimMetadata = claim.metadata as Record<string, unknown> | undefined;
+
+    if (claimMetadata?.tokenAddress) {
+      return claimMetadata.tokenAddress as string;
+    }
+
+    const campaignMetadata = claim.campaign?.metadata as
+      | Record<string, unknown>
+      | undefined;
+
+    if (campaignMetadata?.tokenAddress) {
+      return campaignMetadata.tokenAddress as string;
+    }
+
+    return defaultTokenAddress;
   }
 
   private auditLog(
@@ -358,13 +340,9 @@ export class ClaimsService {
     action: string,
     metadata?: Record<string, unknown>,
   ) {
-    // Stub: In production, this would log to audit table or external system
     console.log(`Audit: ${entity} ${entityId} ${action}`, metadata);
   }
 
-  /**
-   * Generate a receipt DTO for a claim
-   */
   async getReceipt(id: string): Promise<ClaimReceiptDto> {
     const claim = await this.findOne(id);
 
@@ -385,10 +363,6 @@ export class ClaimsService {
     };
   }
 
-  /**
-   * Generate and share a claim receipt
-   * Supports email, SMS, and inline sharing
-   */
   async shareReceipt(
     id: string,
     shareDto: SendReceiptShareDto,
@@ -399,17 +373,10 @@ export class ClaimsService {
     text: string;
   }> {
     const receipt = await this.getReceipt(id);
-
-    // Generate receipt text
     const receiptText = this.generateReceiptText(receipt);
-
-    // Generate filename
     const filename = `claim-receipt-${receipt.claimId}.txt`;
-
-    // Base64 encode the receipt text
     const receiptData = Buffer.from(receiptText).toString('base64');
 
-    // Handle different sharing channels
     if (shareDto.channel === 'email' && shareDto.emailAddresses?.length) {
       this.sendReceiptViaEmail(
         shareDto.emailAddresses,
@@ -424,7 +391,7 @@ export class ClaimsService {
         shareDto.message ?? undefined,
       );
     }
-    // Audit log the share action
+
     void this.auditLog('claim', id, 'receipt_shared', {
       channel: shareDto.channel,
       emailCount: shareDto.emailAddresses?.length || 0,
@@ -439,9 +406,6 @@ export class ClaimsService {
     };
   }
 
-  /**
-   * Generate formatted receipt text
-   */
   private generateReceiptText(receipt: ClaimReceiptDto): string {
     const lines = [
       '═══════════════════════════════════════',
@@ -472,10 +436,6 @@ export class ClaimsService {
     return lines.join('\n');
   }
 
-  /**
-   * Send receipt via email
-   * Stub implementation - replace with actual email service
-   */
   private sendReceiptViaEmail(
     emailAddresses: string[],
     receipt: ClaimReceiptDto,
@@ -490,8 +450,6 @@ export class ClaimsService {
       },
     );
 
-    // TODO: Integrate with email service (SendGrid, AWS SES, etc.)
-    // For now, this is a stub that logs the action
     for (const email of emailAddresses) {
       this.logger.debug(
         `[EMAIL STUB] Would send receipt to ${email}`,
@@ -500,10 +458,6 @@ export class ClaimsService {
     }
   }
 
-  /**
-   * Send receipt via SMS
-   * Stub implementation - replace with actual SMS service
-   */
   private sendReceiptViaSMS(
     phoneNumbers: string[],
     receipt: ClaimReceiptDto,
@@ -517,9 +471,8 @@ export class ClaimsService {
       },
     );
 
-    // TODO: Integrate with SMS service (Twilio, AWS SNS, etc.)
-    // For now, this is a stub that logs the action
     const smsText = `Claim ${receipt.claimId} - Status: ${receipt.status} - Amount: ${receipt.amount} tokens`;
+
     for (const phone of phoneNumbers) {
       this.logger.debug(`[SMS STUB] Would send to ${phone}: ${smsText}`);
     }
