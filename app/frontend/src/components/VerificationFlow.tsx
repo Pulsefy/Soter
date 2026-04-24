@@ -19,6 +19,7 @@ const ACCEPTED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 const ACCEPTED_MIME_SET: ReadonlySet<string> = new Set(ACCEPTED_MIME_TYPES);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
 const MIN_TEXT_LENGTH = 20;
+const DRAFT_STORAGE_KEY = 'soter.verification-flow.draft.v1';
 
 /* ─── PII detection ─────────────────────────────────────────────────────── */
 
@@ -196,6 +197,82 @@ interface CapturedLocation {
     accuracy: number;
 }
 
+interface VerificationDraft {
+    textInput: string;
+    includeLocation: boolean;
+    locationPermission: LocationPermissionState;
+    locationData: CapturedLocation | null;
+}
+
+function isLocationPermissionState(value: unknown): value is LocationPermissionState {
+    return (
+        value === 'idle' ||
+        value === 'requesting' ||
+        value === 'granted' ||
+        value === 'denied' ||
+        value === 'unsupported' ||
+        value === 'error'
+    );
+}
+
+function isCapturedLocation(value: unknown): value is CapturedLocation {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Record<string, unknown>;
+    return (
+        typeof candidate.latitude === 'number' &&
+        typeof candidate.longitude === 'number' &&
+        typeof candidate.accuracy === 'number'
+    );
+}
+
+export function parseVerificationDraft(raw: string | null): VerificationDraft | null {
+    if (!raw) return null;
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        const candidate = parsed as Record<string, unknown>;
+
+        if (typeof candidate.textInput !== 'string') return null;
+        if (typeof candidate.includeLocation !== 'boolean') return null;
+        if (!isLocationPermissionState(candidate.locationPermission)) return null;
+
+        const locationData =
+            candidate.locationData === null || candidate.locationData === undefined
+                ? null
+                : isCapturedLocation(candidate.locationData)
+                  ? candidate.locationData
+                  : null;
+
+        return {
+            textInput: candidate.textInput,
+            includeLocation: candidate.includeLocation,
+            locationPermission: candidate.locationPermission,
+            locationData,
+        };
+    } catch {
+        return null;
+    }
+}
+
+function buildVerificationDraft(state: {
+    textInput: string;
+    includeLocation: boolean;
+    locationPermission: LocationPermissionState;
+    locationData: CapturedLocation | null;
+}): VerificationDraft {
+    return {
+        textInput: state.textInput,
+        includeLocation: state.includeLocation,
+        locationPermission: state.locationPermission,
+        locationData: state.locationData,
+    };
+}
+
+function readVerificationDraftFromStorage(): VerificationDraft | null {
+    if (typeof window === 'undefined') return null;
+    return parseVerificationDraft(window.localStorage.getItem(DRAFT_STORAGE_KEY));
+}
+
 /* ─── VerificationFlow component ────────────────────────────────────────── */
 
 /**
@@ -212,17 +289,25 @@ interface CapturedLocation {
 export const VerificationFlow: React.FC = () => {
     const uid = useId();
     const { trackJob } = useActivity();
+    const [restoredDraft] = useState<VerificationDraft | null>(() =>
+        readVerificationDraftFromStorage(),
+    );
 
     const [step, setStep] = useState<VerificationStep>('upload');
     const [imageFile, setImageFile] = useState<File | null>(null);
-    const [textInput, setTextInput] = useState('');
-    const [includeLocation, setIncludeLocation] = useState(false);
+    const [textInput, setTextInput] = useState(restoredDraft?.textInput ?? '');
+    const [includeLocation, setIncludeLocation] = useState(
+        restoredDraft?.includeLocation ?? false,
+    );
     const [locationPermission, setLocationPermission] =
-        useState<LocationPermissionState>('idle');
-    const [locationData, setLocationData] = useState<CapturedLocation | null>(null);
+        useState<LocationPermissionState>(restoredDraft?.locationPermission ?? 'idle');
+    const [locationData, setLocationData] = useState<CapturedLocation | null>(
+        restoredDraft?.locationData ?? null,
+    );
     const [errors, setErrors] = useState<ValidationErrors>({});
     const [apiError, setApiError] = useState<string | null>(null);
     const [result, setResult] = useState<VerificationResult | null>(null);
+    const [draftRestored, setDraftRestored] = useState(restoredDraft !== null);
 
     /**
      * Payload ref: stores the validated, PII-clean FormData to be sent when
@@ -244,8 +329,34 @@ export const VerificationFlow: React.FC = () => {
         setErrors(s.errors);
         setApiError(s.apiError);
         setResult(s.result);
+        setDraftRestored(false);
         pendingPayload.current = null;
+        if (typeof window !== 'undefined') {
+            window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+        }
     }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || step !== 'upload') return;
+        const draft = buildVerificationDraft({
+            textInput,
+            includeLocation,
+            locationPermission,
+            locationData,
+        });
+
+        const hasDraftContent =
+            draft.textInput.trim().length > 0 ||
+            draft.includeLocation ||
+            draft.locationData !== null;
+
+        if (!hasDraftContent) {
+            window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+            return;
+        }
+
+        window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    }, [includeLocation, locationData, locationPermission, step, textInput]);
 
     const handleLocationConsentToggle = useCallback((checked: boolean) => {
         setIncludeLocation(checked);
@@ -418,6 +529,8 @@ export const VerificationFlow: React.FC = () => {
                     locationData={locationData}
                     onLocationConsentToggle={handleLocationConsentToggle}
                     onRequestLocation={handleRequestLocation}
+                    onDiscardDraft={resetFlow}
+                    draftRestored={draftRestored}
                 />
             )}
 
@@ -451,6 +564,8 @@ interface StepUploadProps {
     locationData: CapturedLocation | null;
     onLocationConsentToggle: (checked: boolean) => void;
     onRequestLocation: () => void;
+    onDiscardDraft: () => void;
+    draftRestored: boolean;
 }
 
 /**
@@ -477,6 +592,8 @@ function StepUpload({
     locationData,
     onLocationConsentToggle,
     onRequestLocation,
+    onDiscardDraft,
+    draftRestored,
 }: StepUploadProps) {
     const role = getAppUserRole();
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -523,6 +640,12 @@ function StepUpload({
                 >
                     {apiError}
                 </div>
+            )}
+
+            {draftRestored && (
+                <p className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
+                    Restored your locally saved draft from this device.
+                </p>
             )}
 
             {/* Form-level validation error (at-least-one rule) */}
@@ -659,14 +782,23 @@ function StepUpload({
                 )}
             </div>
 
-            <button
-                type="submit"
-                disabled={!canSubmit}
-                aria-disabled={!canSubmit}
-                className="px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            >
-                Submit for Verification
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+                <button
+                    type="submit"
+                    disabled={!canSubmit}
+                    aria-disabled={!canSubmit}
+                    className="px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                >
+                    Submit for Verification
+                </button>
+                <button
+                    type="button"
+                    onClick={onDiscardDraft}
+                    className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 transition-colors"
+                >
+                    Discard Draft
+                </button>
+            </div>
         </form>
     );
 }
