@@ -364,3 +364,33 @@ model EvidenceQueueItem {
   @@index([ownerId])
   @@index([fileHash])
 }
+
+enum NotificationOutboxStatus {
+  pending
+  enqueued
+  sent
+  failed
+}
+
+model NotificationOutbox {
+  id            String                   @id @default(cuid())
+  type          String                   // "email" | "sms"
+  recipient     String
+  subject       String?
+  message       String
+  status        NotificationOutboxStatus @default(pending)
+  retryCount    Int                      @default(0)
+  lastError     String?
+  lastAttemptAt DateTime?
+  scheduledFor  DateTime                 @default(now())
+  sentAt        DateTime?
+  jobId         String?
+  metadata      String?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+
+  @@index([status])
+  @@index([recipient])
+  @@index([scheduledFor])
+  @@index([createdAt])
+}

@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { NotificationsService } from './notifications.service';
 import { NotificationProcessor } from './notifications.processor';
+import { OutboxController } from './outbox.controller';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { NotificationProcessor } from './notifications.processor';
       inject: [ConfigService],
     }),
   ],
+  controllers: [OutboxController],
   providers: [NotificationsService, NotificationProcessor],
   exports: [NotificationsService],
 })
