@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { BudgetAlertsService } from '../campaigns/budget-alerts.service';
 import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
 import { ClaimStatus } from '@prisma/client';
@@ -31,6 +32,7 @@ export class CancelAndReissueService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly encryptionService: EncryptionService,
+    private readonly budgetAlertsService: BudgetAlertsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -115,6 +117,9 @@ export class CancelAndReissueService {
       campaignId: claim.campaignId,
       amount: claim.amount,
     });
+
+    // Check budget thresholds after balance changes
+    void this.budgetAlertsService.checkThresholds(claim.campaignId);
 
     return {
       ...cancelled,

@@ -345,11 +345,26 @@ model Campaign {
   balanceLedger BalanceLedger[]
   packages      AidPackage[]
 
+  budgetThresholdAlerts BudgetThresholdAlert[]
+
   @@index([status])
   @@index([archivedAt])
   @@index([ngoId])
   @@index([orgId])
   @@index([deletedAt])
+}
+
+model BudgetThresholdAlert {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+
+  threshold  Float    // e.g., 0.5 for 50%, 0.8 for 80%, 0.95 for 95%
+  alertedAt  DateTime @default(now())
+
+  @@unique([campaignId, threshold])
+  @@index([campaignId])
+  @@index([alertedAt])
 }
 
 model Role {
