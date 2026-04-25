@@ -73,6 +73,13 @@ describe('VerificationService', () => {
               findUnique: jest.fn(),
               update: jest.fn(),
             },
+            reviewCase: {
+              upsert: jest.fn().mockResolvedValue({ id: 'rc-1', claimId: 'test-claim-id' }),
+              deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+              findUnique: jest.fn(),
+              findMany: jest.fn().mockResolvedValue([]),
+              count: jest.fn().mockResolvedValue(0),
+            },
           },
         },
         {
@@ -202,6 +209,8 @@ describe('VerificationService', () => {
           status: ClaimStatus.verified,
         });
 
+      const deleteManySpy = jest.spyOn(prismaService.reviewCase, 'deleteMany');
+
       await service.processVerification({
         claimId: 'test-claim-id',
         timestamp: Date.now(),
@@ -210,6 +219,46 @@ describe('VerificationService', () => {
       const updateCall = updateSpy.mock.calls[0]?.[0];
       expect(updateCall?.data).toHaveProperty('status');
       expect(updateCall?.data?.status).toBe('verified');
+      // When score >= threshold, any existing review case should be cleaned up
+      expect(deleteManySpy).toHaveBeenCalledWith({ where: { claimId: 'test-claim-id' } });
+    });
+
+    it('should create a review case when score is below threshold', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+
+      jest.spyOn(service as any, 'generateMockVerification').mockReturnValue({
+        score: 0.55,
+        confidence: 0.6,
+        details: {
+          factors: ['Test factor', 'Risk factor'],
+          riskLevel: 'medium',
+          recommendations: ['Manual review required'],
+        },
+        processedAt: new Date(),
+      });
+
+      jest
+        .spyOn(prismaService.claim, 'update')
+        .mockResolvedValue({
+          ...mockClaim,
+          status: ClaimStatus.requested,
+        });
+
+      const upsertSpy = jest.spyOn(prismaService.reviewCase, 'upsert');
+
+      await service.processVerification({
+        claimId: 'test-claim-id',
+        timestamp: Date.now(),
+      });
+
+      // When score < threshold, a review case should be created
+      expect(upsertSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { claimId: 'test-claim-id' },
+        }),
+      );
     });
   });
 
