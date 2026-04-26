@@ -453,7 +453,6 @@ export class RetentionPolicyService {
         const result = await this.prisma.verificationRequest.updateMany({
           where,
           data: {
-            status: 'anonymized',
             deletedAt: new Date(),
           },
         });

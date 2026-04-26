@@ -21,6 +21,14 @@ export class MetricsService {
     public onchainOperationsCounter: Counter<string>,
     @InjectMetric('onchain_operation_duration_seconds')
     public onchainOperationDuration: Histogram<string>,
+    @InjectMetric('ingestion_lag_seconds')
+    public ingestionLagGauge: Gauge<string>,
+    @InjectMetric('webhook_retries_total')
+    public webhookRetriesCounter: Counter<string>,
+    @InjectMetric('webhook_delivery_duration_seconds')
+    public webhookDeliveryDuration: Histogram<string>,
+    @InjectMetric('error_rate_total')
+    public errorRateCounter: Counter<string>,
   ) {}
 
   /**
@@ -36,6 +44,15 @@ export class MetricsService {
       route,
       status_code: statusCode.toString(),
     });
+
+    // Track error rate
+    if (statusCode >= 400) {
+      this.errorRateCounter.inc({
+        method,
+        route,
+        status_code: statusCode.toString(),
+      });
+    }
   }
 
   /**
@@ -59,6 +76,10 @@ export class MetricsService {
       this.jobsProcessedCounter.inc({ job_type: jobType });
     } else {
       this.jobsFailedCounter.inc({ job_type: jobType });
+      this.errorRateCounter.inc({
+        job_type: jobType,
+        error_type: 'job_failure',
+      });
     }
   }
 
@@ -94,6 +115,14 @@ export class MetricsService {
       adapter,
       status,
     });
+
+    if (status === 'failed') {
+      this.errorRateCounter.inc({
+        operation,
+        adapter,
+        error_type: 'onchain_failure',
+      });
+    }
   }
 
   /**
@@ -108,6 +137,35 @@ export class MetricsService {
       {
         operation,
         adapter,
+      },
+      duration,
+    );
+  }
+
+  /**
+   * Set ingestion lag gauge (time between event creation and processing)
+   */
+  setIngestionLag(source: string, lagSeconds: number): void {
+    this.ingestionLagGauge.set({ source }, lagSeconds);
+  }
+
+  /**
+   * Increment webhook retry counter
+   */
+  incrementWebhookRetry(webhookType: string, reason: string): void {
+    this.webhookRetriesCounter.inc({
+      webhook_type: webhookType,
+      reason,
+    });
+  }
+
+  /**
+   * Record webhook delivery duration
+   */
+  recordWebhookDeliveryDuration(webhookType: string, duration: number): void {
+    this.webhookDeliveryDuration.observe(
+      {
+        webhook_type: webhookType,
       },
       duration,
     );

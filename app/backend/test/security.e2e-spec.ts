@@ -38,7 +38,7 @@ const createTestApp = async ({ enableDocs }: TestAppOptions) => {
   });
 
   const configService = app.get(ConfigService);
-  app.use(createHelmetMiddleware());
+  app.use(createHelmetMiddleware(configService));
   app.use(createCorsOriginValidator(configService));
   app.enableCors(buildCorsOptions(configService));
   app.use(createRateLimiter(configService));
@@ -85,13 +85,48 @@ describe('Security (e2e)', () => {
   });
 
   describe('Helmet Security Headers', () => {
-    it('should have required security headers enabled', async () => {
+    it('should have required security headers enabled (development mode)', async () => {
       const response = await request(app.getHttpServer()).get('/api/v1/health');
 
       expect(response.headers['x-content-type-options']).toBe('nosniff');
       expect(response.headers['x-frame-options']).toBe('DENY');
-      expect(response.headers['referrer-policy']).toBe('no-referrer');
+      expect(response.headers['referrer-policy']).toBe(
+        'strict-origin-when-cross-origin',
+      );
+      expect(response.headers['cross-origin-resource-policy']).toBe(
+        'same-origin',
+      );
+      expect(response.headers['x-dns-prefetch-control']).toBe('off');
+      expect(response.headers['x-permitted-cross-domain-policies']).toBe(
+        'none',
+      );
+      expect(response.headers['x-powered-by']).toBeUndefined();
       expect(response.headers['content-security-policy']).toBeUndefined();
+    });
+
+    it('should have production security headers in production mode', async () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CORS_ORIGINS = 'https://api.pulsefy.com';
+      process.env.CORS_ALLOW_CREDENTIALS = 'false';
+
+      const prodApp = await createTestApp({ enableDocs: false });
+      const response = await request(prodApp.getHttpServer()).get(
+        '/api/v1/health',
+      );
+
+      expect(response.headers['x-content-type-options']).toBe('nosniff');
+      expect(response.headers['x-frame-options']).toBe('DENY');
+      expect(response.headers['strict-transport-security']).toBeDefined();
+      expect(response.headers['content-security-policy']).toBeDefined();
+      expect(response.headers['cross-origin-opener-policy']).toBe(
+        'same-origin',
+      );
+
+      await prodApp.close();
+
+      // Reset to development
+      process.env.NODE_ENV = 'development';
+      process.env.CORS_ORIGINS = 'http://localhost:3000';
     });
   });
 

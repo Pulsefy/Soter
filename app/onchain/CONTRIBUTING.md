@@ -1,6 +1,3 @@
-### **5. `app/onchain/CONTRIBUTING.md`** (Contributor guidelines)
-
-````markdown
 # Contributing to On-Chain Contracts
 
 Welcome! This document outlines how to contribute to Soter's on-chain contracts.
@@ -55,7 +52,6 @@ pub fn create_package(
     // implementation
 }
 ```
-````
 
 ## ✅ CI/CD & Testing
 

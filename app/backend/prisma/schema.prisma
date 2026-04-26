@@ -182,18 +182,32 @@ model SessionSubmission {
   @@index([deletedAt])
 }
 
+enum VerificationStatus {
+  pending
+  pending_review
+  approved
+  rejected
+  needs_resubmission
+}
+
 model VerificationRequest {
-  id        String    @id @default(cuid())
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id        String            @id @default(cuid())
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
   deletedAt DateTime?
 
-  status    String    @default("pending")
+  status    VerificationStatus @default(pending)
   orgId       String?
   organization Organization? @relation(fields: [orgId], references: [id])
+  reviewedAt DateTime?
+  reviewedBy String?
+  rejectionReason String?
+  nextStepMessage String?
 
   @@index([deletedAt])
   @@index([orgId])
+  @@index([status])
+  @@index([reviewedAt])
 }
 
 model Claim {

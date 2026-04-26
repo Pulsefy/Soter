@@ -8,6 +8,7 @@ import {
 import { OnchainAdapter } from './onchain.adapter';
 import { MockOnchainAdapter } from './onchain.adapter.mock';
 import { SorobanAdapter } from './soroban.adapter';
+import { PrismaModule } from '../prisma/prisma.module';
 
 describe('OnchainModule', () => {
   let module: TestingModule;
@@ -19,6 +20,7 @@ describe('OnchainModule', () => {
         ConfigModule.forRoot({
           isGlobal: false,
         }),
+        PrismaModule,
         OnchainModule,
       ],
     }).compile();

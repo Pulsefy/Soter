@@ -30,10 +30,30 @@ export class AuditController {
   @ApiQuery({ name: 'entity', required: false })
   @ApiQuery({ name: 'entityId', required: false })
   @ApiQuery({ name: 'actorId', required: false })
+  @ApiQuery({ name: 'action', required: false })
   @ApiQuery({ name: 'startTime', required: false, description: 'ISO string' })
   @ApiQuery({ name: 'endTime', required: false, description: 'ISO string' })
-  async getLogs(@Query() query: AuditQuery) {
-    return this.auditService.findLogs(query);
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    description: 'Page number (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Items per page (default: 50, max: 200)',
+  })
+  async getLogs(
+    @Query() query: AuditQuery,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.auditService.findLogs(query);
+
+    res.setHeader('X-Total-Count', String(result.total));
+    res.setHeader('X-Page', String(result.page));
+    res.setHeader('X-Limit', String(result.limit));
+
+    return result.data;
   }
 
   @Get('export')
@@ -67,6 +87,16 @@ export class AuditController {
     name: 'entity',
     required: false,
     description: 'Filter by entity type',
+  })
+  @ApiQuery({
+    name: 'action',
+    required: false,
+    description: 'Filter by action type',
+  })
+  @ApiQuery({
+    name: 'actorId',
+    required: false,
+    description: 'Filter by actor ID',
   })
   @ApiQuery({
     name: 'page',

@@ -24,7 +24,9 @@ describe('AuditController', () => {
   };
 
   const mockAuditService = {
-    findLogs: jest.fn().mockResolvedValue([]),
+    findLogs: jest
+      .fn()
+      .mockResolvedValue({ data: [], total: 0, page: 1, limit: 50 }),
     exportLogs: jest.fn().mockResolvedValue(mockExportResult),
     buildCsv: jest.fn().mockReturnValue('id,actorHash,...\nlog-1,...'),
   };
@@ -49,11 +51,19 @@ describe('AuditController', () => {
   });
 
   describe('getLogs', () => {
-    it('should call auditService.findLogs', async () => {
+    it('should call auditService.findLogs and set pagination headers', async () => {
       const query = { entity: 'campaign' };
-      await controller.getLogs(query);
+      const res = {
+        setHeader: jest.fn(),
+      } as any;
+
+      await controller.getLogs(query as any, res);
+
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(service.findLogs).toHaveBeenCalledWith(query);
+      expect(res.setHeader).toHaveBeenCalledWith('X-Total-Count', '0');
+      expect(res.setHeader).toHaveBeenCalledWith('X-Page', '1');
+      expect(res.setHeader).toHaveBeenCalledWith('X-Limit', '50');
     });
   });
 

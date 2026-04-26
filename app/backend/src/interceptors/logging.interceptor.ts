@@ -25,12 +25,19 @@ export class LoggingInterceptor implements NestInterceptor {
 
     const method = request.method;
     const url = request.url;
-    const requestId = request.requestId;
+    const requestId = request.headers['x-request-id'] as string;
+    const userId =
+      (request.user as any)?.sub ||
+      (request.user as any)?.id ||
+      (request.user as any)?.apiKeyId;
+    const route = `${method} ${url}`;
     const startTime = Date.now();
 
-    // Log incoming request
+    // Log incoming request with structured fields
     this.logger.log(`Incoming ${method} request`, 'LoggingInterceptor', {
-      requestId,
+      request_id: requestId,
+      user_id: userId,
+      route,
       method,
       url,
       timestamp: new Date().toISOString(),
@@ -41,9 +48,11 @@ export class LoggingInterceptor implements NestInterceptor {
         next: () => {
           const duration = Date.now() - startTime;
           this.logger.log(`${method} ${url} completed`, 'LoggingInterceptor', {
-            requestId,
+            request_id: requestId,
+            user_id: userId,
+            route,
             statusCode: response.statusCode,
-            duration: `${duration}ms`,
+            duration_ms: duration,
           });
         },
         error: error => {
@@ -53,9 +62,11 @@ export class LoggingInterceptor implements NestInterceptor {
             (error as { stack?: string }).stack,
             'LoggingInterceptor',
             {
-              requestId,
+              request_id: requestId,
+              user_id: userId,
+              route,
               statusCode: (error as { status?: number }).status || 500,
-              duration: `${duration}ms`,
+              duration_ms: duration,
               error: (error as { message?: string }).message,
             },
           );
