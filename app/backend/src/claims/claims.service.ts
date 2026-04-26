@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
@@ -522,6 +523,184 @@ export class ClaimsService {
     const smsText = `Claim ${receipt.claimId} - Status: ${receipt.status} - Amount: ${receipt.amount} tokens`;
     for (const phone of phoneNumbers) {
       this.logger.debug(`[SMS STUB] Would send to ${phone}: ${smsText}`);
+    }
+  }
+
+  /**
+   * Cron job to clean up expired claims
+   * Runs every hour to identify and process claims where expiresAt < now
+   * Updates database status to 'expired' and triggers onchain revoke if applicable
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async cleanupExpiredClaims(): Promise<void> {
+    this.logger.log('Starting expired claims cleanup job');
+
+    try {
+      const now = new Date();
+
+      // Find all requested or verified claims that have expired
+      const expiredClaims = await this.prisma.claim.findMany({
+        where: {
+          status: {
+            in: [ClaimStatus.requested, ClaimStatus.verified],
+          },
+          expiresAt: {
+            lt: now,
+          },
+          deletedAt: null,
+        },
+        include: {
+          campaign: true,
+        },
+      });
+
+      if (expiredClaims.length === 0) {
+        this.logger.log('No expired claims found');
+        return;
+      }
+
+      this.logger.log(`Found ${expiredClaims.length} expired claims to process`);
+
+      let successCount = 0;
+      let failureCount = 0;
+      const failedClaimIds: string[] = [];
+
+      for (const claim of expiredClaims) {
+        try {
+          this.logger.log(`Processing expired claim: ${claim.id}`, {
+            claimId: claim.id,
+            status: claim.status,
+            expiresAt: claim.expiresAt,
+          });
+
+          // Trigger onchain revoke if onchain is enabled and claim has metadata with packageId
+          const claimMetadata = claim.metadata as Record<string, unknown> | undefined;
+          const packageId = claimMetadata?.packageId as string | undefined;
+
+          if (this.onchainEnabled && this.onchainAdapter && packageId) {
+            try {
+              this.logger.log(`Revoking onchain package for claim ${claim.id}`, {
+                packageId,
+              });
+
+              const operatorAddress = this.configService.get<string>(
+                'SOROBAN_OPERATOR_ADDRESS',
+                'admin',
+              );
+
+              const revokeResult = await this.onchainAdapter.revokeAidPackage({
+                packageId,
+                operatorAddress,
+              });
+
+              this.logger.log(`Onchain revoke completed for claim ${claim.id}`, {
+                transactionHash: revokeResult.transactionHash,
+                status: revokeResult.status,
+              });
+
+              // Log onchain revoke to audit
+              await this.auditService.record({
+                actorId: 'system',
+                entity: 'onchain',
+                entityId: claim.id,
+                action: 'revoke_expired',
+                metadata: {
+                  packageId,
+                  transactionHash: revokeResult.transactionHash,
+                  status: revokeResult.status,
+                  amountRefunded: revokeResult.amountRefunded,
+                },
+              });
+            } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+              this.logger.error(`Onchain revoke failed for claim ${claim.id}: ${errorMessage}`, 
+                error instanceof Error ? error.stack : undefined);
+              
+              // Log failed revoke attempt
+              await this.auditService.record({
+                actorId: 'system',
+                entity: 'onchain',
+                entityId: claim.id,
+                action: 'revoke_expired_failed',
+                metadata: {
+                  packageId,
+                  error: errorMessage,
+                },
+              });
+              // Continue with status update even if onchain revoke fails
+            }
+          }
+
+          // Update claim status to expired
+          await this.prisma.claim.update({
+            where: { id: claim.id },
+            data: { status: ClaimStatus.expired },
+          });
+
+          // Log the expiration to audit
+          await this.auditService.record({
+            actorId: 'system',
+            entity: 'claim',
+            entityId: claim.id,
+            action: 'expired',
+            metadata: {
+              previousStatus: claim.status,
+              expiresAt: claim.expiresAt,
+              processedAt: now.toISOString(),
+              packageId: packageId || null,
+            },
+          });
+
+          successCount++;
+          this.logger.log(`Successfully processed expired claim: ${claim.id}`);
+        } catch (error) {
+          failureCount++;
+          failedClaimIds.push(claim.id);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          this.logger.error(`Failed to process expired claim ${claim.id}: ${errorMessage}`,
+            error instanceof Error ? error.stack : undefined);
+        }
+      }
+
+      // Log summary of cleanup job
+      this.logger.log('Expired claims cleanup job completed', {
+        total: expiredClaims.length,
+        success: successCount,
+        failed: failureCount,
+        failedClaimIds,
+      });
+
+      // Log summary to audit
+      await this.auditService.record({
+        actorId: 'system',
+        entity: 'claim',
+        entityId: 'cleanup_job',
+        action: 'cleanup_expired_completed',
+        metadata: {
+          totalProcessed: expiredClaims.length,
+          successCount,
+          failureCount,
+          failedClaimIds,
+          executedAt: now.toISOString(),
+        },
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error('Expired claims cleanup job failed:', errorMessage,
+        error instanceof Error ? error.stack : undefined);
+
+      // Log job failure to audit
+      await this.auditService.record({
+        actorId: 'system',
+        entity: 'claim',
+        entityId: 'cleanup_job',
+        action: 'cleanup_expired_failed',
+        metadata: {
+          error: errorMessage,
+        },
+      });
+
+      throw error;
     }
   }
 }

@@ -24,6 +24,8 @@ import {
   AidPackage,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
+  RevokeAidPackageParams,
+  RevokeAidPackageResult,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 
@@ -384,6 +386,46 @@ export class SorobanAdapter implements OnchainAdapter {
     } catch (error) {
       const mappedError = this.errorMapper.mapError(error);
       this.logger.error('Failed to get token balance:', mappedError);
+      throw error;
+    }
+  }
+
+  /**
+   * Revoke/reclaim an expired aid package
+   */
+  async revokeAidPackage(
+    params: RevokeAidPackageParams,
+  ): Promise<RevokeAidPackageResult> {
+    this.ensureContractId();
+    this.logger.debug('Revoking expired aid package:', {
+      packageId: params.packageId,
+      operator: params.operatorAddress,
+    });
+
+    try {
+      const _sdk = await this.loadSorobanSDK();
+
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+
+      // Implementation would call contract's revoke method
+      const transactionHash = this.generateMockHash(
+        `revoke-${params.packageId}-${Date.now()}`,
+      );
+
+      return {
+        packageId: params.packageId,
+        transactionHash,
+        timestamp: new Date(),
+        status: 'success',
+        amountRefunded: '1000000000', // Would come from contract
+        metadata: {
+          contractId: this.contractId,
+          operator: params.operatorAddress,
+        },
+      };
+    } catch (error) {
+      const mappedError = this.errorMapper.mapError(error);
+      this.logger.error('Failed to revoke aid package:', mappedError);
       throw error;
     }
   }

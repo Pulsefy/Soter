@@ -163,6 +163,20 @@ export interface DisburseResult {
   metadata?: Record<string, any>;
 }
 
+export interface RevokeAidPackageParams {
+  packageId: string;
+  operatorAddress: string;
+}
+
+export interface RevokeAidPackageResult {
+  packageId: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  amountRefunded: string;
+  metadata?: Record<string, any>;
+}
+
 /**
  * Interface for on-chain operations with Soroban AidEscrow contract
  */
@@ -218,6 +232,13 @@ export interface OnchainAdapter {
   getTokenBalance(
     params: GetTokenBalanceParams,
   ): Promise<GetTokenBalanceResult>;
+
+  /**
+   * Revoke/reclaim an expired aid package
+   */
+  revokeAidPackage(
+    params: RevokeAidPackageParams,
+  ): Promise<RevokeAidPackageResult>;
 
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;

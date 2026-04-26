@@ -20,6 +20,7 @@ enum ClaimStatus {
   approved
   disbursed
   archived
+  expired
 }
 
 model AidPackage {
@@ -146,6 +147,7 @@ model Claim {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   deletedAt    DateTime?
+  expiresAt    DateTime?
 
   status       ClaimStatus @default(requested)
 
@@ -156,11 +158,13 @@ model Claim {
 
   recipientRef String
   evidenceRef  String?
+  metadata     Json?
 
   @@index([status])
   @@index([campaignId])
   @@index([createdAt])
   @@index([deletedAt])
+  @@index([expiresAt])
 }
 
 model AuditLog {
