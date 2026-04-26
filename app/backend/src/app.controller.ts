@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiOkResponse } from '@nestjs/swagger';
 import { AppService } from './app.service';
 import { API_VERSIONS } from './common/constants/api-version.constants';
 import { Public } from './common/decorators/public.decorator';
+import { Deprecated } from './common/decorators/deprecated.decorator';
 
 @ApiTags('App')
 @Controller()
@@ -40,5 +41,18 @@ export class AppController {
   @ApiOkResponse({ description: 'Service is available.' })
   health() {
     return { status: 'ok', service: 'backend' };
+  }
+
+  @Public()
+  @Get('deprecated-test')
+  @Deprecated({
+    deprecatedSince: '2025-01-01',
+    sunsetDate: '2025-12-31',
+    reason: 'This endpoint is for testing deprecation headers.',
+    alternative: '/api/v1/health',
+    migrationGuide: 'https://docs.pulsefy.com/migration',
+  })
+  deprecatedTest() {
+    return { message: 'This endpoint is deprecated' };
   }
 }
