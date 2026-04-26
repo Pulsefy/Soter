@@ -1087,17 +1087,22 @@ impl AidEscrow {
     /// # Returns
     /// A Vec<u64> containing package IDs that belong to the recipient,
     /// starting from the cursor position and limited by the limit parameter.
-    pub fn list_recipient_packages(env: Env, recipient: Address, cursor: u64, limit: u32) -> Vec<u64> {
+    pub fn list_recipient_packages(
+        env: Env,
+        recipient: Address,
+        cursor: u64,
+        limit: u32,
+    ) -> Vec<u64> {
         let package_counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
         let mut result: Vec<u64> = Vec::new(&env);
-        
+
         // Calculate the end position: cursor + limit or package_counter, whichever comes first
         let end_pos = if cursor.saturating_add(limit as u64) > package_counter {
             package_counter
         } else {
             cursor.saturating_add(limit as u64)
         };
-        
+
         // Iterate from cursor to end_pos
         for id in cursor..end_pos {
             let key = (symbol_short!("pkg"), id);
@@ -1107,7 +1112,7 @@ impl AidEscrow {
                 result.push_back(id);
             }
         }
-        
+
         result
     }
 }
@@ -1225,9 +1230,18 @@ mod tests {
 
         // Create 7 packages for the recipient
         let operator = admin.clone();
-        let package_ids: Vec<u64> = (0..7).map(|i| {
-            client.create_package(&operator, &(i as u64), &recipient, &(1000 + i as i128 * 100), &token, &86400)
-        }).collect();
+        let package_ids: Vec<u64> = (0..7)
+            .map(|i| {
+                client.create_package(
+                    &operator,
+                    &(i as u64),
+                    &recipient,
+                    &(1000 + i as i128 * 100),
+                    &token,
+                    &86400,
+                )
+            })
+            .collect();
 
         // Test pagination with limit 3
         let page1 = client.list_recipient_packages(&recipient, &0, &3);
