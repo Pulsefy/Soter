@@ -136,6 +136,18 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
           >
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.bulkModeButton, { borderColor: colors.brand.primary }]}
+            accessibilityRole="button"
+            accessibilityLabel="Switch to Bulk Mode"
+            accessibilityHint="Switch to a continuous scanning mode for multiple packages"
+            onPress={() => navigation.replace('BulkScanner')}
+          >
+            <Text style={[styles.bulkModeText, { color: colors.brand.primary }]}>
+              Switch to Bulk Mode
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -241,5 +253,17 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  bulkModeButton: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  bulkModeText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

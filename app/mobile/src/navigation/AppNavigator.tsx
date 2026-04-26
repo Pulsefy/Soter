@@ -5,9 +5,11 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { HealthScreen } from '../screens/HealthScreen';
 import { AidOverviewScreen } from '../screens/AidOverviewScreen';
 import { AidDetailsScreen } from '../screens/AidDetailsScreen';
+import { EvidenceUploadScreen } from '../screens/EvidenceUploadScreen';
 import { ClaimReceiptScreen } from '../screens/ClaimReceiptScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ScannerScreen } from '../screens/ScannerScreen';
+import { BulkScannerScreen } from '../screens/BulkScannerScreen';
 import { TaskListScreen } from '../screens/TaskListScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -40,9 +42,19 @@ export const AppNavigator = () => {
         options={{ title: 'Aid Details' }}
       />
       <Stack.Screen
+        name="EvidenceUpload"
+        component={EvidenceUploadScreen}
+        options={{ title: 'Upload Evidence' }}
+      />
+      <Stack.Screen
         name="Scanner"
         component={ScannerScreen}
         options={{ title: 'Scan QR Code', presentation: 'modal' }}
+      />
+      <Stack.Screen
+        name="BulkScanner"
+        component={BulkScannerScreen}
+        options={{ title: 'NGO Bulk Scan', presentation: 'modal' }}
       />
       <Stack.Screen
         name="ClaimReceipt"

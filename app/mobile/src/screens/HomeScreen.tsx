@@ -270,6 +270,17 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
               View Aid Details
             </Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: colors.info }]}
+            accessibilityRole="button"
+            accessibilityLabel="NGO Bulk Scan Mode"
+            accessibilityHint="Opens the bulk scanner for repeated package processing"
+            onPress={() => navigation.navigate('BulkScanner')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.primaryButtonText}>NGO Bulk Scan Mode</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 
