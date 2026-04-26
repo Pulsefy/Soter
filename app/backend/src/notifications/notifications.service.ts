@@ -21,6 +21,7 @@ export class NotificationsService {
     recipient: string,
     subject: string,
     message: string,
+    correlationId?: string,
   ): Promise<{ outboxId: string; jobId: string }> {
     // 1. Persist intent before enqueue (status = pending)
     const outbox = await this.prisma.notificationOutbox.create({
@@ -33,7 +34,7 @@ export class NotificationsService {
       },
     });
 
-    // 2. Enqueue the BullMQ job (carries outboxId)
+    // 2. Enqueue the BullMQ job (carries outboxId and correlationId)
     const data: NotificationJobData = {
       type: NotificationType.EMAIL,
       recipient,
@@ -41,6 +42,7 @@ export class NotificationsService {
       message,
       timestamp: Date.now(),
       outboxId: outbox.id,
+      correlationId,
     };
 
     const job = await this.notificationsQueue.add('send-email', data, {
@@ -69,6 +71,7 @@ export class NotificationsService {
   async sendSms(
     recipient: string,
     message: string,
+    correlationId?: string,
   ): Promise<{ outboxId: string; jobId: string }> {
     // 1. Persist intent before enqueue (status = pending)
     const outbox = await this.prisma.notificationOutbox.create({
@@ -80,13 +83,14 @@ export class NotificationsService {
       },
     });
 
-    // 2. Enqueue the BullMQ job (carries outboxId)
+    // 2. Enqueue the BullMQ job (carries outboxId and correlationId)
     const data: NotificationJobData = {
       type: NotificationType.SMS,
       recipient,
       message,
       timestamp: Date.now(),
       outboxId: outbox.id,
+      correlationId,
     };
 
     const job = await this.notificationsQueue.add('send-sms', data, {

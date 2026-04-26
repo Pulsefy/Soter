@@ -71,6 +71,21 @@ describe('VerificationProcessor', () => {
       );
     });
 
+    it('should log correlationId when present in job data', async () => {
+      const logSpy = jest.spyOn(processor['logger'], 'log');
+      const mockJob = {
+        id: 'job-456',
+        data: { ...mockJobData, correlationId: 'trace-abc-123' },
+        attemptsMade: 0,
+      } as Job<VerificationJobData, VerificationResult, string>;
+
+      await processor.process(mockJob);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('trace-abc-123'),
+      );
+    });
+
     it('should throw error when processing fails', async () => {
       const mockJob = {
         id: 'job-123',

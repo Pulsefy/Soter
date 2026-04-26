@@ -26,7 +26,7 @@ export class VerificationProcessor extends WorkerHost {
     job: Job<VerificationJobData, VerificationResult, string>,
   ): Promise<VerificationResult> {
     this.logger.log(
-      `Processing job ${job.id} for claim ${job.data.claimId} (attempt ${job.attemptsMade + 1})`,
+      `Processing job ${job.id} for claim ${job.data.claimId} (attempt ${job.attemptsMade + 1})${job.data.correlationId ? ` [correlationId=${job.data.correlationId}]` : ''}`,
     );
 
     try {
