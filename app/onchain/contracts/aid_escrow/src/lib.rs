@@ -1230,8 +1230,9 @@ mod tests {
 
         // Create 7 packages for the recipient
         let operator = admin.clone();
-        let package_ids: Vec<u64> = (0..7)
-            .map(|i| {
+        let mut package_ids: Vec<u64> = Vec::new(&env);
+        for i in 0..7 {
+            package_ids.push_back(
                 client.create_package(
                     &operator,
                     &(i as u64),
@@ -1240,25 +1241,25 @@ mod tests {
                     &token,
                     &86400,
                 )
-            })
-            .collect();
+            );
+        }
 
         // Test pagination with limit 3
         let page1 = client.list_recipient_packages(&recipient, &0, &3);
         assert_eq!(page1.len(), 3);
-        assert!(page1.contains(&package_ids[0]));
-        assert!(page1.contains(&package_ids[1]));
-        assert!(page1.contains(&package_ids[2]));
+        assert!(page1.contains(&package_ids.get(0).unwrap()));
+        assert!(page1.contains(&package_ids.get(1).unwrap()));
+        assert!(page1.contains(&package_ids.get(2).unwrap()));
 
         let page2 = client.list_recipient_packages(&recipient, &3, &3);
         assert_eq!(page2.len(), 3);
-        assert!(page2.contains(&package_ids[3]));
-        assert!(page2.contains(&package_ids[4]));
-        assert!(page2.contains(&package_ids[5]));
+        assert!(page2.contains(&package_ids.get(3).unwrap()));
+        assert!(page2.contains(&package_ids.get(4).unwrap()));
+        assert!(page2.contains(&package_ids.get(5).unwrap()));
 
         let page3 = client.list_recipient_packages(&recipient, &6, &3);
         assert_eq!(page3.len(), 1);
-        assert!(page3.contains(&package_ids[6]));
+        assert!(page3.contains(&package_ids.get(6).unwrap()));
 
         // Test cursor beyond available packages
         let empty_page = client.list_recipient_packages(&recipient, &10, &3);
@@ -1267,7 +1268,7 @@ mod tests {
         // Test limit that exceeds remaining packages
         let last_page = client.list_recipient_packages(&recipient, &5, &10);
         assert_eq!(last_page.len(), 2);
-        assert!(last_page.contains(&package_ids[5]));
-        assert!(last_page.contains(&package_ids[6]));
+        assert!(last_page.contains(&package_ids.get(5).unwrap()));
+        assert!(last_page.contains(&package_ids.get(6).unwrap()));
     }
 }
