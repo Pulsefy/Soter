@@ -25,3 +25,5 @@ export default function Error({
     />
   );
 }
+  /* Added by bounty-bot */
+}
