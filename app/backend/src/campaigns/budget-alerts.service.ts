@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Campaign, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+
+interface CampaignWithAlerts extends Campaign {
+  budgetThresholdAlerts: Array<{ threshold: number; alertedAt: Date }>;
+  org?: { id: string; name?: string } | null;
+}
 
 @Injectable()
 export class BudgetAlertsService {
@@ -72,7 +78,7 @@ export class BudgetAlertsService {
    * Send an alert for a threshold if it hasn't been sent before.
    */
   private async alertIfNotAlreadySent(
-    campaign: any,
+    campaign: CampaignWithAlerts,
     threshold: number,
     utilization: number,
   ): Promise<void> {
@@ -105,7 +111,7 @@ export class BudgetAlertsService {
    * Send the actual budget alert notification.
    */
   private async sendBudgetAlert(
-    campaign: any,
+    campaign: CampaignWithAlerts,
     threshold: number,
     utilization: number,
   ): Promise<void> {
@@ -147,7 +153,7 @@ Please review your campaign budget allocation.
    * Get email recipients for budget alerts.
    * For now, returns org admin emails. In production, this would be configurable.
    */
-  private async getAlertRecipients(campaign: any): Promise<string[]> {
+  private async getAlertRecipients(campaign: CampaignWithAlerts): Promise<string[]> {
     if (!campaign.orgId) {
       return []; // No org, no recipients
     }
@@ -160,7 +166,9 @@ Please review your campaign budget allocation.
       },
     });
 
-    return orgUsers.map(user => user.email);
+    return orgUsers
+      .map((user) => user.email)
+      .filter((email): email is string => email !== null && email !== undefined);
   }
 
   /**
