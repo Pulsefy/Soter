@@ -65,8 +65,8 @@ export class CampaignsService {
   async findOne(id: string) {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id },
-    }) as typeof campaign & { deletedAt: Date | null } | null;
-    if (!campaign || campaign.deletedAt) {
+    });
+    if (!campaign || (campaign as { deletedAt?: Date | null }).deletedAt) {
       throw new NotFoundException('Campaign not found');
     }
     return campaign;

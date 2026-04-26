@@ -75,9 +75,9 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
         args,
       }),
     });
-    const simResult = sim as any;
-    if (simResult?.error) {
-      throw new Error('Simulation error: ' + JSON.stringify(simResult.error));
+    if (sim && typeof sim === 'object' && 'error' in sim) {
+      const error = (sim as Record<string, unknown>).error;
+      throw new Error('Simulation error: ' + JSON.stringify(error));
     }
     const result = await rpcCall(this.http, this.rpcUrl, 'sendTransaction', {
       transaction: JSON.stringify({
@@ -88,7 +88,9 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
         secret: this.secretKey,
       }),
     });
-    return (result as any)?.returnValue ?? null;
+    return result && typeof result === 'object' && 'returnValue' in result
+      ? (result as Record<string, unknown>).returnValue
+      : null;
   }
 
   async initEscrow(params: InitEscrowParams): Promise<InitEscrowResult> {
