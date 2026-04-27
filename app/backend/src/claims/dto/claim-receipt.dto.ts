@@ -15,10 +15,10 @@ export class ClaimReceiptDto {
 
   @ApiProperty({
     description: 'Current status of the claim',
-    enum: ['requested', 'verified', 'approved', 'disbursed', 'archived'],
+    enum: ['requested', 'verified', 'approved', 'disbursed', 'archived', 'expired'],
     example: 'disbursed',
   })
-  status: 'requested' | 'verified' | 'approved' | 'disbursed' | 'archived';
+  status: 'requested' | 'verified' | 'approved' | 'disbursed' | 'archived' | 'expired';
 
   @ApiProperty({
     description: 'Token amount for the claim',
