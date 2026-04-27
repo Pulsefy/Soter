@@ -24,6 +24,7 @@ import {
 import { EvidenceService } from './evidence.service';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
+import { evidenceUploadOptions } from './multer.config';
 
 @ApiTags('Evidence Queue')
 @ApiBearerAuth('JWT-auth')
@@ -33,7 +34,7 @@ export class EvidenceController {
 
   @Post('upload')
   @Roles(AppRole.operator, AppRole.admin)
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', evidenceUploadOptions))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Upload evidence to queue',
