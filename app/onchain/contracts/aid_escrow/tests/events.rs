@@ -4,9 +4,9 @@
 
 use aid_escrow::{AidEscrow, AidEscrowClient};
 use soroban_sdk::{
-    Address, Env, Symbol, TryFromVal, Val, Vec,
     testutils::{Address as _, Events, Ledger},
     token::{StellarAssetClient, TokenClient},
+    Address, Env, Symbol, TryFromVal, Val, Vec,
 };
 
 fn setup_token(env: &Env, admin: &Address) -> (TokenClient<'static>, StellarAssetClient<'static>) {

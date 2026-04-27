@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    Address, Env, Map, String, Symbol, Vec, contract, contracterror, contractevent, contractimpl,
-    contracttype, symbol_short, token,
+    contract, contracterror, contractevent, contractimpl, contracttype, symbol_short, token,
+    Address, Env, Map, String, Symbol, Vec,
 };
 
 // --- Storage Keys ---
@@ -1122,9 +1122,9 @@ impl AidEscrow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::Env;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::token::{StellarAssetClient, TokenClient};
+    use soroban_sdk::Env;
 
     fn setup() -> (Env, AidEscrowClient<'static>) {
         let env = Env::default();
