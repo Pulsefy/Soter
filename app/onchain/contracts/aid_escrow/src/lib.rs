@@ -1230,7 +1230,7 @@ mod tests {
 
         // Create 7 packages for the recipient
         let operator = admin.clone();
-        let package_ids: std::vec::Vec<u64> = (0..7)
+        let package_ids = (0..7)
             .map(|i| {
                 client.create_package(
                     &operator,
