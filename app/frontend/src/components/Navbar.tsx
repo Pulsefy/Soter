@@ -52,7 +52,7 @@ export function Navbar() {
           <Link href="/" className="text-xl font-bold">
             Soter
           </Link>
-
+          
           <div className="hidden md:flex items-center gap-2">
             {navigationItems.map(item => {
               const isActive = isActiveRoute(item.href, pathname);
@@ -75,6 +75,7 @@ export function Navbar() {
           </div>
         </div>
 
+        {/* Mobile menu toggle button */}
         <button
           type="button"
           className="inline-flex items-center justify-center rounded-full border border-slate-200 p-2 text-slate-700 md:hidden dark:border-slate-700 dark:text-slate-200"

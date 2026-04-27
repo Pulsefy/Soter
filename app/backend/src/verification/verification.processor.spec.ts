@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Job } from 'bullmq';
 import { VerificationProcessor } from './verification.processor';
 import { VerificationService } from './verification.service';
+import { DlqService } from '../jobs/dlq.service';
 import {
   VerificationJobData,
   VerificationResult,
@@ -36,6 +37,12 @@ describe('VerificationProcessor', () => {
             processVerification: jest.fn().mockResolvedValue(mockResult),
           },
         },
+        {
+          provide: DlqService,
+          useValue: {
+            moveToDlq: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -61,6 +68,21 @@ describe('VerificationProcessor', () => {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(verificationService.processVerification).toHaveBeenCalledWith(
         mockJobData,
+      );
+    });
+
+    it('should log correlationId when present in job data', async () => {
+      const logSpy = jest.spyOn(processor['logger'], 'log');
+      const mockJob = {
+        id: 'job-456',
+        data: { ...mockJobData, correlationId: 'trace-abc-123' },
+        attemptsMade: 0,
+      } as Job<VerificationJobData, VerificationResult, string>;
+
+      await processor.process(mockJob);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('trace-abc-123'),
       );
     });
 

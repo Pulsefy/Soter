@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { NotificationsService } from './notifications.service';
 import { NotificationProcessor } from './notifications.processor';
 import { OutboxController } from './outbox.controller';
+import { JobsModule } from '../jobs/jobs.module';
 
 @Module({
   imports: [
@@ -16,13 +17,10 @@ import { OutboxController } from './outbox.controller';
           host: configService.get<string>('REDIS_HOST') || 'localhost',
           port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
         },
-        defaultJobOptions: {
-          removeOnComplete: 100,
-          removeOnFail: 50,
-        },
       }),
       inject: [ConfigService],
     }),
+    JobsModule,
   ],
   controllers: [OutboxController],
   providers: [NotificationsService, NotificationProcessor],

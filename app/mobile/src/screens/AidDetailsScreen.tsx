@@ -24,7 +24,7 @@ import { SaverModeBanner } from '../components/SaverModeBanner';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidDetails'>;
 
-export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
+export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const { aidId } = route.params;
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -406,6 +406,15 @@ export const AidDetailsScreen: React.FC<Props> = ({ route }) => {
             {hasPendingConfirmation ? 'Claim Confirmation Queued' : 'Confirm Claim'}
           </Text>
         )}
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        accessibilityRole="button"
+        style={[styles.button, { backgroundColor: colors.success }]}
+        onPress={() => navigation.navigate('EvidenceUpload', { aidId })}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.buttonText}>Upload Evidence</Text>
       </TouchableOpacity>
 
       {lastUpdated ? (

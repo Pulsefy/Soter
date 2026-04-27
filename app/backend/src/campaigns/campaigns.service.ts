@@ -1,9 +1,31 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { CampaignStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { BudgetAlertsService } from './budget-alerts.service';
+import { ExportCampaignsQueryDto } from './dto/export-campaigns.dto';
+
+export interface CampaignExportRow {
+  id: string;
+  name: string;
+  status: string;
+  budget: number;
+  orgId: string | null;
+  ngoId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  archivedAt: Date | null;
+  totalClaims: number;
+  totalDisbursed: number;
+}
+
+export interface CampaignExportResult {
+  data: CampaignExportRow[];
+  total: number;
+  page: number;
+  limit: number;
+}
 
 @Injectable()
 export class CampaignsService {
@@ -48,7 +70,7 @@ export class CampaignsService {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id },
     });
-    if (!campaign || campaign.deletedAt) {
+    if (!campaign || (campaign as { deletedAt?: Date | null }).deletedAt) {
       throw new NotFoundException('Campaign not found');
     }
     return campaign;
@@ -101,5 +123,106 @@ export class CampaignsService {
       where: { id },
       data: { deletedAt: new Date() },
     });
+  }
+
+  async exportCampaigns(query: ExportCampaignsQueryDto): Promise<CampaignExportResult> {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(200, Math.max(1, query.limit ?? 50));
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.CampaignWhereInput = {
+      deletedAt: null,
+    };
+
+    if (query.status) where.status = query.status;
+    if (query.orgId) where.orgId = query.orgId;
+    if (query.ngoId) where.ngoId = query.ngoId;
+
+    if (query.from || query.to) {
+      if (query.from && isNaN(Date.parse(query.from))) {
+        throw new BadRequestException(`Invalid 'from' date: ${query.from}`);
+      }
+      if (query.to && isNaN(Date.parse(query.to))) {
+        throw new BadRequestException(`Invalid 'to' date: ${query.to}`);
+      }
+      where.createdAt = {};
+      if (query.from) where.createdAt.gte = new Date(query.from);
+      if (query.to) where.createdAt.lte = new Date(query.to);
+    }
+
+    const [campaignsResult, total] = await this.prisma.$transaction([
+      this.prisma.campaign.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          _count: {
+            select: { claims: true },
+          },
+          balanceLedger: {
+            where: { eventType: 'disburse' },
+          },
+        },
+      }),
+      this.prisma.campaign.count({ where }),
+    ]);
+
+    // Use type assertion to handle Prisma client type limitations
+    // Prisma schema has these fields but generated types may be stale
+    const campaigns = campaignsResult as unknown as Array<{
+      id: string;
+      name: string;
+      status: CampaignStatus;
+      budget: number;
+      orgId: string | null;
+      ngoId: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+      archivedAt: Date | null;
+      deletedAt: Date | null;
+      _count: { claims: number };
+      balanceLedger: Array<{ amount: number }>;
+    }>;
+
+    const data: CampaignExportRow[] = campaigns.map(c => ({
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      budget: c.budget,
+      orgId: c.orgId ?? null,
+      ngoId: c.ngoId ?? null,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+      archivedAt: c.archivedAt ?? null,
+      totalClaims: c._count.claims,
+      totalDisbursed: c.balanceLedger.reduce((sum, bl) => sum + bl.amount, 0),
+    }));
+
+    return { data, total, page, limit };
+  }
+
+  buildCsv(rows: CampaignExportRow[]): string {
+    const escape = (value: string | number | null): string => {
+      const str = String(value ?? '').replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const header = 'id,name,status,budget,orgId,ngoId,createdAt,updatedAt,archivedAt,totalClaims,totalDisbursed';
+    const lines = rows.map(r => [
+      escape(r.id),
+      escape(r.name),
+      escape(r.status),
+      escape(r.budget),
+      escape(r.orgId),
+      escape(r.ngoId),
+      escape(r.createdAt.toISOString()),
+      escape(r.updatedAt.toISOString()),
+      escape(r.archivedAt?.toISOString() ?? ''),
+      escape(r.totalClaims),
+      escape(r.totalDisbursed.toFixed(2)),
+    ].join(','));
+
+    return [header, ...lines].join('\r\n');
   }
 }

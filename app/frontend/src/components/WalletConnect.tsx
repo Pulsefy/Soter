@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { isConnected, setAllowed, getAddress, getNetworkDetails } from "@stellar/freighter-api";
 import { useWalletStore } from "../lib/walletStore";
 import { useToast } from "./ToastProvider";
+import { ErrorInline } from "./ErrorInline";
 
 export const WalletConnect: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -169,7 +170,15 @@ export const WalletConnect: React.FC = () => {
         Connect Freighter Wallet
       </button>
       {error && (
-        <span className="text-red-400 text-xs max-w-xs text-right break-words">{error}</span>
+        <div className="w-full max-w-xs mt-2">
+          <ErrorInline 
+            error={error} 
+            category="wallet"
+            variant="banner"
+            onRetry={connectWallet}
+            onClose={() => setError(null)}
+          />
+        </div>
       )}
     </div>
   );

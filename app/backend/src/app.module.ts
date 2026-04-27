@@ -39,6 +39,8 @@ import { InvitesModule } from './orgs/invites.module';
 import { AdminSearchModule } from './search/admin-search.module';
 import { RedisModule } from '@liaoliaots/nestjs-redis';
 import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guard';
+import { DeprecationInterceptor } from './common/interceptors/deprecation.interceptor';
+
 
 @Module({
   imports: [
@@ -62,6 +64,21 @@ import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guar
         connection: {
           host: configService.get<string>('REDIS_HOST') ?? 'localhost',
           port: parseInt(configService.get<string>('REDIS_PORT') ?? '6379', 10),
+        },
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 5000,
+          },
+          removeOnComplete: {
+            age: 3600, // keep for 1 hour
+            count: 1000,
+          },
+          removeOnFail: {
+            age: 24 * 3600, // keep for 24 hours
+            count: 5000,
+          },
         },
       }),
       inject: [ConfigService],
@@ -129,6 +146,10 @@ import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guar
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: DeprecationInterceptor,
     },
   ],
 })

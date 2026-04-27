@@ -5,9 +5,11 @@ export type RootStackParamList = {
   Health: undefined;
   AidOverview: undefined;
   AidDetails: { aidId: string };
+  EvidenceUpload: { aidId: string };
   ClaimReceipt: { claimId: string };
   Settings: undefined;
   Scanner: undefined;
+  BulkScanner: undefined;
   TaskList: undefined;
 };
 

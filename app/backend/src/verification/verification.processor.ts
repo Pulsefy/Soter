@@ -7,13 +7,18 @@ import {
   VerificationResult,
 } from './interfaces/verification-job.interface';
 
+import { DlqService } from '../jobs/dlq.service';
+
 @Processor('verification', {
   concurrency: parseInt(process.env.QUEUE_CONCURRENCY || '5'),
 })
 export class VerificationProcessor extends WorkerHost {
   private readonly logger = new Logger(VerificationProcessor.name);
 
-  constructor(private readonly verificationService: VerificationService) {
+  constructor(
+    private readonly verificationService: VerificationService,
+    private readonly dlqService: DlqService,
+  ) {
     super();
   }
 
@@ -21,7 +26,7 @@ export class VerificationProcessor extends WorkerHost {
     job: Job<VerificationJobData, VerificationResult, string>,
   ): Promise<VerificationResult> {
     this.logger.log(
-      `Processing job ${job.id} for claim ${job.data.claimId} (attempt ${job.attemptsMade + 1})`,
+      `Processing job ${job.id} for claim ${job.data.claimId} (attempt ${job.attemptsMade + 1})${job.data.correlationId ? ` [correlationId=${job.data.correlationId}]` : ''}`,
     );
 
     try {
@@ -51,11 +56,12 @@ export class VerificationProcessor extends WorkerHost {
   }
 
   @OnWorkerEvent('failed')
-  onFailed(job: Job<VerificationJobData> | undefined, error: Error) {
+  async onFailed(job: Job<VerificationJobData> | undefined, error: Error) {
     if (job) {
       this.logger.error(
         `Job ${job.id} failed for claim ${job.data.claimId}: ${error.message}`,
       );
+      await this.dlqService.moveToDlq('verification', job, error);
     } else {
       this.logger.error(`Job failed: ${error.message}`);
     }

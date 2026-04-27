@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { ErrorInline } from './ErrorInline';
 import Link from 'next/link';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
@@ -523,6 +524,7 @@ export const VerificationFlow: React.FC = () => {
                     formErrorId={formErrorId}
                     onImageChange={setImageFile}
                     onTextChange={setTextInput}
+                    onClearApiError={() => setApiError(null)}
                     onSubmit={handleSubmit}
                     includeLocation={includeLocation}
                     locationPermission={locationPermission}
@@ -558,6 +560,7 @@ interface StepUploadProps {
     formErrorId: string;
     onImageChange: (file: File | null) => void;
     onTextChange: (text: string) => void;
+    onClearApiError: () => void;
     onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
     includeLocation: boolean;
     locationPermission: LocationPermissionState;
@@ -586,6 +589,7 @@ function StepUpload({
     formErrorId,
     onImageChange,
     onTextChange,
+    onClearApiError,
     onSubmit,
     includeLocation,
     locationPermission,
@@ -634,11 +638,13 @@ function StepUpload({
 
             {/* API error from a previous attempt */}
             {apiError && (
-                <div
-                    role="alert"
-                    className="mb-4 p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 text-sm"
-                >
-                    {apiError}
+                <div className="mb-6">
+                    <ErrorInline 
+                        error={apiError} 
+                        onRetry={onClearApiError}
+                        onClose={onClearApiError}
+                        variant="card"
+                    />
                 </div>
             )}
 

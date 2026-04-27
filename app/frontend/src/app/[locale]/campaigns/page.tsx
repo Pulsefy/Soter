@@ -5,7 +5,8 @@ import { useMemo, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { ExportControls } from '@/components/dashboard/ExportControls';
-import { useCampaigns, useCreateCampaign, useUpdateCampaign } from '@/hooks/useCampaigns';
+import { useCampaigns, useCreateCampaign } from '@/hooks/useCampaigns';
+import { useCampaignAction, useCampaignActions } from '@/hooks/useOptimisticCampaignMutations';
 import {
   canManageCampaigns,
   getUserRole,
@@ -44,7 +45,7 @@ export default function CampaignsPage() {
   const userRoleLabel = getUserRoleLabel(userRole);
   const { data: campaigns = [], isLoading, isError, error } = useCampaigns();
   const createCampaign = useCreateCampaign();
-  const updateCampaign = useUpdateCampaign();
+  const campaignAction = useCampaignAction();
 
   const [name, setName] = useState('');
   const [budget, setBudget] = useState('');
@@ -135,25 +136,20 @@ export default function CampaignsPage() {
     }
   };
 
-  const onPauseResume = async (id: string, currentStatus: CampaignStatus) => {
-    const targetStatus = currentStatus === 'active' ? 'paused' : 'active';
-    try {
-      await updateCampaign.mutateAsync({ id, data: { status: targetStatus } });
-      setFormMessage(
-        `Campaign ${targetStatus === 'active' ? 'resumed' : 'paused'} successfully.`
-      );
-    } catch (err) {
-      setFormMessage((err as Error).message ?? 'Failed to update campaign.');
-    }
+  const onPauseResume = async (id: string, name: string, currentStatus: CampaignStatus) => {
+    const action = currentStatus === 'active' 
+      ? { type: 'pause' as const, targetStatus: 'paused' as const }
+      : { type: 'resume' as const, targetStatus: 'active' as const };
+    
+    campaignAction.mutate({ id, name, action });
   };
 
-  const onArchive = async (id: string) => {
-    try {
-      await updateCampaign.mutateAsync({ id, data: { status: 'archived' } });
-      setFormMessage('Campaign archived successfully.');
-    } catch (err) {
-      setFormMessage((err as Error).message ?? 'Failed to archive campaign.');
-    }
+  const onArchive = async (id: string, name: string) => {
+    campaignAction.mutate({ 
+      id, 
+      name, 
+      action: { type: 'archive' as const, targetStatus: 'archived' as const } 
+    });
   };
 
   return (
@@ -309,16 +305,16 @@ export default function CampaignsPage() {
                       </Link>
                       <button
                         type="button"
-                        onClick={() => onPauseResume(campaign.id, campaign.status)}
-                        disabled={updateCampaign.isPending}
+                        onClick={() => onPauseResume(campaign.id, campaign.name, campaign.status)}
+                        disabled={campaignAction.isPending}
                         className="rounded-md border border-gray-300 px-3 py-1 text-sm hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
                       >
                         {campaign.status === 'active' ? 'Pause' : 'Resume'}
                       </button>
                       <button
                         type="button"
-                        onClick={() => onArchive(campaign.id)}
-                        disabled={updateCampaign.isPending || campaign.status === 'archived'}
+                        onClick={() => onArchive(campaign.id, campaign.name)}
+                        disabled={campaignAction.isPending || campaign.status === 'archived'}
                         className="rounded-md border border-red-400 px-3 py-1 text-sm text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
                       >
                         Archive
