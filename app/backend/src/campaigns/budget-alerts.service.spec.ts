@@ -68,6 +68,7 @@ describe('BudgetAlertsService', () => {
 
       await service.checkThresholds('campaign-1');
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(notificationsService.sendEmail).not.toHaveBeenCalled();
     });
 
@@ -91,12 +92,14 @@ describe('BudgetAlertsService', () => {
 
       await service.checkThresholds('campaign-1');
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(notificationsService.sendEmail).toHaveBeenCalledWith(
         'admin@example.com',
         'Budget Alert: Test Campaign at 60.0% utilization',
         expect.stringContaining('Current Utilization: 60.0%'),
       );
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(prismaService.budgetThresholdAlert.create).toHaveBeenCalledWith({
         data: {
           campaignId: 'campaign-1',
@@ -120,6 +123,7 @@ describe('BudgetAlertsService', () => {
 
       await service.checkThresholds('campaign-1');
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(notificationsService.sendEmail).not.toHaveBeenCalled();
     });
   });

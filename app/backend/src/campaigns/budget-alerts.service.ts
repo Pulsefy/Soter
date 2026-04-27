@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Campaign, User } from '@prisma/client';
+import { Campaign } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 

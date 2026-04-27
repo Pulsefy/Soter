@@ -1,4 +1,8 @@
-import { isValidExtension, isValidMimeType, isValidFilename } from '../src/evidence/multer.config';
+import {
+  isValidExtension,
+  isValidMimeType,
+  isValidFilename,
+} from '../src/evidence/multer.config';
 
 describe('Multer Config Validation Functions', () => {
   describe('isValidExtension', () => {
@@ -44,7 +48,11 @@ describe('Multer Config Validation Functions', () => {
       expect(isValidMimeType('application/pdf')).toBe(true);
       expect(isValidMimeType('text/plain')).toBe(true);
       expect(isValidMimeType('application/msword')).toBe(true);
-      expect(isValidMimeType('application/vnd.openxmlformats-officedocument.wordprocessingml.document')).toBe(true);
+      expect(
+        isValidMimeType(
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ),
+      ).toBe(true);
     });
 
     it('should be case-insensitive', () => {
