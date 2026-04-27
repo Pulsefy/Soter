@@ -10,6 +10,7 @@ export interface NotificationJobData {
   message: string;
   timestamp: number;
   outboxId: string;
+  correlationId?: string;
 }
 
 export interface NotificationResult {

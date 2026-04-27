@@ -90,6 +90,18 @@ describe('NotificationProcessor', () => {
       expect(result.messageId).toBeDefined();
     });
 
+    it('should log correlationId when present in job data', async () => {
+      const logSpy = jest.spyOn(processor['logger'], 'log');
+      const job = makeJob({ outboxId: 'outbox-abc' });
+      job.data.correlationId = 'test-correlation-id';
+
+      await processor.process(job);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('test-correlation-id'),
+      );
+    });
+
     it('should re-throw when prisma.update throws during process', async () => {
       prismaMock.notificationOutbox.update.mockRejectedValueOnce(
         new Error('DB error'),

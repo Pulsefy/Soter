@@ -38,6 +38,9 @@ Pillow==11.3.0
 # NLP for PII anonymization
 spacy==3.7.4
 
+# ML for fraud detection clustering
+scikit-learn==1.4.2
+
 # Rate limiting
 slowapi==0.1.9
 

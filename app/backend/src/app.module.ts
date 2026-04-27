@@ -41,7 +41,6 @@ import { RedisModule } from '@liaoliaots/nestjs-redis';
 import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guard';
 import { DeprecationInterceptor } from './common/interceptors/deprecation.interceptor';
 
-
 @Module({
   imports: [
     ConfigModule.forRoot({

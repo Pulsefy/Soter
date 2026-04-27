@@ -166,7 +166,7 @@ export class VerificationInboxController {
   })
   async approve(
     @Param('id') id: string,
-    @Body() body: { nextStepMessage?: string },
+    @Body() body: { nextStepMessage?: string; internalNote?: string },
     @Request() req: ExpressRequest,
   ) {
     const reviewerId =
@@ -177,6 +177,7 @@ export class VerificationInboxController {
       reviewerId,
       body.nextStepMessage,
       undefined,
+      body.internalNote,
     );
   }
 
@@ -213,7 +214,12 @@ export class VerificationInboxController {
   })
   async reject(
     @Param('id') id: string,
-    @Body() body: { rejectionReason: string; nextStepMessage?: string },
+    @Body()
+    body: {
+      rejectionReason: string;
+      nextStepMessage?: string;
+      internalNote?: string;
+    },
     @Request() req: ExpressRequest,
   ) {
     const reviewerId =
@@ -224,6 +230,7 @@ export class VerificationInboxController {
       reviewerId,
       body.nextStepMessage,
       body.rejectionReason,
+      body.internalNote,
     );
   }
 
@@ -260,7 +267,12 @@ export class VerificationInboxController {
   })
   async requestResubmission(
     @Param('id') id: string,
-    @Body() body: { rejectionReason: string; nextStepMessage: string },
+    @Body()
+    body: {
+      rejectionReason: string;
+      nextStepMessage: string;
+      internalNote?: string;
+    },
     @Request() req: ExpressRequest,
   ) {
     const reviewerId =
@@ -271,6 +283,7 @@ export class VerificationInboxController {
       reviewerId,
       body.nextStepMessage,
       body.rejectionReason,
+      body.internalNote,
     );
   }
 
@@ -308,5 +321,71 @@ export class VerificationInboxController {
   })
   async getDetails(@Param('id') id: string) {
     return this.verificationInboxService.getDetails(id);
+  }
+
+  @Post(':id/notes')
+  @Version('1')
+  @Roles(AppRole.operator, AppRole.admin)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Add internal note to verification request',
+    description:
+      'Add an internal note visible only to reviewers. The action is recorded in the audit trail.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Unique identifier of the verification request',
+  })
+  @ApiOkResponse({
+    description: 'Internal note added successfully.',
+    schema: {
+      example: {
+        id: 'note-abc123',
+        entityType: 'verification',
+        entityId: 'clv789xyz123',
+        content: 'Contacted applicant for additional documents.',
+        authorId: 'reviewer-001',
+        category: 'follow_up',
+        createdAt: '2025-01-23T15:00:00.000Z',
+      },
+    },
+  })
+  @ApiNotFoundResponse({
+    description: 'The specified verification request was not found.',
+  })
+  async addInternalNote(
+    @Param('id') id: string,
+    @Body() body: { content: string; category?: string },
+    @Request() req: ExpressRequest,
+  ) {
+    const authorId =
+      (req.user as any)?.sub || (req.user as any)?.apiKeyId || 'system';
+    return this.verificationInboxService.addInternalNote(
+      id,
+      body.content,
+      authorId,
+      body.category,
+    );
+  }
+
+  @Get(':id/notes')
+  @Version('1')
+  @ApiOperation({
+    summary: 'List internal notes for a verification request',
+    description:
+      'Retrieve all internal notes attached to a verification request.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Unique identifier of the verification request',
+  })
+  @ApiOkResponse({
+    description: 'Internal notes retrieved successfully.',
+  })
+  @ApiNotFoundResponse({
+    description: 'The specified verification request was not found.',
+  })
+  async getInternalNotes(@Param('id') id: string) {
+    return this.verificationInboxService.getInternalNotes(id);
   }
 }

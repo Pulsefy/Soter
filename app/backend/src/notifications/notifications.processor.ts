@@ -26,7 +26,7 @@ export class NotificationProcessor extends WorkerHost {
     job: Job<NotificationJobData, NotificationResult, string>,
   ): Promise<NotificationResult> {
     this.logger.log(
-      `Processing ${job.data.type} notification for ${job.data.recipient} (attempt ${job.attemptsMade + 1})`,
+      `Processing ${job.data.type} notification for ${job.data.recipient} (attempt ${job.attemptsMade + 1})${job.data.correlationId ? ` [correlationId=${job.data.correlationId}]` : ''}`,
     );
 
     // Update outbox record: set lastAttemptAt to mark processing start
