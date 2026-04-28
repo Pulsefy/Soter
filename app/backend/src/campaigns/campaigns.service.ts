@@ -3,6 +3,7 @@ import { CampaignStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
+import { BudgetAlertsService } from './budget-alerts.service';
 import { ExportCampaignsQueryDto } from './dto/export-campaigns.dto';
 
 export interface CampaignExportRow {
@@ -28,7 +29,10 @@ export interface CampaignExportResult {
 
 @Injectable()
 export class CampaignsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly budgetAlertsService: BudgetAlertsService,
+  ) {}
 
   private sanitizeMetadata(
     metadata?: Record<string, unknown>,
@@ -73,9 +77,10 @@ export class CampaignsService {
   }
 
   async update(id: string, dto: UpdateCampaignDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
+    const budgetChanged = dto.budget !== undefined && dto.budget !== existing.budget;
 
-    return this.prisma.campaign.update({
+    const updated = await this.prisma.campaign.update({
       where: { id },
       data: {
         name: dto.name,
@@ -87,6 +92,13 @@ export class CampaignsService {
             : this.sanitizeMetadata(dto.metadata),
       },
     });
+
+    // Reset budget alerts if budget was changed
+    if (budgetChanged) {
+      await this.budgetAlertsService.resetAlerts(id);
+    }
+
+    return updated;
   }
 
   async archive(id: string) {

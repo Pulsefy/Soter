@@ -30,6 +30,15 @@ export class EvidenceService {
   }
 
   async queueEvidence(file: Express.Multer.File, ownerId: string) {
+    // Additional validation layer
+    if (!file) {
+      throw new BadRequestException('No file provided');
+    }
+
+    if (!file.originalname || file.originalname.trim().length === 0) {
+      throw new BadRequestException('Invalid filename');
+    }
+
     const fileHash = crypto
       .createHash('sha256')
       .update(file.buffer)

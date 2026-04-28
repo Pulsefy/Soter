@@ -1,12 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+interface SearchResult {
+  type: string;
+  label: string;
+  status: string;
+  id: string;
+}
+
 @Injectable()
 export class AdminSearchService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async search(query: string, entity: string | undefined, orgId: string) {
-    const results: any[] = [];
+  async search(query: string, entity: string | undefined, orgId: string): Promise<SearchResult[]> {
+    const results: SearchResult[] = [];
     const q = query.toLowerCase();
 
     // 1. Search Campaigns
@@ -19,12 +26,12 @@ export class AdminSearchService {
         take: 10,
       });
       results.push(
-        ...campaigns.map(c => ({
+        ...campaigns.map((c): SearchResult => ({
           type: 'campaign',
           label: c.name,
-          status: c.status,
+          status: c.status.toString(),
           id: c.id,
-        })),
+        }))
       );
     }
 
@@ -38,12 +45,12 @@ export class AdminSearchService {
         take: 10,
       });
       results.push(
-        ...claims.map(c => ({
+        ...claims.map((c): SearchResult => ({
           type: 'claim',
           label: `Claim ${c.id}`,
-          status: c.status,
+          status: c.status.toString(),
           id: c.id,
-        })),
+        }))
       );
     }
 
@@ -58,7 +65,7 @@ export class AdminSearchService {
         take: 10,
       });
       results.push(
-        ...recipients.map(c => ({
+        ...recipients.map((c): SearchResult => ({
           type: 'recipient',
           label: c.recipientRef,
           status: 'active',
@@ -77,12 +84,12 @@ export class AdminSearchService {
         take: 10,
       });
       results.push(
-        ...verifications.map(v => ({
+        ...verifications.map((v): SearchResult => ({
           type: 'verification',
           label: v.identifier,
-          status: v.status,
+          status: v.status.toString(),
           id: v.id,
-        })),
+        }))
       );
     }
 

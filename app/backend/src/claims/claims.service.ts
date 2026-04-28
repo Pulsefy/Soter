@@ -22,6 +22,7 @@ import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { BudgetAlertsService } from '../campaigns/budget-alerts.service';
 
 @Injectable()
 export class ClaimsService {
@@ -38,6 +39,7 @@ export class ClaimsService {
     private readonly metricsService: MetricsService,
     private readonly auditService: AuditService,
     private readonly encryptionService: EncryptionService,
+    private readonly budgetAlertsService: BudgetAlertsService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
@@ -337,6 +339,19 @@ export class ClaimsService {
         include: { campaign: true },
       });
 
+      // Create balance ledger entry for approved claims (lock the budget)
+      if (toStatus === ClaimStatus.approved) {
+        await tx.balanceLedger.create({
+          data: {
+            campaignId: claim.campaignId,
+            claimId: id,
+            eventType: 'lock',
+            amount: claim.amount,
+            note: `Claim ${id} approved`,
+          },
+        });
+      }
+
       // Audit log for status change
       void this.auditLog('claim', id, `status_changed_to_${toStatus}`, {
         from: fromStatus,
@@ -351,6 +366,11 @@ export class ClaimsService {
 
       return updated;
     });
+
+    // Check budget thresholds after balance changes
+    if (toStatus === ClaimStatus.approved) {
+      void this.budgetAlertsService.checkThresholds(claim.campaignId);
+    }
 
     return updatedClaim;
   }
