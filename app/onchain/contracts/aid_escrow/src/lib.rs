@@ -1184,7 +1184,7 @@ mod tests {
 
         // Mint tokens to admin and fund the escrow pool.
         sac.mint(&admin, &10_000);
-        client.fund(&token, &admin, &5_000);
+        client.fund(&token, &admin, &10_000);
 
         // Create packages for recipient1 (3 packages) and recipient2 (2 packages)
         let operator = admin.clone();
