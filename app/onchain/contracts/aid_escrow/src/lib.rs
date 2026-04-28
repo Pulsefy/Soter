@@ -1270,3 +1270,4 @@ mod tests {
         assert!(last_page.contains(package_ids.get(6).unwrap()));
     }
 }
+}
