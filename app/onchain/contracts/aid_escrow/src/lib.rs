@@ -14,6 +14,9 @@ const KEY_CONFIG: Symbol = symbol_short!("config");
 const KEY_PKG_IDX: Symbol = symbol_short!("pkg_idx"); // Aggregation index counter
 const KEY_DISTRIBUTORS: Symbol = symbol_short!("dstrbtrs"); // Map<Address, bool>
 const KEY_PAUSED: Symbol = symbol_short!("paused");
+const KEY_PAUSE_CREATE: Symbol = symbol_short!("p_create");
+const KEY_PAUSE_CLAIM: Symbol = symbol_short!("p_claim");
+const KEY_PAUSE_WITHDRAW: Symbol = symbol_short!("p_wdrw");
 
 // --- Data Types ---
 
@@ -169,6 +172,18 @@ pub struct ContractPausedEvent {
 #[contractevent]
 pub struct ContractUnpausedEvent {
     pub admin: Address,
+}
+
+#[contractevent]
+pub struct ActionPausedEvent {
+    pub admin: Address,
+    pub action: Symbol,
+}
+
+#[contractevent]
+pub struct ActionUnpausedEvent {
+    pub admin: Address,
+    pub action: Symbol,
 }
 
 #[contract]
@@ -334,6 +349,46 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Admin-only. Pauses a specific action (create, claim, or withdraw).
+    /// Emits an `ActionPausedEvent`.
+    pub fn pause_action(env: Env, action: Symbol) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let key = Self::get_pause_key(action.clone())?;
+        env.storage().instance().set(&key, &true);
+
+        ActionPausedEvent { admin, action }.publish(&env);
+        Ok(())
+    }
+
+    /// Admin-only. Unpauses a specific action.
+    /// Emits an `ActionUnpausedEvent`.
+    pub fn unpause_action(env: Env, action: Symbol) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let key = Self::get_pause_key(action.clone())?;
+        env.storage().instance().set(&key, &false);
+
+        ActionUnpausedEvent { admin, action }.publish(&env);
+        Ok(())
+    }
+
+    /// Returns `true` if the specific action is currently paused.
+    pub fn is_action_paused(env: Env, action: Symbol) -> bool {
+        if Self::is_paused(env.clone()) {
+            return true;
+        }
+
+        let key = match Self::get_pause_key(action) {
+            Ok(k) => k,
+            Err(_) => return false,
+        };
+
+        env.storage().instance().get(&key).unwrap_or(false)
+    }
+
     /// Returns `true` if the contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
         env.storage().instance().get(&KEY_PAUSED).unwrap_or(false)
@@ -388,7 +443,7 @@ impl AidEscrow {
         token: Address,
         expires_at: u64,
     ) -> Result<u64, Error> {
-        Self::check_paused(&env)?;
+        Self::check_action_paused(&env, symbol_short!("create"))?;
         Self::require_admin_or_distributor(&env, &operator)?;
         let config = Self::get_config(env.clone());
 
@@ -485,7 +540,7 @@ impl AidEscrow {
         token: Address,
         expires_in: u64,
     ) -> Result<Vec<u64>, Error> {
-        Self::check_paused(&env)?;
+        Self::check_action_paused(&env, symbol_short!("create"))?;
         Self::require_admin_or_distributor(&env, &operator)?;
 
         // Validate array lengths match
@@ -590,7 +645,7 @@ impl AidEscrow {
 
     /// Recipient claims the package.
     pub fn claim(env: Env, id: u64) -> Result<(), Error> {
-        Self::check_paused(&env)?;
+        Self::check_action_paused(&env, symbol_short!("claim"))?;
         let key = (symbol_short!("pkg"), id);
         let mut package: Package = env
             .storage()
@@ -901,6 +956,7 @@ impl AidEscrow {
         amount: i128,
         token: Address,
     ) -> Result<(), Error> {
+        Self::check_action_paused(&env, symbol_short!("withdraw"))?;
         // 1. Only the admin can withdraw surplus
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -944,11 +1000,32 @@ impl AidEscrow {
 
     // --- Helpers ---
 
-    fn check_paused(env: &Env) -> Result<(), Error> {
+    fn check_action_paused(env: &Env, action: Symbol) -> Result<(), Error> {
         if env.storage().instance().get(&KEY_PAUSED).unwrap_or(false) {
             return Err(Error::ContractPaused);
         }
+
+        let key = match Self::get_pause_key(action) {
+            Ok(k) => k,
+            Err(_) => return Ok(()),
+        };
+
+        if env.storage().instance().get(&key).unwrap_or(false) {
+            return Err(Error::ContractPaused);
+        }
         Ok(())
+    }
+
+    fn get_pause_key(action: Symbol) -> Result<Symbol, Error> {
+        if action == symbol_short!("create") {
+            Ok(KEY_PAUSE_CREATE)
+        } else if action == symbol_short!("claim") {
+            Ok(KEY_PAUSE_CLAIM)
+        } else if action == symbol_short!("withdraw") {
+            Ok(KEY_PAUSE_WITHDRAW)
+        } else {
+            Err(Error::InvalidState)
+        }
     }
 
     fn decrement_locked(env: &Env, token: &Address, amount: i128) {
@@ -1124,5 +1201,62 @@ mod tests {
 
         let package = client.get_package(&package_id);
         assert_eq!(package.status, PackageStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_action_specific_pause() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = token_id.address();
+        let sac = StellarAssetClient::new(&env, &token);
+
+        env.mock_all_auths();
+        client.init(&admin);
+        sac.mint(&admin, &10_000);
+        client.fund(&token, &admin, &5_000);
+
+        // 1. Pause 'create' action
+        client.pause_action(&symbol_short!("create"));
+        assert!(client.is_action_paused(&symbol_short!("create")));
+
+        // Attempt to create package should fail
+        let result = client.try_create_package(&admin, &1, &recipient, &1000, &token, &86400);
+        assert!(result.is_err());
+
+        // 2. Unpause 'create', pause 'claim'
+        client.unpause_action(&symbol_short!("create"));
+        client.pause_action(&symbol_short!("claim"));
+
+        // Create package should work now
+        let package_id = client.create_package(&admin, &1, &recipient, &1000, &token, &86400);
+
+        // Claim should fail
+        let claim_result = client.try_claim(&package_id);
+        assert!(claim_result.is_err());
+
+        // 3. Unpause 'claim', pause 'withdraw'
+        client.unpause_action(&symbol_short!("claim"));
+        client.pause_action(&symbol_short!("withdraw"));
+
+        // Claim should work now
+        client.claim(&package_id);
+
+        // Withdraw surplus should fail
+        let withdraw_result = client.try_withdraw_surplus(&admin, &100, &token);
+        assert!(withdraw_result.is_err());
+
+        // 4. Global pause overrides all
+        client.unpause_action(&symbol_short!("withdraw"));
+        client.pause();
+
+        assert!(client.is_action_paused(&symbol_short!("create")));
+        assert!(client.is_action_paused(&symbol_short!("claim")));
+        assert!(client.is_action_paused(&symbol_short!("withdraw")));
+
+        let result = client.try_create_package(&admin, &2, &recipient, &1000, &token, &86400);
+        assert!(result.is_err());
     }
 }
