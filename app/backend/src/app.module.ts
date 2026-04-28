@@ -33,6 +33,7 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AidEscrowModule } from './onchain/aid-escrow.module';
+import { UploadsModule } from './uploads/uploads.module';
 
 @Module({
   imports: [
@@ -76,6 +77,7 @@ import { AidEscrowModule } from './onchain/aid-escrow.module';
     JobsModule,
     AnalyticsModule,
     AidEscrowModule,
+    UploadsModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60000,       // 60 seconds window
