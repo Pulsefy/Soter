@@ -6,6 +6,7 @@ Handles environment variables and API key management
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 import logging
+import secrets
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,11 @@ class Settings(BaseSettings):
     # Proof-of-life settings
     proof_of_life_confidence_threshold: float = 0.65
     proof_of_life_min_face_size: int = 80
+
+    # Verification artifact access settings
+    verification_artifacts_dir: str = "./artifacts/verification"
+    verification_artifact_url_ttl_seconds: int = 300
+    artifact_signing_secret: str = secrets.token_urlsafe(32)
     
     model_config = SettingsConfigDict(
         env_file=".env",
