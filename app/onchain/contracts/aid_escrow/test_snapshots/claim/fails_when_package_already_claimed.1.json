@@ -555,6 +555,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "pkg_cnt"
+                        },
+                        "val": {
+                          "u64": "2"
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "pkg_idx"
                         },
                         "val": {

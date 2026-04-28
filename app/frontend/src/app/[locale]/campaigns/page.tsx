@@ -7,6 +7,7 @@ import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { ExportControls } from '@/components/dashboard/ExportControls';
 import { useCampaigns, useCreateCampaign } from '@/hooks/useCampaigns';
 import { useCampaignAction, useCampaignActions } from '@/hooks/useOptimisticCampaignMutations';
+import { InlineFeedback, OptimisticStatusBadge } from '@/components/InlineFeedback';
 import {
   canManageCampaigns,
   getUserRole,
@@ -289,11 +290,10 @@ export default function CampaignsPage() {
                             : 'N/A'}
                         </p>
                       </div>
-                      <span
-                        className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[campaign.status]}`}
-                      >
-                        {campaign.status}
-                      </span>
+                      <OptimisticStatusBadge
+                        status={campaign.status}
+                        isOptimistic={campaignAction.isPending && campaignAction.variables?.id === campaign.id}
+                      />
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -303,22 +303,31 @@ export default function CampaignsPage() {
                       >
                         Import recipients
                       </Link>
-                      <button
-                        type="button"
-                        onClick={() => onPauseResume(campaign.id, campaign.name, campaign.status)}
-                        disabled={campaignAction.isPending}
-                        className="rounded-md border border-gray-300 px-3 py-1 text-sm hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
-                      >
-                        {campaign.status === 'active' ? 'Pause' : 'Resume'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onArchive(campaign.id, campaign.name)}
-                        disabled={campaignAction.isPending || campaign.status === 'archived'}
-                        className="rounded-md border border-red-400 px-3 py-1 text-sm text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
-                      >
-                        Archive
-                      </button>
+                      {campaignAction.isPending && campaignAction.variables?.id === campaign.id ? (
+                        <InlineFeedback
+                          isPending={true}
+                          action={campaignAction.variables?.action.type === 'pause' ? 'pausing' : campaignAction.variables?.action.type === 'resume' ? 'resuming' : 'archiving' as any}
+                        />
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onPauseResume(campaign.id, campaign.name, campaign.status)}
+                            disabled={campaignAction.isPending}
+                            className="rounded-md border border-gray-300 px-3 py-1 text-sm hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+                          >
+                            {campaign.status === 'active' ? 'Pause' : 'Resume'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onArchive(campaign.id, campaign.name)}
+                            disabled={campaignAction.isPending || campaign.status === 'archived'}
+                            className="rounded-md border border-red-400 px-3 py-1 text-sm text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                          >
+                            Archive
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}
