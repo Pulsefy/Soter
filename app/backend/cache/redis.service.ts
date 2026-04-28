@@ -61,4 +61,36 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Redis DEL failed for key "${key}": ${String(err)}`);
     }
   }
+
+  /**
+   * Delete all keys matching a glob pattern using SCAN (non-blocking).
+   * Returns the number of keys deleted.
+   */
+  async delByPattern(pattern: string): Promise<number> {
+    try {
+      const keys: string[] = [];
+      let cursor = '0';
+      do {
+        const [nextCursor, batch] = await this.client.scan(
+          cursor,
+          'MATCH',
+          pattern,
+          'COUNT',
+          100,
+        );
+        cursor = nextCursor;
+        keys.push(...batch);
+      } while (cursor !== '0');
+
+      if (keys.length > 0) {
+        await this.client.del(...keys);
+      }
+      return keys.length;
+    } catch (err) {
+      this.logger.warn(
+        `Redis SCAN/DEL failed for pattern "${pattern}": ${String(err)}`,
+      );
+      return 0;
+    }
+  }
 }

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pytesseract
 from PIL import Image
 
+import metrics
 from services.preprocessing import ImagePreprocessor
 
 
@@ -107,10 +108,13 @@ class OCRService:
                 field_chars
             )
 
+        latency = time.time() - start_time
+        metrics.PIPELINE_STEP_LATENCY.labels(step_name='ocr').observe(latency)
+
         return OCRResult(
             fields=fields,
             raw_text=raw_text,
-            processing_time_ms=int((time.time() - start_time) * 1000),
+            processing_time_ms=int(latency * 1000),
         )
 
     def _run_tesseract(self, image: Image.Image) -> dict:

@@ -1,7 +1,8 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { ApiTags, ApiOperation, ApiOkResponse } from '@nestjs/swagger';
+import { RETENTION_PURGE_QUEUE } from '../retention-policy/retention-purge.processor';
 
 @ApiTags('Jobs')
 @Controller('jobs')
@@ -10,6 +11,8 @@ export class JobsController {
     @InjectQueue('verification') private verificationQueue: Queue,
     @InjectQueue('notifications') private notificationsQueue: Queue,
     @InjectQueue('onchain') private onchainQueue: Queue,
+    @InjectQueue(RETENTION_PURGE_QUEUE) private retentionPurgeQueue: Queue,
+    @InjectQueue('dead-letter') private deadLetterQueue: Queue,
   ) {}
 
   @ApiOperation({
@@ -54,7 +57,39 @@ export class JobsController {
       verification: await this.getQueueStatus(this.verificationQueue),
       notifications: await this.getQueueStatus(this.notificationsQueue),
       onchain: await this.getQueueStatus(this.onchainQueue),
+      'retention-purge': await this.getQueueStatus(this.retentionPurgeQueue),
+      'dead-letter': await this.getQueueStatus(this.deadLetterQueue),
     };
+  }
+
+  @ApiOperation({
+    summary: 'Get overall health of background job queues',
+    description: 'Checks if any core queues are degraded (too many waiting or failed jobs).',
+  })
+  @Get('health')
+  async getHealth() {
+    const statuses = [
+      await this.getQueueStatus(this.verificationQueue),
+      await this.getQueueStatus(this.notificationsQueue),
+      await this.getQueueStatus(this.onchainQueue),
+    ];
+
+    const isDegraded = statuses.some(s => s.waiting > 100 || s.failed > 50);
+
+    const result = {
+      status: isDegraded ? 'degraded' : 'ok',
+      details: statuses.map(s => ({
+        name: s.name,
+        waiting: s.waiting,
+        failed: s.failed,
+      })),
+    };
+
+    if (isDegraded) {
+      throw new HttpException(result, HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    return result;
   }
 
   private async getQueueStatus(queue: Queue) {

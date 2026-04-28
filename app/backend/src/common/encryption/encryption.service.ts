@@ -100,4 +100,29 @@ export class EncryptionService {
       decipher.final(),
     ]).toString('utf8');
   }
+
+  /**
+   * Encrypts a Buffer using AES-256-GCM.
+   * Format: [IV (12 bytes)][AuthTag (16 bytes)][Ciphertext]
+   */
+  encryptBuffer(buffer: Buffer): Buffer {
+    const iv = crypto.randomBytes(IV_GCM_BYTES);
+    const cipher = crypto.createCipheriv(ALGORITHM_GCM, this.key, iv);
+    const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
+    const authTag = cipher.getAuthTag();
+    return Buffer.concat([iv, authTag, encrypted]);
+  }
+
+  /**
+   * Decrypts a Buffer produced by encryptBuffer().
+   */
+  decryptBuffer(encryptedBuffer: Buffer): Buffer {
+    const iv = encryptedBuffer.subarray(0, IV_GCM_BYTES);
+    const authTag = encryptedBuffer.subarray(IV_GCM_BYTES, IV_GCM_BYTES + 16);
+    const ciphertext = encryptedBuffer.subarray(IV_GCM_BYTES + 16);
+
+    const decipher = crypto.createDecipheriv(ALGORITHM_GCM, this.key, iv);
+    decipher.setAuthTag(authTag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  }
 }

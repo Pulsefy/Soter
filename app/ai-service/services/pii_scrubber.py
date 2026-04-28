@@ -3,6 +3,8 @@
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
+import time
+import metrics
 
 import spacy
 from spacy.language import Language
@@ -46,32 +48,37 @@ class PIIScrubberService:
 
     def anonymize(self, text: str) -> Dict[str, object]:
         """Return privacy-preserving anonymized text and summary metadata."""
-        if not text:
+        start_time = time.time()
+        try:
+            if not text:
+                return {
+                    "original_length": 0,
+                    "anonymized_text": "",
+                    "pii_summary": {"names": 0, "locations": 0, "dates": 0, "total": 0},
+                    "token_counts": {},
+                }
+
+            spans = self._detect_spans(text)
+            anonymized_text, token_counts = self._mask_spans(text, spans)
+
+            names = sum(1 for span in spans if span.label == "PERSON")
+            locations = sum(1 for span in spans if span.label == "LOCATION")
+            dates = sum(1 for span in spans if span.label == "DATE")
+
             return {
-                "original_length": 0,
-                "anonymized_text": "",
-                "pii_summary": {"names": 0, "locations": 0, "dates": 0, "total": 0},
-                "token_counts": {},
+                "original_length": len(text),
+                "anonymized_text": anonymized_text,
+                "pii_summary": {
+                    "names": names,
+                    "locations": locations,
+                    "dates": dates,
+                    "total": len(spans),
+                },
+                "token_counts": token_counts,
             }
-
-        spans = self._detect_spans(text)
-        anonymized_text, token_counts = self._mask_spans(text, spans)
-
-        names = sum(1 for span in spans if span.label == "PERSON")
-        locations = sum(1 for span in spans if span.label == "LOCATION")
-        dates = sum(1 for span in spans if span.label == "DATE")
-
-        return {
-            "original_length": len(text),
-            "anonymized_text": anonymized_text,
-            "pii_summary": {
-                "names": names,
-                "locations": locations,
-                "dates": dates,
-                "total": len(spans),
-            },
-            "token_counts": token_counts,
-        }
+        finally:
+            latency = time.time() - start_time
+            metrics.PIPELINE_STEP_LATENCY.labels(step_name='scrub').observe(latency)
 
     def _build_nlp(self) -> Language:
         nlp = spacy.blank("en")

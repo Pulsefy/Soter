@@ -1,6 +1,7 @@
 export interface VerificationJobData {
   claimId: string;
   timestamp: number;
+  correlationId?: string;
 }
 
 export interface VerificationResult {

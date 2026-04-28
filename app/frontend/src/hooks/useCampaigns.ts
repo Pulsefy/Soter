@@ -7,6 +7,7 @@ import type {
   CampaignCreatePayload,
   CampaignUpdatePayload,
 } from '@/types/campaign';
+import { useActivity } from './useActivity';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -77,9 +78,16 @@ export function useCampaigns() {
 
 export function useCreateCampaign() {
   const queryClient = useQueryClient();
+  const { trackJob } = useActivity();
 
   return useMutation({
-    mutationFn: postCampaign,
+    mutationFn: (payload: CampaignCreatePayload) => {
+      return trackJob(
+        'Create Campaign',
+        `Creating campaign "${payload.name}"`,
+        () => postCampaign(payload)
+      );
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campaigns'] });
     },

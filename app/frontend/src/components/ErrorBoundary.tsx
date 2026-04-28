@@ -48,8 +48,6 @@ export class ErrorBoundary extends Component<
     if (error) {
       return (
         <ErrorState
-          title="Something went wrong"
-          description="We hit an unexpected problem while loading this experience. You can try the action again or return to the home page."
           error={error}
           onTryAgain={this.handleRetry}
         />

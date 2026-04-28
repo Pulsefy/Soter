@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { DashboardFilters } from './DashboardFilters';
 import { FilteredPackageList } from './FilteredPackageList';
+import { FilterPresets } from './FilterPresets';
 import { ExportControls } from './ExportControls';
 import type { AidPackageFilters } from '@/types/aid-package';
 
@@ -20,6 +21,7 @@ export function DashboardContent() {
 
   // Sync localSearch if URL changes externally (e.g. browser back/forward)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalSearch(urlSearch);
   }, [urlSearch]);
 
@@ -32,33 +34,62 @@ export function DashboardContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localSearch]);
 
-  function updateParam(key: string, value: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    if (value) {
-      params.set(key, value);
-    } else {
-      params.delete(key);
-    }
-    router.replace(`?${params.toString()}`, { scroll: false });
-  }
+  const updateParam = useCallback(
+    (key: string, value: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (value) {
+        params.set(key, value);
+      } else {
+        params.delete(key);
+      }
+      router.replace(`?${params.toString()}`, { scroll: false });
+    },
+    [router, searchParams],
+  );
 
-  function handleSearchChange(value: string) {
+  const handleSearchChange = useCallback((value: string) => {
     setLocalSearch(value);
-  }
+  }, []);
 
-  function handleStatusChange(value: string) {
-    updateParam('status', value);
-  }
+  const handleStatusChange = useCallback(
+    (value: string) => {
+      updateParam('status', value);
+    },
+    [updateParam],
+  );
 
-  function handleTokenChange(value: string) {
-    updateParam('token', value);
-  }
+  const handleTokenChange = useCallback(
+    (value: string) => {
+      updateParam('token', value);
+    },
+    [updateParam],
+  );
 
-  const filters: AidPackageFilters = {
-    search: urlSearch,
-    status: urlStatus as AidPackageFilters['status'],
-    token: urlToken as AidPackageFilters['token'],
-  };
+  /**
+   * Apply a preset (or restore defaults) by rebuilding the URL from scratch.
+   * This avoids stale params lingering from the previous filter state.
+   */
+  const handleApplyPreset = useCallback(
+    (preset: AidPackageFilters) => {
+      const params = new URLSearchParams();
+      if (preset.search) params.set('search', preset.search);
+      if (preset.status) params.set('status', preset.status);
+      if (preset.token) params.set('token', preset.token);
+      // Also update the local search field immediately
+      setLocalSearch(preset.search ?? '');
+      router.replace(params.size ? `?${params.toString()}` : '?', { scroll: false });
+    },
+    [router],
+  );
+
+  const filters: AidPackageFilters = useMemo(
+    () => ({
+      search: urlSearch,
+      status: urlStatus as AidPackageFilters['status'],
+      token: urlToken as AidPackageFilters['token'],
+    }),
+    [urlSearch, urlStatus, urlToken],
+  );
 
   return (
     <div className="p-6 bg-white dark:bg-gray-900 rounded-xl shadow-lg border border-gray-100 dark:border-gray-800 space-y-5">
@@ -76,6 +107,13 @@ export function DashboardContent() {
         onSearchChange={handleSearchChange}
         onStatusChange={handleStatusChange}
         onTokenChange={handleTokenChange}
+      />
+
+      {/* Preset bar — save/apply/delete/copy/restore */}
+      <FilterPresets
+        filters={filters}
+        scope="dashboard"
+        onApply={handleApplyPreset}
       />
 
       {/* Package list */}

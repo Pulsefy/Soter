@@ -1,11 +1,17 @@
 from services.pii_scrubber import PIIScrubberService
+import metrics
+from unittest.mock import patch, MagicMock
 
 
 class TestPIIScrubberService:
     def setup_method(self):
         self.service = PIIScrubberService()
 
-    def test_anonymize_detects_and_masks_name_location_date(self):
+    @patch('metrics.PIPELINE_STEP_LATENCY.labels')
+    def test_anonymize_detects_and_masks_name_location_date(self, mock_labels):
+        mock_observe = MagicMock()
+        mock_labels.return_value.observe = mock_observe
+        
         text = "On 15 Jan 2025, Mary Johnson received aid in Maiduguri Camp."
         result = self.service.anonymize(text)
 
@@ -13,6 +19,9 @@ class TestPIIScrubberService:
         assert "[RECIPIENT_NAME]" in result["anonymized_text"]
         assert "[LOCATION]" in result["anonymized_text"]
         assert result["pii_summary"]["total"] >= 3
+        
+        mock_labels.assert_called_with(step_name='scrub')
+        mock_observe.assert_called_once()
 
     def test_anonymize_preserves_context_words(self):
         text = "John Doe reported food assistance delays in Kano State on 2024-07-12."

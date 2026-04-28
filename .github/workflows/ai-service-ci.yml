@@ -150,10 +150,23 @@ jobs:
     - name: Test Docker container
       run: |
         docker run -d --name test-container -p 8000:8000 soter-ai-service:test
-        sleep 10
-        curl -f http://localhost:8000/health || exit 1
-        docker stop test-container
-        docker rm test-container
+        # Wait for container to be ready with retry logic
+        for i in $(seq 1 30); do
+          if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+            echo "✓ Container is ready!"
+            curl -f http://localhost:8000/health
+            docker stop test-container
+            docker rm test-container
+            exit 0
+          fi
+          echo "Waiting for container to start... (attempt $i/30)"
+          sleep 2
+        done
+        echo "✗ Container failed to start within 60 seconds"
+        docker logs test-container
+        docker stop test-container 2>/dev/null || true
+        docker rm test-container 2>/dev/null || true
+        exit 1
 
   security-scan:
     runs-on: ubuntu-latest

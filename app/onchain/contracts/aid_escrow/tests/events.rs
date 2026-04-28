@@ -270,3 +270,37 @@ fn test_package_refunded_event() {
     assert_eq!(data_address(&env, &data, "actor"), admin);
     assert_field_exists(&env, &data, "timestamp");
 }
+
+#[test]
+fn test_extended_event_records_old_and_new_expiry() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &10_000);
+    client.fund(&token_client.address, &admin, &5000);
+
+    let old_expires_at = env.ledger().timestamp() + 86400;
+    let new_expires_at = old_expires_at + 600;
+    client.create_package(
+        &admin,
+        &42u64,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &old_expires_at,
+    );
+    client.extend_expiry(&42u64, &new_expires_at);
+
+    let data = last_event_data(&env, &contract_id, "extended_event");
+    assert_eq!(data_u64(&env, &data, "id"), 42);
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_eq!(data_u64(&env, &data, "old_expires_at"), old_expires_at);
+    assert_eq!(data_u64(&env, &data, "new_expires_at"), new_expires_at);
+}

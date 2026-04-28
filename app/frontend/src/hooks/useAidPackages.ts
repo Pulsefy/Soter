@@ -7,6 +7,10 @@ import type { AidPackage, AidPackageFilters } from '@/types/aid-package';
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 async function fetchAidPackages(filters?: AidPackageFilters): Promise<AidPackage[]> {
+  const perfEnabled =
+    typeof window !== 'undefined' && process.env.NEXT_PUBLIC_DASHBOARD_PERF === '1';
+  const start = perfEnabled ? performance.now() : 0;
+
   const params = new URLSearchParams();
 
   if (filters?.search) params.set('search', filters.search);
@@ -20,12 +24,27 @@ async function fetchAidPackages(filters?: AidPackageFilters): Promise<AidPackage
   if (!response.ok) {
     throw new Error(`Failed to fetch aid packages: ${response.status}`);
   }
-  return response.json();
+  const json = await response.json();
+
+  if (perfEnabled) {
+    const end = performance.now();
+    console.debug(`[perf] fetchAidPackages ${Math.round(end - start)}ms`, {
+      search: filters?.search ?? '',
+      status: filters?.status ?? '',
+      token: filters?.token ?? '',
+    });
+  }
+
+  return json;
 }
 
 export function useAidPackages(filters?: AidPackageFilters) {
+  const search = filters?.search ?? '';
+  const status = filters?.status ?? '';
+  const token = filters?.token ?? '';
+
   return useQuery({
-    queryKey: ['aid-packages', filters ?? {}],
+    queryKey: ['aid-packages', search, status, token],
     queryFn: () => fetchAidPackages(filters),
   });
 }

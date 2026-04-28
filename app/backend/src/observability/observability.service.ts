@@ -1,11 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable } from '@nestjs/common';
 import { CreateObservabilityDto } from './dto/create-observability.dto';
 import { UpdateObservabilityDto } from './dto/update-observability.dto';
 
 @Injectable()
 export class ObservabilityService {
-  create(createObservabilityDto: CreateObservabilityDto) {
+  create(_createObservabilityDto: CreateObservabilityDto) {
     return 'This action adds a new observability';
   }
 
@@ -17,7 +16,7 @@ export class ObservabilityService {
     return `This action returns a #${id} observability`;
   }
 
-  update(id: number, updateObservabilityDto: UpdateObservabilityDto) {
+  update(id: number, _updateObservabilityDto: UpdateObservabilityDto) {
     return `This action updates a #${id} observability`;
   }
 

@@ -69,25 +69,51 @@ const isRateLimitExempt = (req: Request): boolean => {
   return RATE_LIMIT_EXEMPT_PATHS.some(pattern => pattern.test(normalizedPath));
 };
 
-// Explicit Helmet configuration: only the required headers are enabled.
-const buildHelmetOptions = (): HelmetOptions => ({
-  contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false,
-  crossOriginOpenerPolicy: false,
-  crossOriginResourcePolicy: false,
-  originAgentCluster: false,
-  referrerPolicy: { policy: 'no-referrer' },
-  strictTransportSecurity: false,
-  xContentTypeOptions: true,
-  xDnsPrefetchControl: false,
-  xDownloadOptions: false,
-  xFrameOptions: { action: 'deny' },
-  xPermittedCrossDomainPolicies: false,
-  xPoweredBy: false,
-  xXssProtection: false,
-});
+// Explicit Helmet configuration: recommended security headers for production
+const buildHelmetOptions = (config: ConfigService): HelmetOptions => {
+  const nodeEnv = config.get<string>('NODE_ENV', 'development');
+  const isProduction = nodeEnv === 'production';
 
-export const createHelmetMiddleware = () => helmet(buildHelmetOptions());
+  return {
+    contentSecurityPolicy: isProduction
+      ? {
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", 'data:', 'https:'],
+            connectSrc: ["'self'"],
+            fontSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            mediaSrc: ["'self'"],
+            frameSrc: ["'none'"],
+          },
+        }
+      : false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: isProduction ? { policy: 'same-origin' } : false,
+    crossOriginResourcePolicy: { policy: 'same-origin' },
+    originAgentCluster: true,
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    strictTransportSecurity: isProduction
+      ? {
+          maxAge: 31536000,
+          includeSubDomains: true,
+          preload: true,
+        }
+      : false,
+    xContentTypeOptions: true,
+    xDnsPrefetchControl: { allow: false },
+    xDownloadOptions: false,
+    xFrameOptions: { action: 'deny' },
+    xPermittedCrossDomainPolicies: { permittedPolicies: 'none' },
+    xPoweredBy: false,
+    xXssProtection: false,
+  };
+};
+
+export const createHelmetMiddleware = (config: ConfigService) =>
+  helmet(buildHelmetOptions(config));
 
 const resolveAllowedOrigins = (config: ConfigService): string[] => {
   const rawOrigins = config.get<string>('CORS_ORIGINS');

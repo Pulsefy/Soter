@@ -44,7 +44,7 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
 
   // Security middleware (order matters)
-  app.use(createHelmetMiddleware());
+  app.use(createHelmetMiddleware(configService));
   app.use(createCorsOriginValidator(configService));
   app.enableCors(buildCorsOptions(configService));
   app.use(createRateLimiter(configService));

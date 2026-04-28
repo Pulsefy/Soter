@@ -34,6 +34,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AidEscrowModule } from './onchain/aid-escrow.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
 
 @Module({
   imports: [
@@ -78,14 +79,14 @@ import { UploadsModule } from './uploads/uploads.module';
     AnalyticsModule,
     AidEscrowModule,
     UploadsModule,
+    ApiKeysModule,
     ThrottlerModule.forRoot([
       {
-        ttl: 60000,       // 60 seconds window
-        limit: 20,     // default: 20 req/min
+        ttl: 60000, // 60 seconds window
+        limit: 20, // default: 20 req/min
       },
     ]),
   ],
-  
 
   controllers: [AppController],
   providers: [
@@ -106,7 +107,7 @@ import { UploadsModule } from './uploads/uploads.module';
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
     },
-     {
+    {
       provide: APP_GUARD,
       useClass: ThrottlerGuard, // rate-limiting guard runs after auth and role checks to avoid unnecessary counting of unauthenticated/unauthorized requests
     },

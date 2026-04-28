@@ -6,10 +6,13 @@ import { VerificationController } from './verification.controller';
 import { VerificationService } from './verification.service';
 import { VerificationFlowService } from './verification-flow.service';
 import { VerificationProcessor } from './verification.processor';
+import { VerificationInboxController } from './verification-inbox.controller';
+import { VerificationInboxService } from './verification-inbox.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuditModule } from '../audit/audit.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { EncryptionModule } from '../common/encryption/encryption.module';
+import { JobsModule } from '../jobs/jobs.module';
 
 @Module({
   imports: [
@@ -27,20 +30,22 @@ import { EncryptionModule } from '../common/encryption/encryption.module';
           host: configService.get<string>('REDIS_HOST') || 'localhost',
           port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
         },
-        defaultJobOptions: {
-          removeOnComplete: 100,
-          removeOnFail: 50,
-        },
       }),
       inject: [ConfigService],
     }),
+    JobsModule,
   ],
-  controllers: [VerificationController],
+  controllers: [VerificationController, VerificationInboxController],
   providers: [
     VerificationService,
     VerificationFlowService,
     VerificationProcessor,
+    VerificationInboxService,
   ],
-  exports: [VerificationService, VerificationFlowService],
+  exports: [
+    VerificationService,
+    VerificationFlowService,
+    VerificationInboxService,
+  ],
 })
 export class VerificationModule {}

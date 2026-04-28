@@ -345,6 +345,74 @@ fn test_extend_expiration_success() {
 }
 
 #[test]
+fn test_extend_expiry_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+
+    client.init(&admin);
+    token_admin_client.mint(&admin, &10_000);
+    client.fund(&token_client.address, &admin, &5000);
+
+    let pkg_id = 1;
+    let initial_expiry = env.ledger().timestamp() + 1000;
+    client.create_package(
+        &admin,
+        &pkg_id,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &initial_expiry,
+    );
+
+    let new_expiry = initial_expiry + 500;
+    client.extend_expiry(&pkg_id, &new_expiry);
+
+    let pkg_extended = client.get_package(&pkg_id);
+    assert_eq!(pkg_extended.expires_at, new_expiry);
+    assert_eq!(pkg_extended.status, PackageStatus::Created);
+}
+
+#[test]
+fn test_extend_expiry_rejects_non_increasing_expiry() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+
+    client.init(&admin);
+    token_admin_client.mint(&admin, &10_000);
+    client.fund(&token_client.address, &admin, &5000);
+
+    let pkg_id = 1;
+    let initial_expiry = env.ledger().timestamp() + 1000;
+    client.create_package(
+        &admin,
+        &pkg_id,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &initial_expiry,
+    );
+
+    let result = client.try_extend_expiry(&pkg_id, &initial_expiry);
+    assert_eq!(result, Err(Ok(Error::InvalidState)));
+}
+
+#[test]
 fn test_extend_expiration_non_existent_package() {
     let env = Env::default();
     env.mock_all_auths();
@@ -581,4 +649,82 @@ fn test_extend_expiration_cancelled_package() {
     // Try to extend cancelled package
     let result = client.try_extend_expiration(&pkg_id, &500);
     assert_eq!(result, Err(Ok(Error::PackageNotActive)));
+}
+
+#[test]
+fn test_get_recipient_package_count_returns_zero_when_recipient_has_no_packages() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let other_recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+
+    client.init(&admin);
+    token_admin_client.mint(&admin, &10_000);
+    client.fund(&token_client.address, &admin, &5000);
+
+    let expiry = env.ledger().timestamp() + 1000;
+    client.create_package(
+        &admin,
+        &1,
+        &other_recipient,
+        &1000,
+        &token_client.address,
+        &expiry,
+    );
+
+    assert_eq!(client.get_recipient_package_count(&recipient), 0);
+}
+
+#[test]
+fn test_get_recipient_package_count_returns_multiple_packages() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let other_recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+
+    client.init(&admin);
+    token_admin_client.mint(&admin, &20_000);
+    client.fund(&token_client.address, &admin, &10_000);
+
+    let expiry = env.ledger().timestamp() + 1000;
+    client.create_package(
+        &admin,
+        &5,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &expiry,
+    );
+    client.create_package(
+        &admin,
+        &12,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &expiry,
+    );
+    client.create_package(
+        &admin,
+        &13,
+        &other_recipient,
+        &1000,
+        &token_client.address,
+        &expiry,
+    );
+
+    assert_eq!(client.get_recipient_package_count(&recipient), 2);
 }

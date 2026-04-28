@@ -9,6 +9,8 @@ import {
 } from './interfaces/onchain-job.interface';
 import { ONCHAIN_ADAPTER_TOKEN, OnchainAdapter } from './onchain.adapter';
 
+import { DlqService } from '../jobs/dlq.service';
+
 @Processor('onchain', {
   concurrency: 1, // Usually sequential for blockchain transactions
 })
@@ -18,6 +20,7 @@ export class OnchainProcessor extends WorkerHost {
   constructor(
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
+    private readonly dlqService: DlqService,
   ) {
     super();
   }
@@ -57,10 +60,27 @@ export class OnchainProcessor extends WorkerHost {
         metadata: result?.metadata,
       };
     } catch (error) {
-      this.logger.error(
-        `Onchain job ${job.id} failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        error instanceof Error ? error.stack : undefined,
-      );
+      const errMessage =
+        error instanceof Error
+          ? error.message.toLowerCase()
+          : String(error).toLowerCase();
+      const isTransient =
+        errMessage.includes('timeout') ||
+        errMessage.includes('congestion') ||
+        errMessage.includes('rate limit') ||
+        errMessage.includes('too many requests') ||
+        errMessage.includes('tx_too_late');
+
+      if (isTransient) {
+        this.logger.warn(
+          `Onchain job ${job.id} encountered transient network/congestion error: ${error instanceof Error ? error.message : 'Unknown error'}. Relying on exponential backoff.`,
+        );
+      } else {
+        this.logger.error(
+          `Onchain job ${job.id} failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
       throw error;
     }
   }
@@ -71,9 +91,10 @@ export class OnchainProcessor extends WorkerHost {
   }
 
   @OnWorkerEvent('failed')
-  onFailed(job: Job<OnchainJobData> | undefined, error: Error) {
+  async onFailed(job: Job<OnchainJobData> | undefined, error: Error) {
     if (job) {
       this.logger.error(`Onchain job ${job.id} failed: ${error.message}`);
+      await this.dlqService.moveToDlq('onchain', job, error);
     } else {
       this.logger.error(`Onchain job failed: ${error.message}`);
     }

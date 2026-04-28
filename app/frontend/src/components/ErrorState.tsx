@@ -1,95 +1,164 @@
 'use client';
 
 import Link from 'next/link';
+import { 
+  AlertTriangle, 
+  WifiOff, 
+  ServerCrash, 
+  Wallet, 
+  RefreshCcw, 
+  Home, 
+  ChevronRight,
+  Info
+} from 'lucide-react';
+import { ERROR_METADATA, ErrorCategory } from '@/types/error';
+import { categorizeError } from '@/lib/error-utils';
 
 interface ErrorStateProps {
-  title: string;
-  description: string;
+  title?: string;
+  description?: string;
   error?: Error & { digest?: string };
   onTryAgain?: () => void;
+  category?: ErrorCategory;
 }
 
 export function ErrorState({
-  title,
-  description,
+  title: manualTitle,
+  description: manualDescription,
   error,
   onTryAgain,
+  category: manualCategory,
 }: ErrorStateProps) {
+  const category = manualCategory || categorizeError(error);
+  const metadata = ERROR_METADATA[category];
+  
+  const title = manualTitle || metadata.title;
+  const description = manualDescription || metadata.description;
   const showDetails = process.env.NODE_ENV !== 'production';
+
+  const CategoryIcon = {
+    wallet: Wallet,
+    network: WifiOff,
+    server: ServerCrash,
+    unknown: AlertTriangle,
+  }[category];
 
   return (
     <main className="relative flex min-h-screen flex-1 items-center justify-center overflow-hidden bg-slate-950 px-4 py-16 text-slate-100">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.28),transparent_42%),radial-gradient(circle_at_bottom,rgba(16,185,129,0.18),transparent_35%)]" />
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.12)_1px,transparent_1px)] bg-position-[center_center] bg-size-[52px_52px] opacity-40" />
+      {/* Dynamic Background Elements */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute -top-[10%] -left-[10%] h-[40%] w-[40%] rounded-full bg-cyan-500/10 blur-[120px]" />
+        <div className="absolute -bottom-[10%] -right-[10%] h-[40%] w-[40%] rounded-full bg-emerald-500/10 blur-[120px]" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.05)_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
+      </div>
 
-      <section className="relative z-10 w-full max-w-3xl rounded-3xl border border-white/10 bg-slate-900/85 p-8 shadow-2xl shadow-cyan-950/30 backdrop-blur md:p-12">
-        <div className="mb-8 inline-flex items-center rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-1 text-sm font-medium tracking-[0.2em] text-cyan-200 uppercase">
-          Soter platform status
-        </div>
+      <section className="relative z-10 w-full max-w-2xl overflow-hidden rounded-3xl border border-white/10 bg-slate-900/60 shadow-2xl backdrop-blur-xl md:p-2">
+        <div className="p-8 md:p-12">
+          {/* Header Section */}
+          <div className="mb-8 flex flex-col items-start gap-6 sm:flex-row sm:items-center">
+            <div className={`flex h-16 w-16 items-center justify-center rounded-2xl border bg-gradient-to-br ${
+              category === 'wallet' ? 'border-amber-400/30 from-amber-400/20 to-amber-400/5 text-amber-400' :
+              category === 'network' ? 'border-cyan-400/30 from-cyan-400/20 to-cyan-400/5 text-cyan-400' :
+              category === 'server' ? 'border-rose-400/30 from-rose-400/20 to-rose-400/5 text-rose-400' :
+              'border-slate-400/30 from-slate-400/20 to-slate-400/5 text-slate-400'
+            }`}>
+              <CategoryIcon size={32} strokeWidth={1.5} />
+            </div>
+            
+            <div className="space-y-1">
+              <div className="inline-flex items-center rounded-full bg-white/5 px-3 py-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-400 border border-white/5">
+                {category} error detected
+              </div>
+              <h1 className="text-3xl font-bold tracking-tight text-white md:text-4xl">
+                {title}
+              </h1>
+            </div>
+          </div>
 
-        <div className="space-y-4">
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-emerald-300">
-            Resilient aid delivery
-          </p>
-          <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-white md:text-5xl">
-            {title}
-          </h1>
-          <p className="max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
+          <p className="text-lg leading-relaxed text-slate-300">
             {description}
           </p>
-        </div>
 
-        <div className="mt-10 flex flex-col gap-3 sm:flex-row">
-          {onTryAgain ? (
-            <button
-              type="button"
-              onClick={onTryAgain}
-              className="inline-flex items-center justify-center rounded-full bg-cyan-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2 focus:ring-offset-slate-950"
+          {/* Action Zone */}
+          <div className="mt-10 flex flex-col gap-4 sm:flex-row">
+            {onTryAgain && metadata.canRetry && (
+              <button
+                type="button"
+                onClick={onTryAgain}
+                className="group inline-flex items-center justify-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-semibold text-slate-950 transition-all hover:bg-slate-200 hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <RefreshCcw size={18} className="transition-transform group-hover:rotate-180 duration-700" />
+                Retry action
+              </button>
+            )}
+
+            <Link
+              href="/"
+              className="group inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-6 py-3.5 text-sm font-semibold text-white transition-all hover:bg-white/10 hover:border-white/20"
             >
-              Try again
-            </button>
-          ) : null}
-
-          <Link
-            href="/"
-            className="inline-flex items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-white transition hover:border-cyan-300/60 hover:bg-white/5"
-          >
-            Back to Home
-          </Link>
-        </div>
-
-        <div className="mt-10 grid gap-4 border-t border-white/10 pt-6 text-sm text-slate-300 md:grid-cols-2">
-          <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
-            <p className="font-semibold text-white">What happened</p>
-            <p className="mt-2 leading-6 text-slate-300">
-              The application hit an unexpected error while rendering this view.
-              We keep the user-facing message generic so internal details stay
-              private in production.
-            </p>
+              <Home size={18} />
+              Return Home
+            </Link>
           </div>
-          <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
-            <p className="font-semibold text-white">What you can do</p>
-            <p className="mt-2 leading-6 text-slate-300">
-              Retry the action or return to the home page to start a fresh
-              session.
-            </p>
-          </div>
-        </div>
 
-        {showDetails && error ? (
-          <div className="mt-8 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">
-            <p className="font-semibold text-amber-50">Development details</p>
-            <p className="mt-2 wrap-break-word font-mono text-xs leading-6 text-amber-100/90">
-              {error.message}
-            </p>
-            {error.digest ? (
-              <p className="mt-1 font-mono text-xs leading-6 text-amber-100/90">
-                Digest: {error.digest}
+          {/* Recovery Tips */}
+          <div className="mt-12 space-y-6">
+            <div className="rounded-2xl border border-white/5 bg-slate-950/40 p-6">
+              <div className="flex items-center gap-2 mb-4 text-sm font-semibold text-emerald-400">
+                <Info size={16} />
+                <span>Recommended Recovery</span>
+              </div>
+              <p className="text-sm leading-relaxed text-slate-400">
+                {metadata.remediation}
               </p>
-            ) : null}
+              
+              <div className="mt-6 space-y-3">
+                {metadata.hints.map((hint, i) => (
+                  <div key={i} className="flex items-start gap-3 group">
+                    <div className="mt-1.5 flex h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400 transition-transform group-hover:scale-150" />
+                    <span className="text-xs leading-relaxed text-slate-400 group-hover:text-slate-200 transition-colors">
+                      {hint}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-        ) : null}
+
+          {/* Technical Details (Dev Only) */}
+          {showDetails && error && (
+            <div className="mt-8 overflow-hidden rounded-xl border border-rose-500/20 bg-rose-500/5">
+              <div className="flex items-center justify-between border-b border-rose-500/20 bg-rose-500/10 px-4 py-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-300">
+                  Developer Context
+                </span>
+                {error.digest && (
+                  <span className="text-[10px] font-mono text-rose-400/60">
+                    ID: {error.digest}
+                  </span>
+                )}
+              </div>
+              <div className="p-4">
+                <code className="block whitespace-pre-wrap font-mono text-xs text-rose-200/80">
+                  {error.stack || error.message}
+                </code>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
+
+      {/* Footer Support Hub */}
+      <div className="absolute bottom-8 left-0 right-0 z-10 flex justify-center px-4">
+        <Link 
+          href="/support"
+          className="group flex items-center gap-2 text-xs font-medium text-slate-500 transition-colors hover:text-slate-300"
+        >
+          Still having issues? Contact Support
+          <ChevronRight size={14} className="transition-transform group-hover:translate-x-1" />
+        </Link>
+      </div>
     </main>
   );
 }
+

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { useAidPackages } from '@/hooks/useAidPackages';
 import type { AidPackage, AidPackageStatus } from '@/types/aid-package';
 
@@ -28,8 +28,7 @@ function PackageCard({ pkg }: { pkg: AidPackage }) {
 }
 
 export const AidPackageList: React.FC = () => {
-  const [page, setPage] = useState(1);
-  const { data, isLoading, error } = useAidPackages(page, 10);
+  const { data: packages = [], isLoading, error } = useAidPackages();
 
   if (isLoading) {
     return (
@@ -48,9 +47,7 @@ export const AidPackageList: React.FC = () => {
     );
   }
 
-  const packages = data?.data;
-
-  if (!packages || packages.length === 0) {
+  if (packages.length === 0) {
     return <div className="text-gray-500">No aid packages found.</div>;
   }
 
@@ -62,29 +59,6 @@ export const AidPackageList: React.FC = () => {
           <PackageCard key={pkg.id} pkg={pkg} />
         ))}
       </div>
-      
-      {/* Pagination Controls */}
-      {data?.meta && (
-        <div className="flex justify-between items-center pt-4">
-          <button
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-            disabled={page === 1}
-            className="px-4 py-2 text-sm border rounded-lg disabled:opacity-50"
-          >
-            Previous
-          </button>
-          <span className="text-sm text-gray-600">
-            Page {data.meta.page} of {data.meta.totalPages}
-          </span>
-          <button
-            onClick={() => setPage(p => Math.min(data.meta.totalPages, p + 1))}
-            disabled={page === data.meta.totalPages}
-            className="px-4 py-2 text-sm border rounded-lg disabled:opacity-50"
-          >
-            Next
-          </button>
-        </div>
-      )}
     </div>
   );
 };

@@ -18,14 +18,19 @@ export interface AuditQuery {
   entity?: string;
   entityId?: string;
   actorId?: string;
+  action?: string;
   startTime?: string;
   endTime?: string;
+  page?: number;
+  limit?: number;
 }
 
 export class ExportAuditQuery {
   from?: string;
   to?: string;
   entity?: string;
+  action?: string;
+  actorId?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -79,11 +84,16 @@ export class AuditService {
   }
 
   async findLogs(query: AuditQuery) {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(200, Math.max(1, query.limit ?? 50));
+    const skip = (page - 1) * limit;
+
     const where: Prisma.AuditLogWhereInput = {};
 
     if (query.entity) where.entity = query.entity;
     if (query.entityId) where.entityId = query.entityId;
     if (query.actorId) where.actorId = query.actorId;
+    if (query.action) where.action = query.action;
 
     if (query.startTime || query.endTime) {
       where.timestamp = {};
@@ -91,12 +101,17 @@ export class AuditService {
       if (query.endTime) where.timestamp.lte = new Date(query.endTime);
     }
 
-    return this.prisma.auditLog.findMany({
-      where,
-      orderBy: {
-        timestamp: 'desc',
-      },
-    });
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.auditLog.findMany({
+        where,
+        orderBy: { timestamp: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.auditLog.count({ where }),
+    ]);
+
+    return { data: rows, total, page, limit };
   }
 
   async exportLogs(query: ExportAuditQuery): Promise<ExportAuditResult> {
@@ -107,6 +122,8 @@ export class AuditService {
     const where: Prisma.AuditLogWhereInput = {};
 
     if (query.entity) where.entity = query.entity;
+    if (query.action) where.action = query.action;
+    if (query.actorId) where.actorId = query.actorId;
 
     if (query.from || query.to) {
       if (query.from && isNaN(Date.parse(query.from))) {

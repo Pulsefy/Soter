@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 from PIL import Image
+import time
+import metrics
 
 
 class ImagePreprocessor:
@@ -54,18 +56,24 @@ class ImagePreprocessor:
         threshold_method: str = "otsu",
         denoise: bool = True,
     ) -> Image.Image:
-        if image.size[0] == 0 or image.size[1] == 0:
-            return image.convert("L")
+        start_time = time.time()
+        
+        try:
+            if image.size[0] == 0 or image.size[1] == 0:
+                return image.convert("L")
 
-        resized = self.resize_image(image)
-        gray = self.to_grayscale(resized)
+            resized = self.resize_image(image)
+            gray = self.to_grayscale(resized)
 
-        if denoise:
-            gray = self.denoise(gray)
+            if denoise:
+                gray = self.denoise(gray)
 
-        thresholded = self.apply_threshold(gray, method=threshold_method)
+            thresholded = self.apply_threshold(gray, method=threshold_method)
 
-        return thresholded
+            return thresholded
+        finally:
+            latency = time.time() - start_time
+            metrics.PIPELINE_STEP_LATENCY.labels(step_name='preprocess').observe(latency)
 
     @staticmethod
     def image_to_numpy(image: Image.Image) -> np.ndarray:

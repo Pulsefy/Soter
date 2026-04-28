@@ -1,6 +1,10 @@
 'use client';
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { ErrorInline } from './ErrorInline';
+import Link from 'next/link';
+import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
+import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
 import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
 import type {
     PiiDetectionResult,
@@ -8,6 +12,7 @@ import type {
     VerificationResult,
     VerificationStep,
 } from '@/types/verification';
+import { useActivity } from '@/hooks/useActivity';
 
 /* ─── Accepted image MIME types ─────────────────────────────────────────── */
 
@@ -15,6 +20,7 @@ const ACCEPTED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 const ACCEPTED_MIME_SET: ReadonlySet<string> = new Set(ACCEPTED_MIME_TYPES);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
 const MIN_TEXT_LENGTH = 20;
+const DRAFT_STORAGE_KEY = 'soter.verification-flow.draft.v1';
 
 /* ─── PII detection ─────────────────────────────────────────────────────── */
 
@@ -155,6 +161,9 @@ interface FlowState {
     step: VerificationStep;
     imageFile: File | null;
     textInput: string;
+    includeLocation: boolean;
+    locationPermission: LocationPermissionState;
+    locationData: CapturedLocation | null;
     errors: ValidationErrors;
     apiError: string | null;
     result: VerificationResult | null;
@@ -166,10 +175,103 @@ function initialState(): FlowState {
         step: 'upload',
         imageFile: null,
         textInput: '',
+        includeLocation: false,
+        locationPermission: 'idle',
+        locationData: null,
         errors: {},
         apiError: null,
         result: null,
     };
+}
+
+type LocationPermissionState =
+    | 'idle'
+    | 'requesting'
+    | 'granted'
+    | 'denied'
+    | 'unsupported'
+    | 'error';
+
+interface CapturedLocation {
+    latitude: number;
+    longitude: number;
+    accuracy: number;
+}
+
+interface VerificationDraft {
+    textInput: string;
+    includeLocation: boolean;
+    locationPermission: LocationPermissionState;
+    locationData: CapturedLocation | null;
+}
+
+function isLocationPermissionState(value: unknown): value is LocationPermissionState {
+    return (
+        value === 'idle' ||
+        value === 'requesting' ||
+        value === 'granted' ||
+        value === 'denied' ||
+        value === 'unsupported' ||
+        value === 'error'
+    );
+}
+
+function isCapturedLocation(value: unknown): value is CapturedLocation {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Record<string, unknown>;
+    return (
+        typeof candidate.latitude === 'number' &&
+        typeof candidate.longitude === 'number' &&
+        typeof candidate.accuracy === 'number'
+    );
+}
+
+export function parseVerificationDraft(raw: string | null): VerificationDraft | null {
+    if (!raw) return null;
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        const candidate = parsed as Record<string, unknown>;
+
+        if (typeof candidate.textInput !== 'string') return null;
+        if (typeof candidate.includeLocation !== 'boolean') return null;
+        if (!isLocationPermissionState(candidate.locationPermission)) return null;
+
+        const locationData =
+            candidate.locationData === null || candidate.locationData === undefined
+                ? null
+                : isCapturedLocation(candidate.locationData)
+                  ? candidate.locationData
+                  : null;
+
+        return {
+            textInput: candidate.textInput,
+            includeLocation: candidate.includeLocation,
+            locationPermission: candidate.locationPermission,
+            locationData,
+        };
+    } catch {
+        return null;
+    }
+}
+
+function buildVerificationDraft(state: {
+    textInput: string;
+    includeLocation: boolean;
+    locationPermission: LocationPermissionState;
+    locationData: CapturedLocation | null;
+}): VerificationDraft {
+    return {
+        textInput: state.textInput,
+        includeLocation: state.includeLocation,
+        locationPermission: state.locationPermission,
+        locationData: state.locationData,
+    };
+}
+
+function readVerificationDraftFromStorage(): VerificationDraft | null {
+    if (typeof window === 'undefined') return null;
+    return parseVerificationDraft(window.localStorage.getItem(DRAFT_STORAGE_KEY));
 }
 
 /* ─── VerificationFlow component ────────────────────────────────────────── */
@@ -187,13 +289,26 @@ function initialState(): FlowState {
  */
 export const VerificationFlow: React.FC = () => {
     const uid = useId();
+    const { trackJob } = useActivity();
+    const [restoredDraft] = useState<VerificationDraft | null>(() =>
+        readVerificationDraftFromStorage(),
+    );
 
     const [step, setStep] = useState<VerificationStep>('upload');
     const [imageFile, setImageFile] = useState<File | null>(null);
-    const [textInput, setTextInput] = useState('');
+    const [textInput, setTextInput] = useState(restoredDraft?.textInput ?? '');
+    const [includeLocation, setIncludeLocation] = useState(
+        restoredDraft?.includeLocation ?? false,
+    );
+    const [locationPermission, setLocationPermission] =
+        useState<LocationPermissionState>(restoredDraft?.locationPermission ?? 'idle');
+    const [locationData, setLocationData] = useState<CapturedLocation | null>(
+        restoredDraft?.locationData ?? null,
+    );
     const [errors, setErrors] = useState<ValidationErrors>({});
     const [apiError, setApiError] = useState<string | null>(null);
     const [result, setResult] = useState<VerificationResult | null>(null);
+    const [draftRestored, setDraftRestored] = useState(restoredDraft !== null);
 
     /**
      * Payload ref: stores the validated, PII-clean FormData to be sent when
@@ -209,10 +324,78 @@ export const VerificationFlow: React.FC = () => {
         setStep(s.step);
         setImageFile(s.imageFile);
         setTextInput(s.textInput);
+        setIncludeLocation(s.includeLocation);
+        setLocationPermission(s.locationPermission);
+        setLocationData(s.locationData);
         setErrors(s.errors);
         setApiError(s.apiError);
         setResult(s.result);
+        setDraftRestored(false);
         pendingPayload.current = null;
+        if (typeof window !== 'undefined') {
+            window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || step !== 'upload') return;
+        const draft = buildVerificationDraft({
+            textInput,
+            includeLocation,
+            locationPermission,
+            locationData,
+        });
+
+        const hasDraftContent =
+            draft.textInput.trim().length > 0 ||
+            draft.includeLocation ||
+            draft.locationData !== null;
+
+        if (!hasDraftContent) {
+            window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+            return;
+        }
+
+        window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    }, [includeLocation, locationData, locationPermission, step, textInput]);
+
+    const handleLocationConsentToggle = useCallback((checked: boolean) => {
+        setIncludeLocation(checked);
+        if (!checked) {
+            setLocationPermission('idle');
+            setLocationData(null);
+        }
+    }, []);
+
+    const handleRequestLocation = useCallback(() => {
+        if (typeof navigator === 'undefined' || !navigator.geolocation) {
+            setLocationPermission('unsupported');
+            return;
+        }
+
+        setLocationPermission('requesting');
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                setLocationData({
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    accuracy: position.coords.accuracy,
+                });
+                setLocationPermission('granted');
+            },
+            (positionError) => {
+                if (positionError.code === positionError.PERMISSION_DENIED) {
+                    setLocationPermission('denied');
+                } else {
+                    setLocationPermission('error');
+                }
+            },
+            {
+                enableHighAccuracy: false,
+                timeout: 8000,
+                maximumAge: 5 * 60 * 1000,
+            },
+        );
     }, []);
 
     /* ── Step 1 → submission handler ────────────────────────────────────────── */
@@ -254,13 +437,18 @@ export const VerificationFlow: React.FC = () => {
             if (trimmedText.length > 0) {
                 form.append('text', trimmedText);
             }
+            if (includeLocation && locationPermission === 'granted' && locationData) {
+                form.append('location_latitude', locationData.latitude.toString());
+                form.append('location_longitude', locationData.longitude.toString());
+                form.append('location_accuracy_meters', locationData.accuracy.toString());
+            }
             pendingPayload.current = form;
 
             // 4. Advance to Step 2; the API call fires via useEffect below
             setApiError(null);
             setStep('analysing');
         },
-        [imageFile, textInput],
+        [imageFile, includeLocation, locationData, locationPermission, textInput],
     );
 
     /* ── Step 2 → API call ───────────────────────────────────────────────────── */
@@ -277,29 +465,34 @@ export const VerificationFlow: React.FC = () => {
 
         let cancelled = false;
 
-        startEvidenceVerification(payload)
-            .then((data) => {
-                if (cancelled) return;
-                setResult(data);
-                setStep('result');
-            })
-            .catch((err: unknown) => {
-                if (cancelled) return;
-                if (err instanceof VerificationApiError) {
-                    setApiError(err.message);
-                } else {
-                    setApiError(
-                        'An unexpected error occurred. Please try again.',
-                    );
-                }
-                pendingPayload.current = null;
-                setStep('upload');
-            });
+        (async () => {
+          try {
+            const data = await trackJob(
+              'Evidence Verification',
+              'Analyzing submitted evidence for authenticity',
+              () => startEvidenceVerification(payload)
+            );
+            if (cancelled) return;
+            setResult(data);
+            setStep('result');
+          } catch (err) {
+            if (cancelled) return;
+            if (err instanceof VerificationApiError) {
+              setApiError(err.message);
+            } else {
+              setApiError(
+                'An unexpected error occurred. Please try again.',
+              );
+            }
+            pendingPayload.current = null;
+            setStep('upload');
+          }
+        })();
 
         return () => {
             cancelled = true;
         };
-    }, [step]);
+    }, [step, trackJob]);
 
     /* ── Derived IDs ─────────────────────────────────────────────────────────── */
 
@@ -331,7 +524,15 @@ export const VerificationFlow: React.FC = () => {
                     formErrorId={formErrorId}
                     onImageChange={setImageFile}
                     onTextChange={setTextInput}
+                    onClearApiError={() => setApiError(null)}
                     onSubmit={handleSubmit}
+                    includeLocation={includeLocation}
+                    locationPermission={locationPermission}
+                    locationData={locationData}
+                    onLocationConsentToggle={handleLocationConsentToggle}
+                    onRequestLocation={handleRequestLocation}
+                    onDiscardDraft={resetFlow}
+                    draftRestored={draftRestored}
                 />
             )}
 
@@ -359,7 +560,15 @@ interface StepUploadProps {
     formErrorId: string;
     onImageChange: (file: File | null) => void;
     onTextChange: (text: string) => void;
+    onClearApiError: () => void;
     onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
+    includeLocation: boolean;
+    locationPermission: LocationPermissionState;
+    locationData: CapturedLocation | null;
+    onLocationConsentToggle: (checked: boolean) => void;
+    onRequestLocation: () => void;
+    onDiscardDraft: () => void;
+    draftRestored: boolean;
 }
 
 /**
@@ -380,8 +589,17 @@ function StepUpload({
     formErrorId,
     onImageChange,
     onTextChange,
+    onClearApiError,
     onSubmit,
+    includeLocation,
+    locationPermission,
+    locationData,
+    onLocationConsentToggle,
+    onRequestLocation,
+    onDiscardDraft,
+    draftRestored,
 }: StepUploadProps) {
+    const role = getAppUserRole();
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0] ?? null;
         onImageChange(file);
@@ -391,14 +609,49 @@ function StepUpload({
         <form onSubmit={onSubmit} noValidate aria-label="Evidence upload form">
             <h2 className="text-lg font-semibold mb-4">Submit Evidence for Verification</h2>
 
+            {!imageFile && textInput.trim().length === 0 && (
+                <div className="mb-6">
+                    <AppEmptyState
+                        compact
+                        eyebrow="No Evidence Added"
+                        title={
+                            isOperationsRole(role)
+                                ? 'Start with sample evidence to review the verification experience'
+                                : 'Start with a sample request if you want to explore the flow first'
+                        }
+                        description={
+                            isOperationsRole(role)
+                                ? 'Contributors can preload example text, attach a small test image, and walk through validation and result states without needing a live claimant record.'
+                                : 'You can type your own request or use sample text to understand how verification behaves before real data is connected.'
+                        }
+                        actions={[
+                            {
+                                onClick: () => onTextChange(getSampleVerificationText(role)),
+                                label: 'Insert sample evidence',
+                                icon: 'sample',
+                            },
+                            { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                        ]}
+                    />
+                </div>
+            )}
+
             {/* API error from a previous attempt */}
             {apiError && (
-                <div
-                    role="alert"
-                    className="mb-4 p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 text-sm"
-                >
-                    {apiError}
+                <div className="mb-6">
+                    <ErrorInline 
+                        error={apiError} 
+                        onRetry={onClearApiError}
+                        onClose={onClearApiError}
+                        variant="card"
+                    />
                 </div>
+            )}
+
+            {draftRestored && (
+                <p className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
+                    Restored your locally saved draft from this device.
+                </p>
             )}
 
             {/* Form-level validation error (at-least-one rule) */}
@@ -480,14 +733,78 @@ function StepUpload({
                 )}
             </div>
 
-            <button
-                type="submit"
-                disabled={!canSubmit}
-                aria-disabled={!canSubmit}
-                className="px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            >
-                Submit for Verification
-            </button>
+            <div className="mb-6 rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800/50">
+                <label className="flex items-start gap-3">
+                    <input
+                        type="checkbox"
+                        checked={includeLocation}
+                        onChange={(e) => onLocationConsentToggle(e.target.checked)}
+                        className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100">
+                            Share approximate location (optional)
+                        </span>
+                        <span className="block text-xs text-gray-600 dark:text-gray-400 mt-1">
+                            We use this only to add context for field verification and delivery routing. Your request still works if you choose not to share.
+                        </span>
+                    </span>
+                </label>
+
+                {includeLocation && (
+                    <div className="mt-3 space-y-2">
+                        <button
+                            type="button"
+                            onClick={onRequestLocation}
+                            disabled={locationPermission === 'requesting'}
+                            className="px-3 py-1.5 text-xs font-medium rounded-md border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-60 disabled:cursor-not-allowed dark:border-blue-700 dark:bg-blue-900/40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                        >
+                            {locationPermission === 'requesting'
+                                ? 'Requesting location...'
+                                : 'Allow location access'}
+                        </button>
+
+                        {locationPermission === 'granted' && locationData && (
+                            <p className="text-xs text-green-700 dark:text-green-300">
+                                Location added (accuracy: ±{Math.round(locationData.accuracy)}m).
+                            </p>
+                        )}
+                        {locationPermission === 'denied' && (
+                            <p className="text-xs text-amber-700 dark:text-amber-300">
+                                Location permission was denied. You can continue without it.
+                            </p>
+                        )}
+                        {locationPermission === 'unsupported' && (
+                            <p className="text-xs text-amber-700 dark:text-amber-300">
+                                Location is not supported in this browser. You can continue without it.
+                            </p>
+                        )}
+                        {locationPermission === 'error' && (
+                            <p className="text-xs text-amber-700 dark:text-amber-300">
+                                We couldn&apos;t capture your location right now. You can continue without it.
+                            </p>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+                <button
+                    type="submit"
+                    disabled={!canSubmit}
+                    aria-disabled={!canSubmit}
+                    className="px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                >
+                    Submit for Verification
+                </button>
+                <button
+                    type="button"
+                    onClick={onDiscardDraft}
+                    className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 transition-colors"
+                >
+                    Discard Draft
+                </button>
+            </div>
         </form>
     );
 }
@@ -577,6 +894,13 @@ function StepResult({ result, onReset }: StepResultProps) {
             >
                 Start New Verification
             </button>
+
+            <Link
+                href="/help"
+                className="inline-flex items-center rounded-lg text-sm font-medium text-blue-600 hover:text-blue-700"
+            >
+                Review contributor help
+            </Link>
         </div>
     );
 }

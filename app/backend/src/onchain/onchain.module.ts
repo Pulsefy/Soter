@@ -7,6 +7,10 @@ import { MockOnchainAdapter } from './onchain.adapter.mock';
 import { SorobanAdapter } from './soroban.adapter';
 import { OnchainProcessor } from './onchain.processor';
 import { OnchainService } from './onchain.service';
+import { LedgerBackfillService } from './ledger-backfill.service';
+import { LedgerReconciliationService } from './ledger-reconciliation.service';
+import { LedgerAdminController } from './ledger-admin.controller';
+import { JobsModule } from '../jobs/jobs.module';
 
 /**
  * Factory function to create the appropriate adapter based on configuration
@@ -49,14 +53,23 @@ const onchainAdapterProvider: Provider = {
       }),
       inject: [ConfigService],
     }),
+    JobsModule,
   ],
+  controllers: [LedgerAdminController],
   providers: [
     MockOnchainAdapter,
     SorobanAdapter,
     onchainAdapterProvider,
     OnchainProcessor,
     OnchainService,
+    LedgerBackfillService,
+    LedgerReconciliationService,
   ],
-  exports: [ONCHAIN_ADAPTER_TOKEN, OnchainService],
+  exports: [
+    ONCHAIN_ADAPTER_TOKEN,
+    OnchainService,
+    LedgerBackfillService,
+    LedgerReconciliationService,
+  ],
 })
 export class OnchainModule {}

@@ -10,7 +10,9 @@ export interface NetworkStatus {
  * Monitors network connectivity using @react-native-community/netinfo.
  * Returns live connection state and fires `onReconnect` when connectivity is restored.
  */
-export const useNetworkStatus = (onReconnect?: () => void): NetworkStatus => {
+export const useNetworkStatus = (
+  onReconnect?: () => void | Promise<void>,
+): NetworkStatus => {
   const [status, setStatus] = useState<NetworkStatus>({
     isConnected: true,
     isInternetReachable: true,
