@@ -163,6 +163,21 @@ export interface DisburseResult {
   metadata?: Record<string, any>;
 }
 
+export interface RevokeParams {
+  claimId: string;
+  packageId: string;
+  recipientAddress?: string;
+  tokenAddress: string;
+  reason?: string;
+}
+
+export interface RevokeResult {
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  metadata?: Record<string, any>;
+}
+
 /**
  * Interface for on-chain operations with Soroban AidEscrow contract
  */
@@ -222,4 +237,5 @@ export interface OnchainAdapter {
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;
   disburse(params: DisburseParams): Promise<DisburseResult>;
+  revoke(params: RevokeParams): Promise<RevokeResult>;
 }

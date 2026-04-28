@@ -28,6 +28,14 @@ export interface InitEscrowJobParams {
   supportedTokens?: string[]; // Optional list of supported token addresses
 }
 
+export interface RevokeClaimJobParams {
+  claimId: string;
+  packageId: string;
+  recipientAddress?: string;
+  tokenAddress: string;
+  reason?: string;
+}
+
 @Injectable()
 export class OnchainService {
   private readonly logger = new Logger(OnchainService.name);
@@ -52,6 +60,13 @@ export class OnchainService {
       throw new Error('tokenAddress is required for disbursement');
     }
     return this.enqueue(OnchainOperationType.DISBURSE, params);
+  }
+
+  async enqueueRevoke(params: RevokeClaimJobParams) {
+    if (!params.tokenAddress) {
+      throw new Error('tokenAddress is required for revocation');
+    }
+    return this.enqueue(OnchainOperationType.REVOKE, params);
   }
 
   private async enqueue(type: OnchainOperationType, params: unknown) {

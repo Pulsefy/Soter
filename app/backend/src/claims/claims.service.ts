@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron } from '@nestjs/schedule';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
@@ -683,5 +684,73 @@ export class ClaimsService {
     ].join(','));
 
     return [header, ...lines].join('\r\n');
+  }
+
+  @Cron('0 * * * *')
+  async handleExpiredClaims() {
+    this.logger.log('Running scheduled claim expiration check');
+
+    const now = new Date();
+    const expiredClaims = await this.prisma.claim.findMany({
+      where: {
+        expiresAt: { lt: now },
+        status: { in: [ClaimStatus.requested, ClaimStatus.verified] },
+        deletedAt: null,
+      },
+      include: { campaign: true },
+    });
+
+    if (expiredClaims.length === 0) {
+      this.logger.log('No expired claims found');
+      return { processed: 0 };
+    }
+
+    this.logger.log(`Found ${expiredClaims.length} expired claims`);
+
+    let processed = 0;
+    for (const claim of expiredClaims) {
+      try {
+        const tokenAddress = this.getTokenAddressForClaim(claim);
+        const packageId = this.generateMockPackageId(claim.id);
+
+        if (this.onchainEnabled && this.onchainAdapter) {
+          await this.onchainAdapter.revoke({
+            claimId: claim.id,
+            packageId,
+            recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
+            tokenAddress,
+            reason: 'Claim expired',
+          });
+        }
+
+        await this.prisma.claim.update({
+          where: { id: claim.id },
+          data: { status: ClaimStatus.expired },
+        });
+
+        await this.auditService.record({
+          actorId: 'system:cron',
+          entity: 'claim',
+          entityId: claim.id,
+          action: 'expired',
+          metadata: {
+            amount: claim.amount,
+            expiresAt: claim.expiresAt,
+            previousStatus: claim.status,
+            tokenAddress,
+          },
+        });
+
+        processed++;
+      } catch (error) {
+        this.logger.error(
+          `Failed to process expired claim ${claim.id}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
+
+    this.logger.log(`Processed ${processed}/${expiredClaims.length} expired claims`);
+    return { processed, total: expiredClaims.length };
   }
 }

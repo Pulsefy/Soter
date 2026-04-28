@@ -22,6 +22,7 @@ enum ClaimStatus {
   disbursed
   archived
   cancelled
+  expired
 }
 
 model AidPackage {
@@ -235,6 +236,9 @@ model Claim {
   reissuedFromId String?
   reissuedFrom   Claim?    @relation("ReissueChain", fields: [reissuedFromId], references: [id])
   reissuedTo     Claim[]   @relation("ReissueChain")
+
+  /// Expiration timestamp for time-limited claims
+  expiresAt    DateTime?
 
   balanceLedger  BalanceLedger[]
 

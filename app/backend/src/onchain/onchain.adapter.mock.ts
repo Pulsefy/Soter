@@ -7,6 +7,8 @@ import {
   CreateClaimResult,
   DisburseParams,
   DisburseResult,
+  RevokeParams,
+  RevokeResult,
   CreateAidPackageParams,
   CreateAidPackageResult,
   BatchCreateAidPackagesParams,
@@ -271,6 +273,26 @@ export class MockOnchainAdapter implements OnchainAdapter {
         claimId: params.claimId,
         packageId: params.packageId,
         recipientAddress: params.recipientAddress,
+        adapter: 'mock',
+      },
+    };
+  }
+
+  async revoke(params: RevokeParams): Promise<RevokeResult> {
+    await Promise.resolve();
+    const transactionHash = this.generateMockHash(
+      `revoke-${params.claimId}-${Date.now()}`,
+    );
+
+    return {
+      transactionHash,
+      timestamp: new Date(),
+      status: 'success',
+      metadata: {
+        claimId: params.claimId,
+        packageId: params.packageId,
+        recipientAddress: params.recipientAddress,
+        reason: params.reason,
         adapter: 'mock',
       },
     };

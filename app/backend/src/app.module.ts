@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { ScheduleModule } from '@nestjs/schedule';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -56,6 +57,8 @@ import { DeprecationInterceptor } from './common/interceptors/deprecation.interc
         return existing.length > 0 ? existing : candidates;
       })(),
     }),
+
+    ScheduleModule.forRoot(),
 
     BullModule.forRootAsync({
       imports: [ConfigModule],
