@@ -1197,15 +1197,15 @@ mod tests {
         // Test listing recipient1's packages with limit 10 (more than they have)
         let packages = client.list_recipient_packages(&recipient1, &0, &10);
         assert_eq!(packages.len(), 3);
-        assert!(packages.contains(&package1_id));
-        assert!(packages.contains(&package2_id));
-        assert!(packages.contains(&package3_id));
+        assert!(packages.contains(package1_id));
+        assert!(packages.contains(package2_id));
+        assert!(packages.contains(package3_id));
 
         // Test listing recipient2's packages with limit 10 (more than they have)
         let packages = client.list_recipient_packages(&recipient2, &0, &10);
         assert_eq!(packages.len(), 2);
-        assert!(packages.contains(&package4_id));
-        assert!(packages.contains(&package5_id));
+        assert!(packages.contains(package4_id));
+        assert!(packages.contains(package5_id));
     }
 
     #[test]
@@ -1245,19 +1245,19 @@ mod tests {
         // Test pagination with limit 3
         let page1 = client.list_recipient_packages(&recipient, &0, &3);
         assert_eq!(page1.len(), 3);
-        assert!(page1.contains(&package_ids.get(0).unwrap()));
-        assert!(page1.contains(&package_ids.get(1).unwrap()));
-        assert!(page1.contains(&package_ids.get(2).unwrap()));
+        assert!(page1.contains(package_ids.get(0).unwrap()));
+        assert!(page1.contains(package_ids.get(1).unwrap()));
+        assert!(page1.contains(package_ids.get(2).unwrap()));
 
         let page2 = client.list_recipient_packages(&recipient, &3, &3);
         assert_eq!(page2.len(), 3);
-        assert!(page2.contains(&package_ids.get(3).unwrap()));
-        assert!(page2.contains(&package_ids.get(4).unwrap()));
-        assert!(page2.contains(&package_ids.get(5).unwrap()));
+        assert!(page2.contains(package_ids.get(3).unwrap()));
+        assert!(page2.contains(package_ids.get(4).unwrap()));
+        assert!(page2.contains(package_ids.get(5).unwrap()));
 
         let page3 = client.list_recipient_packages(&recipient, &6, &3);
         assert_eq!(page3.len(), 1);
-        assert!(page3.contains(&package_ids.get(6).unwrap()));
+        assert!(page3.contains(package_ids.get(6).unwrap()));
 
         // Test cursor beyond available packages
         let empty_page = client.list_recipient_packages(&recipient, &10, &3);
@@ -1266,7 +1266,7 @@ mod tests {
         // Test limit that exceeds remaining packages
         let last_page = client.list_recipient_packages(&recipient, &5, &10);
         assert_eq!(last_page.len(), 2);
-        assert!(last_page.contains(&package_ids.get(5).unwrap()));
-        assert!(last_page.contains(&package_ids.get(6).unwrap()));
+        assert!(last_page.contains(package_ids.get(5).unwrap()));
+        assert!(last_page.contains(package_ids.get(6).unwrap()));
     }
 }
