@@ -1298,11 +1298,52 @@ mod tests {
 
         // Create packages for recipient1 (3 packages) and recipient2 (2 packages)
         let operator = admin.clone();
-        let package1_id = client.create_package(&operator, &1, &recipient1, &1000, &token, &86400);
-        let package2_id = client.create_package(&operator, &2, &recipient1, &1500, &token, &86400);
-        let package3_id = client.create_package(&operator, &3, &recipient1, &2000, &token, &86400);
-        let package4_id = client.create_package(&operator, &4, &recipient2, &1200, &token, &86400);
-        let package5_id = client.create_package(&operator, &5, &recipient2, &1800, &token, &86400);
+        let empty_metadata = Map::new(&env);
+        let package1_id = client.create_package(
+            &operator,
+            &1,
+            &recipient1,
+            &1000,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
+        let package2_id = client.create_package(
+            &operator,
+            &2,
+            &recipient1,
+            &1500,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
+        let package3_id = client.create_package(
+            &operator,
+            &3,
+            &recipient1,
+            &2000,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
+        let package4_id = client.create_package(
+            &operator,
+            &4,
+            &recipient2,
+            &1200,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
+        let package5_id = client.create_package(
+            &operator,
+            &5,
+            &recipient2,
+            &1800,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
 
         // Test listing recipient1's packages with limit 10 (more than they have)
         let packages = client.list_recipient_packages(&recipient1, &0, &10);
@@ -1341,6 +1382,7 @@ mod tests {
         // Create 7 packages for the recipient
         let operator = admin.clone();
         let mut package_ids: soroban_sdk::Vec<u64> = soroban_sdk::Vec::new(&env);
+        let empty_metadata = Map::new(&env);
         for i in 0..7 {
             package_ids.push_back(client.create_package(
                 &operator,
@@ -1349,6 +1391,7 @@ mod tests {
                 &(1000 + i as i128 * 100),
                 &token,
                 &86400,
+                &empty_metadata,
             ));
         }
 
