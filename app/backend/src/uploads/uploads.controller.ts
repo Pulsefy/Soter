@@ -1,6 +1,25 @@
-import { Controller, Post, Body, Param, Put, UploadedFile, UseInterceptors, ParseIntPipe, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Param,
+  Put,
+  UploadedFile,
+  UseInterceptors,
+  ParseIntPipe,
+  BadRequestException,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiConsumes, ApiOkResponse, ApiCreatedResponse, ApiParam } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiConsumes,
+  ApiOkResponse,
+  ApiCreatedResponse,
+  ApiParam,
+} from '@nestjs/swagger';
 import { UploadsService } from './uploads.service';
 import { CreateUploadSessionDto } from './dto/create-upload-session.dto';
 import { FinalizeUploadDto } from './dto/finalize-upload.dto';
@@ -26,12 +45,17 @@ export class UploadsController {
   async uploadChunk(
     @Param('id') id: string,
     @Param('chunkIndex', ParseIntPipe) chunkIndex: number,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: { size: number; buffer: Buffer },
   ) {
     if (!file) {
       throw new BadRequestException('File chunk is required');
     }
-    return this.uploadsService.uploadChunk(id, chunkIndex, file.size, file.buffer);
+    return this.uploadsService.uploadChunk(
+      id,
+      chunkIndex,
+      file.size,
+      file.buffer,
+    );
   }
 
   @Post('session/:id/finalize')

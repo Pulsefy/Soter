@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  PayloadTooLargeException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUploadSessionDto } from './dto/create-upload-session.dto';
 import { UploadSessionStatus } from '@prisma/client';
@@ -9,13 +14,22 @@ export class UploadsService {
 
   async createSession(dto: CreateUploadSessionDto) {
     // Validate content type
-    const validContentTypes = ['image/jpeg', 'image/png', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    const validContentTypes = [
+      'image/jpeg',
+      'image/png',
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ];
     if (!validContentTypes.includes(dto.contentType)) {
-      throw new BadRequestException('Invalid content type. Only images and documents are allowed.');
+      throw new BadRequestException(
+        'Invalid content type. Only images and documents are allowed.',
+      );
     }
-    
+
     // Validate size limit
-    if (dto.totalSize > 50 * 1024 * 1024) { // 50MB
+    if (dto.totalSize > 50 * 1024 * 1024) {
+      // 50MB
       throw new PayloadTooLargeException('File size exceeds 50MB limit');
     }
 
@@ -35,7 +49,12 @@ export class UploadsService {
     });
   }
 
-  async uploadChunk(sessionId: string, chunkIndex: number, size: number, buffer: Buffer) {
+  async uploadChunk(
+    sessionId: string,
+    chunkIndex: number,
+    size: number,
+    _buffer: Buffer,
+  ) {
     const session = await this.prisma.uploadSession.findUnique({
       where: { id: sessionId },
     });
@@ -45,7 +64,9 @@ export class UploadsService {
     }
 
     if (session.status !== UploadSessionStatus.pending) {
-      throw new BadRequestException(`Cannot upload chunk to session with status ${session.status}`);
+      throw new BadRequestException(
+        `Cannot upload chunk to session with status ${session.status}`,
+      );
     }
 
     if (session.expiresAt < new Date()) {
@@ -58,7 +79,7 @@ export class UploadsService {
 
     // Here we would typically stream the buffer to S3, GCS, or a local file system.
     // For now, we simulate the storage and just track the chunk completion in the DB.
-    
+
     // Check if chunk already exists for idempotency (resume semantics)
     const existingChunk = await this.prisma.uploadChunk.findUnique({
       where: {
@@ -91,23 +112,32 @@ export class UploadsService {
     if (!session) {
       throw new NotFoundException('Upload session not found');
     }
-    
+
     // Validate ownership
     if (session.ownerId !== ownerId) {
       throw new BadRequestException('Ownership validation failed');
     }
 
     if (session.status !== UploadSessionStatus.pending) {
-      throw new BadRequestException(`Cannot finalize session with status ${session.status}`);
+      throw new BadRequestException(
+        `Cannot finalize session with status ${session.status}`,
+      );
     }
 
-    const uploadedSize = session.chunks.reduce((acc, chunk) => acc + chunk.size, 0);
+    const uploadedSize = session.chunks.reduce(
+      (acc, chunk) => acc + chunk.size,
+      0,
+    );
     if (uploadedSize !== session.totalSize) {
-      throw new BadRequestException(`Size mismatch: expected ${session.totalSize}, got ${uploadedSize}`);
+      throw new BadRequestException(
+        `Size mismatch: expected ${session.totalSize}, got ${uploadedSize}`,
+      );
     }
 
     // Check chunk ordering (make sure all chunks are present and contiguous)
-    const sortedChunks = session.chunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
+    const sortedChunks = session.chunks.sort(
+      (a, b) => a.chunkIndex - b.chunkIndex,
+    );
     for (let i = 0; i < sortedChunks.length; i++) {
       if (sortedChunks[i].chunkIndex !== i) {
         throw new BadRequestException(`Missing chunk at index ${i}`);
