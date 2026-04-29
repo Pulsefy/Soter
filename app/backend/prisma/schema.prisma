@@ -490,3 +490,38 @@ model IdempotencyKey {
   @@index([key])
   @@index([expiresAt])
 }
+
+enum UploadSessionStatus {
+  pending
+  completed
+  failed
+  expired
+}
+
+model UploadSession {
+  id          String              @id @default(cuid())
+  ownerId     String
+  filename    String
+  contentType String
+  totalSize   Int
+  status      UploadSessionStatus @default(pending)
+  expiresAt   DateTime
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  chunks      UploadChunk[]
+
+  @@index([status, expiresAt])
+  @@index([ownerId])
+}
+
+model UploadChunk {
+  id              String        @id @default(cuid())
+  uploadSessionId String
+  uploadSession   UploadSession @relation(fields: [uploadSessionId], references: [id])
+  chunkIndex      Int
+  size            Int
+  createdAt       DateTime      @default(now())
+
+  @@unique([uploadSessionId, chunkIndex])
+}
