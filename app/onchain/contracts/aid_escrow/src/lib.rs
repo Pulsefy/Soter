@@ -1256,7 +1256,15 @@ mod tests {
         assert!(client.is_action_paused(&symbol_short!("create")));
 
         // Attempt to create package should fail
-        let result = client.try_create_package(&admin, &1, &recipient, &1000, &token, &86400, &Map::new(&env));
+        let result = client.try_create_package(
+            &admin,
+            &1,
+            &recipient,
+            &1000,
+            &token,
+            &86400,
+            &Map::new(&env),
+        );
         assert!(result.is_err());
 
         // 2. Unpause 'create', pause 'claim'
@@ -1264,7 +1272,15 @@ mod tests {
         client.pause_action(&symbol_short!("claim"));
 
         // Create package should work now
-        let package_id = client.create_package(&admin, &1, &recipient, &1000, &token, &86400, &Map::new(&env));
+        let package_id = client.create_package(
+            &admin,
+            &1,
+            &recipient,
+            &1000,
+            &token,
+            &86400,
+            &Map::new(&env),
+        );
 
         // Claim should fail
         let claim_result = client.try_claim(&package_id);
@@ -1289,7 +1305,15 @@ mod tests {
         assert!(client.is_action_paused(&symbol_short!("claim")));
         assert!(client.is_action_paused(&symbol_short!("withdraw")));
 
-        let result = client.try_create_package(&admin, &2, &recipient, &1000, &token, &86400, &Map::new(&env));
+        let result = client.try_create_package(
+            &admin,
+            &2,
+            &recipient,
+            &1000,
+            &token,
+            &86400,
+            &Map::new(&env),
+        );
         assert!(result.is_err());
     }
 }
