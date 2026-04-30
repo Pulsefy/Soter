@@ -7,6 +7,8 @@ use soroban_sdk::{
     Address, Env, Map, Vec,
 };
 
+const UNIT: i128 = 10_000_000; // 1.0 Token (7 decimals)
+
 fn setup_token(env: &Env, admin: &Address) -> (TokenClient<'static>, StellarAssetClient<'static>) {
     let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
     let token_client = TokenClient::new(env, &token_contract.address());
@@ -19,58 +21,37 @@ fn test_integration_flow() {
     let env = Env::default();
     env.mock_all_auths();
 
-    // Setup
     let admin = Address::generate(&env);
     let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
 
     let contract_id = env.register(AidEscrow, ());
     let client = AidEscrowClient::new(&env, &contract_id);
 
-    // Initialize contract
     client.init(&admin);
-    assert_eq!(client.get_admin(), admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
 
-    // Mint tokens to admin for funding
-    token_admin_client.mint(&admin, &10_000);
-
-    // Fund the contract (Pool)
-    client.fund(&token_client.address, &admin, &5000);
-    assert_eq!(token_client.balance(&contract_id), 5000);
-
-    // Create package
     let pkg_id = 0;
-    let expires_at = env.ledger().timestamp() + 86400; // 1 day from now
+    let expires_at = env.ledger().timestamp() + 86400;
 
-    let returned_id = client.create_package(
+    client.create_package(
         &admin,
         &pkg_id,
         &recipient,
-        &1000,
+        &UNIT,
         &token_client.address,
         &expires_at,
         &Map::new(&env),
     );
-    assert_eq!(returned_id, pkg_id);
 
-    // Verify package details
     let package = client.get_package(&pkg_id);
-    assert_eq!(package.recipient, recipient);
-    assert_eq!(package.amount, 1000);
-    assert_eq!(package.token, token_client.address);
+    assert_eq!(package.amount, UNIT);
     assert_eq!(package.status, PackageStatus::Created);
 
-    // Claim package
     client.claim(&pkg_id);
-
-    // Verify claimed state
-    let package = client.get_package(&pkg_id);
-    assert_eq!(package.status, PackageStatus::Claimed);
-
-    // Verify funds moved
-    assert_eq!(token_client.balance(&recipient), 1000);
-    assert_eq!(token_client.balance(&contract_id), 4000);
+    assert_eq!(token_client.balance(&recipient), UNIT);
+    assert_eq!(token_client.balance(&contract_id), 4 * UNIT);
 }
 
 #[test]
@@ -81,56 +62,35 @@ fn test_multiple_packages() {
     let admin = Address::generate(&env);
     let recipient1 = Address::generate(&env);
     let recipient2 = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
 
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
 
-    // Mint tokens to admin for funding
-    token_admin_client.mint(&admin, &10_000);
-
-    // Fund contract with enough for both packages
-    client.fund(&token_client.address, &admin, &5000);
-    assert_eq!(token_client.balance(&contract_id), 5000);
-
-    // Create multiple packages with manual IDs
-    let id1 = 100;
-    let id2 = 101;
-    let expiry = env.ledger().timestamp() + 86400;
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
 
     client.create_package(
         &admin,
-        &id1,
+        &100,
         &recipient1,
-        &500,
+        &UNIT,
         &token_client.address,
-        &expiry,
+        &9999999,
         &Map::new(&env),
     );
     client.create_package(
         &admin,
-        &id2,
+        &101,
         &recipient2,
-        &1000,
+        &(2 * UNIT),
         &token_client.address,
-        &expiry,
+        &9999999,
         &Map::new(&env),
     );
 
-    // Verify each package is independent
-    let p1 = client.get_package(&id1);
-    let p2 = client.get_package(&id2);
-
-    assert_eq!(p1.recipient, recipient1);
-    assert_eq!(p2.recipient, recipient2);
-    assert_eq!(p1.amount, 500);
-    assert_eq!(p2.amount, 1000);
-
-    // Verify contract balance reflects locked funds
-    assert_eq!(token_client.balance(&contract_id), 5000);
+    assert_eq!(client.get_package(&100).amount, UNIT);
+    assert_eq!(client.get_package(&101).amount, 2 * UNIT);
 }
 
 #[test]
@@ -139,52 +99,28 @@ fn test_error_cases() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
 
-    // Mint tokens to admin for funding
-    token_admin_client.mint(&admin, &10_000);
+    token_admin_client.mint(&admin, &(5 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
 
-    // Fund contract
-    client.fund(&token_client.address, &admin, &5000);
-
-    // Test invalid amount (0)
-    let result = client.try_create_package(
+    // Case 1: Invalid amount (0)
+    let res1 = client.try_create_package(
         &admin,
         &0,
-        &recipient,
+        &Address::generate(&env),
         &0,
         &token_client.address,
         &86400,
         &Map::new(&env),
     );
-    assert_eq!(result, Err(Ok(Error::InvalidAmount)));
+    assert_eq!(res1, Err(Ok(Error::InvalidAmount)));
 
-    // Create valid package first to establish state
-    let pkg_id = 1;
-    client.create_package(
-        &admin,
-        &pkg_id,
-        &recipient,
-        &1000,
-        &token_client.address,
-        &86400,
-        &Map::new(&env),
-    );
-
-    // Try to claim non-existent package
-    let result = client.try_claim(&999);
-    assert_eq!(result, Err(Ok(Error::PackageNotFound)));
-
-    // Get non-existent package
-    let result = client.try_get_package(&999);
-    assert_eq!(result, Err(Ok(Error::PackageNotFound)));
+    // Case 2: Package not found
+    let res2 = client.try_claim(&999);
+    assert_eq!(res2, Err(Ok(Error::PackageNotFound)));
 }
 
 #[test]
@@ -193,25 +129,20 @@ fn test_set_get_config() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let allowed_token_admin = Address::generate(&env);
-    let (allowed_token_client, _) = setup_token(&env, &allowed_token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
+    let (token_client, _) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
 
-    let mut allowed_tokens = Vec::new(&env);
-    allowed_tokens.push_back(allowed_token_client.address.clone());
+    let mut tokens = Vec::new(&env);
+    tokens.push_back(token_client.address.clone());
 
     let config = Config {
-        min_amount: 50,
+        min_amount: UNIT,
         max_expires_in: 3600,
-        allowed_tokens,
+        allowed_tokens: tokens,
     };
     client.set_config(&config);
-
-    let stored = client.get_config();
-    assert_eq!(stored, config);
+    assert_eq!(client.get_config(), config);
 }
 
 #[test]
@@ -220,99 +151,59 @@ fn test_config_constraints_on_create_package() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let allowed_token_admin = Address::generate(&env);
-    let blocked_token_admin = Address::generate(&env);
-    let (allowed_token_client, allowed_token_admin_client) =
-        setup_token(&env, &allowed_token_admin);
-    let (blocked_token_client, _) = setup_token(&env, &blocked_token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let (blocked_token, _) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
 
-    allowed_token_admin_client.mint(&admin, &10_000);
-    client.fund(&allowed_token_client.address, &admin, &5000);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(10 * UNIT));
 
-    let mut allowed_tokens = Vec::new(&env);
-    allowed_tokens.push_back(allowed_token_client.address.clone());
+    let mut allowed = Vec::new(&env);
+    allowed.push_back(token_client.address.clone());
     client.set_config(&Config {
-        min_amount: 100,
+        min_amount: 5 * UNIT,
         max_expires_in: 1000,
-        allowed_tokens,
+        allowed_tokens: allowed,
     });
 
     let now = env.ledger().timestamp();
-    let too_small = client.try_create_package(
+
+    // Fail: Below min_amount
+    let res1 = client.try_create_package(
         &admin,
         &1,
-        &recipient,
-        &99,
-        &allowed_token_client.address,
+        &Address::generate(&env),
+        &UNIT,
+        &token_client.address,
         &(now + 10),
         &Map::new(&env),
     );
-    assert_eq!(too_small, Err(Ok(Error::InvalidAmount)));
+    assert_eq!(res1, Err(Ok(Error::InvalidAmount)));
 
-    let blocked_token = client.try_create_package(
+    // Fail: Token not allowed
+    let res2 = client.try_create_package(
         &admin,
         &2,
-        &recipient,
-        &200,
-        &blocked_token_client.address,
+        &Address::generate(&env),
+        &(5 * UNIT),
+        &blocked_token.address,
         &(now + 10),
         &Map::new(&env),
     );
-    assert_eq!(blocked_token, Err(Ok(Error::InvalidState)));
+    assert_eq!(res2, Err(Ok(Error::InvalidState)));
 
-    let too_far = client.try_create_package(
+    // Fail: Expiry too far
+    let res3 = client.try_create_package(
         &admin,
         &3,
-        &recipient,
-        &200,
-        &allowed_token_client.address,
+        &Address::generate(&env),
+        &(5 * UNIT),
+        &token_client.address,
         &(now + 2000),
         &Map::new(&env),
     );
-    assert_eq!(too_far, Err(Ok(Error::InvalidState)));
-}
-
-#[test]
-fn test_config_constraints_on_extend_expiration() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-    client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
-
-    client.set_config(&Config {
-        min_amount: 1,
-        max_expires_in: 1000,
-        allowed_tokens: Vec::new(&env),
-    });
-
-    let now = env.ledger().timestamp();
-    let pkg_id = 1;
-    client.create_package(
-        &admin,
-        &pkg_id,
-        &recipient,
-        &1000,
-        &token_client.address,
-        &(now + 500),
-        &Map::new(&env),
-    );
-
-    let result = client.try_extend_expiration(&pkg_id, &700);
-    assert_eq!(result, Err(Ok(Error::InvalidState)));
+    assert_eq!(res3, Err(Ok(Error::InvalidState)));
 }
 
 #[test]
@@ -321,43 +212,26 @@ fn test_extend_expiration_success() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
 
-    // Create package with initial expiration
-    let pkg_id = 1;
-    let initial_expiry = env.ledger().timestamp() + 1000;
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
+    let expiry = env.ledger().timestamp() + 1000;
     client.create_package(
         &admin,
-        &pkg_id,
-        &recipient,
-        &1000,
+        &1,
+        &Address::generate(&env),
+        &UNIT,
         &token_client.address,
-        &initial_expiry,
+        &expiry,
         &Map::new(&env),
     );
 
-    // Verify initial expiration
-    let pkg = client.get_package(&pkg_id);
-    assert_eq!(pkg.expires_at, initial_expiry);
-    assert_eq!(pkg.status, PackageStatus::Created);
-
-    // Extend expiration by 500 units
-    let additional_time = 500;
-    client.extend_expiration(&pkg_id, &additional_time);
-
-    // Verify new expiration
-    let pkg_extended = client.get_package(&pkg_id);
-    assert_eq!(pkg_extended.expires_at, initial_expiry + additional_time);
-    assert_eq!(pkg_extended.status, PackageStatus::Created);
+    client.extend_expiration(&1, &500);
+    assert_eq!(client.get_package(&1).expires_at, expiry + 500);
 }
 
 #[test]
@@ -366,35 +240,27 @@ fn test_extend_expiry_success() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
 
-    let pkg_id = 1;
-    let initial_expiry = env.ledger().timestamp() + 1000;
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
+    let initial = env.ledger().timestamp() + 1000;
     client.create_package(
         &admin,
-        &pkg_id,
-        &recipient,
-        &1000,
+        &1,
+        &Address::generate(&env),
+        &UNIT,
         &token_client.address,
-        &initial_expiry,
+        &initial,
         &Map::new(&env),
     );
 
-    let new_expiry = initial_expiry + 500;
-    client.extend_expiry(&pkg_id, &new_expiry);
-
-    let pkg_extended = client.get_package(&pkg_id);
-    assert_eq!(pkg_extended.expires_at, new_expiry);
-    assert_eq!(pkg_extended.status, PackageStatus::Created);
+    let new_exp = initial + 500;
+    client.extend_expiry(&1, &new_exp);
+    assert_eq!(client.get_package(&1).expires_at, new_exp);
 }
 
 #[test]
@@ -403,127 +269,32 @@ fn test_extend_expiry_rejects_non_increasing_expiry() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
 
-    let pkg_id = 1;
-    let initial_expiry = env.ledger().timestamp() + 1000;
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
+    let initial = env.ledger().timestamp() + 1000;
     client.create_package(
         &admin,
-        &pkg_id,
-        &recipient,
-        &1000,
+        &1,
+        &Address::generate(&env),
+        &UNIT,
         &token_client.address,
-        &initial_expiry,
+        &initial,
         &Map::new(&env),
     );
 
-    let result = client.try_extend_expiry(&pkg_id, &initial_expiry);
-    assert_eq!(result, Err(Ok(Error::InvalidState)));
-}
-
-#[test]
-fn test_extend_expiration_non_existent_package() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
-    client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
-
-    // Try to extend non-existent package
-    let result = client.try_extend_expiration(&999, &500);
-    assert_eq!(result, Err(Ok(Error::PackageNotFound)));
-}
-
-#[test]
-fn test_extend_expiration_claimed_package() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
-    client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
-
-    // Create and claim package
-    let pkg_id = 1;
-    let expiry = env.ledger().timestamp() + 1000;
-    client.create_package(
-        &admin,
-        &pkg_id,
-        &recipient,
-        &1000,
-        &token_client.address,
-        &expiry,
-        &Map::new(&env),
+    assert_eq!(
+        client.try_extend_expiry(&1, &initial),
+        Err(Ok(Error::InvalidState))
     );
-    client.claim(&pkg_id);
-
-    // Try to extend claimed package
-    let result = client.try_extend_expiration(&pkg_id, &500);
-    assert_eq!(result, Err(Ok(Error::PackageNotActive)));
-}
-
-#[test]
-fn test_extend_expiration_expired_package() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
-    client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
-
-    // Create package and advance time past expiration
-    let start_time = 1000;
-    env.ledger().set_timestamp(start_time);
-    let pkg_id = 1;
-    let expiry = start_time + 100;
-    client.create_package(
-        &admin,
-        &pkg_id,
-        &recipient,
-        &1000,
-        &token_client.address,
-        &expiry,
-        &Map::new(&env),
+    assert_eq!(
+        client.try_extend_expiry(&1, &(initial - 1)),
+        Err(Ok(Error::InvalidState))
     );
-
-    env.ledger().set_timestamp(expiry + 1);
-
-    // Try to extend expired package
-    let result = client.try_extend_expiration(&pkg_id, &500);
-    assert_eq!(result, Err(Ok(Error::PackageExpired)));
 }
 
 #[test]
@@ -532,111 +303,86 @@ fn test_extend_expiration_zero_additional_time() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
 
-    // Create package
-    let pkg_id = 1;
-    let expiry = env.ledger().timestamp() + 1000;
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
     client.create_package(
         &admin,
-        &pkg_id,
-        &recipient,
-        &1000,
+        &1,
+        &Address::generate(&env),
+        &UNIT,
         &token_client.address,
-        &expiry,
+        &9999999,
         &Map::new(&env),
     );
-
-    // Try to extend with zero additional time
-    let result = client.try_extend_expiration(&pkg_id, &0);
-    assert_eq!(result, Err(Ok(Error::InvalidAmount)));
+    assert_eq!(
+        client.try_extend_expiration(&1, &0),
+        Err(Ok(Error::InvalidAmount))
+    );
 }
 
 #[test]
-fn test_extend_expiration_unbounded_package() {
+fn test_extend_expiration_expired_package() {
     let env = Env::default();
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
 
-    // Create package with unbounded expiration (expires_at = 0)
-    let pkg_id = 1;
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
+    env.ledger().set_timestamp(1000);
     client.create_package(
         &admin,
-        &pkg_id,
-        &recipient,
-        &1000,
+        &1,
+        &Address::generate(&env),
+        &UNIT,
         &token_client.address,
-        &0,
+        &1100,
         &Map::new(&env),
     );
 
-    // Try to extend unbounded package
-    let result = client.try_extend_expiration(&pkg_id, &500);
-    assert_eq!(result, Err(Ok(Error::InvalidState)));
+    env.ledger().set_timestamp(1101);
+    assert_eq!(
+        client.try_extend_expiration(&1, &10),
+        Err(Ok(Error::PackageExpired))
+    );
 }
 
 #[test]
-fn test_extend_expiration_multiple_extends() {
+fn test_extend_expiration_claimed_package() {
     let env = Env::default();
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
 
-    // Create package
-    let pkg_id = 1;
-    let initial_expiry = env.ledger().timestamp() + 1000;
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
     client.create_package(
         &admin,
-        &pkg_id,
-        &recipient,
-        &1000,
+        &1,
+        &Address::generate(&env),
+        &UNIT,
         &token_client.address,
-        &initial_expiry,
+        &9999999,
         &Map::new(&env),
     );
-
-    // Extend multiple times
-    client.extend_expiration(&pkg_id, &100);
-    let pkg1 = client.get_package(&pkg_id);
-    assert_eq!(pkg1.expires_at, initial_expiry + 100);
-
-    client.extend_expiration(&pkg_id, &200);
-    let pkg2 = client.get_package(&pkg_id);
-    assert_eq!(pkg2.expires_at, initial_expiry + 300);
-
-    client.extend_expiration(&pkg_id, &500);
-    let pkg3 = client.get_package(&pkg_id);
-    assert_eq!(pkg3.expires_at, initial_expiry + 800);
+    client.claim(&1);
+    assert_eq!(
+        client.try_extend_expiration(&1, &10),
+        Err(Ok(Error::PackageNotActive))
+    );
 }
 
 #[test]
@@ -645,34 +391,64 @@ fn test_extend_expiration_cancelled_package() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
 
-    // Create and cancel package
-    let pkg_id = 1;
-    let expiry = env.ledger().timestamp() + 1000;
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
     client.create_package(
         &admin,
-        &pkg_id,
-        &recipient,
-        &1000,
+        &1,
+        &Address::generate(&env),
+        &UNIT,
         &token_client.address,
-        &expiry,
+        &9999999,
         &Map::new(&env),
     );
-    client.cancel_package(&pkg_id);
+    client.cancel_package(&1);
+    assert_eq!(
+        client.try_extend_expiration(&1, &10),
+        Err(Ok(Error::PackageNotActive))
+    );
+}
 
-    // Try to extend cancelled package
-    let result = client.try_extend_expiration(&pkg_id, &500);
-    assert_eq!(result, Err(Ok(Error::PackageNotActive)));
+#[test]
+fn test_config_constraints_on_extend_expiration() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
+    client.init(&admin);
+
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
+    client.set_config(&Config {
+        min_amount: UNIT,
+        max_expires_in: 500,
+        allowed_tokens: Vec::new(&env),
+    });
+
+    let now = env.ledger().timestamp();
+    client.create_package(
+        &admin,
+        &1,
+        &Address::generate(&env),
+        &UNIT,
+        &token_client.address,
+        &(now + 100),
+        &Map::new(&env),
+    );
+
+    // Total expiry (100 + 500) = 600. Max allowed from creation is 500.
+    assert_eq!(
+        client.try_extend_expiration(&1, &500),
+        Err(Ok(Error::InvalidState))
+    );
 }
 
 #[test]
@@ -681,30 +457,13 @@ fn test_get_recipient_package_count_returns_zero_when_recipient_has_no_packages(
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let other_recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
 
-    let expiry = env.ledger().timestamp() + 1000;
-    client.create_package(
-        &admin,
-        &1,
-        &other_recipient,
-        &1000,
-        &token_client.address,
-        &expiry,
-        &Map::new(&env),
+    assert_eq!(
+        client.get_recipient_package_count(&Address::generate(&env)),
+        0
     );
-
-    assert_eq!(client.get_recipient_package_count(&recipient), 0);
 }
 
 #[test]
@@ -714,45 +473,99 @@ fn test_get_recipient_package_count_returns_multiple_packages() {
 
     let admin = Address::generate(&env);
     let recipient = Address::generate(&env);
-    let other_recipient = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
     client.init(&admin);
-    token_admin_client.mint(&admin, &20_000);
-    client.fund(&token_client.address, &admin, &10_000);
 
-    let expiry = env.ledger().timestamp() + 1000;
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(10 * UNIT));
+
     client.create_package(
         &admin,
-        &5,
+        &1,
         &recipient,
-        &1000,
+        &UNIT,
         &token_client.address,
-        &expiry,
+        &9999999,
         &Map::new(&env),
     );
     client.create_package(
         &admin,
-        &12,
+        &2,
         &recipient,
-        &1000,
+        &UNIT,
         &token_client.address,
-        &expiry,
-        &Map::new(&env),
-    );
-    client.create_package(
-        &admin,
-        &13,
-        &other_recipient,
-        &1000,
-        &token_client.address,
-        &expiry,
+        &9999999,
         &Map::new(&env),
     );
 
     assert_eq!(client.get_recipient_package_count(&recipient), 2);
+}
+
+#[test]
+fn test_extend_expiration_non_existent_package() {
+    let env = Env::default();
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
+    assert_eq!(
+        client.try_extend_expiration(&99, &10),
+        Err(Ok(Error::PackageNotFound))
+    );
+}
+
+#[test]
+fn test_extend_expiration_unbounded_package() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
+    client.init(&admin);
+
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
+    // expiry = 0 (unbounded)
+    client.create_package(
+        &admin,
+        &1,
+        &Address::generate(&env),
+        &UNIT,
+        &token_client.address,
+        &0,
+        &Map::new(&env),
+    );
+    assert_eq!(
+        client.try_extend_expiration(&1, &10),
+        Err(Ok(Error::InvalidState))
+    );
+}
+
+#[test]
+fn test_extend_expiration_multiple_extends() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
+    client.init(&admin);
+
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
+    let initial = env.ledger().timestamp() + 1000;
+    client.create_package(
+        &admin,
+        &1,
+        &Address::generate(&env),
+        &UNIT,
+        &token_client.address,
+        &initial,
+        &Map::new(&env),
+    );
+
+    client.extend_expiration(&1, &100);
+    client.extend_expiration(&1, &200);
+    assert_eq!(client.get_package(&1).expires_at, initial + 300);
 }

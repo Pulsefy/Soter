@@ -7,6 +7,8 @@ use soroban_sdk::{
     Address, Env, Map,
 };
 
+const UNIT: i128 = 10_000_000; // 1.0 Token (7 decimals)
+
 fn setup_token(env: &Env, admin: &Address) -> (TokenClient<'static>, StellarAssetClient<'static>) {
     let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
     let token_client = TokenClient::new(env, &token_contract.address());
@@ -31,17 +33,17 @@ fn test_view_package_status() {
     // Initialize contract
     client.init(&admin);
 
-    // Mint tokens to admin for funding
-    token_admin_client.mint(&admin, &10_000);
+    // Mint tokens to admin for funding (10.0 tokens)
+    token_admin_client.mint(&admin, &(10 * UNIT));
 
-    // Fund the contract
-    client.fund(&token_client.address, &admin, &5000);
+    // Fund the contract (5.0 tokens)
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
 
     // 1. Check status for non-existent package
     let result = client.try_view_package_status(&999);
     assert_eq!(result, Err(Ok(Error::PackageNotFound)));
 
-    // 2. Create package and check status
+    // 2. Create package (1.0 token) and check status
     let pkg_id = 1;
     let expires_at = env.ledger().timestamp() + 86400;
 
@@ -50,7 +52,7 @@ fn test_view_package_status() {
         &admin,
         &pkg_id,
         &recipient,
-        &1000,
+        &UNIT,
         &token_client.address,
         &expires_at,
         &metadata,
