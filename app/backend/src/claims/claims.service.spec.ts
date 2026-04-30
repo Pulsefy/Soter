@@ -29,6 +29,7 @@ describe('ClaimsService', () => {
     amount: new Prisma.Decimal('100.00'),
     recipientRef: 'recipient-123',
     evidenceRef: 'evidence-456',
+    expiresAt: new Date(Date.now() + 3600_000),
     createdAt: new Date(),
     updatedAt: new Date(),
     campaign: {
@@ -50,8 +51,22 @@ describe('ClaimsService', () => {
     amountDisbursed: '1000000000',
     metadata: { adapter: 'mock' },
   });
-  const mockOnchainAdapter: Partial<OnchainAdapter> = {
+  const mockOnchainAdapter: Partial<OnchainAdapter> & {
+    revokeAidPackage: jest.Mock;
+    refundAidPackage: jest.Mock;
+  } = {
     disburse: mockDisburse,
+    revokeAidPackage: jest.fn().mockResolvedValue({
+      transactionHash: 'mock-revoke-hash',
+      timestamp: new Date(),
+      status: 'success' as const,
+    }),
+    refundAidPackage: jest.fn().mockResolvedValue({
+      transactionHash: 'mock-refund-hash',
+      timestamp: new Date(),
+      status: 'success' as const,
+      amountRefunded: '1000000000',
+    }),
   };
 
   const mockMetricsService = {
@@ -376,6 +391,86 @@ describe('ClaimsService', () => {
 
       await expect(service.disburse('claim-123')).rejects.toThrow(
         BadRequestException,
+      );
+    });
+  });
+
+  describe('cleanupExpiredClaims', () => {
+    it('archives requested and verified claims whose expiry has passed', async () => {
+      const expiredClaim = {
+        ...mockClaim,
+        status: ClaimStatus.requested,
+        expiresAt: new Date('2026-04-01T00:00:00.000Z'),
+      };
+
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValue([expiredClaim] as never);
+      jest.spyOn(prismaService.claim, 'update').mockResolvedValue({
+        ...expiredClaim,
+        status: ClaimStatus.archived,
+      } as never);
+
+      const result = await service.cleanupExpiredClaims(
+        new Date('2026-04-29T00:00:00.000Z'),
+      );
+
+      expect(result).toEqual({ processed: 1, archived: 1 });
+      expect(prismaService.claim.findMany).toHaveBeenCalledWith({
+        where: {
+          deletedAt: null,
+          status: {
+            in: [ClaimStatus.requested, ClaimStatus.verified],
+          },
+          expiresAt: {
+            lt: new Date('2026-04-29T00:00:00.000Z'),
+          },
+        },
+      });
+      expect(prismaService.claim.update).toHaveBeenCalledWith({
+        where: { id: expiredClaim.id },
+        data: { status: ClaimStatus.archived },
+      });
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: 'system',
+          entity: 'claim',
+          entityId: expiredClaim.id,
+          action: 'expired_cleanup',
+        }),
+      );
+    });
+
+    it('skips cleanup gracefully when the adapter does not support revoke/refund', async () => {
+      const expiredClaim = {
+        ...mockClaim,
+        status: ClaimStatus.verified,
+        expiresAt: new Date('2026-04-01T00:00:00.000Z'),
+      };
+      delete (mockOnchainAdapter as Record<string, unknown>).revokeAidPackage;
+      delete (mockOnchainAdapter as Record<string, unknown>).refundAidPackage;
+
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValue([expiredClaim] as never);
+      jest.spyOn(prismaService.claim, 'update').mockResolvedValue({
+        ...expiredClaim,
+        status: ClaimStatus.archived,
+      } as never);
+
+      await service.cleanupExpiredClaims(new Date('2026-04-29T00:00:00.000Z'));
+
+      expect(prismaService.claim.update).toHaveBeenCalled();
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'expired_cleanup',
+          metadata: expect.objectContaining({
+            onchain: expect.objectContaining({
+              attempted: false,
+              skippedReason: 'adapter_missing_cleanup_methods',
+            }),
+          }),
+        }),
       );
     });
   });

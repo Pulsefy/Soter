@@ -2,9 +2,9 @@
 
 use aid_escrow::{AidEscrow, AidEscrowClient, Config, Error, PackageStatus};
 use soroban_sdk::{
-    Address, Env, Vec,
     testutils::{Address as _, Ledger},
     token::{StellarAssetClient, TokenClient},
+    Address, Env, Map, Vec,
 };
 
 fn setup_token(env: &Env, admin: &Address) -> (TokenClient<'static>, StellarAssetClient<'static>) {
@@ -50,6 +50,7 @@ fn test_integration_flow() {
         &1000,
         &token_client.address,
         &expires_at,
+        &Map::new(&env),
     );
     assert_eq!(returned_id, pkg_id);
 
@@ -107,6 +108,7 @@ fn test_multiple_packages() {
         &500,
         &token_client.address,
         &expiry,
+        &Map::new(&env),
     );
     client.create_package(
         &admin,
@@ -115,6 +117,7 @@ fn test_multiple_packages() {
         &1000,
         &token_client.address,
         &expiry,
+        &Map::new(&env),
     );
 
     // Verify each package is independent
@@ -152,8 +155,15 @@ fn test_error_cases() {
     client.fund(&token_client.address, &admin, &5000);
 
     // Test invalid amount (0)
-    let result =
-        client.try_create_package(&admin, &0, &recipient, &0, &token_client.address, &86400);
+    let result = client.try_create_package(
+        &admin,
+        &0,
+        &recipient,
+        &0,
+        &token_client.address,
+        &86400,
+        &Map::new(&env),
+    );
     assert_eq!(result, Err(Ok(Error::InvalidAmount)));
 
     // Create valid package first to establish state
@@ -165,6 +175,7 @@ fn test_error_cases() {
         &1000,
         &token_client.address,
         &86400,
+        &Map::new(&env),
     );
 
     // Try to claim non-existent package
@@ -239,6 +250,7 @@ fn test_config_constraints_on_create_package() {
         &99,
         &allowed_token_client.address,
         &(now + 10),
+        &Map::new(&env),
     );
     assert_eq!(too_small, Err(Ok(Error::InvalidAmount)));
 
@@ -249,6 +261,7 @@ fn test_config_constraints_on_create_package() {
         &200,
         &blocked_token_client.address,
         &(now + 10),
+        &Map::new(&env),
     );
     assert_eq!(blocked_token, Err(Ok(Error::InvalidState)));
 
@@ -259,6 +272,7 @@ fn test_config_constraints_on_create_package() {
         &200,
         &allowed_token_client.address,
         &(now + 2000),
+        &Map::new(&env),
     );
     assert_eq!(too_far, Err(Ok(Error::InvalidState)));
 }
@@ -294,6 +308,7 @@ fn test_config_constraints_on_extend_expiration() {
         &1000,
         &token_client.address,
         &(now + 500),
+        &Map::new(&env),
     );
 
     let result = client.try_extend_expiration(&pkg_id, &700);
@@ -327,6 +342,7 @@ fn test_extend_expiration_success() {
         &1000,
         &token_client.address,
         &initial_expiry,
+        &Map::new(&env),
     );
 
     // Verify initial expiration
@@ -370,6 +386,7 @@ fn test_extend_expiry_success() {
         &1000,
         &token_client.address,
         &initial_expiry,
+        &Map::new(&env),
     );
 
     let new_expiry = initial_expiry + 500;
@@ -406,6 +423,7 @@ fn test_extend_expiry_rejects_non_increasing_expiry() {
         &1000,
         &token_client.address,
         &initial_expiry,
+        &Map::new(&env),
     );
 
     let result = client.try_extend_expiry(&pkg_id, &initial_expiry);
@@ -460,6 +478,7 @@ fn test_extend_expiration_claimed_package() {
         &1000,
         &token_client.address,
         &expiry,
+        &Map::new(&env),
     );
     client.claim(&pkg_id);
 
@@ -497,6 +516,7 @@ fn test_extend_expiration_expired_package() {
         &1000,
         &token_client.address,
         &expiry,
+        &Map::new(&env),
     );
 
     env.ledger().set_timestamp(expiry + 1);
@@ -533,6 +553,7 @@ fn test_extend_expiration_zero_additional_time() {
         &1000,
         &token_client.address,
         &expiry,
+        &Map::new(&env),
     );
 
     // Try to extend with zero additional time
@@ -566,6 +587,7 @@ fn test_extend_expiration_unbounded_package() {
         &1000,
         &token_client.address,
         &0,
+        &Map::new(&env),
     );
 
     // Try to extend unbounded package
@@ -600,6 +622,7 @@ fn test_extend_expiration_multiple_extends() {
         &1000,
         &token_client.address,
         &initial_expiry,
+        &Map::new(&env),
     );
 
     // Extend multiple times
@@ -643,6 +666,7 @@ fn test_extend_expiration_cancelled_package() {
         &1000,
         &token_client.address,
         &expiry,
+        &Map::new(&env),
     );
     client.cancel_package(&pkg_id);
 
@@ -677,6 +701,7 @@ fn test_get_recipient_package_count_returns_zero_when_recipient_has_no_packages(
         &1000,
         &token_client.address,
         &expiry,
+        &Map::new(&env),
     );
 
     assert_eq!(client.get_recipient_package_count(&recipient), 0);
@@ -708,6 +733,7 @@ fn test_get_recipient_package_count_returns_multiple_packages() {
         &1000,
         &token_client.address,
         &expiry,
+        &Map::new(&env),
     );
     client.create_package(
         &admin,
@@ -716,6 +742,7 @@ fn test_get_recipient_package_count_returns_multiple_packages() {
         &1000,
         &token_client.address,
         &expiry,
+        &Map::new(&env),
     );
     client.create_package(
         &admin,
@@ -724,6 +751,7 @@ fn test_get_recipient_package_count_returns_multiple_packages() {
         &1000,
         &token_client.address,
         &expiry,
+        &Map::new(&env),
     );
 
     assert_eq!(client.get_recipient_package_count(&recipient), 2);
