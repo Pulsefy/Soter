@@ -1,5 +1,5 @@
 # On-Chain Module (Soroban Contracts)
-//Comment
+
 This module contains Soroban smart contracts for Soter's on-chain escrow and claimable packages functionality.
 
 ## 🧠 AidEscrow Contract

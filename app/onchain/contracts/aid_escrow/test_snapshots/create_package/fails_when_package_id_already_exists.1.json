@@ -83,7 +83,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "i128": "200"
+                  "i128": "10000000"
                 }
               ]
             }
@@ -105,13 +105,13 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
-                  "u64": "42"
+                  "u64": "1"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "i128": "100"
+                  "i128": "10000000"
                 },
                 {
                   "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
@@ -337,7 +337,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u64": "42"
+                  "u64": "1"
                 }
               }
             },
@@ -356,7 +356,7 @@
                   "symbol": "pkg"
                 },
                 {
-                  "u64": "42"
+                  "u64": "1"
                 }
               ]
             },
@@ -376,7 +376,7 @@
                       "symbol": "pkg"
                     },
                     {
-                      "u64": "42"
+                      "u64": "1"
                     }
                   ]
                 },
@@ -388,7 +388,7 @@
                         "symbol": "amount"
                       },
                       "val": {
-                        "i128": "100"
+                        "i128": "10000000"
                       }
                     },
                     {
@@ -412,7 +412,7 @@
                         "symbol": "id"
                       },
                       "val": {
-                        "u64": "42"
+                        "u64": "1"
                       }
                     },
                     {
@@ -531,7 +531,7 @@
                                 "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
                               },
                               "val": {
-                                "i128": "100"
+                                "i128": "10000000"
                               }
                             }
                           ]
@@ -542,7 +542,7 @@
                           "symbol": "pkg_cnt"
                         },
                         "val": {
-                          "u64": "43"
+                          "u64": "2"
                         }
                       },
                       {
@@ -613,7 +613,7 @@
                         "symbol": "amount"
                       },
                       "val": {
-                        "i128": "200"
+                        "i128": "10000000"
                       }
                     },
                     {
