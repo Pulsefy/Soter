@@ -23,6 +23,7 @@ import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { BudgetService } from '../common/budget/budget.service';
 
 type ExpirationCleanupCapableAdapter = OnchainAdapter & {
   revokeAidPackage?: (params: {
@@ -59,6 +60,7 @@ export class ClaimsService {
     private readonly metricsService: MetricsService,
     private readonly auditService: AuditService,
     private readonly encryptionService: EncryptionService,
+    private readonly budgetService: BudgetService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
@@ -72,6 +74,12 @@ export class ClaimsService {
     if (!campaign) {
       throw new NotFoundException('Campaign not found');
     }
+
+    // Enforce campaign funding cap
+    await this.budgetService.assertWithinBudget(
+      createClaimDto.campaignId,
+      createClaimDto.amount,
+    );
 
     const claim = await this.prisma.claim.create({
       data: {

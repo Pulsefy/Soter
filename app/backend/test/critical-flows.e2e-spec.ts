@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
+import {
+  INestApplication,
+  ValidationPipe,
+  VersioningType,
+} from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -21,7 +25,9 @@ describe('Critical Flows (e2e)', () => {
       timestamp: new Date(),
     }),
     getTokenBalance: jest.fn().mockResolvedValue({ balance: '5000' }),
-    createAidPackage: jest.fn().mockResolvedValue({ packageId: 'pkg_123', transactionHash: 'hash' }),
+    createAidPackage: jest
+      .fn()
+      .mockResolvedValue({ packageId: 'pkg_123', transactionHash: 'hash' }),
     getAidPackageCount: jest.fn().mockResolvedValue({
       aggregates: {
         totalCommitted: '5000',
@@ -77,7 +83,7 @@ describe('Critical Flows (e2e)', () => {
       return request(app.getHttpServer())
         .get('/api/v1/health/live')
         .expect(200)
-        .expect((res) => {
+        .expect(res => {
           expect(res.body.status).toBe('ok');
         });
     });
@@ -86,7 +92,7 @@ describe('Critical Flows (e2e)', () => {
       return request(app.getHttpServer())
         .get('/api/v1/health/ready')
         .expect(200)
-        .expect((res) => {
+        .expect(res => {
           expect(res.body.ready).toBeDefined();
         });
     });

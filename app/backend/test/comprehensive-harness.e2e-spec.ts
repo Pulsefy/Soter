@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
+import {
+  INestApplication,
+  ValidationPipe,
+  VersioningType,
+} from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -55,7 +59,7 @@ describe('Comprehensive E2E Harness', () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/health/live')
         .expect(200);
-      
+
       expect(res.body).toMatchObject({
         status: 'ok',
       });
@@ -63,11 +67,12 @@ describe('Comprehensive E2E Harness', () => {
     });
 
     it('/api/v1/health/ready (GET) - Readiness Probe', async () => {
-      // Note: This might return 503 if DB/Redis mocks are not perfectly aligned, 
+      // Note: This might return 503 if DB/Redis mocks are not perfectly aligned,
       // but in a proper test environment with ioredis-mock and a test DB it should be 200.
-      const res = await request(app.getHttpServer())
-        .get('/api/v1/health/ready');
-      
+      const res = await request(app.getHttpServer()).get(
+        '/api/v1/health/ready',
+      );
+
       // We accept both 200 and 503 for the purpose of the harness as long as it returns the correct structure
       expect([200, 503]).toContain(res.status);
       expect(res.body).toHaveProperty('ready');
@@ -120,7 +125,7 @@ describe('Comprehensive E2E Harness', () => {
   describe('Onchain Proxy (Aid Escrow)', () => {
     it('should proxy a call to the blockchain contract (mocked)', async () => {
       const packageId = 'pkg_harness_001';
-      
+
       // Mock the getAidPackage response
       mockSorobanAdapter.getAidPackage = jest.fn().mockResolvedValue({
         package: {
@@ -142,7 +147,9 @@ describe('Comprehensive E2E Harness', () => {
 
       expect(res.body.package).toBeDefined();
       expect(res.body.package.id).toBe(packageId);
-      expect(mockSorobanAdapter.getAidPackage).toHaveBeenCalledWith({ packageId });
+      expect(mockSorobanAdapter.getAidPackage).toHaveBeenCalledWith({
+        packageId,
+      });
     });
   });
 });
