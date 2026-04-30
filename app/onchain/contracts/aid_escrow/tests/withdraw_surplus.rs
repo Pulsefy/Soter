@@ -2,9 +2,9 @@
 
 use aid_escrow::{AidEscrow, AidEscrowClient, Error};
 use soroban_sdk::{
-    Address, Env,
     testutils::{Address as _, Events},
     token::{StellarAssetClient, TokenClient},
+    Address, Env, Map,
 };
 
 fn setup_token(env: &Env, admin: &Address) -> (TokenClient<'static>, StellarAssetClient<'static>) {
@@ -69,6 +69,7 @@ fn test_withdraw_surplus_insufficient_surplus() {
     let recipient = Address::generate(&env);
 
     // Create a package that locks 800 tokens
+    let metadata = Map::new(&env);
     client.create_package(
         &admin,
         &1,
@@ -76,6 +77,7 @@ fn test_withdraw_surplus_insufficient_surplus() {
         &800,
         &token_client.address,
         &(&env.ledger().timestamp() + 1000),
+        &metadata,
     );
 
     // Try to withdraw 300 tokens from surplus (1000 balance - 800 locked = 200 surplus available)

@@ -38,6 +38,7 @@ import { AppRole } from 'src/auth/app-role.enum';
 import { Throttle } from '@nestjs/throttler';
 import { OrgOwnershipGuard } from '../common/guards/org-ownership.guard';
 import { CancelAndReissueService } from '../claims/cancel-and-reissue.service';
+import { BudgetService } from '../common/budget/budget.service';
 
 @ApiTags('Campaigns')
 @ApiBearerAuth('JWT-auth')
@@ -46,6 +47,7 @@ export class CampaignsController {
   constructor(
     private readonly campaigns: CampaignsService,
     private readonly cancelAndReissueService: CancelAndReissueService,
+    private readonly budgetService: BudgetService,
   ) {}
 
   @Post()
@@ -191,6 +193,40 @@ export class CampaignsController {
     return ApiResponseDto.ok(balance, 'Campaign balance fetched successfully');
   }
 
+  @Get(':id/budget-summary')
+  @ApiOperation({
+    summary: 'Get campaign budget summary',
+    description:
+      'Returns the total, locked, disbursed, and available budget for a campaign.',
+  })
+  @ApiOkResponse({
+    description: 'Campaign budget summary retrieved successfully.',
+    schema: {
+      properties: {
+        campaignId: { type: 'string' },
+        budget: { type: 'number' },
+        locked: { type: 'number' },
+        disbursed: { type: 'number' },
+        available: { type: 'number' },
+      },
+    },
+  })
+  async getBudgetSummary(@Param('id') id: string) {
+    const campaign = await this.campaigns.findOne(id);
+    if (!campaign) {
+      return { error: 'Campaign not found' };
+    }
+    const usage = await this.budgetService.getCampaignBudgetUsage(id);
+    const available = campaign.budget - usage.locked - usage.disbursed;
+    return {
+      campaignId: id,
+      budget: campaign.budget,
+      locked: usage.locked,
+      disbursed: usage.disbursed,
+      available,
+    };
+  }
+
   @Get('export')
   @Version('1')
   @Roles(AppRole.operator, AppRole.admin)
@@ -214,13 +250,37 @@ export class CampaignsController {
   @ApiForbiddenResponse({
     description: 'Access denied - operator or admin role required.',
   })
-  @ApiQuery({ name: 'from', required: false, description: 'Start date (ISO string)' })
-  @ApiQuery({ name: 'to', required: false, description: 'End date (ISO string)' })
-  @ApiQuery({ name: 'status', required: false, description: 'Campaign status filter' })
-  @ApiQuery({ name: 'orgId', required: false, description: 'Organization ID filter' })
+  @ApiQuery({
+    name: 'from',
+    required: false,
+    description: 'Start date (ISO string)',
+  })
+  @ApiQuery({
+    name: 'to',
+    required: false,
+    description: 'End date (ISO string)',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'Campaign status filter',
+  })
+  @ApiQuery({
+    name: 'orgId',
+    required: false,
+    description: 'Organization ID filter',
+  })
   @ApiQuery({ name: 'ngoId', required: false, description: 'NGO ID filter' })
-  @ApiQuery({ name: 'page', required: false, description: 'Page number (default: 1)' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Items per page (default: 50, max: 200)' })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    description: 'Page number (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Items per page (default: 50, max: 200)',
+  })
   async exportCampaigns(
     @Query() query: ExportCampaignsQueryDto,
     @Res({ passthrough: true }) res: Response,

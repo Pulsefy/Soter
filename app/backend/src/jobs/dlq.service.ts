@@ -11,11 +11,17 @@ export class DlqService {
   /**
    * Move a failed job to the dead-letter queue if it has exhausted all attempts.
    */
-  async moveToDlq(originalQueue: string, job: Job, error: Error): Promise<void> {
+  async moveToDlq(
+    originalQueue: string,
+    job: Job,
+    error: Error,
+  ): Promise<void> {
     const maxAttempts = job.opts.attempts || 1;
     if (job.attemptsMade >= maxAttempts) {
       try {
-        this.logger.warn(`Moving job ${job.id} from queue ${originalQueue} to dead-letter queue after ${job.attemptsMade} attempts.`);
+        this.logger.warn(
+          `Moving job ${job.id} from queue ${originalQueue} to dead-letter queue after ${job.attemptsMade} attempts.`,
+        );
         await this.dlqQueue.add(`dlq-${originalQueue}`, {
           originalId: job.id,
           originalQueue,
@@ -25,7 +31,9 @@ export class DlqService {
           attemptsMade: job.attemptsMade,
         });
       } catch (dlqError) {
-        this.logger.error(`Failed to move job ${job.id} to dead-letter queue: ${dlqError instanceof Error ? dlqError.message : String(dlqError)}`);
+        this.logger.error(
+          `Failed to move job ${job.id} to dead-letter queue: ${dlqError instanceof Error ? dlqError.message : String(dlqError)}`,
+        );
       }
     }
   }

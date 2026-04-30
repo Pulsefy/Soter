@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AidEscrowService } from '../src/onchain/aid-escrow.service';
+import { BudgetService } from '../src/common/budget/budget.service';
+import { PrismaService } from '../src/prisma/prisma.service';
 import { AidEscrowController } from '../src/onchain/aid-escrow.controller';
 import { MockOnchainAdapter } from '../src/onchain/onchain.adapter.mock';
 import {
@@ -22,6 +24,11 @@ describe('AidEscrow Integration Tests', () => {
       controllers: [AidEscrowController],
       providers: [
         AidEscrowService,
+        BudgetService,
+        {
+          provide: PrismaService,
+          useValue: {},
+        },
         {
           provide: ONCHAIN_ADAPTER_TOKEN,
           useValue: mockAdapter,

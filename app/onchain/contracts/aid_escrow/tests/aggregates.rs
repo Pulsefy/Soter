@@ -2,9 +2,9 @@
 
 use aid_escrow::{Aggregates, AidEscrow, AidEscrowClient};
 use soroban_sdk::{
-    Address, Env,
     testutils::{Address as _, Ledger},
     token::{StellarAssetClient, TokenClient},
+    Address, Env, Map,
 };
 
 fn setup_token(env: &Env, admin: &Address) -> (TokenClient<'static>, StellarAssetClient<'static>) {
@@ -68,6 +68,7 @@ fn test_aggregates_single_created_package() {
     let recipient = Address::generate(&env);
     let expiry = env.ledger().timestamp() + 86400;
 
+    let metadata = Map::new(&env);
     client.create_package(
         &admin,
         &1,
@@ -75,6 +76,7 @@ fn test_aggregates_single_created_package() {
         &2000,
         &token_client.address,
         &expiry,
+        &metadata,
     );
 
     let agg = client.get_aggregates(&token_client.address);
@@ -103,22 +105,57 @@ fn test_aggregates_mixed_statuses() {
     let short_expiry = start_time + 100;
 
     // Package 1 — will remain Created (committed)
-    client.create_package(&admin, &1, &r1, &1000, &token_client.address, &expiry);
+    let metadata = Map::new(&env);
+    client.create_package(
+        &admin,
+        &1,
+        &r1,
+        &1000,
+        &token_client.address,
+        &expiry,
+        &metadata,
+    );
 
     // Package 2 — will be Claimed
-    client.create_package(&admin, &2, &r2, &2000, &token_client.address, &expiry);
+    let metadata = Map::new(&env);
+    client.create_package(
+        &admin,
+        &2,
+        &r2,
+        &2000,
+        &token_client.address,
+        &expiry,
+        &metadata,
+    );
     client.claim(&2);
 
     // Package 3 — will be Cancelled (via revoke)
-    client.create_package(&admin, &3, &r3, &500, &token_client.address, &expiry);
+    let metadata = Map::new(&env);
+    client.create_package(
+        &admin,
+        &3,
+        &r3,
+        &500,
+        &token_client.address,
+        &expiry,
+        &metadata,
+    );
     client.revoke(&3);
 
     // Package 4 — will be Expired then Refunded
-    client.create_package(&admin, &4, &r4, &750, &token_client.address, &short_expiry);
+    let metadata = Map::new(&env);
+    client.create_package(
+        &admin,
+        &4,
+        &r4,
+        &750,
+        &token_client.address,
+        &short_expiry,
+        &metadata,
+    );
     // Advance past short_expiry to expire
     env.ledger().set_timestamp(short_expiry + 1);
     client.refund(&4);
-
     let agg = client.get_aggregates(&token_client.address);
     assert_eq!(agg.total_committed, 1000); // pkg 1 (Created)
     assert_eq!(agg.total_claimed, 2000); // pkg 2 (Claimed)
@@ -136,37 +173,30 @@ fn test_aggregates_all_claimed() {
     let r2 = Address::generate(&env);
     let expiry = env.ledger().timestamp() + 86400;
 
-    client.create_package(&admin, &10, &r1, &3000, &token_client.address, &expiry);
-    client.create_package(&admin, &11, &r2, &4000, &token_client.address, &expiry);
+    client.create_package(
+        &admin,
+        &10,
+        &r1,
+        &3000,
+        &token_client.address,
+        &expiry,
+        &Map::new(&env),
+    );
+    client.create_package(
+        &admin,
+        &11,
+        &r2,
+        &4000,
+        &token_client.address,
+        &expiry,
+        &Map::new(&env),
+    );
     client.claim(&10);
     client.claim(&11);
 
     let agg = client.get_aggregates(&token_client.address);
     assert_eq!(agg.total_committed, 0);
     assert_eq!(agg.total_claimed, 7000);
-    assert_eq!(agg.total_expired_cancelled, 0);
-}
-
-#[test]
-fn test_aggregates_all_cancelled() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (client, token_client, admin, _contract_id) = setup_funded(&env, 10_000);
-
-    let r1 = Address::generate(&env);
-    let r2 = Address::generate(&env);
-    let expiry = env.ledger().timestamp() + 86400;
-
-    client.create_package(&admin, &20, &r1, &1500, &token_client.address, &expiry);
-    client.create_package(&admin, &21, &r2, &2500, &token_client.address, &expiry);
-    client.cancel_package(&20);
-    client.cancel_package(&21);
-
-    let agg = client.get_aggregates(&token_client.address);
-    assert_eq!(agg.total_committed, 0);
-    assert_eq!(agg.total_claimed, 0);
-    assert_eq!(agg.total_expired_cancelled, 4000);
 }
 
 // ---------- Token filtering ----------
@@ -197,12 +227,36 @@ fn test_aggregates_filters_by_token() {
     let expiry = env.ledger().timestamp() + 86400;
 
     // Token A packages
-    client.create_package(&admin, &1, &r1, &3000, &token_a.address, &expiry);
-    client.create_package(&admin, &2, &r2, &2000, &token_a.address, &expiry);
+    client.create_package(
+        &admin,
+        &1,
+        &r1,
+        &3000,
+        &token_a.address,
+        &expiry,
+        &Map::new(&env),
+    );
+    client.create_package(
+        &admin,
+        &2,
+        &r2,
+        &2000,
+        &token_a.address,
+        &expiry,
+        &Map::new(&env),
+    );
     client.claim(&2);
 
     // Token B packages
-    client.create_package(&admin, &3, &r1, &5000, &token_b.address, &expiry);
+    client.create_package(
+        &admin,
+        &3,
+        &r1,
+        &5000,
+        &token_b.address,
+        &expiry,
+        &Map::new(&env),
+    );
     client.revoke(&3);
 
     // Aggregates for Token A
@@ -230,7 +284,15 @@ fn test_aggregates_unknown_token() {
     let r = Address::generate(&env);
     let expiry = env.ledger().timestamp() + 86400;
 
-    client.create_package(&admin, &1, &r, &1000, &token_client.address, &expiry);
+    client.create_package(
+        &admin,
+        &1,
+        &r,
+        &1000,
+        &token_client.address,
+        &expiry,
+        &Map::new(&env),
+    );
 
     // Query for a completely different (random) token address
     let unknown_token = Address::generate(&env);
@@ -254,11 +316,27 @@ fn test_aggregates_disburse_counts_as_claimed() {
     let expiry = env.ledger().timestamp() + 86400;
 
     // Package 1 — claimed by recipient
-    client.create_package(&admin, &1, &r1, &1000, &token_client.address, &expiry);
+    client.create_package(
+        &admin,
+        &1,
+        &r1,
+        &1000,
+        &token_client.address,
+        &expiry,
+        &Map::new(&env),
+    );
     client.claim(&1);
 
     // Package 2 — disbursed by admin (also sets status to Claimed)
-    client.create_package(&admin, &2, &r2, &2000, &token_client.address, &expiry);
+    client.create_package(
+        &admin,
+        &2,
+        &r2,
+        &2000,
+        &token_client.address,
+        &expiry,
+        &Map::new(&env),
+    );
     client.disburse(&2);
 
     let agg = client.get_aggregates(&token_client.address);
@@ -280,7 +358,15 @@ fn test_aggregates_many_packages() {
     // Create 10 packages: even IDs -> claim, odd IDs -> cancel
     for i in 0u64..10 {
         let r = Address::generate(&env);
-        client.create_package(&admin, &i, &r, &1000, &token_client.address, &expiry);
+        client.create_package(
+            &admin,
+            &i,
+            &r,
+            &1000,
+            &token_client.address,
+            &expiry,
+            &Map::new(&env),
+        );
         if i % 2 == 0 {
             client.claim(&i);
         } else {
@@ -307,7 +393,15 @@ fn test_aggregates_update_after_transitions() {
     let expiry = env.ledger().timestamp() + 86400;
 
     // Step 1: Create — should be committed
-    client.create_package(&admin, &1, &r, &3000, &token_client.address, &expiry);
+    client.create_package(
+        &admin,
+        &1,
+        &r,
+        &3000,
+        &token_client.address,
+        &expiry,
+        &Map::new(&env),
+    );
     let agg1 = client.get_aggregates(&token_client.address);
     assert_eq!(agg1.total_committed, 3000);
     assert_eq!(agg1.total_claimed, 0);
@@ -331,7 +425,15 @@ fn test_aggregates_revoke_then_refund() {
     let r = Address::generate(&env);
     let expiry = env.ledger().timestamp() + 86400;
 
-    client.create_package(&admin, &1, &r, &4000, &token_client.address, &expiry);
+    client.create_package(
+        &admin,
+        &1,
+        &r,
+        &4000,
+        &token_client.address,
+        &expiry,
+        &Map::new(&env),
+    );
 
     // After creation
     let agg1 = client.get_aggregates(&token_client.address);

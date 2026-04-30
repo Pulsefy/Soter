@@ -1,9 +1,10 @@
 #![cfg(all(test, not(target_arch = "wasm32")))]
 
 use soroban_sdk::{
-    Address, Env, Vec,
+    symbol_short,
     testutils::{Address as _, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
+    Address, Env, Map, Vec,
 };
 
 use aid_escrow::{AidEscrow, AidEscrowClient, Config, Error, PackageStatus};
@@ -91,6 +92,7 @@ impl TestSetup {
     fn create_default_package(&self, recipient: &Address, amount: i128) -> u64 {
         self.fund_contract(amount);
         let expires_at = self.now() + 3_600; // 1 hour from now
+        let metadata = soroban_sdk::Map::new(&self.env);
         self.client.create_package(
             &self.admin,
             &1u64,
@@ -98,6 +100,7 @@ impl TestSetup {
             &amount,
             &self.token,
             &expires_at,
+            &metadata,
         )
     }
 }
@@ -107,6 +110,49 @@ impl TestSetup {
 // ===========================================================================
 
 mod create_package {
+    #[test]
+    fn succeeds_with_metadata() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        t.fund_contract(100);
+
+        let expires_at = t.now() + 3_600;
+        let mut metadata = soroban_sdk::Map::new(&t.env);
+
+        // Use the symbol_short! macro to avoid deprecation warnings
+        // and provide cleaner string conversion
+        metadata.set(
+            symbol_short!("campaign"),
+            soroban_sdk::String::from_str(&t.env, "demo-123"),
+        );
+        metadata.set(
+            symbol_short!("region"),
+            soroban_sdk::String::from_str(&t.env, "LATAM"),
+        );
+
+        let id = t.client.create_package(
+            &t.admin,
+            &42u64,
+            &recipient,
+            &100i128,
+            &t.token,
+            &expires_at,
+            &metadata,
+        );
+
+        let pkg = t.client.get_package(&id);
+
+        // Using symbol_short! here as well for consistency and speed
+        assert_eq!(
+            pkg.metadata.get(symbol_short!("campaign")).unwrap(),
+            soroban_sdk::String::from_str(&t.env, "demo-123")
+        );
+        assert_eq!(
+            pkg.metadata.get(symbol_short!("region")).unwrap(),
+            soroban_sdk::String::from_str(&t.env, "LATAM")
+        );
+    }
+
     use super::*;
 
     // -----------------------------------------------------------------------
@@ -120,9 +166,16 @@ mod create_package {
         let recipient = Address::generate(&t.env);
         let expires_at = t.now() + 3_600;
 
-        let result =
-            t.client
-                .try_create_package(&t.admin, &1u64, &recipient, &0i128, &t.token, &expires_at);
+        let metadata = soroban_sdk::Map::new(&t.env);
+        let result = t.client.try_create_package(
+            &t.admin,
+            &1u64,
+            &recipient,
+            &0i128,
+            &t.token,
+            &expires_at,
+            &metadata,
+        );
 
         assert_eq!(result, Err(Ok(Error::InvalidAmount)));
     }
@@ -134,6 +187,7 @@ mod create_package {
         let recipient = Address::generate(&t.env);
         let expires_at = t.now() + 3_600;
 
+        let metadata = soroban_sdk::Map::new(&t.env);
         let result = t.client.try_create_package(
             &t.admin,
             &2u64,
@@ -141,6 +195,7 @@ mod create_package {
             &(-10i128),
             &t.token,
             &expires_at,
+            &metadata,
         );
 
         assert_eq!(result, Err(Ok(Error::InvalidAmount)));
@@ -162,6 +217,7 @@ mod create_package {
         let expires_at = t.now() + 3_600;
         t.fund_contract(50);
 
+        let metadata = soroban_sdk::Map::new(&t.env);
         let result = t.client.try_create_package(
             &t.admin,
             &3u64,
@@ -169,6 +225,7 @@ mod create_package {
             &50i128,
             &t.token,
             &expires_at,
+            &metadata,
         );
 
         assert_eq!(result, Err(Ok(Error::InvalidAmount)));
@@ -193,8 +250,16 @@ mod create_package {
         let recipient = Address::generate(&env);
         let expires_at = env.ledger().timestamp() + 3_600;
 
-        let result =
-            client.try_create_package(&recipient, &1u64, &recipient, &100i128, &token, &expires_at);
+        let metadata = soroban_sdk::Map::new(&env);
+        let result = client.try_create_package(
+            &recipient,
+            &1u64,
+            &recipient,
+            &100i128,
+            &token,
+            &expires_at,
+            &metadata,
+        );
 
         assert_eq!(result, Err(Ok(Error::NotInitialized)));
     }
@@ -228,7 +293,16 @@ mod create_package {
         let expires_at = env.ledger().timestamp() + 3_600;
 
         // This must panic because admin.require_auth() cannot be satisfied.
-        let _ = client.create_package(&recipient, &1u64, &recipient, &100i128, &token, &expires_at);
+        let metadata = soroban_sdk::Map::new(&env);
+        let _ = client.create_package(
+            &recipient,
+            &1u64,
+            &recipient,
+            &100i128,
+            &token,
+            &expires_at,
+            &metadata,
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -242,7 +316,7 @@ mod create_package {
         let expires_at = t.now() + 3_600;
 
         t.fund_contract(200);
-
+        let metadata = soroban_sdk::Map::new(&t.env);
         // First creation succeeds.
         t.client.create_package(
             &t.admin,
@@ -251,8 +325,8 @@ mod create_package {
             &100i128,
             &t.token,
             &expires_at,
+            &metadata,
         );
-
         // Second creation with the same ID must fail.
         let result = t.client.try_create_package(
             &t.admin,
@@ -261,6 +335,7 @@ mod create_package {
             &50i128,
             &t.token,
             &expires_at,
+            &metadata,
         );
 
         assert_eq!(result, Err(Ok(Error::PackageIdExists)));
@@ -279,6 +354,7 @@ mod create_package {
         // Fund only 50 but ask for 100.
         t.fund_contract(50);
 
+        let metadata = soroban_sdk::Map::new(&t.env);
         let result = t.client.try_create_package(
             &t.admin,
             &1u64,
@@ -286,6 +362,7 @@ mod create_package {
             &100i128,
             &t.token,
             &expires_at,
+            &metadata,
         );
 
         assert_eq!(result, Err(Ok(Error::InsufficientFunds)));
@@ -314,6 +391,7 @@ mod create_package {
         let recipient = Address::generate(&t.env);
         let expires_at = t.now() + 3_600;
 
+        let metadata = soroban_sdk::Map::new(&t.env);
         let result = t.client.try_create_package(
             &t.admin,
             &1u64,
@@ -321,6 +399,7 @@ mod create_package {
             &100i128,
             &disallowed_token,
             &expires_at,
+            &metadata,
         );
 
         assert_eq!(result, Err(Ok(Error::InvalidState)));
@@ -336,7 +415,6 @@ mod create_package {
         let recipient = Address::generate(&t.env);
 
         let id = t.create_default_package(&recipient, 500);
-
         let pkg = t.client.get_package(&id);
         assert_eq!(pkg.status, PackageStatus::Created);
         assert_eq!(pkg.amount, 500);
@@ -498,6 +576,7 @@ mod edge_cases {
             &amounts,
             &t.token,
             &3_600u64,
+            &Vec::new(&t.env),
         );
 
         assert_eq!(result, Err(Ok(Error::MismatchedArrays)));
@@ -578,8 +657,15 @@ mod edge_cases {
         t.fund_contract(100);
         let expires_at = t.now() + 3_600;
 
-        t.client
-            .create_package(&t.admin, &1u64, &recipient, &100i128, &t.token, &expires_at);
+        t.client.create_package(
+            &t.admin,
+            &1u64,
+            &recipient,
+            &100i128,
+            &t.token,
+            &expires_at,
+            &Map::new(&t.env),
+        );
 
         // All 100 are locked — creating another package should fail.
         let r2 = t.client.try_create_package(
@@ -589,6 +675,7 @@ mod edge_cases {
             &50i128,
             &t.token,
             &expires_at,
+            &Map::new(&t.env),
         );
         assert_eq!(r2, Err(Ok(Error::InsufficientFunds)));
 
@@ -597,8 +684,14 @@ mod edge_cases {
 
         // Fund another 50 and verify a new package can now be created.
         t.fund_contract(50);
-        let _r3 =
-            t.client
-                .create_package(&t.admin, &3u64, &recipient, &50i128, &t.token, &expires_at);
+        let _r3 = t.client.create_package(
+            &t.admin,
+            &3u64,
+            &recipient,
+            &50i128,
+            &t.token,
+            &expires_at,
+            &Map::new(&t.env),
+        );
     }
 }

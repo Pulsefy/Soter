@@ -4,9 +4,9 @@
 
 use aid_escrow::{AidEscrow, AidEscrowClient};
 use soroban_sdk::{
-    Address, Env, Symbol, TryFromVal, Val, Vec,
     testutils::{Address as _, Events, Ledger},
     token::{StellarAssetClient, TokenClient},
+    Address, Env, Map, Symbol, TryFromVal, Val, Vec,
 };
 
 fn setup_token(env: &Env, admin: &Address) -> (TokenClient<'static>, StellarAssetClient<'static>) {
@@ -34,11 +34,12 @@ fn last_event_data(env: &Env, contract_id: &Address, topic: &str) -> Val {
     let expected = sym(env, topic);
     let events = contract_events(env, contract_id);
     for (_, topics, data) in events.iter().rev() {
-        if let Some(first) = topics.first()
-            && let Ok(s) = Symbol::try_from_val(env, &first)
-            && s == expected
-        {
-            return *data;
+        if let Some(first) = topics.first() {
+            if let Ok(s) = Symbol::try_from_val(env, &first) {
+                if s == expected {
+                    return *data;
+                }
+            }
         }
     }
     panic!(
@@ -116,6 +117,7 @@ fn test_package_created_event() {
     client.fund(&token_client.address, &admin, &5000);
 
     let expires_at = env.ledger().timestamp() + 86400;
+    let metadata = Map::new(&env);
     client.create_package(
         &admin,
         &42u64,
@@ -123,6 +125,7 @@ fn test_package_created_event() {
         &1000,
         &token_client.address,
         &expires_at,
+        &metadata,
     );
 
     let data = last_event_data(&env, &contract_id, "package_created");
@@ -156,6 +159,7 @@ fn test_package_claimed_event() {
         &1000,
         &token_client.address,
         &expires_at,
+        &Map::new(&env),
     );
     client.claim(&0u64);
 
@@ -190,6 +194,7 @@ fn test_package_disbursed_event() {
         &1000,
         &token_client.address,
         &expires_at,
+        &Map::new(&env),
     );
     client.disburse(&0u64);
 
@@ -224,6 +229,7 @@ fn test_package_revoked_event() {
         &1000,
         &token_client.address,
         &expires_at,
+        &Map::new(&env),
     );
     client.revoke(&0u64);
 
@@ -258,6 +264,7 @@ fn test_package_refunded_event() {
         &1000,
         &token_client.address,
         &expires_at,
+        &Map::new(&env),
     );
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 2);
@@ -295,6 +302,7 @@ fn test_extended_event_records_old_and_new_expiry() {
         &1000,
         &token_client.address,
         &old_expires_at,
+        &Map::new(&env),
     );
     client.extend_expiry(&42u64, &new_expires_at);
 

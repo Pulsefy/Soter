@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
@@ -22,6 +23,27 @@ import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { BudgetService } from '../common/budget/budget.service';
+
+type ExpirationCleanupCapableAdapter = OnchainAdapter & {
+  revokeAidPackage?: (params: {
+    packageId: string;
+    operatorAddress: string;
+  }) => Promise<{
+    transactionHash: string;
+    status: 'success' | 'failed';
+  }>;
+  refundAidPackage?: (params: {
+    packageId: string;
+    operatorAddress: string;
+  }) => Promise<{
+    transactionHash: string;
+    status: 'success' | 'failed';
+    amountRefunded?: string;
+  }>;
+};
+
+const DEFAULT_CLAIM_EXPIRY_DAYS = 30;
 
 @Injectable()
 export class ClaimsService {
@@ -38,6 +60,7 @@ export class ClaimsService {
     private readonly metricsService: MetricsService,
     private readonly auditService: AuditService,
     private readonly encryptionService: EncryptionService,
+    private readonly budgetService: BudgetService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
@@ -52,6 +75,12 @@ export class ClaimsService {
       throw new NotFoundException('Campaign not found');
     }
 
+    // Enforce campaign funding cap
+    await this.budgetService.assertWithinBudget(
+      createClaimDto.campaignId,
+      createClaimDto.amount,
+    );
+
     const claim = await this.prisma.claim.create({
       data: {
         campaignId: createClaimDto.campaignId,
@@ -60,6 +89,11 @@ export class ClaimsService {
           createClaimDto.recipientRef,
         ),
         evidenceRef: createClaimDto.evidenceRef,
+        expiresAt:
+          createClaimDto.expiresAt ??
+          new Date(
+            Date.now() + DEFAULT_CLAIM_EXPIRY_DAYS * 24 * 60 * 60 * 1000,
+          ),
         // Store tokenAddress in metadata for multi-token support
         // Note: This would require a schema migration to add tokenAddress field
         // For now, we pass it to on-chain operations directly
@@ -101,7 +135,9 @@ export class ClaimsService {
       },
     });
     // Type assertion for stale Prisma types
-    const claim = claimResult as typeof claimResult & { deletedAt: Date | null } | null;
+    const claim = claimResult as
+      | (typeof claimResult & { deletedAt: Date | null })
+      | null;
     if (!claim || claim.deletedAt) {
       throw new NotFoundException('Claim not found');
     }
@@ -310,6 +346,116 @@ export class ClaimsService {
       ClaimStatus.disbursed,
       ClaimStatus.archived,
     );
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async handleExpiredClaimsCron(): Promise<void> {
+    try {
+      await this.cleanupExpiredClaims();
+    } catch (error) {
+      this.logger.error(
+        'Failed to clean up expired claims',
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
+  async cleanupExpiredClaims(now: Date = new Date()): Promise<{
+    processed: number;
+    archived: number;
+  }> {
+    const expiredClaims = await this.prisma.claim.findMany({
+      where: {
+        deletedAt: null,
+        status: {
+          in: [ClaimStatus.requested, ClaimStatus.verified],
+        },
+        expiresAt: {
+          lt: now,
+        },
+      },
+    });
+
+    if (expiredClaims.length === 0) {
+      this.logger.log('No expired claims found for cleanup');
+      return { processed: 0, archived: 0 };
+    }
+
+    let archived = 0;
+
+    for (const claim of expiredClaims) {
+      const onchainMetadata = await this.cleanupExpiredClaimOnchain(claim.id);
+
+      await this.prisma.claim.update({
+        where: { id: claim.id },
+        data: { status: ClaimStatus.archived },
+      });
+
+      await this.auditService.record({
+        actorId: 'system',
+        entity: 'claim',
+        entityId: claim.id,
+        action: 'expired_cleanup',
+        metadata: {
+          previousStatus: claim.status,
+          nextStatus: ClaimStatus.archived,
+          expiresAt: claim.expiresAt?.toISOString() ?? null,
+          onchain: onchainMetadata,
+        },
+      });
+
+      archived += 1;
+    }
+
+    this.logger.log(
+      `Expired claim cleanup completed: archived ${archived} claim(s)`,
+    );
+
+    return {
+      processed: expiredClaims.length,
+      archived,
+    };
+  }
+
+  private async cleanupExpiredClaimOnchain(claimId: string): Promise<{
+    attempted: boolean;
+    revoked?: string;
+    refunded?: string;
+    skippedReason?: string;
+  }> {
+    if (!this.onchainEnabled || !this.onchainAdapter) {
+      return {
+        attempted: false,
+        skippedReason: 'onchain_disabled',
+      };
+    }
+
+    const cleanupAdapter = this
+      .onchainAdapter as ExpirationCleanupCapableAdapter;
+
+    if (!cleanupAdapter.revokeAidPackage || !cleanupAdapter.refundAidPackage) {
+      return {
+        attempted: false,
+        skippedReason: 'adapter_missing_cleanup_methods',
+      };
+    }
+
+    const packageId = this.generateMockPackageId(claimId);
+
+    const revokeResult = await cleanupAdapter.revokeAidPackage({
+      packageId,
+      operatorAddress: 'system',
+    });
+    const refundResult = await cleanupAdapter.refundAidPackage({
+      packageId,
+      operatorAddress: 'system',
+    });
+
+    return {
+      attempted: true,
+      revoked: revokeResult.transactionHash,
+      refunded: refundResult.transactionHash,
+    };
   }
 
   private async transitionStatus(
@@ -582,7 +728,11 @@ export class ClaimsService {
     if (query.tokenAddress) {
       // Check if either claim or campaign metadata contains the token address
       where.OR = [
-        { campaign: { metadata: { path: 'tokenAddress', equals: query.tokenAddress } } },
+        {
+          campaign: {
+            metadata: { path: 'tokenAddress', equals: query.tokenAddress },
+          },
+        },
       ];
     }
 
@@ -620,7 +770,9 @@ export class ClaimsService {
 
     const data = claims.map(c => {
       const claimMetadata = c.metadata as Record<string, unknown> | undefined;
-      const campaignMetadata = c.campaign?.metadata as Record<string, unknown> | undefined;
+      const campaignMetadata = c.campaign?.metadata as
+        | Record<string, unknown>
+        | undefined;
 
       return {
         id: c.id,
@@ -636,7 +788,9 @@ export class ClaimsService {
         cancelReason: c.cancelReason ?? null,
         reissuedFromId: c.reissuedFromId ?? null,
         // Extract tokenAddress from metadata (keeping it secure - no decryption of recipientRef)
-        tokenAddress: (claimMetadata?.tokenAddress ?? campaignMetadata?.tokenAddress ?? null) as string | null,
+        tokenAddress: (claimMetadata?.tokenAddress ??
+          campaignMetadata?.tokenAddress ??
+          null) as string | null,
       };
     });
 
@@ -665,22 +819,25 @@ export class ClaimsService {
       return `"${str}"`;
     };
 
-    const header = 'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress';
-    const lines = rows.map(r => [
-      escape(r.id),
-      escape(r.campaignId),
-      escape(r.campaignName),
-      escape(r.status),
-      escape(r.amount.toFixed(2)),
-      escape(r.evidenceRef),
-      escape(r.createdAt.toISOString()),
-      escape(r.updatedAt.toISOString()),
-      escape(r.cancelledAt?.toISOString() ?? ''),
-      escape(r.cancelledBy),
-      escape(r.cancelReason),
-      escape(r.reissuedFromId),
-      escape(r.tokenAddress),
-    ].join(','));
+    const header =
+      'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress';
+    const lines = rows.map(r =>
+      [
+        escape(r.id),
+        escape(r.campaignId),
+        escape(r.campaignName),
+        escape(r.status),
+        escape(r.amount.toFixed(2)),
+        escape(r.evidenceRef),
+        escape(r.createdAt.toISOString()),
+        escape(r.updatedAt.toISOString()),
+        escape(r.cancelledAt?.toISOString() ?? ''),
+        escape(r.cancelledBy),
+        escape(r.cancelReason),
+        escape(r.reissuedFromId),
+        escape(r.tokenAddress),
+      ].join(','),
+    );
 
     return [header, ...lines].join('\r\n');
   }

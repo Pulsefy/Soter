@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    Address, Env, Map, String, Symbol, Vec, contract, contracterror, contractevent, contractimpl,
-    contracttype, symbol_short, token,
+    contract, contracterror, contractevent, contractimpl, contracttype, symbol_short, token,
+    Address, Env, Map, String, Symbol, Vec,
 };
 
 // --- Storage Keys ---
@@ -14,6 +14,9 @@ const KEY_CONFIG: Symbol = symbol_short!("config");
 const KEY_PKG_IDX: Symbol = symbol_short!("pkg_idx"); // Aggregation index counter
 const KEY_DISTRIBUTORS: Symbol = symbol_short!("dstrbtrs"); // Map<Address, bool>
 const KEY_PAUSED: Symbol = symbol_short!("paused");
+const KEY_PAUSE_CREATE: Symbol = symbol_short!("p_create");
+const KEY_PAUSE_CLAIM: Symbol = symbol_short!("p_claim");
+const KEY_PAUSE_WITHDRAW: Symbol = symbol_short!("p_wdrw");
 
 // --- Data Types ---
 
@@ -169,6 +172,18 @@ pub struct ContractPausedEvent {
 #[contractevent]
 pub struct ContractUnpausedEvent {
     pub admin: Address,
+}
+
+#[contractevent]
+pub struct ActionPausedEvent {
+    pub admin: Address,
+    pub action: Symbol,
+}
+
+#[contractevent]
+pub struct ActionUnpausedEvent {
+    pub admin: Address,
+    pub action: Symbol,
 }
 
 #[contract]
@@ -334,6 +349,46 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Admin-only. Pauses a specific action (create, claim, or withdraw).
+    /// Emits an `ActionPausedEvent`.
+    pub fn pause_action(env: Env, action: Symbol) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let key = Self::get_pause_key(action.clone())?;
+        env.storage().instance().set(&key, &true);
+
+        ActionPausedEvent { admin, action }.publish(&env);
+        Ok(())
+    }
+
+    /// Admin-only. Unpauses a specific action.
+    /// Emits an `ActionUnpausedEvent`.
+    pub fn unpause_action(env: Env, action: Symbol) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let key = Self::get_pause_key(action.clone())?;
+        env.storage().instance().set(&key, &false);
+
+        ActionUnpausedEvent { admin, action }.publish(&env);
+        Ok(())
+    }
+
+    /// Returns `true` if the specific action is currently paused.
+    pub fn is_action_paused(env: Env, action: Symbol) -> bool {
+        if Self::is_paused(env.clone()) {
+            return true;
+        }
+
+        let key = match Self::get_pause_key(action) {
+            Ok(k) => k,
+            Err(_) => return false,
+        };
+
+        env.storage().instance().get(&key).unwrap_or(false)
+    }
+
     /// Returns `true` if the contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
         env.storage().instance().get(&KEY_PAUSED).unwrap_or(false)
@@ -377,8 +432,19 @@ impl AidEscrow {
         Ok(())
     }
 
-    /// Creates a package with a specific ID.
+    /// Creates a package with a specific ID and stores provided metadata.
     /// Locks funds from the available pool (Contract Balance - Total Locked).
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `operator` - Address of the admin or distributor creating the package
+    /// * `id` - Unique package ID
+    /// * `recipient` - Address of the recipient
+    /// * `amount` - Amount to escrow
+    /// * `token` - Token contract address
+    /// * `expires_at` - Expiration timestamp (0 for no expiration)
+    /// * `metadata` - Arbitrary key-value metadata for the package
+    #[allow(clippy::too_many_arguments)]
     pub fn create_package(
         env: Env,
         operator: Address,
@@ -387,8 +453,9 @@ impl AidEscrow {
         amount: i128,
         token: Address,
         expires_at: u64,
+        metadata: Map<Symbol, String>,
     ) -> Result<u64, Error> {
-        Self::check_paused(&env)?;
+        Self::check_action_paused(&env, symbol_short!("create"))?;
         Self::require_admin_or_distributor(&env, &operator)?;
         let config = Self::get_config(env.clone());
 
@@ -447,7 +514,7 @@ impl AidEscrow {
             status: PackageStatus::Created,
             created_at,
             expires_at,
-            metadata: Map::new(&env),
+            metadata,
         };
 
         env.storage().persistent().set(&key, &package);
@@ -477,6 +544,15 @@ impl AidEscrow {
 
     /// Creates multiple packages in a single transaction for multiple recipients.
     /// Uses an auto-incrementing counter for package IDs.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `operator` - Address of the admin or distributor creating the packages
+    /// * `recipients` - List of recipient addresses
+    /// * `amounts` - List of amounts to escrow (must match recipients)
+    /// * `token` - Token contract address
+    /// * `expires_in` - Expiry duration in seconds from now
+    /// * `metadatas` - List of metadata maps, one per package
     pub fn batch_create_packages(
         env: Env,
         operator: Address,
@@ -484,12 +560,13 @@ impl AidEscrow {
         amounts: Vec<i128>,
         token: Address,
         expires_in: u64,
+        metadatas: Vec<Map<Symbol, String>>,
     ) -> Result<Vec<u64>, Error> {
-        Self::check_paused(&env)?;
+        Self::check_action_paused(&env, symbol_short!("create"))?;
         Self::require_admin_or_distributor(&env, &operator)?;
 
         // Validate array lengths match
-        if recipients.len() != amounts.len() {
+        if recipients.len() != amounts.len() || recipients.len() != metadatas.len() {
             return Err(Error::MismatchedArrays);
         }
 
@@ -517,6 +594,7 @@ impl AidEscrow {
         for i in 0..recipients.len() {
             let recipient = recipients.get(i).unwrap();
             let amount = amounts.get(i).unwrap();
+            let metadata = metadatas.get(i).unwrap();
 
             // Validate amount
             if amount <= 0 {
@@ -543,7 +621,7 @@ impl AidEscrow {
                 status: PackageStatus::Created,
                 created_at,
                 expires_at,
-                metadata: Map::new(&env),
+                metadata: metadata.clone(),
             };
 
             env.storage().persistent().set(&key, &package);
@@ -590,7 +668,7 @@ impl AidEscrow {
 
     /// Recipient claims the package.
     pub fn claim(env: Env, id: u64) -> Result<(), Error> {
-        Self::check_paused(&env)?;
+        Self::check_action_paused(&env, symbol_short!("claim"))?;
         let key = (symbol_short!("pkg"), id);
         let mut package: Package = env
             .storage()
@@ -901,6 +979,7 @@ impl AidEscrow {
         amount: i128,
         token: Address,
     ) -> Result<(), Error> {
+        Self::check_action_paused(&env, symbol_short!("withdraw"))?;
         // 1. Only the admin can withdraw surplus
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -944,11 +1023,32 @@ impl AidEscrow {
 
     // --- Helpers ---
 
-    fn check_paused(env: &Env) -> Result<(), Error> {
+    fn check_action_paused(env: &Env, action: Symbol) -> Result<(), Error> {
         if env.storage().instance().get(&KEY_PAUSED).unwrap_or(false) {
             return Err(Error::ContractPaused);
         }
+
+        let key = match Self::get_pause_key(action) {
+            Ok(k) => k,
+            Err(_) => return Ok(()),
+        };
+
+        if env.storage().instance().get(&key).unwrap_or(false) {
+            return Err(Error::ContractPaused);
+        }
         Ok(())
+    }
+
+    fn get_pause_key(action: Symbol) -> Result<Symbol, Error> {
+        if action == symbol_short!("create") {
+            Ok(KEY_PAUSE_CREATE)
+        } else if action == symbol_short!("claim") {
+            Ok(KEY_PAUSE_CLAIM)
+        } else if action == symbol_short!("withdraw") {
+            Ok(KEY_PAUSE_WITHDRAW)
+        } else {
+            Err(Error::InvalidState)
+        }
     }
 
     fn decrement_locked(env: &Env, token: &Address, amount: i128) {
@@ -1030,20 +1130,20 @@ impl AidEscrow {
             let idx_key = (symbol_short!("pidx"), i);
             if let Some(pkg_id) = env.storage().persistent().get::<_, u64>(&idx_key) {
                 let pkg_key = (symbol_short!("pkg"), pkg_id);
-                if let Some(package) = env.storage().persistent().get::<_, Package>(&pkg_key)
-                    && package.token == token
-                {
-                    match package.status {
-                        PackageStatus::Created => {
-                            total_committed += package.amount;
-                        }
-                        PackageStatus::Claimed => {
-                            total_claimed += package.amount;
-                        }
-                        PackageStatus::Expired
-                        | PackageStatus::Cancelled
-                        | PackageStatus::Refunded => {
-                            total_expired_cancelled += package.amount;
+                if let Some(package) = env.storage().persistent().get::<_, Package>(&pkg_key) {
+                    if package.token == token {
+                        match package.status {
+                            PackageStatus::Created => {
+                                total_committed += package.amount;
+                            }
+                            PackageStatus::Claimed => {
+                                total_claimed += package.amount;
+                            }
+                            PackageStatus::Expired
+                            | PackageStatus::Cancelled
+                            | PackageStatus::Refunded => {
+                                total_expired_cancelled += package.amount;
+                            }
                         }
                     }
                 }
@@ -1067,14 +1167,53 @@ impl AidEscrow {
 
         for id in 0..count {
             let key = (symbol_short!("pkg"), id);
-            if let Some(package) = env.storage().persistent().get::<_, Package>(&key)
-                && package.recipient == recipient
-            {
-                matches += 1;
+            if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                if package.recipient == recipient {
+                    matches += 1;
+                }
             }
         }
 
         matches
+    }
+
+    /// Lists package IDs for a specific recipient with pagination.
+    ///
+    /// # Arguments
+    /// * `recipient` - The address to filter packages by
+    /// * `cursor` - Starting position for pagination (0-indexed)
+    /// * `limit` - Maximum number of results to return
+    ///
+    /// # Returns
+    /// A Vec<u64> containing package IDs that belong to the recipient,
+    /// starting from the cursor position and limited by the limit parameter.
+    pub fn list_recipient_packages(
+        env: Env,
+        recipient: Address,
+        cursor: u64,
+        limit: u32,
+    ) -> Vec<u64> {
+        let package_counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        let mut result: Vec<u64> = Vec::new(&env);
+
+        // Calculate the end position: cursor + limit or package_counter, whichever comes first
+        let end_pos = if cursor.saturating_add(limit as u64) > package_counter {
+            package_counter
+        } else {
+            cursor.saturating_add(limit as u64)
+        };
+
+        // Iterate from cursor to end_pos
+        for id in cursor..end_pos {
+            let key = (symbol_short!("pkg"), id);
+            if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                if package.recipient == recipient {
+                    result.push_back(id);
+                }
+            }
+        }
+
+        result
     }
 }
 
@@ -1083,9 +1222,9 @@ impl AidEscrow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::Env;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::token::{StellarAssetClient, TokenClient};
+    use soroban_sdk::Env;
 
     fn setup() -> (Env, AidEscrowClient<'static>) {
         let env = Env::default();
@@ -1118,11 +1257,253 @@ mod tests {
         // Confirm the contract holds the funded balance.
         assert_eq!(token_client.balance(&client.address), 5_000);
 
+        let package_metadata = Map::new(&env);
+
         let operator = admin.clone();
-        let package_id = client.create_package(&operator, &1, &recipient, &1000, &token, &86400);
+        let package_id = client.create_package(
+            &operator,
+            &1,
+            &recipient,
+            &1000,
+            &token,
+            &86400,
+            &package_metadata,
+        );
         client.cancel_package(&package_id);
 
         let package = client.get_package(&package_id);
         assert_eq!(package.status, PackageStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_list_recipient_packages_few_packages() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient1 = Address::generate(&env);
+        let recipient2 = Address::generate(&env);
+
+        // Deploy a mock Stellar asset contract to use as the token.
+        let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = token_id.address();
+        let sac = StellarAssetClient::new(&env, &token);
+
+        env.mock_all_auths();
+
+        // Initialise the escrow contract.
+        client.init(&admin);
+
+        // Mint tokens to admin and fund the escrow pool.
+        sac.mint(&admin, &10_000);
+        client.fund(&token, &admin, &10_000);
+
+        // Create packages for recipient1 (3 packages) and recipient2 (2 packages)
+        let operator = admin.clone();
+        let empty_metadata = Map::new(&env);
+        let package1_id = client.create_package(
+            &operator,
+            &1,
+            &recipient1,
+            &1000,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
+        let package2_id = client.create_package(
+            &operator,
+            &2,
+            &recipient1,
+            &1500,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
+        let package3_id = client.create_package(
+            &operator,
+            &3,
+            &recipient1,
+            &2000,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
+        let package4_id = client.create_package(
+            &operator,
+            &4,
+            &recipient2,
+            &1200,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
+        let package5_id = client.create_package(
+            &operator,
+            &5,
+            &recipient2,
+            &1800,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
+
+        // Test listing recipient1's packages with limit 10 (more than they have)
+        let packages = client.list_recipient_packages(&recipient1, &0, &10);
+        assert_eq!(packages.len(), 3);
+        assert!(packages.contains(package1_id));
+        assert!(packages.contains(package2_id));
+        assert!(packages.contains(package3_id));
+
+        // Test listing recipient2's packages with limit 10 (more than they have)
+        let packages = client.list_recipient_packages(&recipient2, &0, &10);
+        assert_eq!(packages.len(), 2);
+        assert!(packages.contains(package4_id));
+        assert!(packages.contains(package5_id));
+    }
+
+    #[test]
+    fn test_list_recipient_packages_pagination() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        // Deploy a mock Stellar asset contract to use as the token.
+        let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = token_id.address();
+        let sac = StellarAssetClient::new(&env, &token);
+
+        env.mock_all_auths();
+
+        // Initialise the escrow contract.
+        client.init(&admin);
+
+        // Mint tokens to admin and fund the escrow pool.
+        sac.mint(&admin, &20_000);
+        client.fund(&token, &admin, &15_000);
+
+        // Create 7 packages for the recipient
+        let operator = admin.clone();
+        let mut package_ids: soroban_sdk::Vec<u64> = soroban_sdk::Vec::new(&env);
+        let empty_metadata = Map::new(&env);
+        for i in 0..7 {
+            package_ids.push_back(client.create_package(
+                &operator,
+                &i,
+                &recipient,
+                &(1000 + i as i128 * 100),
+                &token,
+                &86400,
+                &empty_metadata,
+            ));
+        }
+
+        // Test pagination with limit 3
+        let page1 = client.list_recipient_packages(&recipient, &0, &3);
+        assert_eq!(page1.len(), 3);
+        assert!(page1.contains(package_ids.get(0).unwrap()));
+        assert!(page1.contains(package_ids.get(1).unwrap()));
+        assert!(page1.contains(package_ids.get(2).unwrap()));
+
+        let page2 = client.list_recipient_packages(&recipient, &3, &3);
+        assert_eq!(page2.len(), 3);
+        assert!(page2.contains(package_ids.get(3).unwrap()));
+        assert!(page2.contains(package_ids.get(4).unwrap()));
+        assert!(page2.contains(package_ids.get(5).unwrap()));
+
+        let page3 = client.list_recipient_packages(&recipient, &6, &3);
+        assert_eq!(page3.len(), 1);
+        assert!(page3.contains(package_ids.get(6).unwrap()));
+
+        // Test cursor beyond available packages
+        let empty_page = client.list_recipient_packages(&recipient, &10, &3);
+        assert_eq!(empty_page.len(), 0);
+
+        // Test limit that exceeds remaining packages
+        let last_page = client.list_recipient_packages(&recipient, &5, &10);
+        assert_eq!(last_page.len(), 2);
+        assert!(last_page.contains(package_ids.get(5).unwrap()));
+        assert!(last_page.contains(package_ids.get(6).unwrap()));
+    }
+
+    #[test]
+    fn test_action_specific_pause() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        // Deploy a mock Stellar asset contract to use as the token.
+        let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = token_id.address();
+        let sac = StellarAssetClient::new(&env, &token);
+
+        env.mock_all_auths();
+
+        // Initialise the escrow contract.
+        client.init(&admin);
+        sac.mint(&admin, &10_000);
+        client.fund(&token, &admin, &5_000);
+
+        // 1. Pause 'create' action
+        client.pause_action(&symbol_short!("create"));
+        assert!(client.is_action_paused(&symbol_short!("create")));
+
+        // Attempt to create package should fail
+        let result = client.try_create_package(
+            &admin,
+            &1,
+            &recipient,
+            &1000,
+            &token,
+            &86400,
+            &Map::new(&env),
+        );
+        assert!(result.is_err());
+
+        // 2. Unpause 'create', pause 'claim'
+        client.unpause_action(&symbol_short!("create"));
+        client.pause_action(&symbol_short!("claim"));
+
+        // Create package should work now
+        let package_id = client.create_package(
+            &admin,
+            &1,
+            &recipient,
+            &1000,
+            &token,
+            &86400,
+            &Map::new(&env),
+        );
+
+        // Claim should fail
+        let claim_result = client.try_claim(&package_id);
+        assert!(claim_result.is_err());
+
+        // 3. Unpause 'claim', pause 'withdraw'
+        client.unpause_action(&symbol_short!("claim"));
+        client.pause_action(&symbol_short!("withdraw"));
+
+        // Claim should work now
+        client.claim(&package_id);
+
+        // Withdraw surplus should fail
+        let withdraw_result = client.try_withdraw_surplus(&admin, &100, &token);
+        assert!(withdraw_result.is_err());
+
+        // 4. Global pause overrides all
+        client.unpause_action(&symbol_short!("withdraw"));
+        client.pause();
+
+        assert!(client.is_action_paused(&symbol_short!("create")));
+        assert!(client.is_action_paused(&symbol_short!("claim")));
+        assert!(client.is_action_paused(&symbol_short!("withdraw")));
+
+        let result = client.try_create_package(
+            &admin,
+            &2,
+            &recipient,
+            &1000,
+            &token,
+            &86400,
+            &Map::new(&env),
+        );
+        assert!(result.is_err());
     }
 }

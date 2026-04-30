@@ -24,17 +24,19 @@ describe('Deprecation Headers (e2e)', () => {
     return request(app.getHttpServer())
       .get('/api/deprecated-test')
       .expect(200)
-      .expect((res) => {
+      .expect(res => {
         // Check Deprecation header
         expect(res.header['deprecation']).toBe('2025-01-01');
-        
+
         // Check Sunset header
         expect(res.header['sunset']).toBe('2025-12-31');
-        
+
         // Check Link header
         const linkHeader = res.header['link'];
         expect(linkHeader).toContain('</api/v1/health>; rel="alternate"');
-        expect(linkHeader).toContain('<https://docs.pulsefy.com/migration>; rel="deprecation"');
+        expect(linkHeader).toContain(
+          '<https://docs.pulsefy.com/migration>; rel="deprecation"',
+        );
       });
   });
 
@@ -42,7 +44,7 @@ describe('Deprecation Headers (e2e)', () => {
     return request(app.getHttpServer())
       .get('/api/health')
       .expect(200)
-      .expect((res) => {
+      .expect(res => {
         expect(res.header['deprecation']).toBeUndefined();
         expect(res.header['sunset']).toBeUndefined();
         expect(res.header['link']).toBeUndefined();

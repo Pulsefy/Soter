@@ -2,9 +2,9 @@
 
 use aid_escrow::{AidEscrow, AidEscrowClient, Error, PackageStatus};
 use soroban_sdk::{
-    Address, Env,
     testutils::{Address as _, Ledger},
     token::{StellarAssetClient, TokenClient},
+    Address, Env, Map,
 };
 
 fn setup_token(env: &Env, admin: &Address) -> (TokenClient<'static>, StellarAssetClient<'static>) {
@@ -41,6 +41,7 @@ fn test_core_flow_fund_create_claim() {
     // 3. Create Package
     let pkg_id = 101;
     let expiry = env.ledger().timestamp() + 86400; // 1 day later
+    let metadata = Map::new(&env);
     client.create_package(
         &admin,
         &pkg_id,
@@ -48,6 +49,7 @@ fn test_core_flow_fund_create_claim() {
         &1000,
         &token_client.address,
         &expiry,
+        &metadata,
     );
 
     // Check Package State
@@ -83,14 +85,41 @@ fn test_solvency_check() {
     client.fund(&token_client.address, &admin, &1000);
 
     // Try creating package > available balance
-    let res = client.try_create_package(&admin, &1, &recipient, &2000, &token_client.address, &0);
+    let metadata = Map::new(&env);
+    let res = client.try_create_package(
+        &admin,
+        &1,
+        &recipient,
+        &2000,
+        &token_client.address,
+        &0,
+        &metadata,
+    );
     assert_eq!(res, Err(Ok(Error::InsufficientFunds)));
 
     // Create valid package using all funds
-    client.create_package(&admin, &2, &recipient, &1000, &token_client.address, &0);
+    let metadata = Map::new(&env);
+    client.create_package(
+        &admin,
+        &2,
+        &recipient,
+        &1000,
+        &token_client.address,
+        &0,
+        &metadata,
+    );
 
     // Try creating another package (funds are locked)
-    let res2 = client.try_create_package(&admin, &3, &recipient, &1, &token_client.address, &0);
+    let metadata = Map::new(&env);
+    let res2 = client.try_create_package(
+        &admin,
+        &3,
+        &recipient,
+        &1,
+        &token_client.address,
+        &0,
+        &metadata,
+    );
     assert_eq!(res2, Err(Ok(Error::InsufficientFunds)));
 }
 
@@ -116,6 +145,7 @@ fn test_expiry_and_refund() {
     env.ledger().set_timestamp(start_time);
     let pkg_id = 1;
     let expiry = start_time + 100;
+    let metadata = Map::new(&env);
     client.create_package(
         &admin,
         &pkg_id,
@@ -123,6 +153,7 @@ fn test_expiry_and_refund() {
         &500,
         &token_client.address,
         &expiry,
+        &metadata,
     );
 
     // Advance time past expiry
@@ -163,7 +194,16 @@ fn test_cancel_package_flow() {
     client.fund(&token_client.address, &admin, &1000);
 
     let pkg_id = 1;
-    client.create_package(&admin, &pkg_id, &recipient, &500, &token_client.address, &0);
+    let metadata = Map::new(&env);
+    client.create_package(
+        &admin,
+        &pkg_id,
+        &recipient,
+        &500,
+        &token_client.address,
+        &0,
+        &metadata,
+    );
 
     // Cancel (was revoke in legacy)
     client.cancel_package(&pkg_id);
@@ -173,6 +213,7 @@ fn test_cancel_package_flow() {
 
     // Funds are now unlocked. We can create a new package using those same funds.
     let pkg_id_2 = 2;
+    let metadata = Map::new(&env);
     client.create_package(
         &admin,
         &pkg_id_2,
@@ -180,6 +221,7 @@ fn test_cancel_package_flow() {
         &1000,
         &token_client.address,
         &0,
+        &metadata,
     );
 }
 
@@ -204,6 +246,7 @@ fn test_distributor_package_creation() {
     client.add_distributor(&distributor);
 
     let pkg_id = 1;
+    let metadata = Map::new(&env);
     client.create_package(
         &distributor,
         &pkg_id,
@@ -211,11 +254,13 @@ fn test_distributor_package_creation() {
         &1_000,
         &token_client.address,
         &0,
+        &metadata,
     );
     let pkg = client.get_package(&pkg_id);
     assert_eq!(pkg.status, PackageStatus::Created);
 
     client.remove_distributor(&distributor);
+    let metadata = Map::new(&env);
     let res = client.try_create_package(
         &distributor,
         &2,
@@ -223,6 +268,7 @@ fn test_distributor_package_creation() {
         &100,
         &token_client.address,
         &0,
+        &metadata,
     );
     assert_eq!(res, Err(Ok(Error::NotAuthorized)));
 }

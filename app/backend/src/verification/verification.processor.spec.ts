@@ -65,7 +65,7 @@ describe('VerificationProcessor', () => {
       const result = await processor.process(mockJob);
 
       expect(result).toEqual(mockResult);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(verificationService.processVerification).toHaveBeenCalledWith(
         mockJobData,
       );
