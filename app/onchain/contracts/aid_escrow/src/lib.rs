@@ -37,6 +37,7 @@ const KEY_PAUSED: Symbol = symbol_short!("paused");
 const KEY_PAUSE_CREATE: Symbol = symbol_short!("p_create");
 const KEY_PAUSE_CLAIM: Symbol = symbol_short!("p_claim");
 const KEY_PAUSE_WITHDRAW: Symbol = symbol_short!("p_wdrw");
+const KEY_TOTAL_CLAIMED: Symbol = symbol_short!("claimed"); // Map<Address, i128>
 
 // --- Data Types ---
 
@@ -722,30 +723,38 @@ impl AidEscrow {
             .get(&key)
             .ok_or(Error::PackageNotFound)?;
 
-        // Validations
         if package.status != PackageStatus::Created {
             return Err(Error::PackageNotActive);
         }
-        // Check expiry
+
         if package.expires_at > 0 && env.ledger().timestamp() > package.expires_at {
-            // Auto-expire if accessed after date
             package.status = PackageStatus::Expired;
             env.storage().persistent().set(&key, &package);
             return Err(Error::PackageExpired);
         }
 
-        // Auth
         package.recipient.require_auth();
 
-        // State Transition: Created -> Claimed
-        // Checks passed, update state FIRST (Re-entrancy protection)
+        // State Transition
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&key, &package);
 
-        // Update Global Locked
+        // Update Global Locked (Bookkeeping)
         Self::decrement_locked(&env, &package.token, package.amount);
 
-        // Effect: Transfer Funds
+        // --- ADDED FOR INVARIANT TRACKING ---
+        let mut claimed_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_CLAIMED)
+            .unwrap_or(Map::new(&env));
+        let current_total = claimed_map.get(package.token.clone()).unwrap_or(0);
+        claimed_map.set(package.token.clone(), current_total + package.amount);
+        env.storage()
+            .instance()
+            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+        // ------------------------------------
+
         let token_client = token::Client::new(&env, &package.token);
         token_client.transfer(
             &env.current_contract_address(),
@@ -753,13 +762,12 @@ impl AidEscrow {
             &package.amount,
         );
 
-        let timestamp = env.ledger().timestamp();
         PackageClaimed {
             package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
             actor: package.recipient.clone(),
-            timestamp,
+            timestamp: env.ledger().timestamp(),
         }
         .publish(&env);
 
@@ -1113,6 +1121,26 @@ impl AidEscrow {
 
         locked_map.set(token.clone(), new_locked);
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+    }
+
+    /// Returns the total amount currently locked for a specific token.
+    pub fn get_total_locked(env: Env, token: Address) -> i128 {
+        let locked_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_LOCKED)
+            .unwrap_or(Map::new(&env));
+        locked_map.get(token).unwrap_or(0)
+    }
+
+    /// Returns the cumulative amount ever claimed for a specific token.
+    pub fn get_total_claimed(env: Env, token: Address) -> i128 {
+        let claimed_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_CLAIMED)
+            .unwrap_or(Map::new(&env));
+        claimed_map.get(token).unwrap_or(0)
     }
 
     fn require_admin_or_distributor(env: &Env, operator: &Address) -> Result<(), Error> {
