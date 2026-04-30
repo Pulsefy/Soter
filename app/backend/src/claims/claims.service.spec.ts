@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ClaimsService } from './claims.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { BudgetService } from '../common/budget/budget.service';
 import {
   OnchainAdapter,
   ONCHAIN_ADAPTER_TOKEN,
@@ -82,6 +83,13 @@ describe('ClaimsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ClaimsService,
+        {
+          provide: BudgetService,
+          useValue: {
+            assertWithinBudget: jest.fn(),
+            getCampaignBudgetUsage: jest.fn(),
+          },
+        },
         {
           provide: PrismaService,
           useValue: {
@@ -259,6 +267,13 @@ describe('ClaimsService', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           ClaimsService,
+          {
+            provide: BudgetService,
+            useValue: {
+              assertWithinBudget: jest.fn(),
+              getCampaignBudgetUsage: jest.fn(),
+            },
+          },
           {
             provide: PrismaService,
             useValue: {
