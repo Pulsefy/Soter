@@ -64,7 +64,8 @@ export class JobsController {
 
   @ApiOperation({
     summary: 'Get overall health of background job queues',
-    description: 'Checks if any core queues are degraded (too many waiting or failed jobs).',
+    description:
+      'Checks if any core queues are degraded (too many waiting or failed jobs).',
   })
   @Get('health')
   async getHealth() {

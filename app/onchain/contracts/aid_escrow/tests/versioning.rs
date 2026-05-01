@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use aid_escrow::{AidEscrow, AidEscrowClient};
-use soroban_sdk::{Address, Env, testutils::Address as _};
+use soroban_sdk::{testutils::Address as _, Address, Env};
 
 #[test]
 fn test_version_set_on_init() {

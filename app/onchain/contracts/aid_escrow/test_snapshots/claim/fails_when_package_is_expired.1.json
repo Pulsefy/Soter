@@ -83,7 +83,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "i128": "150"
+                  "i128": "10000000"
                 }
               ]
             }
@@ -111,13 +111,16 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "i128": "150"
+                  "i128": "10000000"
                 },
                 {
                   "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
                 },
                 {
                   "u64": "1003600"
+                },
+                {
+                  "map": []
                 }
               ]
             }
@@ -385,7 +388,7 @@
                         "symbol": "amount"
                       },
                       "val": {
-                        "i128": "150"
+                        "i128": "10000000"
                       }
                     },
                     {
@@ -528,10 +531,18 @@
                                 "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
                               },
                               "val": {
-                                "i128": "150"
+                                "i128": "10000000"
                               }
                             }
                           ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "pkg_cnt"
+                        },
+                        "val": {
+                          "u64": "2"
                         }
                       },
                       {
@@ -602,7 +613,7 @@
                         "symbol": "amount"
                       },
                       "val": {
-                        "i128": "150"
+                        "i128": "10000000"
                       }
                     },
                     {

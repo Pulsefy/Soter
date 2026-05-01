@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { CampaignStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
@@ -113,7 +117,9 @@ export class CampaignsService {
     });
   }
 
-  async exportCampaigns(query: ExportCampaignsQueryDto): Promise<CampaignExportResult> {
+  async exportCampaigns(
+    query: ExportCampaignsQueryDto,
+  ): Promise<CampaignExportResult> {
     const page = Math.max(1, query.page ?? 1);
     const limit = Math.min(200, Math.max(1, query.limit ?? 50));
     const skip = (page - 1) * limit;
@@ -196,20 +202,23 @@ export class CampaignsService {
       return `"${str}"`;
     };
 
-    const header = 'id,name,status,budget,orgId,ngoId,createdAt,updatedAt,archivedAt,totalClaims,totalDisbursed';
-    const lines = rows.map(r => [
-      escape(r.id),
-      escape(r.name),
-      escape(r.status),
-      escape(r.budget),
-      escape(r.orgId),
-      escape(r.ngoId),
-      escape(r.createdAt.toISOString()),
-      escape(r.updatedAt.toISOString()),
-      escape(r.archivedAt?.toISOString() ?? ''),
-      escape(r.totalClaims),
-      escape(r.totalDisbursed.toFixed(2)),
-    ].join(','));
+    const header =
+      'id,name,status,budget,orgId,ngoId,createdAt,updatedAt,archivedAt,totalClaims,totalDisbursed';
+    const lines = rows.map(r =>
+      [
+        escape(r.id),
+        escape(r.name),
+        escape(r.status),
+        escape(r.budget),
+        escape(r.orgId),
+        escape(r.ngoId),
+        escape(r.createdAt.toISOString()),
+        escape(r.updatedAt.toISOString()),
+        escape(r.archivedAt?.toISOString() ?? ''),
+        escape(r.totalClaims),
+        escape(r.totalDisbursed.toFixed(2)),
+      ].join(','),
+    );
 
     return [header, ...lines].join('\r\n');
   }

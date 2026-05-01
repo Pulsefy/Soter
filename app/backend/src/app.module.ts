@@ -2,6 +2,7 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -82,6 +83,7 @@ import { DeprecationInterceptor } from './common/interceptors/deprecation.interc
       }),
       inject: [ConfigService],
     }),
+    ScheduleModule.forRoot(),
 
     LoggerModule,
     PrismaModule,

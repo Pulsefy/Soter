@@ -9,6 +9,7 @@ import {
   GetAidPackageDto,
   GetAidPackageStatsDto,
 } from './dto/aid-escrow.dto';
+import { BudgetService } from '../common/budget/budget.service';
 
 /**
  * AidEscrowService
@@ -22,6 +23,7 @@ export class AidEscrowService {
   constructor(
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
+    private readonly budgetService: BudgetService,
   ) {}
 
   /**
@@ -85,6 +87,16 @@ export class AidEscrowService {
         `Insufficient token balance for ${dto.tokenAddress}. ` +
           `Required: ${balanceCheck.required}, Available: ${balanceCheck.balance}`,
       );
+    }
+
+    // Enforce campaign funding cap if campaign_ref is present in metadata
+    const campaignId = dto.metadata?.campaign_ref;
+    if (campaignId) {
+      const amountNum = Number(dto.amount);
+      if (isNaN(amountNum)) {
+        throw new BadRequestException('Invalid amount for funding cap check');
+      }
+      await this.budgetService.assertWithinBudget(campaignId, amountNum);
     }
 
     const result = await this.onchainAdapter.createAidPackage({
