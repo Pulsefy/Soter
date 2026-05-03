@@ -95,4 +95,21 @@ export const metricsProviders = [
       'error_type',
     ],
   }),
+
+  // Analytics Cache Metrics
+  makeCounterProvider({
+    name: 'analytics_cache_hits_total',
+    help: 'Total number of analytics cache hits',
+    labelNames: ['endpoint'],
+  }),
+  makeCounterProvider({
+    name: 'analytics_cache_misses_total',
+    help: 'Total number of analytics cache misses',
+    labelNames: ['endpoint'],
+  }),
+  makeCounterProvider({
+    name: 'analytics_cache_invalidations_total',
+    help: 'Total number of analytics cache invalidations',
+    labelNames: ['reason'],
+  }),
 ];

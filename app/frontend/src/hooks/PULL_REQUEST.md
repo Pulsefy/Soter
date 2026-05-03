@@ -2,7 +2,7 @@
 
 ## Summary
 
-Implements optimistic mutation patterns for campaign actions (pause, resume, archive) with automatic rollback on failure and standardized toast feedback.
+Implements optimistic mutation patterns for campaign actions (pause, resume, archive) with automatic rollback on failure, standardized toast feedback, and inline status indicators.
 
 > **Related Issue**: Improve perceived performance for common admin actions such as pause, archive, and update workflows.
 
@@ -22,30 +22,44 @@ Implements optimistic mutation patterns for campaign actions (pause, resume, arc
 
 | File | Description |
 |------|-------------|
-| `app/frontend/src/app/[locale]/campaigns/page.tsx` | Updated to use `useCampaignAction` hook |
+| `app/frontend/src/app/[locale]/campaigns/page.tsx` | Integrated `InlineFeedback` and `OptimisticStatusBadge` components |
 
 ---
 
-## Features
+## This PR (v2) - Inline Feedback Integration
 
-### 1. Optimistic State Updates ✅
-- UI updates immediately when user triggers an action
-- No waiting for server response before showing feedback
-- Status changes reflect instantly in the campaign list
+### Code Changes
 
-### 2. Automatic Rollback ✅
-- On API failure, UI cleanly reverts to previous state
-- Uses React Query's `onError` callback with context snapshot
-- No manual state management required
+```typescript
+// Added imports (line 10)
+import { InlineFeedback, OptimisticStatusBadge } from '@/components/InlineFeedback';
 
-### 3. Standardized Toast Patterns ✅
-- Consistent success toasts: `"Campaign {action}ed - {name} has been {action}ed."`
-- Consistent error toasts: `"Failed to {action} campaign - {error message}"`
-- Uses existing `ToastProvider` infrastructure
+// Replaced static status badge with optimistic version
+<OptimisticStatusBadge
+  status={campaign.status}
+  isOptimistic={campaignAction.isPending && campaignAction.variables?.id === campaign.id}
+/>
 
-### 4. Type Safety ✅
-- Full TypeScript support with `CampaignAction` union type
-- `useCampaignActions()` helper for UI conditional rendering
+// Added conditional inline feedback during mutations
+{campaignAction.isPending && campaignAction.variables?.id === campaign.id ? (
+  <InlineFeedback
+    isPending={true}
+    action={campaignAction.variables?.action.type === 'pause' ? 'pausing' : ...}
+  />
+) : (
+  // Original buttons
+)}
+```
+
+### Requirements Fulfilled
+
+| Requirement | Status | Implementation |
+|-------------|--------|----------------|
+| Optimistic state updates | ✅ | `useOptimisticCampaignAction` hook with `onMutate` callback |
+| Rollback on failure | ✅ | `onError` restores previous campaign state from snapshot |
+| Standardized toast patterns | ✅ | `ToastProvider` with consistent success/error messages |
+| Inline feedback on mutations | ✅ | `InlineFeedback` component shown during pending state |
+| Optimistic status badge | ✅ | `OptimisticStatusBadge` with animated pulse indicator |
 
 ---
 
@@ -134,6 +148,52 @@ User clicks "Pause" → [Loading spinner] → 2s delay → UI updates
 ```
 User clicks "Pause" → UI updates immediately → Background API call → Toast on completion
 ```
+
+---
+
+## User Experience Comparison
+
+### Before
+- User clicks "Pause" → UI freezes until server responds
+- No visual feedback on which campaign is being mutated
+- Static status badge until page refetches
+
+### After
+- User clicks "Pause" → Status badge immediately shows "paused" with pulsing indicator
+- Buttons replaced with "Pausing campaign..." inline spinner
+- Success toast appears on completion
+- On failure: UI rolls back to previous state + error toast
+
+```
+Before:                          After:
+┌─────────────────────────┐     ┌─────────────────────────┐
+│ Campaign Name            │     │ Campaign Name            │
+│ Status: active           │     │ Status: ⏸ paused       │
+│ [Pause] [Archive]        │     │ ⟳ Pausing campaign...   │
+└─────────────────────────┘     └─────────────────────────┘
+                                  (pulsing indicator)
+```
+
+---
+
+## Checklist
+
+- [x] TypeScript compiles without errors
+- [x] Optimistic updates work for pause/resume/archive
+- [x] Rollback restores previous state on API failure
+- [x] Toast notifications appear on success/error
+- [x] Inline feedback shows during pending mutations
+- [x] Optimistic status badge shows pulsing indicator
+- [x] No backend changes required — uses existing infrastructure
+
+---
+
+## Related Files
+
+- [useOptimisticCampaignMutations.ts](app/frontend/src/hooks/useOptimisticCampaignMutations.ts) — Core optimistic mutation logic
+- [InlineFeedback.tsx](app/frontend/src/components/InlineFeedback.tsx) — Feedback components
+- [ToastProvider.tsx](app/frontend/src/components/ToastProvider.tsx) — Toast notification system
+- [campaigns/page.tsx](app/frontend/src/app/[locale]/campaigns/page.tsx) — Updated campaigns page
 
 ---
 

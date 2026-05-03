@@ -3,6 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request, { Response as SupertestResponse } from 'supertest';
 import { AppModule } from 'src/app.module';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { BudgetService } from 'src/common/budget/budget.service';
 import { App } from 'supertest/types';
 
 type ApiResponse<T> = {
@@ -37,6 +38,7 @@ describe('Claims (e2e)', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
+      providers: [BudgetService, PrismaService],
     }).compile();
 
     app = moduleRef.createNestApplication();
@@ -256,5 +258,33 @@ describe('Claims (e2e)', () => {
     await request(app.getHttpServer())
       .post(`${base}/${claim.id}/verify`)
       .expect(400);
+  });
+  it('POST /claims rejects claim if over campaign budget', async () => {
+    // Create a campaign with a small budget
+    const campaign = await prisma.campaign.create({
+      data: { name: 'Capped Campaign', budget: 100 },
+    });
+
+    // First claim within budget
+    await request(app.getHttpServer())
+      .post(base)
+      .send({
+        campaignId: campaign.id,
+        amount: 60,
+        recipientRef: 'recipient-1',
+      })
+      .expect(201);
+
+    // Second claim that would exceed the cap
+    const res = await request(app.getHttpServer())
+      .post(base)
+      .send({
+        campaignId: campaign.id,
+        amount: 50, // 60 + 50 = 110 > 100
+        recipientRef: 'recipient-2',
+      })
+      .expect(400);
+
+    expect(res.body.message).toMatch(/cap/i);
   });
 });

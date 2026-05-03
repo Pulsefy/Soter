@@ -4,6 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { VerificationStatus } from '@prisma/client';
 
 export interface InboxItem {
@@ -33,9 +34,23 @@ export interface StatsResponse {
   total: number;
 }
 
+export interface InternalNoteResponse {
+  id: string;
+  entityType: string;
+  entityId: string;
+  content: string;
+  authorId: string;
+  category: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 @Injectable()
 export class VerificationInboxService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   async getInbox(
     status?: string,
@@ -113,6 +128,7 @@ export class VerificationInboxService {
     reviewerId: string,
     nextStepMessage?: string,
     rejectionReason?: string,
+    internalNote?: string,
   ) {
     const verification = await this.prisma.verificationRequest.findUnique({
       where: { id, deletedAt: null },
@@ -143,10 +159,40 @@ export class VerificationInboxService {
       updateData.rejectionReason = rejectionReason;
     }
 
-    return this.prisma.verificationRequest.update({
+    const updated = await this.prisma.verificationRequest.update({
       where: { id },
       data: updateData,
     });
+
+    // Record audit trail
+    await this.auditService.record({
+      actorId: reviewerId,
+      entity: 'VerificationRequest',
+      entityId: id,
+      action: `review_${status}`,
+      metadata: {
+        previousStatus: verification.status,
+        newStatus: status,
+        rejectionReason: rejectionReason ?? null,
+        nextStepMessage: nextStepMessage ?? null,
+        reviewedAt: updated.reviewedAt?.toISOString(),
+      },
+    });
+
+    // Persist optional internal note
+    if (internalNote) {
+      await this.prisma.internalNote.create({
+        data: {
+          entityType: 'verification',
+          entityId: id,
+          content: internalNote,
+          authorId: reviewerId,
+          category: `review_${status}`,
+        },
+      });
+    }
+
+    return updated;
   }
 
   async getDetails(id: string) {
@@ -168,5 +214,61 @@ export class VerificationInboxService {
       nextStepMessage: verification.nextStepMessage,
       deepLink: `/verification/${verification.id}`,
     };
+  }
+
+  /**
+   * Add an internal note to a verification request.
+   */
+  async addInternalNote(
+    id: string,
+    content: string,
+    authorId: string,
+    category?: string,
+  ): Promise<InternalNoteResponse> {
+    const verification = await this.prisma.verificationRequest.findUnique({
+      where: { id, deletedAt: null },
+    });
+
+    if (!verification) {
+      throw new NotFoundException('Verification request not found');
+    }
+
+    const note = await this.prisma.internalNote.create({
+      data: {
+        entityType: 'verification',
+        entityId: id,
+        content,
+        authorId,
+        category: category ?? null,
+      },
+    });
+
+    await this.auditService.record({
+      actorId: authorId,
+      entity: 'VerificationRequest',
+      entityId: id,
+      action: 'internal_note_added',
+      metadata: { noteId: note.id, category: category ?? null },
+    });
+
+    return note;
+  }
+
+  /**
+   * List internal notes for a verification request.
+   */
+  async getInternalNotes(id: string): Promise<InternalNoteResponse[]> {
+    const verification = await this.prisma.verificationRequest.findUnique({
+      where: { id, deletedAt: null },
+    });
+
+    if (!verification) {
+      throw new NotFoundException('Verification request not found');
+    }
+
+    return this.prisma.internalNote.findMany({
+      where: { entityType: 'verification', entityId: id },
+      orderBy: { createdAt: 'asc' },
+    });
   }
 }

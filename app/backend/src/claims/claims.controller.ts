@@ -390,14 +390,46 @@ export class ClaimsController {
   @ApiForbiddenResponse({
     description: 'Access denied - operator or admin role required.',
   })
-  @ApiQuery({ name: 'from', required: false, description: 'Start date (ISO string)' })
-  @ApiQuery({ name: 'to', required: false, description: 'End date (ISO string)' })
-  @ApiQuery({ name: 'status', required: false, description: 'Claim status filter' })
-  @ApiQuery({ name: 'campaignId', required: false, description: 'Campaign ID filter' })
-  @ApiQuery({ name: 'orgId', required: false, description: 'Organization ID filter' })
-  @ApiQuery({ name: 'tokenAddress', required: false, description: 'Token address filter' })
-  @ApiQuery({ name: 'page', required: false, description: 'Page number (default: 1)' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Items per page (default: 50, max: 200)' })
+  @ApiQuery({
+    name: 'from',
+    required: false,
+    description: 'Start date (ISO string)',
+  })
+  @ApiQuery({
+    name: 'to',
+    required: false,
+    description: 'End date (ISO string)',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'Claim status filter',
+  })
+  @ApiQuery({
+    name: 'campaignId',
+    required: false,
+    description: 'Campaign ID filter',
+  })
+  @ApiQuery({
+    name: 'orgId',
+    required: false,
+    description: 'Organization ID filter',
+  })
+  @ApiQuery({
+    name: 'tokenAddress',
+    required: false,
+    description: 'Token address filter',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    description: 'Page number (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Items per page (default: 50, max: 200)',
+  })
   async exportClaims(
     @Query() query: ExportClaimsQueryDto,
     @Res({ passthrough: true }) res: Response,

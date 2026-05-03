@@ -1,8 +1,28 @@
 #![no_std]
 
+//! # Token Amount Normalization & Validation Policy
+//!
+//! ## Normalization Policy
+//! All token amounts passed to this contract **must be normalized to the token's smallest unit** (e.g., stroops for Stellar, wei for Ethereum, or the lowest decimal unit for the token).
+//! The contract does **not** perform automatic normalization or conversion based on token decimals. It is the caller's responsibility to ensure amounts are properly scaled.
+//!
+//! ## Validation Rules
+//! - Amounts must be strictly positive integers (`amount > 0`).
+//! - Amounts must be multiples of the token's smallest unit (i.e., no precision-breaking values).
+//! - Zero, negative, or non-integer values (relative to the token's decimals) are rejected.
+//! - The contract assumes all amounts are already validated and normalized before being passed in.
+//!
+//! ## Recommendations
+//! - Integrators should fetch the token's decimals and normalize user input accordingly.
+//! - When adding support for new tokens, ensure all amounts are compatible with the token's decimal convention.
+//!
+//! ## See Also
+//! - Validation is enforced in `fund`, `create_package`, and related entrypoints.
+//! - Tests for invalid/edge cases are in `tests/aid_escrow_tests.rs`.
+
 use soroban_sdk::{
-    Address, Env, Map, String, Symbol, Vec, contract, contracterror, contractevent, contractimpl,
-    contracttype, symbol_short, token,
+    contract, contracterror, contractevent, contractimpl, contracttype, symbol_short, token,
+    Address, Bytes, Env, Map, String, Symbol, Vec,
 };
 
 // --- Storage Keys ---
@@ -14,6 +34,11 @@ const KEY_CONFIG: Symbol = symbol_short!("config");
 const KEY_PKG_IDX: Symbol = symbol_short!("pkg_idx"); // Aggregation index counter
 const KEY_DISTRIBUTORS: Symbol = symbol_short!("dstrbtrs"); // Map<Address, bool>
 const KEY_PAUSED: Symbol = symbol_short!("paused");
+const KEY_PAUSE_CREATE: Symbol = symbol_short!("p_create");
+const KEY_PAUSE_CLAIM: Symbol = symbol_short!("p_claim");
+const KEY_PAUSE_WITHDRAW: Symbol = symbol_short!("p_wdrw");
+const KEY_TOTAL_CLAIMED: Symbol = symbol_short!("claimed"); // Map<Address, i128>
+const META_MERKLE_ROOT_KEY: &str = "merkle_root";
 
 // --- Data Types ---
 
@@ -38,6 +63,7 @@ pub struct Package {
     pub status: PackageStatus,
     pub created_at: u64,
     pub expires_at: u64,
+    pub claim_starts_at: u64,
     pub metadata: Map<Symbol, String>,
 }
 
@@ -75,6 +101,8 @@ pub enum Error {
     MismatchedArrays = 12,
     InsufficientSurplus = 13,
     ContractPaused = 14,
+    ClaimTooEarly = 15,
+    InvalidProof = 16,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -89,7 +117,6 @@ pub struct EscrowFunded {
     pub timestamp: u64,
 }
 
-/// Emitted when a package is created. Actor = operator (admin or distributor).
 #[contractevent]
 pub struct PackageCreated {
     pub package_id: u64,
@@ -99,7 +126,6 @@ pub struct PackageCreated {
     pub timestamp: u64,
 }
 
-/// Emitted when a recipient claims a package. Actor = recipient.
 #[contractevent]
 pub struct PackageClaimed {
     pub package_id: u64,
@@ -109,7 +135,6 @@ pub struct PackageClaimed {
     pub timestamp: u64,
 }
 
-/// Emitted when admin disburses a package. Actor = admin.
 #[contractevent]
 pub struct PackageDisbursed {
     pub package_id: u64,
@@ -119,7 +144,6 @@ pub struct PackageDisbursed {
     pub timestamp: u64,
 }
 
-/// Emitted when a package is revoked/cancelled. Actor = admin.
 #[contractevent]
 pub struct PackageRevoked {
     pub package_id: u64,
@@ -129,7 +153,6 @@ pub struct PackageRevoked {
     pub timestamp: u64,
 }
 
-/// Emitted when funds are refunded to admin after expire/cancel. Actor = admin.
 #[contractevent]
 pub struct PackageRefunded {
     pub package_id: u64,
@@ -169,6 +192,18 @@ pub struct ContractPausedEvent {
 #[contractevent]
 pub struct ContractUnpausedEvent {
     pub admin: Address,
+}
+
+#[contractevent]
+pub struct ActionPausedEvent {
+    pub admin: Address,
+    pub action: Symbol,
+}
+
+#[contractevent]
+pub struct ActionUnpausedEvent {
+    pub admin: Address,
+    pub action: Symbol,
 }
 
 #[contract]
@@ -334,6 +369,46 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Admin-only. Pauses a specific action (create, claim, or withdraw).
+    /// Emits an `ActionPausedEvent`.
+    pub fn pause_action(env: Env, action: Symbol) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let key = Self::get_pause_key(action.clone())?;
+        env.storage().instance().set(&key, &true);
+
+        ActionPausedEvent { admin, action }.publish(&env);
+        Ok(())
+    }
+
+    /// Admin-only. Unpauses a specific action.
+    /// Emits an `ActionUnpausedEvent`.
+    pub fn unpause_action(env: Env, action: Symbol) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let key = Self::get_pause_key(action.clone())?;
+        env.storage().instance().set(&key, &false);
+
+        ActionUnpausedEvent { admin, action }.publish(&env);
+        Ok(())
+    }
+
+    /// Returns `true` if the specific action is currently paused.
+    pub fn is_action_paused(env: Env, action: Symbol) -> bool {
+        if Self::is_paused(env.clone()) {
+            return true;
+        }
+
+        let key = match Self::get_pause_key(action) {
+            Ok(k) => k,
+            Err(_) => return false,
+        };
+
+        env.storage().instance().get(&key).unwrap_or(false)
+    }
+
     /// Returns `true` if the contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
         env.storage().instance().get(&KEY_PAUSED).unwrap_or(false)
@@ -356,15 +431,32 @@ impl AidEscrow {
     /// Transfers `amount` of `token` from `from` to this contract.
     /// This increases the contract's balance, allowing new packages to be created.
     pub fn fund(env: Env, token: Address, from: Address, amount: i128) -> Result<(), Error> {
+        // 1. Basic Validation
         if amount <= 0 {
             return Err(Error::InvalidAmount);
         }
+
+        // 2. Fetch Decimals Dynamically
+        // This is the "production-ready" way. It ensures the check matches the token.
+        let token_client = token::Client::new(&env, &token);
+        let decimals = token_client.decimals();
+
+        // 3. Dynamic Precision Check
+        // Instead of checking 6 AND 8, we check ONLY the decimals this token uses.
+        let unit = 10i128.pow(decimals);
+        if amount % unit != 0 {
+            // This ensures the user isn't trying to send a fractional "human" unit
+            // if your business logic requires whole-unit funding.
+            return Err(Error::InvalidAmount);
+        }
+
+        // 4. Authorization
         from.require_auth();
 
-        // Perform transfer: From -> Contract
-        let token_client = token::Client::new(&env, &token);
+        // 5. Perform Transfer
         token_client.transfer(&from, env.current_contract_address(), &amount);
 
+        // 6. Events
         let timestamp = env.ledger().timestamp();
         EscrowFunded {
             from,
@@ -377,8 +469,19 @@ impl AidEscrow {
         Ok(())
     }
 
-    /// Creates a package with a specific ID.
+    /// Creates a package with a specific ID and stores provided metadata.
     /// Locks funds from the available pool (Contract Balance - Total Locked).
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `operator` - Address of the admin or distributor creating the package
+    /// * `id` - Unique package ID
+    /// * `recipient` - Address of the recipient
+    /// * `amount` - Amount to escrow
+    /// * `token` - Token contract address
+    /// * `expires_at` - Expiration timestamp (0 for no expiration)
+    /// * `metadata` - Arbitrary key-value metadata for the package
+    #[allow(clippy::too_many_arguments)]
     pub fn create_package(
         env: Env,
         operator: Address,
@@ -387,8 +490,9 @@ impl AidEscrow {
         amount: i128,
         token: Address,
         expires_at: u64,
+        metadata: Map<Symbol, String>,
     ) -> Result<u64, Error> {
-        Self::check_paused(&env)?;
+        Self::check_action_paused(&env, symbol_short!("create"))?;
         Self::require_admin_or_distributor(&env, &operator)?;
         let config = Self::get_config(env.clone());
 
@@ -396,10 +500,23 @@ impl AidEscrow {
             return Err(Error::InvalidAmount);
         }
 
+        // --- DYNAMIC PRECISION CHECK ---
+        // Fetch the actual decimals from the token contract to avoid hardcoded traps.
+        let token_client = token::Client::new(&env, &token);
+        let decimals = token_client.decimals();
+        let unit = 10i128.pow(decimals);
+
+        // Enforce that only whole units can be used (if that is your business requirement).
+        // If you want to allow fractional units (e.g., 0.1 tokens), remove this check.
+        if amount % unit != 0 {
+            return Err(Error::InvalidAmount);
+        }
+
         if amount < config.min_amount {
             return Err(Error::InvalidAmount);
         }
 
+        // --- REST OF VALIDATIONS ---
         if !config.allowed_tokens.is_empty() && !config.allowed_tokens.contains(token.clone()) {
             return Err(Error::InvalidState);
         }
@@ -411,14 +528,12 @@ impl AidEscrow {
             }
         }
 
-        // 1. Check ID Uniqueness
         let key = (symbol_short!("pkg"), id);
         if env.storage().persistent().has(&key) {
             return Err(Error::PackageIdExists);
         }
 
-        // 2. Check Solvency (Available Balance vs Locked)
-        let token_client = token::Client::new(&env, &token);
+        // --- SOLVENCY CHECK ---
         let contract_balance = token_client.balance(&env.current_contract_address());
 
         let mut locked_map: Map<Address, i128> = env
@@ -426,19 +541,24 @@ impl AidEscrow {
             .instance()
             .get(&KEY_TOTAL_LOCKED)
             .unwrap_or(Map::new(&env));
+
         let current_locked = locked_map.get(token.clone()).unwrap_or(0);
 
-        // Ensure we don't over-promise funds
         if contract_balance < current_locked + amount {
             return Err(Error::InsufficientFunds);
         }
 
-        // 3. Update Locked State
+        // --- STATE UPDATES ---
         locked_map.set(token.clone(), current_locked + amount);
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
 
-        // 4. Create Package
         let created_at = env.ledger().timestamp();
+        let claim_starts_at = Self::resolve_claim_starts_at(&env, &metadata, created_at)?;
+
+        if claim_starts_at < created_at || (expires_at > 0 && claim_starts_at > expires_at) {
+            return Err(Error::InvalidState);
+        }
+
         let package = Package {
             id,
             recipient: recipient.clone(),
@@ -447,7 +567,8 @@ impl AidEscrow {
             status: PackageStatus::Created,
             created_at,
             expires_at,
-            metadata: Map::new(&env),
+            claim_starts_at,
+            metadata,
         };
 
         env.storage().persistent().set(&key, &package);
@@ -457,7 +578,6 @@ impl AidEscrow {
             env.storage().instance().set(&KEY_PKG_COUNTER, &(id + 1));
         }
 
-        // 5. Track package index for aggregation
         let idx: u64 = env.storage().instance().get(&KEY_PKG_IDX).unwrap_or(0);
         let idx_key = (symbol_short!("pidx"), idx);
         env.storage().persistent().set(&idx_key, &id);
@@ -477,6 +597,15 @@ impl AidEscrow {
 
     /// Creates multiple packages in a single transaction for multiple recipients.
     /// Uses an auto-incrementing counter for package IDs.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `operator` - Address of the admin or distributor creating the packages
+    /// * `recipients` - List of recipient addresses
+    /// * `amounts` - List of amounts to escrow (must match recipients)
+    /// * `token` - Token contract address
+    /// * `expires_in` - Expiry duration in seconds from now
+    /// * `metadatas` - List of metadata maps, one per package
     pub fn batch_create_packages(
         env: Env,
         operator: Address,
@@ -484,12 +613,13 @@ impl AidEscrow {
         amounts: Vec<i128>,
         token: Address,
         expires_in: u64,
+        metadatas: Vec<Map<Symbol, String>>,
     ) -> Result<Vec<u64>, Error> {
-        Self::check_paused(&env)?;
+        Self::check_action_paused(&env, symbol_short!("create"))?;
         Self::require_admin_or_distributor(&env, &operator)?;
 
         // Validate array lengths match
-        if recipients.len() != amounts.len() {
+        if recipients.len() != amounts.len() || recipients.len() != metadatas.len() {
             return Err(Error::MismatchedArrays);
         }
 
@@ -517,6 +647,12 @@ impl AidEscrow {
         for i in 0..recipients.len() {
             let recipient = recipients.get(i).unwrap();
             let amount = amounts.get(i).unwrap();
+            let metadata = metadatas.get(i).unwrap();
+            let claim_starts_at = Self::resolve_claim_starts_at(&env, &metadata, created_at)?;
+
+            if claim_starts_at > expires_at {
+                return Err(Error::InvalidState);
+            }
 
             // Validate amount
             if amount <= 0 {
@@ -543,7 +679,8 @@ impl AidEscrow {
                 status: PackageStatus::Created,
                 created_at,
                 expires_at,
-                metadata: Map::new(&env),
+                claim_starts_at,
+                metadata: metadata.clone(),
             };
 
             env.storage().persistent().set(&key, &package);
@@ -590,7 +727,7 @@ impl AidEscrow {
 
     /// Recipient claims the package.
     pub fn claim(env: Env, id: u64) -> Result<(), Error> {
-        Self::check_paused(&env)?;
+        Self::check_action_paused(&env, symbol_short!("claim"))?;
         let key = (symbol_short!("pkg"), id);
         let mut package: Package = env
             .storage()
@@ -598,48 +735,86 @@ impl AidEscrow {
             .get(&key)
             .ok_or(Error::PackageNotFound)?;
 
-        // Validations
         if package.status != PackageStatus::Created {
             return Err(Error::PackageNotActive);
         }
-        // Check expiry
-        if package.expires_at > 0 && env.ledger().timestamp() > package.expires_at {
-            // Auto-expire if accessed after date
+
+        let now = env.ledger().timestamp();
+        if now < package.claim_starts_at {
+            return Err(Error::ClaimTooEarly);
+        }
+
+        if package.expires_at > 0 && now > package.expires_at {
             package.status = PackageStatus::Expired;
             env.storage().persistent().set(&key, &package);
             return Err(Error::PackageExpired);
         }
 
-        // Auth
-        package.recipient.require_auth();
-
-        // State Transition: Created -> Claimed
-        // Checks passed, update state FIRST (Re-entrancy protection)
-        package.status = PackageStatus::Claimed;
-        env.storage().persistent().set(&key, &package);
-
-        // Update Global Locked
-        Self::decrement_locked(&env, &package.token, package.amount);
-
-        // Effect: Transfer Funds
-        let token_client = token::Client::new(&env, &package.token);
-        token_client.transfer(
-            &env.current_contract_address(),
-            &package.recipient,
-            &package.amount,
-        );
-
-        let timestamp = env.ledger().timestamp();
-        PackageClaimed {
-            package_id: id,
-            recipient: package.recipient.clone(),
-            amount: package.amount,
-            actor: package.recipient.clone(),
-            timestamp,
+        // Packages configured with a Merkle allowlist must be claimed through
+        // claim_with_proof so eligibility can be verified.
+        if Self::merkle_root_from_metadata(&env, &package.metadata).is_some() {
+            return Err(Error::InvalidProof);
         }
-        .publish(&env);
 
-        Ok(())
+        package.recipient.require_auth();
+        let payout_recipient = package.recipient.clone();
+
+        Self::finalize_claim(&env, &key, &mut package, id, &payout_recipient, now)
+    }
+
+    /// Claim a package guarded by an optional Merkle allowlist.
+    ///
+    /// If package metadata includes `merkle_root` (hex-encoded 32-byte value),
+    /// `proof` must contain sibling hashes (hex-encoded 32-byte values) that
+    /// validate the claimant leaf `sha256(claimant_address_string)`.
+    ///
+    /// For non-Merkle packages this still works as a direct claim when
+    /// `claimant` equals the stored recipient.
+    pub fn claim_with_proof(
+        env: Env,
+        id: u64,
+        claimant: Address,
+        proof: Vec<String>,
+    ) -> Result<(), Error> {
+        Self::check_action_paused(&env, symbol_short!("claim"))?;
+        let key = (symbol_short!("pkg"), id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        if package.status != PackageStatus::Created {
+            return Err(Error::PackageNotActive);
+        }
+
+        let now = env.ledger().timestamp();
+        if now < package.claim_starts_at {
+            return Err(Error::ClaimTooEarly);
+        }
+
+        if package.expires_at > 0 && now > package.expires_at {
+            package.status = PackageStatus::Expired;
+            env.storage().persistent().set(&key, &package);
+            return Err(Error::PackageExpired);
+        }
+
+        claimant.require_auth();
+
+        match Self::merkle_root_from_metadata(&env, &package.metadata) {
+            Some(root) => {
+                if !Self::verify_merkle_proof_for_claimant(&env, &claimant, &proof, root) {
+                    return Err(Error::InvalidProof);
+                }
+                Self::finalize_claim(&env, &key, &mut package, id, &claimant, now)
+            }
+            None => {
+                if claimant != package.recipient {
+                    return Err(Error::NotAuthorized);
+                }
+                Self::finalize_claim(&env, &key, &mut package, id, &claimant, now)
+            }
+        }
     }
 
     // --- Admin Actions ---
@@ -901,6 +1076,7 @@ impl AidEscrow {
         amount: i128,
         token: Address,
     ) -> Result<(), Error> {
+        Self::check_action_paused(&env, symbol_short!("withdraw"))?;
         // 1. Only the admin can withdraw surplus
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -944,11 +1120,32 @@ impl AidEscrow {
 
     // --- Helpers ---
 
-    fn check_paused(env: &Env) -> Result<(), Error> {
+    fn check_action_paused(env: &Env, action: Symbol) -> Result<(), Error> {
         if env.storage().instance().get(&KEY_PAUSED).unwrap_or(false) {
             return Err(Error::ContractPaused);
         }
+
+        let key = match Self::get_pause_key(action) {
+            Ok(k) => k,
+            Err(_) => return Ok(()),
+        };
+
+        if env.storage().instance().get(&key).unwrap_or(false) {
+            return Err(Error::ContractPaused);
+        }
         Ok(())
+    }
+
+    fn get_pause_key(action: Symbol) -> Result<Symbol, Error> {
+        if action == symbol_short!("create") {
+            Ok(KEY_PAUSE_CREATE)
+        } else if action == symbol_short!("claim") {
+            Ok(KEY_PAUSE_CLAIM)
+        } else if action == symbol_short!("withdraw") {
+            Ok(KEY_PAUSE_WITHDRAW)
+        } else {
+            Err(Error::InvalidState)
+        }
     }
 
     fn decrement_locked(env: &Env, token: &Address, amount: i128) {
@@ -967,6 +1164,201 @@ impl AidEscrow {
 
         locked_map.set(token.clone(), new_locked);
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+    }
+
+    fn resolve_claim_starts_at(
+        env: &Env,
+        metadata: &Map<Symbol, String>,
+        created_at: u64,
+    ) -> Result<u64, Error> {
+        let key = Symbol::new(env, "claim_starts_at");
+        match metadata.get(key) {
+            Some(raw) => Self::parse_u64(raw).ok_or(Error::InvalidState),
+            None => Ok(created_at),
+        }
+    }
+
+    fn parse_u64(value: String) -> Option<u64> {
+        let len = value.len() as usize;
+        if len == 0 || len > 20 {
+            return None;
+        }
+
+        let mut bytes = [0u8; 20];
+        value.copy_into_slice(&mut bytes[..len]);
+
+        let mut out: u64 = 0;
+        for b in bytes[..len].iter() {
+            if !b.is_ascii_digit() {
+                return None;
+            }
+            out = out.checked_mul(10)?.checked_add((b - b'0') as u64)?;
+        }
+
+        Some(out)
+    }
+
+    fn finalize_claim(
+        env: &Env,
+        key: &(Symbol, u64),
+        package: &mut Package,
+        package_id: u64,
+        payout_recipient: &Address,
+        now: u64,
+    ) -> Result<(), Error> {
+        // State Transition
+        package.status = PackageStatus::Claimed;
+        env.storage().persistent().set(key, package);
+
+        // Update Global Locked (Bookkeeping)
+        Self::decrement_locked(env, &package.token, package.amount);
+
+        let mut claimed_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_CLAIMED)
+            .unwrap_or(Map::new(env));
+        let current_total = claimed_map.get(package.token.clone()).unwrap_or(0);
+        claimed_map.set(package.token.clone(), current_total + package.amount);
+        env.storage()
+            .instance()
+            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+
+        let token_client = token::Client::new(env, &package.token);
+        token_client.transfer(
+            &env.current_contract_address(),
+            payout_recipient,
+            &package.amount,
+        );
+
+        PackageClaimed {
+            package_id,
+            recipient: payout_recipient.clone(),
+            amount: package.amount,
+            actor: payout_recipient.clone(),
+            timestamp: now,
+        }
+        .publish(env);
+
+        Ok(())
+    }
+
+    fn merkle_root_from_metadata(env: &Env, metadata: &Map<Symbol, String>) -> Option<[u8; 32]> {
+        let root_key = Symbol::new(env, META_MERKLE_ROOT_KEY);
+        metadata
+            .get(root_key)
+            .and_then(|hex| Self::parse_hex_32(&hex))
+    }
+
+    fn verify_merkle_proof_for_claimant(
+        env: &Env,
+        claimant: &Address,
+        proof: &Vec<String>,
+        expected_root: [u8; 32],
+    ) -> bool {
+        let mut current = Self::hash_address(env, claimant);
+
+        for i in 0..proof.len() {
+            let sibling_hex = match proof.get(i) {
+                Some(v) => v,
+                None => return false,
+            };
+
+            let sibling = match Self::parse_hex_32(&sibling_hex) {
+                Some(v) => v,
+                None => return false,
+            };
+
+            current = if current <= sibling {
+                Self::hash_pair(env, &current, &sibling)
+            } else {
+                Self::hash_pair(env, &sibling, &current)
+            };
+        }
+
+        current == expected_root
+    }
+
+    fn hash_address(env: &Env, address: &Address) -> [u8; 32] {
+        let addr = address.to_string();
+        let len = addr.len() as usize;
+        let mut raw = [0u8; 96];
+        addr.copy_into_slice(&mut raw[..len]);
+
+        let mut data = Bytes::new(env);
+        for b in raw[..len].iter() {
+            data.push_back(*b);
+        }
+
+        let digest = env.crypto().sha256(&data);
+        Self::hash_to_array(&digest)
+    }
+
+    fn hash_pair(env: &Env, left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+        let mut data = Bytes::new(env);
+        for b in left.iter() {
+            data.push_back(*b);
+        }
+        for b in right.iter() {
+            data.push_back(*b);
+        }
+
+        let digest = env.crypto().sha256(&data);
+        Self::hash_to_array(&digest)
+    }
+
+    fn hash_to_array(value: &soroban_sdk::crypto::Hash<32>) -> [u8; 32] {
+        value.to_array()
+    }
+
+    fn parse_hex_32(value: &String) -> Option<[u8; 32]> {
+        let len = value.len() as usize;
+        if len != 64 {
+            return None;
+        }
+
+        let mut raw = [0u8; 64];
+        value.copy_into_slice(&mut raw);
+
+        let mut out = [0u8; 32];
+        let mut i = 0usize;
+        while i < 32 {
+            let hi = Self::hex_nibble(raw[i * 2])?;
+            let lo = Self::hex_nibble(raw[i * 2 + 1])?;
+            out[i] = (hi << 4) | lo;
+            i += 1;
+        }
+
+        Some(out)
+    }
+
+    fn hex_nibble(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(10 + (b - b'a')),
+            b'A'..=b'F' => Some(10 + (b - b'A')),
+            _ => None,
+        }
+    }
+
+    /// Returns the total amount currently locked for a specific token.
+    pub fn get_total_locked(env: Env, token: Address) -> i128 {
+        let locked_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_LOCKED)
+            .unwrap_or(Map::new(&env));
+        locked_map.get(token).unwrap_or(0)
+    }
+
+    /// Returns the cumulative amount ever claimed for a specific token.
+    pub fn get_total_claimed(env: Env, token: Address) -> i128 {
+        let claimed_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_CLAIMED)
+            .unwrap_or(Map::new(&env));
+        claimed_map.get(token).unwrap_or(0)
     }
 
     fn require_admin_or_distributor(env: &Env, operator: &Address) -> Result<(), Error> {
@@ -1030,20 +1422,20 @@ impl AidEscrow {
             let idx_key = (symbol_short!("pidx"), i);
             if let Some(pkg_id) = env.storage().persistent().get::<_, u64>(&idx_key) {
                 let pkg_key = (symbol_short!("pkg"), pkg_id);
-                if let Some(package) = env.storage().persistent().get::<_, Package>(&pkg_key)
-                    && package.token == token
-                {
-                    match package.status {
-                        PackageStatus::Created => {
-                            total_committed += package.amount;
-                        }
-                        PackageStatus::Claimed => {
-                            total_claimed += package.amount;
-                        }
-                        PackageStatus::Expired
-                        | PackageStatus::Cancelled
-                        | PackageStatus::Refunded => {
-                            total_expired_cancelled += package.amount;
+                if let Some(package) = env.storage().persistent().get::<_, Package>(&pkg_key) {
+                    if package.token == token {
+                        match package.status {
+                            PackageStatus::Created => {
+                                total_committed += package.amount;
+                            }
+                            PackageStatus::Claimed => {
+                                total_claimed += package.amount;
+                            }
+                            PackageStatus::Expired
+                            | PackageStatus::Cancelled
+                            | PackageStatus::Refunded => {
+                                total_expired_cancelled += package.amount;
+                            }
                         }
                     }
                 }
@@ -1067,14 +1459,53 @@ impl AidEscrow {
 
         for id in 0..count {
             let key = (symbol_short!("pkg"), id);
-            if let Some(package) = env.storage().persistent().get::<_, Package>(&key)
-                && package.recipient == recipient
-            {
-                matches += 1;
+            if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                if package.recipient == recipient {
+                    matches += 1;
+                }
             }
         }
 
         matches
+    }
+
+    /// Lists package IDs for a specific recipient with pagination.
+    ///
+    /// # Arguments
+    /// * `recipient` - The address to filter packages by
+    /// * `cursor` - Starting position for pagination (0-indexed)
+    /// * `limit` - Maximum number of results to return
+    ///
+    /// # Returns
+    /// A Vec<u64> containing package IDs that belong to the recipient,
+    /// starting from the cursor position and limited by the limit parameter.
+    pub fn list_recipient_packages(
+        env: Env,
+        recipient: Address,
+        cursor: u64,
+        limit: u32,
+    ) -> Vec<u64> {
+        let package_counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        let mut result: Vec<u64> = Vec::new(&env);
+
+        // Calculate the end position: cursor + limit or package_counter, whichever comes first
+        let end_pos = if cursor.saturating_add(limit as u64) > package_counter {
+            package_counter
+        } else {
+            cursor.saturating_add(limit as u64)
+        };
+
+        // Iterate from cursor to end_pos
+        for id in cursor..end_pos {
+            let key = (symbol_short!("pkg"), id);
+            if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                if package.recipient == recipient {
+                    result.push_back(id);
+                }
+            }
+        }
+
+        result
     }
 }
 
@@ -1083,15 +1514,34 @@ impl AidEscrow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::Env;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::{Address as _, Ledger};
     use soroban_sdk::token::{StellarAssetClient, TokenClient};
+    use soroban_sdk::{symbol_short, Address, Env, Map};
 
     fn setup() -> (Env, AidEscrowClient<'static>) {
         let env = Env::default();
+        // Set a fixed timestamp to avoid 0-timestamp edge cases
+        env.ledger().with_mut(|li| li.timestamp = 1000);
+
         let contract_id = env.register(AidEscrow, ());
         let client = AidEscrowClient::new(&env, &contract_id);
         (env, client)
+    }
+
+    fn setup_token(
+        env: &Env,
+        admin: &Address,
+    ) -> (Address, StellarAssetClient<'static>, TokenClient<'static>) {
+        let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = token_id.address();
+        let sac = StellarAssetClient::new(env, &token);
+        let token_client = TokenClient::new(env, &token);
+
+        // Standard Stellar Assets in Soroban tests default to 7 decimals.
+        // Our test amounts (like 5,000,000) are multiples of 10^6 and 10^7,
+        // so they will pass the dynamic check in the refactored fund method.
+
+        (token, sac, token_client)
     }
 
     #[test]
@@ -1099,30 +1549,124 @@ mod tests {
         let (env, client) = setup();
         let admin = Address::generate(&env);
         let recipient = Address::generate(&env);
-
-        // Deploy a mock Stellar asset contract to use as the token.
-        let token_id = env.register_stellar_asset_contract_v2(admin.clone());
-        let token = token_id.address();
-        let sac = StellarAssetClient::new(&env, &token);
-        let token_client = TokenClient::new(&env, &token);
+        let (token, sac, _) = setup_token(&env, &admin);
 
         env.mock_all_auths();
-
-        // Initialise the escrow contract.
         client.init(&admin);
 
-        // Mint 10_000 tokens to admin and fund the escrow pool.
-        sac.mint(&admin, &10_000);
-        client.fund(&token, &admin, &5_000);
+        // Corrected fund amount (1.0 units)
+        let amount = 10_000_000;
 
-        // Confirm the contract holds the funded balance.
-        assert_eq!(token_client.balance(&client.address), 5_000);
+        sac.mint(&admin, &20_000_000);
+        client.fund(&token, &admin, &amount);
 
-        let operator = admin.clone();
-        let package_id = client.create_package(&operator, &1, &recipient, &1000, &token, &86400);
+        let package_metadata = Map::new(&env);
+        let package_id = client.create_package(
+            &admin,
+            &1,
+            &recipient,
+            &10_000_000, // <--- CHANGED THIS from 1_000_000 to 10_000_000
+            &token,
+            &86400,
+            &package_metadata,
+        );
+
         client.cancel_package(&package_id);
-
         let package = client.get_package(&package_id);
         assert_eq!(package.status, PackageStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_list_recipient_packages_few_packages() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient1 = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        // Using multiples of 10^7 (1.0 units) for 7-decimal test tokens
+        sac.mint(&admin, &50_000_000);
+        client.fund(&token, &admin, &40_000_000);
+
+        let empty_metadata = Map::new(&env);
+        client.create_package(
+            &admin,
+            &1,
+            &recipient1,
+            &10_000_000,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
+        client.create_package(
+            &admin,
+            &2,
+            &recipient1,
+            &20_000_000,
+            &token,
+            &86400,
+            &empty_metadata,
+        );
+
+        let packages = client.list_recipient_packages(&recipient1, &0, &10);
+        assert_eq!(packages.len(), 2);
+    }
+
+    #[test]
+    fn test_list_recipient_packages_pagination() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        sac.mint(&admin, &100_000_000);
+        client.fund(&token, &admin, &100_000_000);
+
+        let mut package_ids = soroban_sdk::Vec::new(&env);
+        for i in 0..5 {
+            package_ids.push_back(client.create_package(
+                &admin,
+                &(i as u64),
+                &recipient,
+                &10_000_000,
+                &token,
+                &86400,
+                &Map::new(&env),
+            ));
+        }
+
+        let page = client.list_recipient_packages(&recipient, &0, &3);
+        assert_eq!(page.len(), 3);
+    }
+
+    #[test]
+    fn test_action_specific_pause() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+        sac.mint(&admin, &20_000_000);
+        client.fund(&token, &admin, &10_000_000);
+
+        client.pause_action(&symbol_short!("create"));
+
+        let result = client.try_create_package(
+            &admin,
+            &99,
+            &recipient,
+            &10_000_000,
+            &token,
+            &86400,
+            &Map::new(&env),
+        );
+        assert!(result.is_err());
     }
 }

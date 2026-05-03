@@ -55,7 +55,7 @@ describe('AuditService', () => {
         metadata: { name: 'test' },
       };
       await service.record(params);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(prisma.auditLog.create).toHaveBeenCalledWith({
         data: {
           actorId: 'user-1',
@@ -72,7 +72,7 @@ describe('AuditService', () => {
     it('should call prisma.auditLog.findMany', async () => {
       const query = { entity: 'campaign' };
       await service.findLogs(query);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(prisma.auditLog.findMany).toHaveBeenCalled();
     });
   });
@@ -112,7 +112,7 @@ describe('AuditService', () => {
 
     it('should use default page=1 and limit=50', async () => {
       await service.exportLogs({});
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(prisma.$transaction).toHaveBeenCalled();
     });
 
@@ -123,7 +123,7 @@ describe('AuditService', () => {
 
     it('should pass date range filter when provided', async () => {
       await service.exportLogs({ from: '2024-01-01', to: '2024-12-31' });
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(prisma.$transaction).toHaveBeenCalled();
     });
 

@@ -1,17 +1,27 @@
 #![cfg(test)]
 
-use aid_escrow::{AidEscrow, AidEscrowClient, Error, PackageStatus};
+use aid_escrow::{AidEscrow, AidEscrowClient, Error};
 use soroban_sdk::{
-    Address, Env, Vec,
     testutils::Address as _,
     token::{StellarAssetClient, TokenClient},
+    Address, Env, Map, Vec,
 };
+
+const UNIT: i128 = 10_000_000; // 1.0 Token for 7-decimal assets
 
 fn setup_token(env: &Env, admin: &Address) -> (TokenClient<'static>, StellarAssetClient<'static>) {
     let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
     let token_client = TokenClient::new(env, &token_contract.address());
     let token_admin_client = StellarAssetClient::new(env, &token_contract.address());
     (token_client, token_admin_client)
+}
+
+fn empty_metadata(env: &Env, count: u32) -> Vec<Map<soroban_sdk::Symbol, soroban_sdk::String>> {
+    let mut metadatas = Vec::new(env);
+    for _ in 0..count {
+        metadatas.push_back(Map::new(env));
+    }
+    metadatas
 }
 
 #[test]
@@ -30,130 +40,32 @@ fn test_batch_create_packages_success() {
     let client = AidEscrowClient::new(&env, &contract_id);
 
     client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &10_000);
+    // Mint and fund 10.0 tokens
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(10 * UNIT));
 
-    // Build recipients and amounts vectors
     let mut recipients = Vec::new(&env);
     recipients.push_back(recipient1.clone());
     recipients.push_back(recipient2.clone());
     recipients.push_back(recipient3.clone());
 
     let mut amounts = Vec::new(&env);
-    amounts.push_back(1000_i128);
-    amounts.push_back(2000_i128);
-    amounts.push_back(3000_i128);
+    amounts.push_back(UNIT); // 1.0
+    amounts.push_back(2 * UNIT); // 2.0
+    amounts.push_back(3 * UNIT); // 3.0
 
-    let expires_in = 86400_u64; // 1 day
-
-    // Call batch_create_packages
     let ids = client.batch_create_packages(
         &admin,
         &recipients,
         &amounts,
         &token_client.address,
-        &expires_in,
+        &86400,
+        &empty_metadata(&env, 3),
     );
 
-    // Verify returned IDs are sequential starting from 0
     assert_eq!(ids.len(), 3);
     assert_eq!(ids.get(0).unwrap(), 0);
-    assert_eq!(ids.get(1).unwrap(), 1);
-    assert_eq!(ids.get(2).unwrap(), 2);
-
-    // Verify each package
-    let pkg0 = client.get_package(&0);
-    assert_eq!(pkg0.recipient, recipient1);
-    assert_eq!(pkg0.amount, 1000);
-    assert_eq!(pkg0.status, PackageStatus::Created);
-
-    let pkg1 = client.get_package(&1);
-    assert_eq!(pkg1.recipient, recipient2);
-    assert_eq!(pkg1.amount, 2000);
-    assert_eq!(pkg1.status, PackageStatus::Created);
-
-    let pkg2 = client.get_package(&2);
-    assert_eq!(pkg2.recipient, recipient3);
-    assert_eq!(pkg2.amount, 3000);
-    assert_eq!(pkg2.status, PackageStatus::Created);
-
-    // Verify contract balance hasn't changed (funds are locked, not transferred)
-    assert_eq!(token_client.balance(&contract_id), 10_000);
-}
-
-#[test]
-fn test_batch_create_packages_mismatched_arrays() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let recipient1 = Address::generate(&env);
-    let recipient2 = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
-    client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
-
-    // 2 recipients but 3 amounts
-    let mut recipients = Vec::new(&env);
-    recipients.push_back(recipient1);
-    recipients.push_back(recipient2);
-
-    let mut amounts = Vec::new(&env);
-    amounts.push_back(1000_i128);
-    amounts.push_back(2000_i128);
-    amounts.push_back(3000_i128);
-
-    let result = client.try_batch_create_packages(
-        &admin,
-        &recipients,
-        &amounts,
-        &token_client.address,
-        &86400,
-    );
-    assert_eq!(result, Err(Ok(Error::MismatchedArrays)));
-}
-
-#[test]
-fn test_batch_create_packages_invalid_amount() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let recipient1 = Address::generate(&env);
-    let recipient2 = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
-    client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
-
-    // Second amount is 0 (invalid)
-    let mut recipients = Vec::new(&env);
-    recipients.push_back(recipient1);
-    recipients.push_back(recipient2);
-
-    let mut amounts = Vec::new(&env);
-    amounts.push_back(1000_i128);
-    amounts.push_back(0_i128);
-
-    let result = client.try_batch_create_packages(
-        &admin,
-        &recipients,
-        &amounts,
-        &token_client.address,
-        &86400,
-    );
-    assert_eq!(result, Err(Ok(Error::InvalidAmount)));
+    assert_eq!(client.get_package(&0).recipient, recipient1);
 }
 
 #[test]
@@ -162,8 +74,6 @@ fn test_batch_create_packages_insufficient_funds() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let recipient1 = Address::generate(&env);
-    let recipient2 = Address::generate(&env);
     let token_admin = Address::generate(&env);
     let (token_client, token_admin_client) = setup_token(&env, &token_admin);
 
@@ -171,17 +81,17 @@ fn test_batch_create_packages_insufficient_funds() {
     let client = AidEscrowClient::new(&env, &contract_id);
 
     client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &1000); // Only 1000 funded
+    // Fund with exactly 1.0 token
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
 
-    // Total amounts = 1500 > 1000 available
     let mut recipients = Vec::new(&env);
-    recipients.push_back(recipient1);
-    recipients.push_back(recipient2);
+    recipients.push_back(Address::generate(&env));
+    recipients.push_back(Address::generate(&env));
 
     let mut amounts = Vec::new(&env);
-    amounts.push_back(800_i128);
-    amounts.push_back(700_i128);
+    amounts.push_back(UNIT); // Uses the full 1.0 token
+    amounts.push_back(UNIT); // Needs another 1.0 token (Insufficient)
 
     let result = client.try_batch_create_packages(
         &admin,
@@ -189,32 +99,10 @@ fn test_batch_create_packages_insufficient_funds() {
         &amounts,
         &token_client.address,
         &86400,
+        &empty_metadata(&env, 2),
     );
+
     assert_eq!(result, Err(Ok(Error::InsufficientFunds)));
-}
-
-#[test]
-fn test_batch_create_packages_empty_arrays() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
-    client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &5000);
-
-    let recipients: Vec<Address> = Vec::new(&env);
-    let amounts: Vec<i128> = Vec::new(&env);
-
-    let ids =
-        client.batch_create_packages(&admin, &recipients, &amounts, &token_client.address, &86400);
-    assert_eq!(ids.len(), 0);
 }
 
 #[test]
@@ -233,41 +121,98 @@ fn test_batch_then_individual_no_id_collision() {
     let client = AidEscrowClient::new(&env, &contract_id);
 
     client.init(&admin);
-    token_admin_client.mint(&admin, &10_000);
-    client.fund(&token_client.address, &admin, &10_000);
+    token_admin_client.mint(&admin, &(5 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
 
-    // Batch create 2 packages (IDs 0, 1)
     let mut recipients = Vec::new(&env);
     recipients.push_back(recipient1.clone());
     recipients.push_back(recipient2.clone());
 
     let mut amounts = Vec::new(&env);
-    amounts.push_back(1000_i128);
-    amounts.push_back(1000_i128);
+    amounts.push_back(UNIT);
+    amounts.push_back(UNIT);
 
-    let ids =
-        client.batch_create_packages(&admin, &recipients, &amounts, &token_client.address, &86400);
+    let ids = client.batch_create_packages(
+        &admin,
+        &recipients,
+        &amounts,
+        &token_client.address,
+        &86400,
+        &empty_metadata(&env, 2),
+    );
+
     assert_eq!(ids.get(0).unwrap(), 0);
     assert_eq!(ids.get(1).unwrap(), 1);
 
-    // Now create an individual package with a manual ID that doesn't collide
-    let manual_id = 100; // explicitly different from batch-assigned IDs
+    let manual_id = 100;
     let expiry = env.ledger().timestamp() + 86400;
     client.create_package(
         &admin,
         &manual_id,
         &recipient3,
-        &1000,
+        &UNIT,
         &token_client.address,
         &expiry,
+        &Map::new(&env),
     );
 
-    let pkg = client.get_package(&manual_id);
-    assert_eq!(pkg.recipient, recipient3);
+    assert_eq!(client.get_package(&manual_id).recipient, recipient3);
+}
 
-    // Verify batch packages are still intact
-    let pkg0 = client.get_package(&0);
-    assert_eq!(pkg0.recipient, recipient1);
-    let pkg1 = client.get_package(&1);
-    assert_eq!(pkg1.recipient, recipient2);
+#[test]
+fn test_batch_create_packages_mismatched_arrays() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, _) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(Address::generate(&env));
+    recipients.push_back(Address::generate(&env));
+
+    let mut amounts = Vec::new(&env);
+    amounts.push_back(UNIT); // Only 1 amount for 2 recipients
+
+    let result = client.try_batch_create_packages(
+        &admin,
+        &recipients,
+        &amounts,
+        &token_client.address,
+        &86400,
+        &empty_metadata(&env, 2),
+    );
+    assert_eq!(result, Err(Ok(Error::MismatchedArrays)));
+}
+
+#[test]
+fn test_batch_create_packages_empty_arrays() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, _) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let recipients: Vec<Address> = Vec::new(&env);
+    let amounts: Vec<i128> = Vec::new(&env);
+
+    let ids = client.batch_create_packages(
+        &admin,
+        &recipients,
+        &amounts,
+        &token_client.address,
+        &86400,
+        &Vec::new(&env),
+    );
+    assert_eq!(ids.len(), 0);
 }

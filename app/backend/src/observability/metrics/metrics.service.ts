@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Counter, Histogram, Gauge } from 'prom-client';
 
+export type CacheResult = 'hit' | 'miss';
+
 @Injectable()
 export class MetricsService {
   constructor(
@@ -29,6 +31,12 @@ export class MetricsService {
     public webhookDeliveryDuration: Histogram<string>,
     @InjectMetric('error_rate_total')
     public errorRateCounter: Counter<string>,
+    @InjectMetric('analytics_cache_hits_total')
+    public analyticsCacheHitsCounter: Counter<string>,
+    @InjectMetric('analytics_cache_misses_total')
+    public analyticsCacheMissesCounter: Counter<string>,
+    @InjectMetric('analytics_cache_invalidations_total')
+    public analyticsCacheInvalidationsCounter: Counter<string>,
   ) {}
 
   /**
@@ -169,5 +177,23 @@ export class MetricsService {
       },
       duration,
     );
+  }
+
+  /**
+   * Record an analytics cache hit or miss.
+   */
+  recordAnalyticsCacheResult(endpoint: string, result: CacheResult): void {
+    if (result === 'hit') {
+      this.analyticsCacheHitsCounter.inc({ endpoint });
+    } else {
+      this.analyticsCacheMissesCounter.inc({ endpoint });
+    }
+  }
+
+  /**
+   * Increment the analytics cache invalidation counter.
+   */
+  incrementAnalyticsCacheInvalidation(reason: string): void {
+    this.analyticsCacheInvalidationsCounter.inc({ reason });
   }
 }

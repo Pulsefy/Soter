@@ -14,6 +14,9 @@ import {
   useNotification,
 } from './src/contexts/NotificationContext';
 import { SaverModeProvider } from './src/contexts/SaverModeContext';
+import { UpdateProvider, useUpdate } from './src/contexts/UpdateContext';
+import { ReleaseNotesModal } from './src/components/ReleaseNotesModal';
+import { ForceUpgradeScreen } from './src/screens/ForceUpgradeScreen';
 
 // ---------------------------------------------------------------------------
 // Deep-link configuration for React Navigation
@@ -43,6 +46,7 @@ const AppInner = () => {
   const { navTheme, scheme } = useTheme();
   const { pendingDeepLink, consumeDeepLink } = useNotification();
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+  const { isForceUpgrade, isLoading } = useUpdate();
 
   // -----------------------------------------------------------------------
   // Navigate when a deep link is pending (from notification tap)
@@ -56,8 +60,6 @@ const AppInner = () => {
       return;
     }
 
-    // Small delay to ensure the navigation container is ready, especially
-    // on cold-start where the mount may still be in progress.
     const timer = setTimeout(() => {
       if (navigationRef.current) {
         navigationRef.current.navigate(
@@ -71,6 +73,14 @@ const AppInner = () => {
     return () => clearTimeout(timer);
   }, [pendingDeepLink, consumeDeepLink]);
 
+  if (isLoading) {
+    return null;
+  }
+
+  if (isForceUpgrade) {
+    return <ForceUpgradeScreen />;
+  }
+
   return (
     <WalletProvider>
       <BiometricProvider>
@@ -83,6 +93,7 @@ const AppInner = () => {
             <AppNavigator />
             <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
           </NavigationContainer>
+          <ReleaseNotesModal />
         </SyncProvider>
       </BiometricProvider>
     </WalletProvider>
@@ -97,11 +108,13 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <SaverModeProvider>
-          <NotificationProvider>
-            <AppInner />
-          </NotificationProvider>
-        </SaverModeProvider>
+        <UpdateProvider>
+          <SaverModeProvider>
+            <NotificationProvider>
+              <AppInner />
+            </NotificationProvider>
+          </SaverModeProvider>
+        </UpdateProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

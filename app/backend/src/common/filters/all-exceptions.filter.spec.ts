@@ -283,7 +283,6 @@ describe('AllExceptionsFilter', () => {
 
       filter.catch(exception, mockHost);
 
-      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('test-trace-id-123'),
         expect.any(String),
@@ -297,7 +296,6 @@ describe('AllExceptionsFilter', () => {
 
       filter.catch(exception, mockHost);
 
-      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('N/A'),
         expect.any(String),

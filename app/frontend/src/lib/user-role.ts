@@ -1,4 +1,10 @@
-export const USER_ROLES = ['guest', 'client', 'operator', 'ngo', 'admin'] as const;
+export const USER_ROLES = [
+  'guest',
+  'client',
+  'operator',
+  'ngo',
+  'admin',
+] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
 
@@ -40,6 +46,12 @@ const NAVIGATION_ITEMS: readonly NavigationItem[] = [
     description: 'navigation.campaignsDescription',
     allowedRoles: CAMPAIGN_MANAGER_ROLES,
   },
+  {
+    href: '/verification-review',
+    label: 'navigation.verificationReview',
+    description: 'navigation.verificationReviewDescription',
+    allowedRoles: ['operator', 'admin'] as readonly UserRole[],
+  },
 ];
 
 export function normalizeUserRole(role?: string | null): UserRole {
@@ -54,7 +66,9 @@ export function normalizeUserRole(role?: string | null): UserRole {
     : DEFAULT_ROLE;
 }
 
-export function getUserRole(role = process.env.NEXT_PUBLIC_USER_ROLE): UserRole {
+export function getUserRole(
+  role = process.env.NEXT_PUBLIC_USER_ROLE,
+): UserRole {
   return normalizeUserRole(role);
 }
 

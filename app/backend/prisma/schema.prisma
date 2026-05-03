@@ -225,6 +225,7 @@ model Claim {
 
   recipientRef String
   evidenceRef  String?
+  expiresAt    DateTime?
 
   /// Set when this claim is cancelled
   cancelledAt    DateTime?
@@ -243,6 +244,7 @@ model Claim {
   @@index([createdAt])
   @@index([deletedAt])
   @@index([reissuedFromId])
+  @@index([expiresAt])
 }
 
 enum PurgeStrategy {

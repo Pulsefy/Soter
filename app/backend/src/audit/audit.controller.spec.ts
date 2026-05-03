@@ -59,7 +59,6 @@ describe('AuditController', () => {
 
       await controller.getLogs(query as any, res);
 
-      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(service.findLogs).toHaveBeenCalledWith(query);
       expect(res.setHeader).toHaveBeenCalledWith('X-Total-Count', '0');
       expect(res.setHeader).toHaveBeenCalledWith('X-Page', '1');
@@ -80,7 +79,7 @@ describe('AuditController', () => {
         { page: 1, limit: 10 },
         res as any,
       );
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(service.exportLogs).toHaveBeenCalledWith({ page: 1, limit: 10 });
       expect(returned).toBe(mockExportResult);
     });
@@ -91,7 +90,7 @@ describe('AuditController', () => {
         { format: 'csv' } as any,
         res as any,
       );
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(service.buildCsv).toHaveBeenCalledWith(mockExportResult.data);
       expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/csv');
       expect(typeof returned).toBe('string');
@@ -111,7 +110,7 @@ describe('AuditController', () => {
         { from: '2024-01-01', to: '2024-12-31' } as any,
         res as any,
       );
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(service.exportLogs).toHaveBeenCalledWith({
         from: '2024-01-01',
         to: '2024-12-31',

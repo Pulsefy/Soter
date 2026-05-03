@@ -14,6 +14,7 @@ import {
 } from './dto';
 import { RedisService } from '../../cache/redis.service';
 import { PrivacyService } from './privacy.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 // export type MapDataPoint = {
 //   id: string;
@@ -98,6 +99,7 @@ export class AnalyticsService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly privacyService: PrivacyService,
+    private readonly metrics: MetricsService,
   ) {}
 
   /**
@@ -119,10 +121,12 @@ export class AnalyticsService {
     const cached = await this.redis.get<GlobalStatsDto>(cacheKey);
     if (cached) {
       this.logger.debug(`Cache hit: ${cacheKey}`);
+      this.metrics.recordAnalyticsCacheResult('global-stats', 'hit');
       return cached;
     }
 
     this.logger.debug(`Cache miss: ${cacheKey} — querying database`);
+    this.metrics.recordAnalyticsCacheResult('global-stats', 'miss');
     const result = await this.computeGlobalStats(query);
 
     await this.redis.set(cacheKey, result, CACHE_TTL_SECONDS);
@@ -148,14 +152,32 @@ export class AnalyticsService {
     const cached = await this.redis.get<MapDataDto>(cacheKey);
     if (cached) {
       this.logger.debug(`Cache hit: ${cacheKey}`);
+      this.metrics.recordAnalyticsCacheResult('map-data', 'hit');
       return cached;
     }
 
     this.logger.debug(`Cache miss: ${cacheKey} — querying database`);
+    this.metrics.recordAnalyticsCacheResult('map-data', 'miss');
     const result = await this.computeMapData(query);
 
     await this.redis.set(cacheKey, result, CACHE_TTL_SECONDS);
     return result;
+  }
+
+  /**
+   * Invalidate all analytics cache entries.
+   *
+   * Should be called whenever campaigns or claims change state so that the
+   * next request recomputes fresh data.
+   *
+   * @param reason - Human-readable reason for the invalidation (used in metrics).
+   */
+  async invalidateCache(reason: string): Promise<void> {
+    const deleted = await this.redis.delByPattern('analytics:*');
+    this.logger.debug(
+      `Analytics cache invalidated (reason: ${reason}), ${deleted} key(s) removed`,
+    );
+    this.metrics.incrementAnalyticsCacheInvalidation(reason);
   }
 
   /**

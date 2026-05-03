@@ -83,7 +83,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "i128": "100"
+                  "i128": "10000000"
                 }
               ]
             }
@@ -105,19 +105,31 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
-                  "u64": "1"
+                  "u64": "100"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "i128": "100"
+                  "i128": "10000000"
                 },
                 {
                   "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
                 },
                 {
-                  "u64": "1003600"
+                  "u64": "1001000"
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "claim_starts_at"
+                      },
+                      "val": {
+                        "string": "1001000"
+                      }
+                    }
+                  ]
                 }
               ]
             }
@@ -126,6 +138,7 @@
         }
       ]
     ],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
@@ -136,7 +149,7 @@
               "function_name": "claim",
               "args": [
                 {
-                  "u64": "1"
+                  "u64": "100"
                 }
               ]
             }
@@ -149,7 +162,7 @@
   "ledger": {
     "protocol_version": 23,
     "sequence_number": 100,
-    "timestamp": 1003600,
+    "timestamp": 1001000,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 10,
     "min_persistent_entry_ttl": 10,
@@ -352,7 +365,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u64": "1"
+                  "u64": "100"
                 }
               }
             },
@@ -371,7 +384,7 @@
                   "symbol": "pkg"
                 },
                 {
-                  "u64": "1"
+                  "u64": "100"
                 }
               ]
             },
@@ -391,7 +404,7 @@
                       "symbol": "pkg"
                     },
                     {
-                      "u64": "1"
+                      "u64": "100"
                     }
                   ]
                 },
@@ -403,7 +416,15 @@
                         "symbol": "amount"
                       },
                       "val": {
-                        "i128": "100"
+                        "i128": "10000000"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "claim_starts_at"
+                      },
+                      "val": {
+                        "u64": "1001000"
                       }
                     },
                     {
@@ -419,7 +440,7 @@
                         "symbol": "expires_at"
                       },
                       "val": {
-                        "u64": "1003600"
+                        "u64": "1001000"
                       }
                     },
                     {
@@ -427,7 +448,7 @@
                         "symbol": "id"
                       },
                       "val": {
-                        "u64": "1"
+                        "u64": "100"
                       }
                     },
                     {
@@ -435,7 +456,16 @@
                         "symbol": "metadata"
                       },
                       "val": {
-                        "map": []
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "claim_starts_at"
+                            },
+                            "val": {
+                              "string": "1001000"
+                            }
+                          }
+                        ]
                       }
                     },
                     {
@@ -504,6 +534,23 @@
                       },
                       {
                         "key": {
+                          "symbol": "claimed"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
+                              },
+                              "val": {
+                                "i128": "10000000"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "config"
                         },
                         "val": {
@@ -550,6 +597,14 @@
                               }
                             }
                           ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "pkg_cnt"
+                        },
+                        "val": {
+                          "u64": "101"
                         }
                       },
                       {
@@ -723,7 +778,7 @@
                         "symbol": "amount"
                       },
                       "val": {
-                        "i128": "100"
+                        "i128": "10000000"
                       }
                     },
                     {
@@ -909,7 +964,7 @@
               }
             ],
             "data": {
-              "i128": "100"
+              "i128": "10000000"
             }
           }
         }
@@ -943,7 +998,7 @@
                     "symbol": "amount"
                   },
                   "val": {
-                    "i128": "100"
+                    "i128": "10000000"
                   }
                 },
                 {
@@ -951,7 +1006,7 @@
                     "symbol": "package_id"
                   },
                   "val": {
-                    "u64": "1"
+                    "u64": "100"
                   }
                 },
                 {
@@ -967,7 +1022,7 @@
                     "symbol": "timestamp"
                   },
                   "val": {
-                    "u64": "1003600"
+                    "u64": "1001000"
                   }
                 }
               ]

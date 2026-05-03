@@ -9,6 +9,8 @@ import { LoggerModule } from '../logger/logger.module';
 import { AuditModule } from '../audit/audit.module';
 import { EncryptionModule } from '../common/encryption/encryption.module';
 import { CampaignsModule } from '../campaigns/campaigns.module';
+import { BudgetService } from '../common/budget/budget.service';
+import { CommonServicesModule } from '../common/services/common-services.module';
 
 @Module({
   imports: [
@@ -19,9 +21,10 @@ import { CampaignsModule } from '../campaigns/campaigns.module';
     AuditModule,
     EncryptionModule,
     CampaignsModule,
+    CommonServicesModule,
   ],
   controllers: [ClaimsController],
-  providers: [ClaimsService, CancelAndReissueService],
+  providers: [ClaimsService, CancelAndReissueService, BudgetService],
   exports: [CancelAndReissueService],
 })
 export class ClaimsModule {}
