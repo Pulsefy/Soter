@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Share2, Download, Copy, Check } from 'lucide-react';
-import { useTheme } from 'next-themes';
+import { Share2, Download, Copy, Check, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
+import { getStellarExpertTransactionUrl } from '@/lib/stellar-explorer';
 
 export interface ClaimReceiptData {
   claimId: string;
@@ -11,6 +11,7 @@ export interface ClaimReceiptData {
   status: 'requested' | 'verified' | 'approved' | 'disbursed' | 'archived';
   amount: number;
   tokenAddress?: string;
+  transactionHash?: string;
   timestamp: string;
   recipientRef?: string;
 }
@@ -26,7 +27,6 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
   onShare,
   compact = false,
 }) => {
-  const { theme } = useTheme();
   const [copied, setCopied] = React.useState(false);
   const [sharing, setSharing] = React.useState(false);
 
@@ -55,14 +55,23 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
   }, [claim.timestamp]);
 
   const receiptText = useMemo(() => {
+    const explorerUrl = getStellarExpertTransactionUrl(claim.transactionHash);
+
     return `Claim Receipt
 Claim ID: ${claim.claimId}
 Package ID: ${claim.packageId}
 Status: ${claim.status.toUpperCase()}
 Amount: ${claim.amount} tokens
 Date: ${formattedDate}
-${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}`;
+${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}
+${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}
+${explorerUrl ? `Explorer: ${explorerUrl}` : ''}`;
   }, [claim, formattedDate]);
+
+  const explorerUrl = useMemo(
+    () => getStellarExpertTransactionUrl(claim.transactionHash),
+    [claim.transactionHash],
+  );
 
   const handleCopy = async () => {
     try {
@@ -163,6 +172,23 @@ ${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}`;
           <div className="col-span-2">
             <p className="text-xs font-semibold opacity-75 mb-1">TOKEN ADDRESS</p>
             <p className="font-mono text-xs break-all">{claim.tokenAddress}</p>
+          </div>
+        )}
+        {claim.transactionHash && (
+          <div className="col-span-2">
+            <p className="text-xs font-semibold opacity-75 mb-1">TRANSACTION HASH</p>
+            <p className="font-mono text-xs break-all">{claim.transactionHash}</p>
+            {explorerUrl && (
+              <a
+                href={explorerUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-flex items-center gap-1 text-sm font-medium underline-offset-2 hover:underline"
+              >
+                View on Stellar Expert
+                <ExternalLink size={14} aria-hidden />
+              </a>
+            )}
           </div>
         )}
       </div>
