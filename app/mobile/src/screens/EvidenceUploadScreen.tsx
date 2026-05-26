@@ -17,6 +17,9 @@ import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
 import { useSync } from '../contexts/SyncContext';
 import { buildEvidenceUploadPayload, EvidenceUploadRequest } from '../services/verificationApi';
+import { MismatchBanner } from '../components/MismatchBanner';
+import { useNetworkGuard } from '../hooks/useNetworkGuard';
+import { getWalletConnectChainId } from '../services/walletConnect';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EvidenceUpload'>;
 
@@ -28,6 +31,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { isConnected, queueEvidenceUpload } = useSync();
+  const { networkMismatch } = useNetworkGuard();
 
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [compressedBase64, setCompressedBase64] = useState<string | null>(null);
@@ -144,6 +148,9 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {/* ── Network Mismatch Banner ────────────────────────────────────── */}
+      <MismatchBanner expectedChainId={getWalletConnectChainId()} />
+
       <View style={styles.header}>
         <Text style={styles.title} accessibilityRole="header">
           Upload Evidence
@@ -207,10 +214,10 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
         <TouchableOpacity
           style={[styles.button, styles.primaryButton]}
           onPress={handleUpload}
-          disabled={!compressedBase64 || uploading}
+          disabled={!compressedBase64 || uploading || networkMismatch}
           accessibilityRole="button"
           accessibilityLabel={uploading ? 'Uploading evidence' : 'Upload evidence now'}
-          accessibilityState={{ busy: uploading, disabled: !compressedBase64 || uploading }}
+          accessibilityState={{ busy: uploading, disabled: !compressedBase64 || uploading || networkMismatch }}
           activeOpacity={0.8}
         >
           {uploading ? (

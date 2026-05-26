@@ -5,18 +5,22 @@ import {
   WalletConnectionStatus,
   createWalletConnection,
   disconnectWalletSession,
+  getWalletConnectChainId,
   openWalletConnectPairingUri,
   restoreWalletSession,
 } from '../services/walletConnect';
+import { detectNetworkMismatch } from '../services/NetworkGuard';
 
 interface WalletContextValue {
   connectWallet: () => Promise<void>;
   disconnectWallet: () => Promise<void>;
   error: string | null;
   lastDeepLinkUrl: string | null;
+  networkMismatch: boolean;
   pairingUri: string | null;
   publicKey: string | null;
   reopenWallet: () => Promise<void>;
+  sessionChainIds: string[];
   status: WalletConnectionStatus;
   walletName: string | null;
 }
@@ -33,8 +37,10 @@ const getErrorMessage = (error: unknown) => {
 
 const idleState = {
   error: null,
+  networkMismatch: false,
   pairingUri: null,
   publicKey: null,
+  sessionChainIds: [] as string[],
   status: 'idle' as WalletConnectionStatus,
   walletName: null,
 };
@@ -47,6 +53,17 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
   const [pairingUri, setPairingUri] = useState<string | null>(null);
   const [lastDeepLinkUrl, setLastDeepLinkUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessionChainIds, setSessionChainIds] = useState<string[]>([]);
+  const [networkMismatch, setNetworkMismatch] = useState(false);
+
+  /**
+   * Recomputes and stores network guard state from a session's chain IDs.
+   * Called on connect, restore, and implicitly cleared on disconnect.
+   */
+  const applyNetworkGuard = (chainIds: string[]) => {
+    setSessionChainIds(chainIds);
+    setNetworkMismatch(detectNetworkMismatch(chainIds, getWalletConnectChainId()));
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -62,6 +79,7 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
       setPairingUri(null);
       setError(null);
       setStatus('connected');
+      applyNetworkGuard(session.chainIds);
     };
 
     const bootstrap = async () => {
@@ -105,6 +123,8 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
     setPairingUri(idleState.pairingUri);
     setError(idleState.error);
     setStatus(idleState.status);
+    setSessionChainIds(idleState.sessionChainIds);
+    setNetworkMismatch(idleState.networkMismatch);
   };
 
   const connectWallet = async () => {
@@ -130,6 +150,7 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
         setPairingUri(null);
         setError(null);
         setStatus('connected');
+        applyNetworkGuard(session.chainIds);
       } catch (approvalError) {
         setError(getErrorMessage(approvalError));
         setStatus('error');
@@ -177,9 +198,11 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
         disconnectWallet,
         error,
         lastDeepLinkUrl,
+        networkMismatch,
         pairingUri,
         publicKey,
         reopenWallet,
+        sessionChainIds,
         status,
         walletName,
       }}

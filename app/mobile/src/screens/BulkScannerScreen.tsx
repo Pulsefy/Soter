@@ -13,6 +13,9 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
 import { useSync } from '../contexts/SyncContext';
+import { MismatchBanner } from '../components/MismatchBanner';
+import { useNetworkGuard } from '../hooks/useNetworkGuard';
+import { getWalletConnectChainId } from '../services/walletConnect';
 
 type BulkScannerScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'BulkScanner'>;
 
@@ -40,6 +43,7 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
 
   const { colors } = useTheme();
   const { queueClaimConfirmation, isConnected } = useSync();
+  const { networkMismatch } = useNetworkGuard();
 
   useEffect(() => {
     const getBarCodeScannerPermissions = async () => {
@@ -51,7 +55,7 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
   }, []);
 
   const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
-    if (isProcessing) return;
+    if (isProcessing || networkMismatch) return;
     setIsProcessing(true);
 
     // Check if it's the correct format: soter://package/{id}
@@ -142,6 +146,13 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
 
         {/* Feedback Area */}
         <View style={styles.feedbackContainer}>
+          {/* ── Network Mismatch Banner ──────────────────────────────── */}
+          {networkMismatch ? (
+            <View style={styles.mismatchBannerWrapper}>
+              <MismatchBanner expectedChainId={getWalletConnectChainId()} />
+            </View>
+          ) : null}
+
           {isProcessing && !lastScanResult && (
             <View style={styles.processingIndicator}>
               <ActivityIndicator color="white" size="small" />
@@ -233,6 +244,10 @@ const styles = StyleSheet.create({
   feedbackContainer: {
     alignItems: 'center',
     paddingHorizontal: 20,
+  },
+  mismatchBannerWrapper: {
+    width: '100%',
+    marginBottom: 12,
   },
   instructionText: {
     color: 'white',

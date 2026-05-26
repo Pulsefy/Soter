@@ -21,6 +21,9 @@ import {
 import { useSync } from '../contexts/SyncContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { SaverModeBanner } from '../components/SaverModeBanner';
+import { MismatchBanner } from '../components/MismatchBanner';
+import { useNetworkGuard } from '../hooks/useNetworkGuard';
+import { getWalletConnectChainId } from '../services/walletConnect';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidDetails'>;
 
@@ -30,6 +33,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { biometricEnabled, authenticate } = useBiometric();
   const { active: saverModeActive, source: saverModeSource } = useSaverMode();
+  const { networkMismatch } = useNetworkGuard();
 
   // null = not yet attempted, true = granted, false = denied
   const [authState, setAuthState] = useState<'idle' | 'pending' | 'granted' | 'denied'>('idle');
@@ -260,6 +264,9 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       {/* ── Saver Mode Banner ──────────────────────────────────────────── */}
       <SaverModeBanner visible={saverModeActive} source={saverModeSource} />
 
+      {/* ── Network Mismatch Banner ────────────────────────────────────── */}
+      <MismatchBanner expectedChainId={getWalletConnectChainId()} />
+
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <View style={styles.header}>
         <Text style={styles.title} accessibilityRole="header">
@@ -393,10 +400,11 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         style={[
           styles.button,
           styles.secondaryButton,
-          confirming || hasPendingConfirmation ? styles.buttonDisabled : null,
+          confirming || hasPendingConfirmation || networkMismatch ? styles.buttonDisabled : null,
         ]}
         onPress={handleConfirmClaim}
-        disabled={confirming || hasPendingConfirmation}
+        disabled={confirming || hasPendingConfirmation || networkMismatch}
+        accessibilityState={{ disabled: confirming || hasPendingConfirmation || networkMismatch }}
         activeOpacity={0.8}
       >
         {confirming ? (
