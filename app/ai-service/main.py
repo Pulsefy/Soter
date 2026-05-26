@@ -29,6 +29,7 @@ from api.routes import router as ocr_router
 from api.v1.router import v1_router
 
 from config import settings
+from logging_config import configure_logging
 import tasks
 from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
 from schemas.anonymization import AnonymizeRequest, AnonymizeResponse
@@ -41,9 +42,7 @@ from services.humanitarian_verification import HumanitarianVerificationService
 
 limiter = Limiter(key_func=get_remote_address)
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
