@@ -78,6 +78,8 @@ def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
                 fraud_risk_score=round(float(score), 4),
                 is_flagged=is_flagged,
                 reason=reason,
+                campaign_id=claim.campaign_id,
+                package_id=claim.package_id,
             )
         )
 

@@ -23,7 +23,11 @@ async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
     # tests (and any future dependency-injection wiring) works transparently.
     import main as _main
 
-    logger.info("Processing humanitarian verification request")
+    logger.info(
+        "Processing humanitarian verification request for campaign=%s claim=%s",
+        request.campaign_id,
+        request.claim_id,
+    )
 
     try:
         result = _main.humanitarian_verification_service.verify_claim(
@@ -31,6 +35,9 @@ async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
             supporting_evidence=request.supporting_evidence,
             context_factors=request.context_factors,
             provider_preference=request.provider_preference,
+            campaign_id=request.campaign_id,
+            claim_id=request.claim_id,
+            package_id=request.package_id,
         )
         return HumanitarianVerificationResponse(success=True, **result)
     except Exception as e:

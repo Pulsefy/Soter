@@ -2,13 +2,15 @@
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
 import time
-import metrics
+from typing import Any, Dict, List, Optional
 
 import httpx
 
+import metrics
+
 from config import settings
+from schemas.metadata import VerificationMetadata
 from services.humanitarian_prompt import HumanitarianPromptEngine
 
 logger = logging.getLogger(__name__)
@@ -26,11 +28,28 @@ class HumanitarianVerificationService:
         supporting_evidence: Optional[List[str]] = None,
         context_factors: Optional[Dict[str, Any]] = None,
         provider_preference: str = "auto",
+        campaign_id: Optional[str] = None,
+        claim_id: Optional[str] = None,
+        package_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
         try:
             evidence = supporting_evidence or []
             context = context_factors or {}
+
+            # Validate and prepare metadata if provided
+            metadata = None
+            if campaign_id or claim_id:
+                if not campaign_id:
+                    raise ValueError("campaign_id is required when providing verification metadata")
+                if not claim_id:
+                    raise ValueError("claim_id is required when providing verification metadata")
+                metadata = VerificationMetadata(
+                    campaign_id=campaign_id,
+                    claim_id=claim_id,
+                    package_id=package_id,
+                    verification_timestamp=int(time.time()),
+                )
 
             primary_prompt = self.prompt_engine.build_primary_prompt(
                 aid_claim=aid_claim,
@@ -54,10 +73,12 @@ class HumanitarianVerificationService:
                 for prompt_variant, prompt in (("primary", primary_prompt), ("fallback", fallback_prompt)):
                     try:
                         logger.info(
-                            "Attempting humanitarian verification with provider=%s model=%s prompt=%s",
+                            "Attempting humanitarian verification with provider=%s model=%s prompt=%s campaign=%s claim=%s",
                             provider,
                             model,
                             prompt_variant,
+                            campaign_id,
+                            claim_id,
                         )
                         raw_content = self._call_provider(
                             provider=provider,
@@ -66,13 +87,16 @@ class HumanitarianVerificationService:
                             user_prompt=prompt["user"],
                         )
                         parsed = self._parse_json_response(raw_content)
-                        return {
+                        result = {
                             "provider": provider,
                             "model": model,
                             "prompt_variant": prompt_variant,
                             "verification": parsed,
                             "raw_response": raw_content,
                         }
+                        if metadata:
+                            result["metadata"] = metadata.dict()
+                        return result
                     except Exception as exc:
                         err = f"provider={provider}, model={model}, prompt={prompt_variant}, error={exc}"
                         errors.append(err)
