@@ -9,7 +9,11 @@ import {
 import { Response } from 'express';
 import { RequestWithRequestId } from '../middleware/request-correlation.middleware';
 import { HealthService } from './health.service';
-import { LivenessResponse, ReadinessResponse } from './health.service';
+import {
+  LivenessResponse,
+  ReadinessResponse,
+  DependencyProbeResponse,
+} from './health.service';
 import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { Public } from '../common/decorators/public.decorator';
 import { Throttle } from '@nestjs/throttler';
@@ -108,6 +112,56 @@ export class HealthController {
     }
 
     return readiness;
+  }
+
+  @Public()
+  @Get('dependencies')
+  @Version(API_VERSIONS.V1)
+  @ApiOperation({
+    summary: 'Dependency probe',
+    description:
+      'Checks Redis connectivity, provider configuration readiness, and filesystem/temp access.',
+  })
+  @ApiOkResponse({
+    description: 'All dependency checks passed.',
+    schema: {
+      example: {
+        status: 'ready',
+        ready: true,
+        service: 'backend',
+        checks: {
+          redis: { status: 'up' },
+          providerConfiguration: { status: 'up' },
+          filesystem: { status: 'up' },
+        },
+      },
+    },
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'One or more dependency checks failed.',
+    schema: {
+      example: {
+        status: 'not_ready',
+        ready: false,
+        service: 'backend',
+        checks: {
+          redis: { status: 'down' },
+          providerConfiguration: { status: 'up' },
+          filesystem: { status: 'up' },
+        },
+      },
+    },
+  })
+  async dependencies(
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<DependencyProbeResponse> {
+    const probe = await this.healthService.getDependencyProbe();
+
+    if (!probe.ready) {
+      res.status(HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    return probe;
   }
 
   @Get('error')

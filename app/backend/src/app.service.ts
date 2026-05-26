@@ -9,6 +9,7 @@ export class AppService {
       docs: '/api/docs',
       endpoints: {
         health: '/api/v1/health',
+        healthDependencies: '/api/v1/health/dependencies',
         aid: '/api/v1/aid',
         verification: '/api/v1/verification',
       },

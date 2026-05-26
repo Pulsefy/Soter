@@ -139,4 +139,37 @@ describe('HealthController', () => {
       }),
     );
   });
+
+  it('GET /health/dependencies returns ready when all dependency probes pass', async () => {
+    const healthService = app.get<HealthService>(HealthService);
+    jest
+      .spyOn(healthService as any, 'getDependencyProbe')
+      .mockResolvedValueOnce({
+        status: 'ready',
+        ready: true,
+        service: 'backend',
+        timestamp: new Date().toISOString(),
+        checks: {
+          redis: { status: 'up' },
+          providerConfiguration: { status: 'up' },
+          filesystem: { status: 'up' },
+        },
+      });
+
+    const res = await request(app.getHttpServer())
+      .get('/health/dependencies')
+      .expect(200);
+
+    expect(res.body).toEqual(
+      expect.objectContaining({
+        status: 'ready',
+        ready: true,
+        checks: {
+          redis: expect.objectContaining({ status: 'up' }),
+          providerConfiguration: expect.objectContaining({ status: 'up' }),
+          filesystem: expect.objectContaining({ status: 'up' }),
+        },
+      }),
+    );
+  });
 });

@@ -2,12 +2,33 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
+import { promises as fs } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import Redis from 'ioredis';
 
 type CheckStatus = 'up' | 'down' | 'skipped';
 
 interface HealthCheckResult {
   status: CheckStatus;
   details?: Record<string, unknown>;
+}
+
+interface DependencyCheckResult {
+  status: 'up' | 'down';
+  details?: Record<string, unknown>;
+}
+
+export interface DependencyProbeResponse {
+  status: 'ready' | 'not_ready';
+  ready: boolean;
+  service: 'backend';
+  timestamp: string;
+  checks: {
+    redis: DependencyCheckResult;
+    providerConfiguration: DependencyCheckResult;
+    filesystem: DependencyCheckResult;
+  };
 }
 
 export interface LivenessResponse {
@@ -103,6 +124,31 @@ export class HealthService {
     };
   }
 
+  async getDependencyProbe(): Promise<DependencyProbeResponse> {
+    const [redis, providerConfiguration, filesystem] = await Promise.all([
+      this.checkRedisConnectivity(),
+      this.checkProviderConfiguration(),
+      this.checkFilesystemAccess(),
+    ]);
+
+    const ready =
+      redis.status === 'up' &&
+      providerConfiguration.status === 'up' &&
+      filesystem.status === 'up';
+
+    return {
+      status: ready ? 'ready' : 'not_ready',
+      ready,
+      service: 'backend',
+      timestamp: new Date().toISOString(),
+      checks: {
+        redis,
+        providerConfiguration,
+        filesystem,
+      },
+    };
+  }
+
   logHealthCheck(requestId?: string) {
     this.logger.log('Health check endpoint accessed', 'HealthService', {
       requestId,
@@ -146,6 +192,125 @@ export class HealthService {
           error: message,
         },
       };
+    }
+  }
+
+  private async checkRedisConnectivity(): Promise<DependencyCheckResult> {
+    let client: Redis | null = null;
+
+    try {
+      const redisUrl = this.configService.get<string>('REDIS_URL');
+      const redisHost = this.configService.get<string>('REDIS_HOST') ?? 'localhost';
+      const redisPort = parseInt(
+        this.configService.get<string>('REDIS_PORT') ?? '6379',
+        10,
+      );
+
+      client = redisUrl
+        ? new Redis(redisUrl)
+        : new Redis({ host: redisHost, port: redisPort });
+
+      await client.ping();
+
+      return {
+        status: 'up',
+        details: {
+          connected: true,
+        },
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown Redis error';
+
+      this.logger.warn(
+        'Redis dependency check failed',
+        undefined,
+        'HealthService',
+        {
+          error: message,
+        },
+      );
+
+      return {
+        status: 'down',
+        details: {
+          connected: false,
+        },
+      };
+    } finally {
+      if (client) {
+        try {
+          await client.quit();
+        } catch {
+          client.disconnect();
+        }
+      }
+    }
+  }
+
+  private checkProviderConfiguration(): DependencyCheckResult {
+    const verificationMode =
+      this.configService.get<string>('VERIFICATION_MODE')?.trim().toLowerCase() ||
+      'mock';
+    const aiServiceUrl = this.configService.get<string>('AI_SERVICE_URL');
+    const openAIKey = this.configService.get<string>('OPENAI_API_KEY');
+    const aiRequired = verificationMode === 'ai';
+
+    const ready = !aiRequired || (!!aiServiceUrl && !!openAIKey);
+
+    return {
+      status: ready ? 'up' : 'down',
+      details: {
+        verificationMode,
+        aiServiceUrlConfigured: Boolean(aiServiceUrl),
+        openAIKeyConfigured: Boolean(openAIKey),
+        required: aiRequired,
+      },
+    };
+  }
+
+  private async checkFilesystemAccess(): Promise<DependencyCheckResult> {
+    const tempDirectory = tmpdir();
+    const tempFile = join(
+      tempDirectory,
+      `soter-health-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
+    );
+
+    try {
+      await fs.writeFile(tempFile, 'ok', { encoding: 'utf8' });
+      await fs.readFile(tempFile, 'utf8');
+
+      return {
+        status: 'up',
+        details: {
+          tempDirectoryAccessible: true,
+        },
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown filesystem error';
+
+      this.logger.warn(
+        'Filesystem dependency check failed',
+        undefined,
+        'HealthService',
+        {
+          error: message,
+        },
+      );
+
+      return {
+        status: 'down',
+        details: {
+          tempDirectoryAccessible: false,
+        },
+      };
+    } finally {
+      try {
+        await fs.unlink(tempFile);
+      } catch {
+        // Ignore cleanup errors; the probe is best-effort for transient temp access
+      }
     }
   }
 
