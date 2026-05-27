@@ -67,6 +67,74 @@ model BalanceLedger {
   @@index([createdAt])
 }
 
+enum DriftSeverity {
+  low
+  medium
+  high
+  critical
+}
+
+enum DriftKind {
+  status_mismatch
+  locked_total_mismatch
+  package_missing_onchain
+  package_missing_backend
+  amount_mismatch
+}
+
+enum DriftResolution {
+  unresolved
+  auto_reconciled
+  manually_resolved
+  ignored
+}
+
+/// Records every detected divergence between on-chain and backend cached state.
+model DriftIncident {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// The kind of drift detected
+  kind        DriftKind
+
+  /// Severity classification
+  severity    DriftSeverity
+
+  /// Optional campaign this drift relates to
+  campaignId  String?
+  campaign    Campaign? @relation(fields: [campaignId], references: [id])
+
+  /// Optional package ID involved
+  packageId   String?
+
+  /// JSON blob with on-chain snapshot at time of detection
+  onchainSnapshot  Json
+
+  /// JSON blob with backend/cached snapshot at time of detection
+  backendSnapshot  Json
+
+  /// Human-readable description of the drift
+  description String
+
+  /// Resolution status
+  resolution  DriftResolution @default(unresolved)
+
+  /// Who or what resolved this incident
+  resolvedBy  String?
+  resolvedAt  DateTime?
+
+  /// Free-form notes from resolution
+  resolutionNotes String?
+
+  @@index([campaignId])
+  @@index([kind])
+  @@index([severity])
+  @@index([resolution])
+  @@index([createdAt])
+  @@index([packageId])
+}
+
 enum VerificationChannel {
   email
   phone

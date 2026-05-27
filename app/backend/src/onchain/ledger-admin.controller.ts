@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Body,
+  Query,
   Version,
   HttpCode,
   HttpStatus,
@@ -17,9 +18,11 @@ import {
   ApiBadRequestResponse,
   ApiUnauthorizedResponse,
   ApiForbiddenResponse,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
+import { StateReconciliationService } from './state-reconciliation.service';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 
@@ -29,6 +32,7 @@ export class LedgerAdminController {
   constructor(
     private readonly backfillService: LedgerBackfillService,
     private readonly reconciliationService: LedgerReconciliationService,
+    private readonly stateReconciliationService: StateReconciliationService,
   ) {}
 
   @Post('backfill')
@@ -250,5 +254,125 @@ export class LedgerAdminController {
       throw new Error('Job not found');
     }
     return status;
+  }
+
+  /* ================================================================ */
+  /*  State reconciliation (on-chain ↔ backend drift detection)        */
+  /* ================================================================ */
+
+  @Post('state-reconciliation')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Trigger on-chain ↔ backend state reconciliation',
+    description:
+      'Compares every AidPackage status and campaign locked-total against the on-chain contract, persists any drift incidents, and returns the report.',
+  })
+  @ApiBody({
+    required: false,
+    schema: {
+      type: 'object',
+      properties: {
+        campaignId: {
+          type: 'string',
+          description:
+            'Optional – scope reconciliation to a single campaign',
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Reconciliation completed.',
+    schema: {
+      example: {
+        triggeredAt: '2026-05-27T12:00:00.000Z',
+        durationMs: 1234,
+        driftsDetected: 1,
+        drifts: [
+          {
+            packageId: 'pkg_abc',
+            kind: 'status_mismatch',
+            severity: 'high',
+            description: '…',
+          },
+        ],
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Unauthorized.' })
+  @ApiForbiddenResponse({ description: 'Admin role required.' })
+  async triggerStateReconciliation(
+    @Body() body?: { campaignId?: string },
+  ) {
+    return this.stateReconciliationService.reconcile(body?.campaignId);
+  }
+
+  @Get('drift-incidents')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'List recorded drift incidents',
+    description:
+      'Returns a paginated list of drift incidents, filterable by campaign, kind, severity, and resolution status.',
+  })
+  @ApiQuery({ name: 'campaignId', required: false })
+  @ApiQuery({ name: 'kind', required: false })
+  @ApiQuery({ name: 'severity', required: false })
+  @ApiQuery({ name: 'resolution', required: false })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiOkResponse({ description: 'Drift incident list.' })
+  @ApiUnauthorizedResponse({ description: 'Unauthorized.' })
+  @ApiForbiddenResponse({ description: 'Admin role required.' })
+  async listDriftIncidents(
+    @Query('campaignId') campaignId?: string,
+    @Query('kind') kind?: string,
+    @Query('severity') severity?: string,
+    @Query('resolution') resolution?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.stateReconciliationService.getDriftHistory({
+      campaignId,
+      kind,
+      severity,
+      resolution,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
+  @Post('drift-incidents/:id/resolve')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Resolve a drift incident',
+    description: 'Mark a drift incident as manually resolved with optional notes.',
+  })
+  @ApiParam({ name: 'id', description: 'Drift incident ID' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        resolvedBy: { type: 'string' },
+        resolutionNotes: { type: 'string' },
+      },
+      required: ['resolvedBy'],
+    },
+  })
+  @ApiOkResponse({ description: 'Incident resolved.' })
+  @ApiUnauthorizedResponse({ description: 'Unauthorized.' })
+  @ApiForbiddenResponse({ description: 'Admin role required.' })
+  async resolveDriftIncident(
+    @Param('id') id: string,
+    @Body() body: { resolvedBy: string; resolutionNotes?: string },
+  ) {
+    return this.stateReconciliationService.resolveDrift(
+      id,
+      body.resolvedBy,
+      body.resolutionNotes,
+    );
   }
 }
