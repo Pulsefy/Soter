@@ -5,6 +5,9 @@ import {
   Switch,
   StyleSheet,
   Alert,
+  Linking,
+  Pressable,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
@@ -12,6 +15,10 @@ import { AppColors } from '../theme/useAppTheme';
 import { useBiometric } from '../contexts/BiometricContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
+import { config } from '../config';
+
+const STELLAR_LAB_FAUCET_URL = 'https://lab.stellar.org/account/fund';
+const STELLAR_FRIENDBOT_URL = 'https://friendbot-testnet.stellar.org';
 
 export const SettingsScreen: React.FC = () => {
   const { colors } = useTheme();
@@ -54,9 +61,23 @@ export const SettingsScreen: React.FC = () => {
     await toggleBiometric(value);
   };
 
+  const openFaucetTool = async (url: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(
+        'Unable to Open Link',
+        'Please try again or open the faucet from your browser.',
+      );
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.container}
+      >
         <Text
           style={styles.sectionHeader}
           accessibilityRole="header"
@@ -211,7 +232,52 @@ export const SettingsScreen: React.FC = () => {
             accessibilityElementsHidden
           />
         </View>
-      </View>
+
+        {config.network === 'testnet' && (
+          <>
+            <Text
+              style={styles.sectionHeader}
+              accessibilityRole="header"
+            >
+              Get Testnet XLM
+            </Text>
+
+            <View style={styles.faucetPanel}>
+              <Text style={styles.faucetCopy}>
+                Fund demo accounts with free test XLM from Stellar.
+              </Text>
+
+              <View style={styles.linkGroup}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.linkButton,
+                    pressed && styles.linkButtonPressed,
+                  ]}
+                  accessibilityRole="link"
+                  accessibilityLabel="Open Stellar Lab faucet"
+                  accessibilityHint="Opens the official Stellar Lab account funding tool"
+                  onPress={() => void openFaucetTool(STELLAR_LAB_FAUCET_URL)}
+                >
+                  <Text style={styles.linkButtonText}>Stellar Lab faucet</Text>
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.secondaryLinkButton,
+                    pressed && styles.linkButtonPressed,
+                  ]}
+                  accessibilityRole="link"
+                  accessibilityLabel="Open Friendbot API"
+                  accessibilityHint="Opens the official Friendbot endpoint for testnet funding"
+                  onPress={() => void openFaucetTool(STELLAR_FRIENDBOT_URL)}
+                >
+                  <Text style={styles.secondaryLinkButtonText}>Friendbot API</Text>
+                </Pressable>
+              </View>
+            </View>
+          </>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -222,9 +288,12 @@ const makeStyles = (colors: AppColors) =>
       flex: 1,
       backgroundColor: colors.background,
     },
-    container: {
+    scrollView: {
       flex: 1,
+    },
+    container: {
       padding: 24,
+      paddingBottom: 40,
     },
     sectionHeader: {
       fontSize: 13,
@@ -233,6 +302,7 @@ const makeStyles = (colors: AppColors) =>
       textTransform: 'uppercase',
       letterSpacing: 0.8,
       marginBottom: 8,
+      marginTop: 20,
     },
     row: {
       flexDirection: 'row',
@@ -265,5 +335,54 @@ const makeStyles = (colors: AppColors) =>
       fontSize: 13,
       color: colors.textSecondary,
       paddingHorizontal: 4,
+    },
+    faucetPanel: {
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 14,
+    },
+    faucetCopy: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      lineHeight: 20,
+    },
+    linkGroup: {
+      gap: 10,
+    },
+    linkButton: {
+      minHeight: 44,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.brand.primary,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    secondaryLinkButton: {
+      minHeight: 44,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.infoBg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    linkButtonPressed: {
+      opacity: 0.78,
+    },
+    linkButtonText: {
+      color: '#FFFFFF',
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    secondaryLinkButtonText: {
+      color: colors.info,
+      fontSize: 15,
+      fontWeight: '700',
     },
   });
