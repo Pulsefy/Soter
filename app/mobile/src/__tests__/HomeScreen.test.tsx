@@ -22,9 +22,11 @@ describe('HomeScreen', () => {
     disconnectWallet: jest.fn(),
     error: null,
     lastDeepLinkUrl: null,
+    networkMismatch: false,
     pairingUri: null,
     publicKey: null,
     reopenWallet: jest.fn(),
+    sessionChainIds: [] as string[],
     status: 'idle',
     walletName: null,
   };

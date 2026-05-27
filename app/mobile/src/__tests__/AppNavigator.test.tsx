@@ -23,9 +23,11 @@ describe('AppNavigator', () => {
       disconnectWallet: jest.fn(),
       error: null,
       lastDeepLinkUrl: null,
+      networkMismatch: false,
       pairingUri: null,
       publicKey: null,
       reopenWallet: jest.fn(),
+      sessionChainIds: [],
       status: 'idle',
       walletName: null,
     });
