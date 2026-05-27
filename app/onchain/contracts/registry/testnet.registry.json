@@ -1,0 +1,48 @@
+{
+    "_meta": {
+      "description": "Soter Testnet Contract Registry — single source of truth for all deployed Soroban contract addresses, WASM hashes, and initialization configuration on Stellar Testnet.",
+      "network": "testnet",
+      "network_passphrase": "Test SDF Network ; September 2015",
+      "soroban_rpc_url": "https://soroban-testnet.stellar.org",
+      "horizon_url": "https://horizon-testnet.stellar.org",
+      "schema_version": "1.0.0",
+      "last_updated": "2025-01-15T00:00:00.000Z",
+      "deployed_at_commit": "REPLACE_WITH_GIT_SHA",
+      "maintainer": "Pulsefy/Soter"
+    },
+    "contracts": {
+      "aid_escrow": {
+        "contract_id": "REPLACE_WITH_CONTRACT_ID",
+        "deployer_address": "REPLACE_WITH_DEPLOYER_PUBLIC_KEY",
+        "wasm_hash": "REPLACE_WITH_WASM_HASH",
+        "deployed_at": "REPLACE_WITH_ISO_TIMESTAMP",
+        "deployed_at_commit": "REPLACE_WITH_GIT_SHA",
+        "init_args": {
+          "admin": "REPLACE_WITH_ADMIN_PUBLIC_KEY",
+          "token": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+          "fee_bps": 50,
+          "min_claim_amount": "1000000",
+          "max_claim_amount": "100000000000"
+        },
+        "description": "Core escrow contract handling creation, funding, and claiming of aid packages.",
+        "source": "app/contracts/src/aid_escrow.rs",
+        "abi_path": "contracts/registry/abi/aid_escrow.json"
+      }
+    },
+    "tokens": {
+      "USDC": {
+        "asset_code": "USDC",
+        "issuer": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+        "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+        "decimals": 7,
+        "note": "Circle USDC on Stellar Testnet"
+      },
+      "XLM": {
+        "asset_code": "XLM",
+        "issuer": "native",
+        "contract_id": "CDMLFMKMMD7MWZP3FKUBZPVHTUEDLSX4BYGYKH4GCESXYHS3IHQ4EIG4",
+        "decimals": 7,
+        "note": "Native XLM wrapped as SAC on Testnet"
+      }
+    }
+  }
