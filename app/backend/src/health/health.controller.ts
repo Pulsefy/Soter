@@ -5,10 +5,11 @@ import {
   ApiOkResponse,
   ApiServiceUnavailableResponse,
   ApiInternalServerErrorResponse,
+  ApiForbiddenResponse,
 } from '@nestjs/swagger';
 import { Response } from 'express';
 import { RequestWithRequestId } from '../middleware/request-correlation.middleware';
-import { HealthService } from './health.service';
+import { HealthService, OnchainProbeResponse } from './health.service';
 import { LivenessResponse, ReadinessResponse } from './health.service';
 import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { Public } from '../common/decorators/public.decorator';
@@ -108,6 +109,37 @@ export class HealthController {
     }
 
     return readiness;
+  }
+
+  @Get('onchain-probe')
+  @Version(API_VERSIONS.V1)
+  @Throttle({ default: { ttl: 60, limit: 30 } }) // More conservative limit for read-only contract calls
+  @ApiOperation({
+    summary: 'On-chain health probe (read-only contract ping)',
+    description:
+      'Performs a read-only contract call to verify backend connectivity to Soroban RPC. ' +
+      'Returns latency and status without leaking secrets. This endpoint is protected and not public.',
+  })
+  @ApiOkResponse({
+    description: 'Successfully pinged the on-chain contract.',
+    schema: {
+      example: {
+        status: 'ok',
+        timestamp: '2025-02-23T12:00:00.000Z',
+        latencyMs: 125,
+        contractId: 'CXXXXX...',
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+      },
+    },
+  })
+  @ApiForbiddenResponse({
+    description: 'Endpoint requires authentication or authorization.',
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Failed to reach the on-chain contract or RPC endpoint error.',
+  })
+  async onchainProbe(): Promise<OnchainProbeResponse> {
+    return this.healthService.probeOnchain();
   }
 
   @Get('error')
