@@ -21,8 +21,8 @@
 //! - Tests for invalid/edge cases are in `tests/aid_escrow_tests.rs`.
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, symbol_short, token,
-    Address, Bytes, Env, Map, String, Symbol, Vec,
+    contract, contracterror, contractevent, contractimpl, contracttype, symbol_short, Address,
+    Bytes, Env, IntoVal, Map, String, Symbol, Val, Vec,
 };
 
 // --- Storage Keys ---
@@ -103,6 +103,8 @@ pub enum Error {
     ContractPaused = 14,
     ClaimTooEarly = 15,
     InvalidProof = 16,
+    InvalidToken = 17,
+    TokenTransferFailed = 18,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -338,6 +340,11 @@ impl AidEscrow {
             return Err(Error::InvalidAmount);
         }
 
+        for i in 0..config.allowed_tokens.len() {
+            let token = config.allowed_tokens.get(i).ok_or(Error::InvalidToken)?;
+            Self::validate_token(&env, &token)?;
+        }
+
         env.storage().instance().set(&KEY_CONFIG, &config);
         Ok(())
     }
@@ -436,10 +443,8 @@ impl AidEscrow {
             return Err(Error::InvalidAmount);
         }
 
-        // 2. Fetch Decimals Dynamically
-        // This is the "production-ready" way. It ensures the check matches the token.
-        let token_client = token::Client::new(&env, &token);
-        let decimals = token_client.decimals();
+        // 2. Validate token interface and fetch decimals dynamically.
+        let decimals = Self::validate_token(&env, &token)?;
 
         // 3. Dynamic Precision Check
         // Instead of checking 6 AND 8, we check ONLY the decimals this token uses.
@@ -454,7 +459,13 @@ impl AidEscrow {
         from.require_auth();
 
         // 5. Perform Transfer
-        token_client.transfer(&from, env.current_contract_address(), &amount);
+        Self::transfer_token(
+            &env,
+            &token,
+            &from,
+            &env.current_contract_address(),
+            &amount,
+        )?;
 
         // 6. Events
         let timestamp = env.ledger().timestamp();
@@ -501,9 +512,8 @@ impl AidEscrow {
         }
 
         // --- DYNAMIC PRECISION CHECK ---
-        // Fetch the actual decimals from the token contract to avoid hardcoded traps.
-        let token_client = token::Client::new(&env, &token);
-        let decimals = token_client.decimals();
+        // Fetch the actual decimals from a validated token contract.
+        let decimals = Self::validate_token(&env, &token)?;
         let unit = 10i128.pow(decimals);
 
         // Enforce that only whole units can be used (if that is your business requirement).
@@ -534,7 +544,7 @@ impl AidEscrow {
         }
 
         // --- SOLVENCY CHECK ---
-        let contract_balance = token_client.balance(&env.current_contract_address());
+        let contract_balance = Self::token_balance(&env, &token, &env.current_contract_address())?;
 
         let mut locked_map: Map<Address, i128> = env
             .storage()
@@ -617,14 +627,24 @@ impl AidEscrow {
     ) -> Result<Vec<u64>, Error> {
         Self::check_action_paused(&env, symbol_short!("create"))?;
         Self::require_admin_or_distributor(&env, &operator)?;
+        let config = Self::get_config(env.clone());
 
         // Validate array lengths match
         if recipients.len() != amounts.len() || recipients.len() != metadatas.len() {
             return Err(Error::MismatchedArrays);
         }
 
-        let token_client = token::Client::new(&env, &token);
-        let contract_balance = token_client.balance(&env.current_contract_address());
+        if !config.allowed_tokens.is_empty() && !config.allowed_tokens.contains(token.clone()) {
+            return Err(Error::InvalidState);
+        }
+
+        if config.max_expires_in > 0 && (expires_in == 0 || expires_in > config.max_expires_in) {
+            return Err(Error::InvalidState);
+        }
+
+        let decimals = Self::validate_token(&env, &token)?;
+        let unit = 10i128.pow(decimals);
+        let contract_balance = Self::token_balance(&env, &token, &env.current_contract_address())?;
 
         let mut locked_map: Map<Address, i128> = env
             .storage()
@@ -656,6 +676,10 @@ impl AidEscrow {
 
             // Validate amount
             if amount <= 0 {
+                return Err(Error::InvalidAmount);
+            }
+
+            if amount < config.min_amount || amount % unit != 0 {
                 return Err(Error::InvalidAmount);
             }
 
@@ -831,20 +855,22 @@ impl AidEscrow {
             return Err(Error::PackageNotActive);
         }
 
+        // Transfer before accounting updates so reverted token transfers cannot
+        // leave the escrow state inconsistent.
+        Self::transfer_token(
+            &env,
+            &package.token,
+            &env.current_contract_address(),
+            &package.recipient,
+            &package.amount,
+        )?;
+
         // State Transition
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&key, &package);
 
         // Update Locked
         Self::decrement_locked(&env, &package.token, package.amount);
-
-        // Transfer
-        let token_client = token::Client::new(&env, &package.token);
-        token_client.transfer(
-            &env.current_contract_address(),
-            &package.recipient,
-            &package.amount,
-        );
 
         let timestamp = env.ledger().timestamp();
         PackageDisbursed {
@@ -909,12 +935,13 @@ impl AidEscrow {
         // Can only refund if Expired or Cancelled.
         // If Created, must Revoke first. If Claimed, impossible.
         // If Refunded, impossible.
+        let should_unlock_locked =
+            package.status == PackageStatus::Created || package.status == PackageStatus::Expired;
+
         if package.status == PackageStatus::Created {
             // Check if actually expired
             if package.expires_at > 0 && env.ledger().timestamp() > package.expires_at {
                 package.status = PackageStatus::Expired;
-                // If we just expired it, we need to unlock the funds first
-                Self::decrement_locked(&env, &package.token, package.amount);
             } else {
                 return Err(Error::InvalidState);
             }
@@ -925,15 +952,24 @@ impl AidEscrow {
         }
 
         // If Cancelled, funds were already unlocked in `revoke`.
-        // If Expired (logic above), funds were just unlocked.
+        // Expired packages are unlocked only after a successful refund transfer.
+
+        // Transfer Contract -> Admin
+        Self::transfer_token(
+            &env,
+            &package.token,
+            &env.current_contract_address(),
+            &admin,
+            &package.amount,
+        )?;
+
+        if should_unlock_locked {
+            Self::decrement_locked(&env, &package.token, package.amount);
+        }
 
         // State Transition
         package.status = PackageStatus::Refunded;
         env.storage().persistent().set(&key, &package);
-
-        // Transfer Contract -> Admin
-        let token_client = token::Client::new(&env, &package.token);
-        token_client.transfer(&env.current_contract_address(), &admin, &package.amount);
 
         let timestamp = env.ledger().timestamp();
         PackageRefunded {
@@ -1083,8 +1119,8 @@ impl AidEscrow {
         }
 
         // 3. Get contract's current balance for the token
-        let token_client = token::Client::new(&env, &token);
-        let contract_balance = token_client.balance(&env.current_contract_address());
+        Self::validate_token(&env, &token)?;
+        let contract_balance = Self::token_balance(&env, &token, &env.current_contract_address())?;
 
         // 4. Get total locked amount for the token
         let locked_map: Map<Address, i128> = env
@@ -1101,7 +1137,7 @@ impl AidEscrow {
         }
 
         // 6. Transfer funds from contract to recipient
-        token_client.transfer(&env.current_contract_address(), &to, &amount);
+        Self::transfer_token(&env, &token, &env.current_contract_address(), &to, &amount)?;
 
         // 7. Emit event
         SurplusWithdrawnEvent {
@@ -1162,6 +1198,43 @@ impl AidEscrow {
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
     }
 
+    fn validate_token(env: &Env, token: &Address) -> Result<u32, Error> {
+        let args: Vec<Val> = Vec::new(env);
+
+        match env.try_invoke_contract::<u32, Error>(token, &symbol_short!("decimals"), args) {
+            Ok(Ok(decimals)) if decimals <= 38 => Ok(decimals),
+            _ => Err(Error::InvalidToken),
+        }
+    }
+
+    fn token_balance(env: &Env, token: &Address, account: &Address) -> Result<i128, Error> {
+        let mut args: Vec<Val> = Vec::new(env);
+        args.push_back(account.clone().into_val(env));
+
+        match env.try_invoke_contract::<i128, Error>(token, &symbol_short!("balance"), args) {
+            Ok(Ok(balance)) => Ok(balance),
+            _ => Err(Error::InvalidToken),
+        }
+    }
+
+    fn transfer_token(
+        env: &Env,
+        token: &Address,
+        from: &Address,
+        to: &Address,
+        amount: &i128,
+    ) -> Result<(), Error> {
+        let mut args: Vec<Val> = Vec::new(env);
+        args.push_back(from.clone().into_val(env));
+        args.push_back(to.clone().into_val(env));
+        args.push_back((*amount).into_val(env));
+
+        match env.try_invoke_contract::<(), Error>(token, &symbol_short!("transfer"), args) {
+            Ok(Ok(())) => Ok(()),
+            _ => Err(Error::TokenTransferFailed),
+        }
+    }
+
     fn resolve_claim_starts_at(
         env: &Env,
         metadata: &Map<Symbol, String>,
@@ -1202,6 +1275,14 @@ impl AidEscrow {
         payout_recipient: &Address,
         now: u64,
     ) -> Result<(), Error> {
+        Self::transfer_token(
+            env,
+            &package.token,
+            &env.current_contract_address(),
+            payout_recipient,
+            &package.amount,
+        )?;
+
         // State Transition
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(key, package);
@@ -1219,13 +1300,6 @@ impl AidEscrow {
         env.storage()
             .instance()
             .set(&KEY_TOTAL_CLAIMED, &claimed_map);
-
-        let token_client = token::Client::new(env, &package.token);
-        token_client.transfer(
-            &env.current_contract_address(),
-            payout_recipient,
-            &package.amount,
-        );
 
         PackageClaimed {
             package_id,

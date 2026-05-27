@@ -203,6 +203,73 @@ mod create_package {
 // claim — Tests
 // ===========================================================================
 
+// ===========================================================================
+// token validation and transfer failure tests
+// ===========================================================================
+
+mod token_interactions {
+    use super::*;
+
+    #[test]
+    fn create_package_rejects_invalid_token_address() {
+        let t = TestSetup::new();
+        let invalid_token = t.env.register(AidEscrow, ());
+
+        let result = t.client.try_create_package(
+            &t.admin,
+            &1u64,
+            &Address::generate(&t.env),
+            &ONE_TOKEN,
+            &invalid_token,
+            &(t.now() + 3600),
+            &Map::new(&t.env),
+        );
+
+        assert_eq!(result, Err(Ok(Error::InvalidToken)));
+    }
+
+    #[test]
+    fn set_config_rejects_invalid_allowed_token_address() {
+        let t = TestSetup::new();
+        let invalid_token = t.env.register(AidEscrow, ());
+        let mut allowed_tokens = Vec::new(&t.env);
+        allowed_tokens.push_back(invalid_token);
+
+        let result = t.client.try_set_config(&Config {
+            min_amount: 1,
+            max_expires_in: 0,
+            allowed_tokens,
+        });
+
+        assert_eq!(result, Err(Ok(Error::InvalidToken)));
+    }
+
+    #[test]
+    fn fund_maps_reverted_token_transfer_to_clear_contract_error() {
+        let t = TestSetup::new();
+
+        let result = t.client.try_fund(&t.token, &t.admin, &ONE_TOKEN);
+
+        assert_eq!(result, Err(Ok(Error::TokenTransferFailed)));
+    }
+
+    #[test]
+    fn claim_keeps_accounting_unchanged_when_token_transfer_reverts() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let id = t.create_default_package(&recipient, ONE_TOKEN);
+
+        t.token_sac.burn(&t.client.address, &ONE_TOKEN);
+
+        let result = t.client.try_claim(&id);
+
+        assert_eq!(result, Err(Ok(Error::TokenTransferFailed)));
+        assert_eq!(t.client.get_package(&id).status, PackageStatus::Created);
+        assert_eq!(t.client.get_total_locked(&t.token), ONE_TOKEN);
+        assert_eq!(TokenClient::new(&t.env, &t.token).balance(&recipient), 0);
+    }
+}
+
 mod claim {
     use super::*;
 

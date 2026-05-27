@@ -81,6 +81,8 @@ Maps Soroban contract errors to standardized backend errors.
 | PackageNotFound | 404 | Package not found |
 | PackageExpired | 410 | Package has expired |
 | ContractPaused | 503 | Contract is paused |
+| InvalidToken | 400 | Invalid token contract address |
+| TokenTransferFailed | 502 | Token transfer failed |
 
 #### 5. **AidEscrowService** (`aid-escrow.service.ts`)
 

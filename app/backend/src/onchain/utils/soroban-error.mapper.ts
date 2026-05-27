@@ -32,6 +32,10 @@ export class SorobanErrorMapper {
     },
     13: { code: 400, message: 'Insufficient surplus funds' },
     14: { code: 503, message: 'Contract is paused' },
+    15: { code: 400, message: 'Claim window has not started' },
+    16: { code: 400, message: 'Invalid claim proof' },
+    17: { code: 400, message: 'Invalid token contract address' },
+    18: { code: 502, message: 'Token transfer failed' },
   };
 
   /**
@@ -91,7 +95,11 @@ export class SorobanErrorMapper {
         message.includes('AlreadyInitialized') ||
         message.includes('NotAuthorized') ||
         message.includes('PackageNotFound') ||
-        message.includes('PackageExpired'))
+        message.includes('PackageExpired') ||
+        message.includes('ClaimTooEarly') ||
+        message.includes('InvalidProof') ||
+        message.includes('InvalidToken') ||
+        message.includes('TokenTransferFailed'))
     ) {
       return this.mapContractErrorMessage(message);
     }
@@ -144,6 +152,10 @@ export class SorobanErrorMapper {
     const code = jsonRpcError.code;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const message = (jsonRpcError.message as string) || '';
+
+    if (message.includes('Error(Contract')) {
+      return this.mapContractErrorMessage(message);
+    }
 
     // JSON-RPC error codes mapping
     switch (code) {
@@ -215,6 +227,10 @@ export class SorobanErrorMapper {
       },
       InsufficientSurplus: { code: 400, message: 'Insufficient surplus funds' },
       ContractPaused: { code: 503, message: 'Contract is paused' },
+      ClaimTooEarly: { code: 400, message: 'Claim window has not started' },
+      InvalidProof: { code: 400, message: 'Invalid claim proof' },
+      InvalidToken: { code: 400, message: 'Invalid token contract address' },
+      TokenTransferFailed: { code: 502, message: 'Token transfer failed' },
     };
 
     for (const [errorKey, errorInfo] of Object.entries(errorMap)) {
@@ -225,6 +241,19 @@ export class SorobanErrorMapper {
           details: {
             error_type: 'contract_error',
             error_name: errorKey,
+          },
+        };
+      }
+    }
+
+    for (const [errorCode, errorInfo] of Object.entries(this.contractErrors)) {
+      if (new RegExp(`#${errorCode}(?!\\d)`).test(message)) {
+        return {
+          statusCode: errorInfo.code,
+          message: errorInfo.message,
+          details: {
+            error_type: 'contract_error',
+            error_code: Number(errorCode),
           },
         };
       }
@@ -290,6 +319,14 @@ export class SorobanErrorMapper {
     if (mapped.statusCode === 503) {
       throw new InternalServerErrorException({
         code: 503,
+        message: mapped.message,
+        details: mapped.details,
+      });
+    }
+
+    if (mapped.statusCode === 502) {
+      throw new InternalServerErrorException({
+        code: 502,
         message: mapped.message,
         details: mapped.details,
       });
