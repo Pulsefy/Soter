@@ -22,6 +22,8 @@ import {
   AidPackage,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
+  GetTransactionStatusParams,
+  GetTransactionStatusResult,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 
@@ -227,6 +229,33 @@ export class MockOnchainAdapter implements OnchainAdapter {
     // Use first 10 hex chars to generate a balance between 0 and ~17B stroops
     const balanceValue = parseInt(hash.substring(0, 10), 16);
     return balanceValue.toString();
+  }
+
+  async getTransactionStatus(
+    params: GetTransactionStatusParams,
+  ): Promise<GetTransactionStatusResult> {
+    await Promise.resolve();
+
+    // Deterministically decide status based on hash for testing
+    // If hash ends with 'F', simulate failure. If 'P', simulate pending. Else success.
+    let status: GetTransactionStatusResult['status'] = 'succeeded';
+    
+    if (params.transactionHash.endsWith('F')) {
+      status = 'failed';
+    } else if (params.transactionHash.endsWith('P')) {
+      status = 'pending';
+    } else if (params.transactionHash.endsWith('U')) {
+      status = 'unknown';
+    }
+
+    return {
+      transactionHash: params.transactionHash,
+      status,
+      timestamp: new Date(),
+      details: {
+        adapter: 'mock',
+      },
+    };
   }
 
   // Legacy methods for backward compatibility

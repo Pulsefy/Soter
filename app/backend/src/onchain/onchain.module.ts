@@ -10,6 +10,7 @@ import { OnchainService } from './onchain.service';
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { LedgerAdminController } from './ledger-admin.controller';
+import { TransactionController } from './transaction.controller';
 import { JobsModule } from '../jobs/jobs.module';
 
 /**
@@ -55,7 +56,7 @@ const onchainAdapterProvider: Provider = {
     }),
     JobsModule,
   ],
-  controllers: [LedgerAdminController],
+  controllers: [LedgerAdminController, TransactionController],
   providers: [
     MockOnchainAdapter,
     SorobanAdapter,

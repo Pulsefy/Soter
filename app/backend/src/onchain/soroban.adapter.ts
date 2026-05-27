@@ -24,6 +24,8 @@ import {
   AidPackage,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
+  GetTransactionStatusParams,
+  GetTransactionStatusResult,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 
@@ -384,6 +386,59 @@ export class SorobanAdapter implements OnchainAdapter {
     } catch (error) {
       const mappedError = this.errorMapper.mapError(error);
       this.logger.error('Failed to get token balance:', mappedError);
+      throw error;
+    }
+  }
+
+  async getTransactionStatus(
+    params: GetTransactionStatusParams,
+  ): Promise<GetTransactionStatusResult> {
+    this.logger.debug('Getting transaction status for hash:', params.transactionHash);
+
+    try {
+      const _sdk = await this.loadSorobanSDK();
+      const client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+      const response = await client.getTransaction(params.transactionHash);
+      
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const rpcStatus = response?.status;
+      
+      let mappedStatus: GetTransactionStatusResult['status'] = 'unknown';
+      if (rpcStatus === 'SUCCESS') {
+        mappedStatus = 'succeeded';
+      } else if (rpcStatus === 'FAILED') {
+        mappedStatus = 'failed';
+      } else if (rpcStatus === 'NOT_FOUND') {
+        mappedStatus = 'pending';
+      }
+
+      return {
+        transactionHash: params.transactionHash,
+        status: mappedStatus,
+        timestamp: new Date(),
+        details: {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          rawResponse: response,
+        },
+      };
+    } catch (error) {
+      // If it's a timeout or network error, we can return 'unknown' or throw
+      // It's safer to map network errors to 'unknown' status rather than failing the poll request
+      // But we will let the error mapper handle it to keep consistency
+      const mappedError = this.errorMapper.mapError(error);
+      this.logger.error('Failed to get transaction status:', mappedError);
+      
+      if (mappedError.statusCode >= 500) {
+        return {
+          transactionHash: params.transactionHash,
+          status: 'unknown',
+          timestamp: new Date(),
+          details: { error: mappedError },
+        };
+      }
+      
       throw error;
     }
   }

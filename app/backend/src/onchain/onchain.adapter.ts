@@ -130,6 +130,17 @@ export interface GetTokenBalanceResult {
   timestamp: Date;
 }
 
+export interface GetTransactionStatusParams {
+  transactionHash: string;
+}
+
+export interface GetTransactionStatusResult {
+  transactionHash: string;
+  status: 'pending' | 'succeeded' | 'failed' | 'unknown';
+  timestamp: Date;
+  details?: Record<string, any>;
+}
+
 // Legacy interfaces kept for backward compatibility
 export interface CreateClaimParams {
   claimId: string;
@@ -218,6 +229,13 @@ export interface OnchainAdapter {
   getTokenBalance(
     params: GetTokenBalanceParams,
   ): Promise<GetTokenBalanceResult>;
+
+  /**
+   * Get the status of a transaction by its hash
+   */
+  getTransactionStatus(
+    params: GetTransactionStatusParams,
+  ): Promise<GetTransactionStatusResult>;
 
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;
