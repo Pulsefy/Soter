@@ -41,6 +41,7 @@ export class SorobanAdapter implements OnchainAdapter {
   private contractId: string;
   private rpcUrl: string;
   private networkPassphrase: string;
+  private network: string;
   private errorMapper: SorobanErrorMapper;
 
   // Note: The actual Soroban SDK will be lazily imported when needed
@@ -48,7 +49,8 @@ export class SorobanAdapter implements OnchainAdapter {
   private sorobanLib: Record<string, any> | null = null;
 
   constructor(private configService: ConfigService) {
-    this.contractId = this.configService.get<string>('SOROBAN_CONTRACT_ID', '');
+    this.contractId = this.configService.get<string>('AID_ESCROW_CONTRACT_ID', '');
+    this.network = this.configService.get<string>('SOROBAN_NETWORK', 'testnet');
     this.rpcUrl = this.configService.get<string>(
       'STELLAR_RPC_URL',
       'https://soroban-testnet.stellar.org',
@@ -58,10 +60,33 @@ export class SorobanAdapter implements OnchainAdapter {
       'Test SDF Network ; September 2015',
     );
     this.errorMapper = new SorobanErrorMapper();
+  }
 
-    if (!this.contractId) {
-      this.logger.warn(
-        'SOROBAN_CONTRACT_ID not configured. SorobanAdapter will not function.',
+  /**
+   * Validates configuration at startup to fail fast on invalid setups
+   */
+  private validateConfig(): void {
+    if (!this.contractId || !this.contractId.startsWith('C') || this.contractId.length !== 56) {
+      throw new Error(
+        'AID_ESCROW_CONTRACT_ID is missing or invalid. It must be a valid Soroban contract ID starting with "C" and 56 characters long. Failing fast.',
+      );
+    }
+
+    if (this.network !== 'testnet') {
+      throw new Error(
+        `Cross-network mismatch detected: SOROBAN_NETWORK is set to '${this.network}', but backend is configured to only support 'testnet'.`,
+      );
+    }
+
+    if (!this.rpcUrl.includes('testnet')) {
+      throw new Error(
+        `Cross-network mismatch detected: STELLAR_RPC_URL (${this.rpcUrl}) does not appear to be a testnet RPC URL.`,
+      );
+    }
+
+    if (!this.networkPassphrase.includes('Test SDF Network')) {
+      throw new Error(
+        `Cross-network mismatch detected: STELLAR_NETWORK_PASSPHRASE does not match the expected testnet passphrase.`,
       );
     }
   }
@@ -109,9 +134,10 @@ export class SorobanAdapter implements OnchainAdapter {
   private ensureContractId(): void {
     if (!this.contractId) {
       throw new Error(
-        'SOROBAN_CONTRACT_ID is not configured. Cannot proceed with contract calls.',
+        'AID_ESCROW_CONTRACT_ID is not configured. Cannot proceed with contract calls.',
       );
     }
+    this.validateConfig();
   }
 
   async initEscrow(params: InitEscrowParams): Promise<InitEscrowResult> {
