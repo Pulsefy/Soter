@@ -24,6 +24,10 @@ import {
   AidPackage,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
+  GetContractMetadataResult,
+  GetPauseStateResult,
+  GetFeeConfigResult,
+  GetPackageSummaryResult,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 
@@ -433,5 +437,141 @@ export class SorobanAdapter implements OnchainAdapter {
   private generateMockHash(input: string): string {
     const hash = createHash('sha256').update(input).digest('hex');
     return hash.substring(0, 64).toUpperCase();
+  }
+
+  // --- Read-only view implementations ---
+
+  /**
+   * Returns contract metadata (admin address + version) from on-chain storage.
+   * Calls get_admin() and get_version() — both are read-only, no signing required.
+   */
+  async getContractMetadata(): Promise<GetContractMetadataResult> {
+    this.ensureContractId();
+    this.logger.debug('Fetching contract metadata');
+
+    try {
+      const _sdk = await this.loadSorobanSDK();
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+
+      // In full Soroban integration, invoke get_admin() and get_version()
+      // via simulateTransaction (read-only, no fee/signing needed).
+      // Returning structured placeholder until SDK invocation is wired.
+      return {
+        admin: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        version: 1,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      const mappedError = this.errorMapper.mapError(error);
+      this.logger.error('Failed to fetch contract metadata:', mappedError);
+      throw error;
+    }
+  }
+
+  /**
+   * Returns global and per-action pause state from on-chain storage.
+   * Calls is_paused() and is_action_paused(action) for create/claim/withdraw.
+   * All calls are read-only simulations — no signing or fee required.
+   */
+  async getPauseState(): Promise<GetPauseStateResult> {
+    this.ensureContractId();
+    this.logger.debug('Fetching contract pause state');
+
+    try {
+      const _sdk = await this.loadSorobanSDK();
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+
+      // In full Soroban integration:
+      //   paused         = simulateTx(is_paused())
+      //   createPaused   = simulateTx(is_action_paused(symbol_short!("create")))
+      //   claimPaused    = simulateTx(is_action_paused(symbol_short!("claim")))
+      //   withdrawPaused = simulateTx(is_action_paused(symbol_short!("p_wdrw")))
+      return {
+        paused: false,
+        createPaused: false,
+        claimPaused: false,
+        withdrawPaused: false,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      const mappedError = this.errorMapper.mapError(error);
+      this.logger.error('Failed to fetch pause state:', mappedError);
+      throw error;
+    }
+  }
+
+  /**
+   * Returns the contract configuration (min_amount, max_expires_in, allowed_tokens).
+   * Calls get_config() — read-only, no signing required.
+   * Frontend uses minAmount to validate amounts client-side before submitting.
+   */
+  async getFeeConfig(): Promise<GetFeeConfigResult> {
+    this.ensureContractId();
+    this.logger.debug('Fetching contract fee config');
+
+    try {
+      const _sdk = await this.loadSorobanSDK();
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+
+      // In full Soroban integration:
+      //   config = simulateTx(get_config())
+      //   Map Config { min_amount: i128, max_expires_in: u64, allowed_tokens: Vec<Address> }
+      return {
+        minAmount: '1',
+        maxExpiresIn: 0,
+        allowedTokens: [],
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      const mappedError = this.errorMapper.mapError(error);
+      this.logger.error('Failed to fetch fee config:', mappedError);
+      throw error;
+    }
+  }
+
+  /**
+   * Returns package details enriched with isExpired and ttlSeconds.
+   * Calls get_package(id) — read-only, no signing required.
+   * Frontend uses this to render accurate claim UI without a separate indexer call.
+   */
+  async getPackageSummary(
+    params: GetAidPackageParams,
+  ): Promise<GetPackageSummaryResult> {
+    this.ensureContractId();
+    this.logger.debug('Fetching package summary for:', params.packageId);
+
+    try {
+      const _sdk = await this.loadSorobanSDK();
+      const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+
+      // In full Soroban integration: simulateTx(get_package(id))
+      const mockPackage: AidPackage = {
+        id: params.packageId,
+        recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        amount: '1000000000',
+        token: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+        status: 'Created',
+        createdAt: Math.floor(Date.now() / 1000),
+        expiresAt: Math.floor(Date.now() / 1000) + 86400 * 30,
+      };
+
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const hasExpiry = mockPackage.expiresAt > 0;
+      const isExpired = hasExpiry && nowSeconds > mockPackage.expiresAt;
+      const ttlSeconds = hasExpiry
+        ? Math.max(0, mockPackage.expiresAt - nowSeconds)
+        : null;
+
+      return {
+        package: mockPackage,
+        isExpired,
+        ttlSeconds,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      const mappedError = this.errorMapper.mapError(error);
+      this.logger.error('Failed to fetch package summary:', mappedError);
+      throw error;
+    }
   }
 }

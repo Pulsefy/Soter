@@ -1,6 +1,13 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
-import { OnchainAdapter, ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
+import {
+  OnchainAdapter,
+  ONCHAIN_ADAPTER_TOKEN,
+  GetContractMetadataResult,
+  GetPauseStateResult,
+  GetFeeConfigResult,
+  GetPackageSummaryResult,
+} from './onchain.adapter';
 import {
   CreateAidPackageDto,
   BatchCreateAidPackagesDto,
@@ -10,6 +17,7 @@ import {
   GetAidPackageStatsDto,
 } from './dto/aid-escrow.dto';
 import { BudgetService } from '../common/budget/budget.service';
+
 
 /**
  * AidEscrowService
@@ -256,6 +264,68 @@ export class AidEscrowService {
       totalClaimed: result.aggregates.totalClaimed,
     });
 
+    return result;
+  }
+
+  // --- Read-only view methods ---
+
+  /**
+   * Returns contract metadata (admin address + current version).
+   * Safe to expose publicly — no privileged data.
+   */
+  async getContractMetadata(): Promise<GetContractMetadataResult> {
+    this.logger.debug('Retrieving contract metadata');
+    const result = await this.onchainAdapter.getContractMetadata();
+    this.logger.debug('Contract metadata retrieved:', {
+      admin: result.admin,
+      version: result.version,
+    });
+    return result;
+  }
+
+  /**
+   * Returns global and per-action pause flags.
+   * Frontend uses these to conditionally disable create/claim/withdraw UI.
+   */
+  async getPauseState(): Promise<GetPauseStateResult> {
+    this.logger.debug('Retrieving contract pause state');
+    const result = await this.onchainAdapter.getPauseState();
+    this.logger.debug('Pause state retrieved:', {
+      paused: result.paused,
+      createPaused: result.createPaused,
+      claimPaused: result.claimPaused,
+      withdrawPaused: result.withdrawPaused,
+    });
+    return result;
+  }
+
+  /**
+   * Returns fee/contract configuration (min amount, allowed tokens, max expiry).
+   * Frontend uses minAmount to validate amounts before submission.
+   */
+  async getFeeConfig(): Promise<GetFeeConfigResult> {
+    this.logger.debug('Retrieving contract fee config');
+    const result = await this.onchainAdapter.getFeeConfig();
+    this.logger.debug('Fee config retrieved:', {
+      minAmount: result.minAmount,
+      allowedTokensCount: result.allowedTokens.length,
+    });
+    return result;
+  }
+
+  /**
+   * Returns package summary by ID, enriched with isExpired and ttlSeconds.
+   * Frontend renders the claim UI accurately without a separate indexer call.
+   */
+  async getPackageSummary(packageId: string): Promise<GetPackageSummaryResult> {
+    this.logger.debug('Retrieving package summary:', packageId);
+    const result = await this.onchainAdapter.getPackageSummary({ packageId });
+    this.logger.debug('Package summary retrieved:', {
+      packageId: result.package.id,
+      status: result.package.status,
+      isExpired: result.isExpired,
+      ttlSeconds: result.ttlSeconds,
+    });
     return result;
   }
 }

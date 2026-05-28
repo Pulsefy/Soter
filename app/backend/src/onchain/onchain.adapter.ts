@@ -130,6 +130,56 @@ export interface GetTokenBalanceResult {
   timestamp: Date;
 }
 
+// --- View-only result types ---
+
+/**
+ * Result for contract metadata view (admin address + version).
+ * Safe to expose publicly — contains no privileged data.
+ */
+export interface GetContractMetadataResult {
+  admin: string;
+  version: number;
+  timestamp: Date;
+}
+
+/**
+ * Result for global and per-action pause state view.
+ * Frontend uses this to conditionally disable UI actions.
+ */
+export interface GetPauseStateResult {
+  paused: boolean;
+  createPaused: boolean;
+  claimPaused: boolean;
+  withdrawPaused: boolean;
+  timestamp: Date;
+}
+
+/**
+ * Result for fee/contract config view.
+ * Frontend uses minAmount to validate amounts before submission.
+ */
+export interface GetFeeConfigResult {
+  minAmount: string;
+  maxExpiresIn: number;
+  allowedTokens: string[];
+  timestamp: Date;
+}
+
+/**
+ * Result for package summary view.
+ * Extends AidPackage with derived TTL/expiry fields so the
+ * frontend can render claim UI accurately without extra computation.
+ *
+ * - isExpired: true when expiresAt > 0 && now > expiresAt
+ * - ttlSeconds: seconds until expiry, 0 if expired, null if no expiry
+ */
+export interface GetPackageSummaryResult {
+  package: AidPackage;
+  isExpired: boolean;
+  ttlSeconds: number | null;
+  timestamp: Date;
+}
+
 // Legacy interfaces kept for backward compatibility
 export interface CreateClaimParams {
   claimId: string;
@@ -218,6 +268,34 @@ export interface OnchainAdapter {
   getTokenBalance(
     params: GetTokenBalanceParams,
   ): Promise<GetTokenBalanceResult>;
+
+  // --- Read-only view methods ---
+
+  /**
+   * Get contract metadata: admin address and current version.
+   * Safe to call publicly — exposes no privileged data.
+   */
+  getContractMetadata(): Promise<GetContractMetadataResult>;
+
+  /**
+   * Get global and per-action pause state.
+   * Frontend uses these flags to conditionally disable UI actions.
+   */
+  getPauseState(): Promise<GetPauseStateResult>;
+
+  /**
+   * Get contract fee/config: min_amount, max_expires_in, allowed tokens.
+   * Frontend validates amounts before submitting transactions.
+   */
+  getFeeConfig(): Promise<GetFeeConfigResult>;
+
+  /**
+   * Get package summary by ID, enriched with derived isExpired and ttlSeconds.
+   * Frontend uses this to render the claim UI accurately.
+   */
+  getPackageSummary(
+    params: GetAidPackageParams,
+  ): Promise<GetPackageSummaryResult>;
 
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;

@@ -22,6 +22,10 @@ import {
   AidPackage,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
+  GetContractMetadataResult,
+  GetPauseStateResult,
+  GetFeeConfigResult,
+  GetPackageSummaryResult,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 
@@ -227,6 +231,93 @@ export class MockOnchainAdapter implements OnchainAdapter {
     // Use first 10 hex chars to generate a balance between 0 and ~17B stroops
     const balanceValue = parseInt(hash.substring(0, 10), 16);
     return balanceValue.toString();
+  }
+
+  // --- Read-only view mock implementations ---
+
+  /**
+   * Returns mock contract metadata with a fixed admin address and version 1.
+   */
+  async getContractMetadata(): Promise<GetContractMetadataResult> {
+    await Promise.resolve();
+    return {
+      admin: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+      version: 1,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Returns a mock pause state where no actions are paused.
+   * In tests, override by setting paused = true when needed.
+   */
+  async getPauseState(): Promise<GetPauseStateResult> {
+    await Promise.resolve();
+    return {
+      paused: false,
+      createPaused: false,
+      claimPaused: false,
+      withdrawPaused: false,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Returns mock fee config with sane defaults matching contract initialization.
+   */
+  async getFeeConfig(): Promise<GetFeeConfigResult> {
+    await Promise.resolve();
+    return {
+      minAmount: '1',
+      maxExpiresIn: 0,
+      allowedTokens: [],
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Returns a package summary enriched with isExpired and ttlSeconds.
+   *
+   * - isExpired: true when expiresAt > 0 && now > expiresAt
+   * - ttlSeconds: null when no expiry (expiresAt === 0), 0 if expired, positive if active
+   */
+  async getPackageSummary(
+    params: GetAidPackageParams,
+  ): Promise<GetPackageSummaryResult> {
+    await Promise.resolve();
+
+    const mockPackage: AidPackage = {
+      id: params.packageId,
+      recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+      amount: '1000000000',
+      token: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+      status: 'Created',
+      createdAt: Math.floor(Date.now() / 1000),
+      expiresAt: Math.floor(Date.now() / 1000) + 86400 * 30,
+      metadata: { campaign_ref: 'campaign-123' },
+    };
+
+    return this.buildPackageSummary(mockPackage);
+  }
+
+  /**
+   * Computes isExpired and ttlSeconds from an AidPackage's expiresAt field.
+   * Shared by getPackageSummary and any future view helpers.
+   */
+  private buildPackageSummary(pkg: AidPackage): GetPackageSummaryResult {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const hasExpiry = pkg.expiresAt > 0;
+    const isExpired = hasExpiry && nowSeconds > pkg.expiresAt;
+    const ttlSeconds = hasExpiry
+      ? Math.max(0, pkg.expiresAt - nowSeconds)
+      : null;
+
+    return {
+      package: pkg,
+      isExpired,
+      ttlSeconds,
+      timestamp: new Date(),
+    };
   }
 
   // Legacy methods for backward compatibility

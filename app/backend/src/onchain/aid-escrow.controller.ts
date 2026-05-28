@@ -330,4 +330,143 @@ export class AidEscrowController {
       this.errorMapper.throwMappedError(error);
     }
   }
+
+  // ─── Read-Only Views ────────────────────────────────────────────────────────
+
+  /**
+   * Get contract metadata (admin address + version)
+   * GET /onchain/aid-escrow/views/metadata
+   */
+  @Get('views/metadata')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get contract metadata',
+    description:
+      'Returns the on-chain admin address and contract version. Safe to call publicly — no privileged data exposed.',
+  })
+  @ApiOkResponse({
+    description: 'Contract metadata retrieved successfully.',
+    schema: {
+      example: {
+        admin: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        version: 1,
+        timestamp: '2026-03-30T12:30:00.000Z',
+      },
+    },
+  })
+  @ApiInternalServerErrorResponse({ description: 'Failed to read contract metadata.' })
+  async getContractMetadata(): Promise<any> {
+    try {
+      return await this.aidEscrowService.getContractMetadata();
+    } catch (error) {
+      this.logger.error('Failed to get contract metadata:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Get global and per-action pause state
+   * GET /onchain/aid-escrow/views/pause-state
+   */
+  @Get('views/pause-state')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get contract pause state',
+    description:
+      'Returns whether the contract is globally paused, and whether individual actions (create, claim, withdraw) are paused. Frontend uses these flags to conditionally disable UI elements.',
+  })
+  @ApiOkResponse({
+    description: 'Pause state retrieved successfully.',
+    schema: {
+      example: {
+        paused: false,
+        createPaused: false,
+        claimPaused: false,
+        withdrawPaused: false,
+        timestamp: '2026-03-30T12:30:00.000Z',
+      },
+    },
+  })
+  @ApiInternalServerErrorResponse({ description: 'Failed to read pause state.' })
+  async getPauseState(): Promise<any> {
+    try {
+      return await this.aidEscrowService.getPauseState();
+    } catch (error) {
+      this.logger.error('Failed to get pause state:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Get contract fee/config
+   * GET /onchain/aid-escrow/views/config
+   */
+  @Get('views/config')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get contract configuration',
+    description:
+      'Returns contract config: minimum aid amount, maximum expiry duration (seconds), and allowed token list. Frontend uses minAmount to validate package amounts before submitting transactions.',
+  })
+  @ApiOkResponse({
+    description: 'Contract config retrieved successfully.',
+    schema: {
+      example: {
+        minAmount: '1',
+        maxExpiresIn: 0,
+        allowedTokens: ['GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN'],
+        timestamp: '2026-03-30T12:30:00.000Z',
+      },
+    },
+  })
+  @ApiInternalServerErrorResponse({ description: 'Failed to read contract config.' })
+  async getFeeConfig(): Promise<any> {
+    try {
+      return await this.aidEscrowService.getFeeConfig();
+    } catch (error) {
+      this.logger.error('Failed to get fee config:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Get package summary with TTL and expiry state
+   * GET /onchain/aid-escrow/views/packages/:id
+   */
+  @Get('views/packages/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get package summary',
+    description:
+      'Returns full package details enriched with computed isExpired and ttlSeconds fields. Frontend uses this to render the claim UI accurately (e.g. show expiry countdown or "Expired" banner) without relying on an external indexer.',
+  })
+  @ApiOkResponse({
+    description: 'Package summary retrieved successfully.',
+    schema: {
+      example: {
+        package: {
+          id: 'pkg_123456789',
+          recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+          amount: '1000000000',
+          token: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+          status: 'Created',
+          createdAt: 1711814400,
+          expiresAt: 1714406400,
+        },
+        isExpired: false,
+        ttlSeconds: 2592000,
+        timestamp: '2026-03-30T12:30:00.000Z',
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Package not found.' })
+  @ApiInternalServerErrorResponse({ description: 'Failed to retrieve package summary.' })
+  async getPackageSummary(@Param('id') packageId: string): Promise<any> {
+    try {
+      return await this.aidEscrowService.getPackageSummary(packageId);
+    } catch (error) {
+      this.logger.error('Failed to get package summary:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
 }
