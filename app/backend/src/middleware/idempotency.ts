@@ -1,7 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import { createHash } from 'crypto';
 import { RedisClient } from 'redis';
-import { IdempotencyRecord, IdempotencyRequest } from '../types/idempotency.types';
+import {
+  IdempotencyRecord,
+  IdempotencyRequest,
+} from '../types/idempotency.types';
 
 function fingerprint(body: any): string {
   return createHash('sha256').update(JSON.stringify(body)).digest('hex');
@@ -9,7 +12,7 @@ function fingerprint(body: any): string {
 
 export function idempotencyMiddleware(
   redisClient: RedisClient,
-  ttlSeconds: number = 86400
+  ttlSeconds: number = 86400,
 ) {
   return async (req: IdempotencyRequest, res: Response, next: NextFunction) => {
     const key = req.headers['idempotency-key'] as string | undefined;
@@ -21,7 +24,7 @@ export function idempotencyMiddleware(
 
     const cacheKey = `idempotency:${endpoint}:${key}`;
 
-    return new Promise<void>((resolve) => {
+    return new Promise<void>(resolve => {
       redisClient.get(cacheKey, (err, cached) => {
         if (err) {
           console.error('Redis error in idempotency middleware:', err);
@@ -34,7 +37,8 @@ export function idempotencyMiddleware(
 
           if (currentFingerprint !== record.fingerprint) {
             res.status(409).json({
-              error: 'Idempotency key already used with a different request body',
+              error:
+                'Idempotency key already used with a different request body',
               key,
             });
             return resolve();
@@ -54,12 +58,21 @@ export function idempotencyMiddleware(
           const recordToCache: IdempotencyRecord = {
             body,
             statusCode: res.statusCode,
-            headers: res.getHeaders() as Record<string, string | number | string[]>,
+            headers: res.getHeaders() as Record<
+              string,
+              string | number | string[]
+            >,
             fingerprint: reqFingerprint,
           };
-          redisClient.setex(cacheKey, ttlSeconds, JSON.stringify(recordToCache), (setErr) => {
-            if (setErr) console.error('Failed to cache idempotency response:', setErr);
-          });
+          redisClient.setex(
+            cacheKey,
+            ttlSeconds,
+            JSON.stringify(recordToCache),
+            setErr => {
+              if (setErr)
+                console.error('Failed to cache idempotency response:', setErr);
+            },
+          );
           return originalSend(body);
         };
         next();

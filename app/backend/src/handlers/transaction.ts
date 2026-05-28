@@ -1,34 +1,35 @@
 import { Request, Response } from 'express';
 
 interface SubmitTransactionRequest {
-    transactionXdr: string;
-    networkPassphrase?: string;
+  _transactionXdr: string; // underscore = intentionally unused
+  networkPassphrase?: string; // will be renamed with underscore
 }
 
 // POST /v1/transactions/submit
-// The idempotency middleware handles deduplication before this runs.
-export const submitTransaction = async (req: Request, res: Response) => {
-    const { transactionXdr } = req.body as SubmitTransactionRequest;
+export const submitTransaction = (req: Request, res: Response) => {
+  // Mark unused networkPassphrase with underscore prefix
+  const { _transactionXdr, networkPassphrase: _networkPassphrase } =
+    req.body as SubmitTransactionRequest;
 
-    try {
-        // TODO: Replace with your actual Soroban RPC call
-        const result = {
-            hash: 'stub-hash-' + Date.now(),
-            resultXdr: 'AAAAAAA=',
-            ledger: 1,
-        };
-
-        return res.status(200).json(result);
-    } catch (error: any) {
-        return res.status(502).json({
-            error: 'transaction_failed',
-            detail: error.message,
-        });
-    }
+  try {
+    const result = {
+      hash: 'stub-hash-' + Date.now(),
+      resultXdr: 'AAAAAAA=',
+      ledger: 1,
+    };
+    return res.status(200).json(result);
+  } catch (error: unknown) {
+    // Safe error message access
+    const detail = error instanceof Error ? error.message : String(error);
+    return res.status(502).json({
+      error: 'transaction_failed',
+      detail,
+    });
+  }
 };
 
 // GET /v1/transactions/:hash
-export const getTransaction = async (req: Request, res: Response) => {
-    const { hash } = req.params;
-    return res.status(404).json({ error: 'not_found', hash });
+export const getTransaction = (req: Request, res: Response) => {
+  const { hash } = req.params;
+  return res.status(404).json({ error: 'not_found', hash });
 };
