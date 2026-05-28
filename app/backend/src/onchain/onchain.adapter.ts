@@ -17,12 +17,13 @@ export interface InitEscrowResult {
 }
 
 export interface CreateAidPackageParams {
-  operatorAddress: string; // Admin or authorized distributor
+  operatorAddress: string;
   packageId: string;
   recipientAddress: string;
-  amount: string; // Amount as string to preserve precision (i128)
+  amount: string;
   tokenAddress: string;
-  expiresAt: number; // Unix timestamp
+  expiresAt: number;
+  metadata?: Record<string, string>;
 }
 
 export interface CreateAidPackageResult {

@@ -1,11 +1,12 @@
 {
   "name": "testnet-smoke",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
+  "description": "Testnet integration harness for Soroban AidEscrow contract",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "ethers": "^5.7.2"
+    "@stellar/stellar-sdk": "^14.6.1"
   }
 }

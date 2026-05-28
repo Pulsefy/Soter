@@ -122,7 +122,10 @@ describe('Evidence Queue (e2e)', () => {
 
     const res = await request(app.getHttpServer())
       .post('/api/v1/evidence/upload')
-      .attach('file', fileContent, { filename: 'test.exe', contentType: 'application/x-msdownload' })
+      .attach('file', fileContent, {
+        filename: 'test.exe',
+        contentType: 'application/x-msdownload',
+      })
       .expect(400);
 
     expect(res.body.message).toContain('Invalid MIME type');
@@ -133,7 +136,10 @@ describe('Evidence Queue (e2e)', () => {
 
     const res = await request(app.getHttpServer())
       .post('/api/v1/evidence/upload')
-      .attach('file', largeFile, { filename: 'big.txt', contentType: 'text/plain' })
+      .attach('file', largeFile, {
+        filename: 'big.txt',
+        contentType: 'text/plain',
+      })
       .expect(400);
 
     expect(res.body.message).toContain('File too large');
@@ -144,7 +150,10 @@ describe('Evidence Queue (e2e)', () => {
 
     const res = await request(app.getHttpServer())
       .post('/api/v1/evidence/upload')
-      .attach('file', fileContent, { filename: 'hash-test.txt', contentType: 'text/plain' })
+      .attach('file', fileContent, {
+        filename: 'hash-test.txt',
+        contentType: 'text/plain',
+      })
       .expect(201);
 
     const item = await prisma.evidenceQueueItem.findUnique({

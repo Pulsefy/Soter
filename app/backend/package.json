@@ -41,6 +41,7 @@
     "@nestjs/swagger": "^11.2.5",
     "@nestjs/terminus": "^11.0.0",
     "@nestjs/throttler": "^6.5.0",
+    "@stellar/stellar-sdk": "^14.6.1",
     "@prisma/client": "^6.19.2",
     "@willsoto/nestjs-prometheus": "^6.0.2",
     "axios": "^1.13.6",
