@@ -9,6 +9,7 @@ import {
   Request,
   Res,
   Version,
+  UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Request as ExpressRequest } from 'express';
@@ -40,6 +41,8 @@ import { AppRole } from 'src/auth/app-role.enum';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
 import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
+import { CostAwareRateLimitGuard } from 'src/common/guards/cost-aware-rate-limit.guard';
+import { RateLimit } from 'src/common/decorators/rate-limit.decorator';
 
 @ApiTags('Onchain Proxy')
 @ApiBearerAuth('JWT-auth')
@@ -52,6 +55,8 @@ export class ClaimsController {
   ) {}
 
   @Post()
+  @UseGuards(CostAwareRateLimitGuard)
+  @RateLimit({ limit: 50, window: 60, cost: 5 }) // Write operation
   @ApiOperation({
     summary: 'Create a claim',
     description: 'Initializes a new claim for a specific campaign.',
@@ -144,6 +149,8 @@ export class ClaimsController {
 
   @Post(':id/disburse')
   @Roles(AppRole.admin)
+  @UseGuards(CostAwareRateLimitGuard)
+  @RateLimit({ limit: 10, window: 60, cost: 20 }) // Expensive on-chain operation
   @ApiOperation({
     summary: 'Disburse funds for a claim',
     description:

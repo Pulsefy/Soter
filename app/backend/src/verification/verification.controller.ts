@@ -8,6 +8,7 @@ import {
   HttpStatus,
   HttpCode,
   Request,
+  UseGuards,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import {
@@ -37,6 +38,8 @@ import { AppRole } from 'src/auth/app-role.enum';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
 import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
+import { CostAwareRateLimitGuard } from 'src/common/guards/cost-aware-rate-limit.guard';
+import { RateLimit } from 'src/common/decorators/rate-limit.decorator';
 
 @ApiTags('Verification')
 @ApiSecurity('x-api-key')
@@ -50,6 +53,8 @@ export class VerificationController {
 
   @Post('claims/:id/enqueue')
   @Version('1')
+  @UseGuards(CostAwareRateLimitGuard)
+  @RateLimit({ limit: 30, window: 60, cost: 5 }) // Write operation
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
     summary: 'Enqueue claim verification job',
