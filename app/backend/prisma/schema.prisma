@@ -19,6 +19,7 @@ enum ClaimStatus {
   requested
   verified
   approved
+  disbursing
   disbursed
   archived
   cancelled

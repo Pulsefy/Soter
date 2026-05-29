@@ -8,6 +8,8 @@ import {
   OnchainOperationType,
 } from './interfaces/onchain-job.interface';
 import { ONCHAIN_ADAPTER_TOKEN, OnchainAdapter } from './onchain.adapter';
+import { PrismaService } from '../prisma/prisma.service';
+import { ClaimStatus } from '@prisma/client';
 
 import { DlqService } from '../jobs/dlq.service';
 
@@ -21,6 +23,7 @@ export class OnchainProcessor extends WorkerHost {
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
     private readonly dlqService: DlqService,
+    private readonly prisma: PrismaService,
   ) {
     super();
   }
@@ -43,6 +46,15 @@ export class OnchainProcessor extends WorkerHost {
           break;
         case OnchainOperationType.DISBURSE:
           result = await this.onchainAdapter.disburse(job.data.params);
+          // Update claim status from disbursing to disbursed on success
+          if (result && result.status === 'success' && job.data.params.claimId) {
+            await this.updateClaimStatus(
+              job.data.params.claimId,
+              ClaimStatus.disbursing,
+              ClaimStatus.disbursed,
+              result.transactionHash,
+            );
+          }
           break;
         default:
           throw new Error(
@@ -85,6 +97,33 @@ export class OnchainProcessor extends WorkerHost {
     }
   }
 
+  private async updateClaimStatus(
+    claimId: string,
+    fromStatus: ClaimStatus,
+    toStatus: ClaimStatus,
+    transactionHash?: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.claim.update({
+        where: { id: claimId },
+        data: {
+          status: toStatus,
+          metadata: transactionHash
+            ? { transactionHash }
+            : undefined,
+        },
+      });
+      this.logger.log(
+        `Updated claim ${claimId} status from ${fromStatus} to ${toStatus}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to update claim ${claimId} status: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+      // Don't throw - the on-chain operation succeeded, we should log but not fail the job
+    }
+  }
+
   @OnWorkerEvent('completed')
   onCompleted(job: Job<OnchainJobData, OnchainJobResult>) {
     this.logger.log(`Onchain job ${job.id} completed successfully`);
@@ -94,9 +133,41 @@ export class OnchainProcessor extends WorkerHost {
   async onFailed(job: Job<OnchainJobData> | undefined, error: Error) {
     if (job) {
       this.logger.error(`Onchain job ${job.id} failed: ${error.message}`);
+      
+      // If this is a disburse job that failed after max retries, revert claim status
+      if (
+        job.data.type === OnchainOperationType.DISBURSE &&
+        job.attemptsMade >= job.opts.attempts! - 1 &&
+        job.data.params.claimId
+      ) {
+        await this.revertClaimStatus(job.data.params.claimId);
+      }
+      
       await this.dlqService.moveToDlq('onchain', job, error);
     } else {
       this.logger.error(`Onchain job failed: ${error.message}`);
+    }
+  }
+
+  private async revertClaimStatus(claimId: string): Promise<void> {
+    try {
+      const claim = await this.prisma.claim.findUnique({
+        where: { id: claimId },
+      });
+
+      if (claim && claim.status === ClaimStatus.disbursing) {
+        await this.prisma.claim.update({
+          where: { id: claimId },
+          data: { status: ClaimStatus.approved },
+        });
+        this.logger.log(
+          `Reverted claim ${claimId} from disbursing to approved after failed disbursement`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to revert claim ${claimId} status: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
   }
 }

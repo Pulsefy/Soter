@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
@@ -61,6 +63,7 @@ export class ClaimsService {
     private readonly auditService: AuditService,
     private readonly encryptionService: EncryptionService,
     private readonly budgetService: BudgetService,
+    @InjectQueue('onchain') private readonly onchainQueue: Queue,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
@@ -175,122 +178,64 @@ export class ClaimsService {
 
     if (claim.status !== ClaimStatus.approved) {
       throw new BadRequestException(
-        `Cannot transition from ${claim.status} to ${ClaimStatus.disbursed}`,
+        `Cannot transition from ${claim.status} to ${ClaimStatus.disbursing}`,
       );
     }
 
-    // Call on-chain adapter if enabled
-    let onchainResult: DisburseResult | null = null;
-    if (this.onchainEnabled && this.onchainAdapter) {
-      const startTime = Date.now();
-      const adapterType =
-        this.configService.get<string>('ONCHAIN_ADAPTER')?.toLowerCase() ||
-        'mock';
-
-      try {
-        this.logger.log(`Calling on-chain adapter for claim ${id}`, {
-          claimId: id,
-          adapter: adapterType,
-        });
-
-        // Generate a mock package ID for the disburse call
-        // In a real implementation, this would come from createClaim
-        const packageId = this.generateMockPackageId(id);
-
-        // Get tokenAddress from claim metadata or use a default
-        // In production, this should be stored in the claim record
-        const tokenAddress = this.getTokenAddressForClaim(claim);
-
-        onchainResult = await this.onchainAdapter.disburse({
-          claimId: id,
-          packageId,
-          recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
-          amount: claim.amount.toString(),
-          tokenAddress,
-        });
-
-        const duration = (Date.now() - startTime) / 1000;
-
-        // Record metrics
-        this.metricsService.incrementOnchainOperation(
-          'disburse',
-          adapterType,
-          onchainResult.status,
-        );
-        this.metricsService.recordOnchainDuration(
-          'disburse',
-          adapterType,
-          duration,
-        );
-
-        this.logger.log(`On-chain disbursement completed for claim ${id}`, {
-          claimId: id,
-          transactionHash: onchainResult.transactionHash,
-          status: onchainResult.status,
-          duration,
-        });
-
-        // Audit log for on-chain operation
-        await this.auditService.record({
-          actorId: 'system',
-          entity: 'onchain',
-          entityId: id,
-          action: 'disburse',
-          metadata: {
-            transactionHash: onchainResult.transactionHash,
-            status: onchainResult.status,
-            amountDisbursed: onchainResult.amountDisbursed,
-            adapter: adapterType,
-          },
-        });
-      } catch (error) {
-        const duration = (Date.now() - startTime) / 1000;
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-
-        this.logger.error(
-          `On-chain disbursement failed for claim ${id}: ${errorMessage}`,
-          error instanceof Error ? error.stack : undefined,
-          'ClaimsService',
-          { claimId: id, adapter: adapterType },
-        );
-
-        // Record failed metric
-        this.metricsService.incrementOnchainOperation(
-          'disburse',
-          adapterType,
-          'failed',
-        );
-        this.metricsService.recordOnchainDuration(
-          'disburse',
-          adapterType,
-          duration,
-        );
-
-        // Audit log for failed operation
-        await this.auditService.record({
-          actorId: 'system',
-          entity: 'onchain',
-          entityId: id,
-          action: 'disburse_failed',
-          metadata: {
-            error: errorMessage,
-            adapter: adapterType,
-          },
-        });
-
-        // Don't throw - allow disbursement to proceed even if on-chain call fails
-        // This is configurable behavior for resilience
-      }
-    }
-
-    // Proceed with status transition
-    return this.transitionStatus(
+    // Transition to disbursing status and enqueue background job
+    const updatedClaim = await this.transitionStatus(
       id,
       ClaimStatus.approved,
-      ClaimStatus.disbursed,
-      onchainResult,
+      ClaimStatus.disbursing,
     );
+
+    // Enqueue disbursement job for background processing
+    if (this.onchainEnabled && this.onchainAdapter) {
+      const packageId = this.generateMockPackageId(id);
+      const tokenAddress = this.getTokenAddressForClaim(claim);
+
+      await this.onchainQueue.add(
+        'disburse',
+        {
+          type: 'disburse',
+          params: {
+            claimId: id,
+            packageId,
+            recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
+            amount: claim.amount.toString(),
+            tokenAddress,
+          },
+          timestamp: Date.now(),
+        },
+        {
+          attempts: 5,
+          backoff: {
+            type: 'exponential',
+            delay: 2000,
+          },
+          removeOnComplete: {
+            count: 10,
+          },
+          removeOnFail: {
+            count: 50,
+          },
+        },
+      );
+
+      this.logger.log(`Enqueued disbursement job for claim ${id}`, {
+        claimId: id,
+        packageId,
+      });
+    } else {
+      // If on-chain is disabled, immediately transition to disbursed
+      await this.transitionStatus(
+        id,
+        ClaimStatus.disbursing,
+        ClaimStatus.disbursed,
+      );
+    }
+
+    return updatedClaim;
   }
 
   /**

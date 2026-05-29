@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ClaimsService } from './claims.service';
 import { ClaimsController } from './claims.controller';
 import { CancelAndReissueService } from './cancel-and-reissue.service';
+import { ClaimRetryService } from './claim-retry.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { OnchainModule } from '../onchain/onchain.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
@@ -22,7 +23,7 @@ import { CommonServicesModule } from '../common/services/common-services.module'
     CommonServicesModule,
   ],
   controllers: [ClaimsController],
-  providers: [ClaimsService, CancelAndReissueService, BudgetService],
+  providers: [ClaimsService, CancelAndReissueService, BudgetService, ClaimRetryService],
   exports: [CancelAndReissueService],
 })
 export class ClaimsModule {}
