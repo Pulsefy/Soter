@@ -63,6 +63,69 @@ const parseAllowedOrigins = (value: string | undefined): string[] => {
   return Array.from(new Set(parsed));
 };
 
+/**
+ * Parse allowlist patterns for CORS origins.
+ * Supports exact matches and wildcard patterns for Vercel preview deployments.
+ *
+ * Examples:
+ * - "https://app.example.com" (exact match)
+ * - "https://*.vercel.app" (wildcard for Vercel previews)
+ * - "https://pr-*.example-app.vercel.app" (specific pattern)
+ */
+const parseAllowlistPatterns = (
+  value: string | undefined,
+): Array<{ pattern: string; isWildcard: boolean; regex?: RegExp }> => {
+  if (value === undefined) {
+    return [];
+  }
+
+  const patterns = value
+    .split(',')
+    .map(pattern => normalizeOrigin(pattern.trim()))
+    .filter(pattern => pattern.length > 0 && pattern !== '*');
+
+  return patterns.map(pattern => {
+    if (pattern.includes('*')) {
+      // Convert wildcard pattern to regex
+      // Escape special regex characters except *
+      const escapedPattern = pattern
+        .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '[^.]*'); // * matches any characters except dots (for subdomain safety)
+
+      const regex = new RegExp(`^${escapedPattern}$`, 'i');
+      return { pattern, isWildcard: true, regex };
+    }
+
+    return { pattern, isWildcard: false };
+  });
+};
+
+/**
+ * Check if an origin matches any of the allowlist patterns.
+ */
+const isOriginAllowed = (
+  origin: string,
+  allowlistPatterns: Array<{
+    pattern: string;
+    isWildcard: boolean;
+    regex?: RegExp;
+  }>,
+): boolean => {
+  const normalizedOrigin = normalizeOrigin(origin);
+
+  for (const { pattern, isWildcard, regex } of allowlistPatterns) {
+    if (isWildcard && regex) {
+      if (regex.test(normalizedOrigin)) {
+        return true;
+      }
+    } else if (normalizedOrigin === pattern) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 const isRateLimitExempt = (req: Request): boolean => {
   const path = req.path ?? req.originalUrl ?? req.url ?? '';
   const normalizedPath = path.split('?')[0];
@@ -129,8 +192,37 @@ const resolveAllowedOrigins = (config: ConfigService): string[] => {
   return parseAllowedOrigins(rawOrigins);
 };
 
+/**
+ * Resolve CORS allowlist patterns from environment configuration.
+ * Supports both legacy CORS_ORIGINS and new CORS_ALLOWLIST for pattern matching.
+ */
+const resolveAllowlistPatterns = (
+  config: ConfigService,
+): Array<{ pattern: string; isWildcard: boolean; regex?: RegExp }> => {
+  const nodeEnv = config.get<string>('NODE_ENV');
+
+  // Check for new allowlist configuration first
+  const allowlistConfig = config.get<string>('CORS_ALLOWLIST');
+  if (allowlistConfig !== undefined) {
+    return parseAllowlistPatterns(allowlistConfig);
+  }
+
+  // Fallback to legacy CORS_ORIGINS for backward compatibility
+  const legacyOrigins = config.get<string>('CORS_ORIGINS');
+  if (legacyOrigins !== undefined) {
+    return parseAllowlistPatterns(legacyOrigins);
+  }
+
+  // Default behavior for development/test
+  if (nodeEnv === 'development' || nodeEnv === 'test') {
+    return parseAllowlistPatterns(DEFAULT_ALLOWED_ORIGINS.join(','));
+  }
+
+  return [];
+};
+
 export const buildCorsOptions = (config: ConfigService): CorsOptions => {
-  const allowedOrigins = resolveAllowedOrigins(config);
+  const allowlistPatterns = resolveAllowlistPatterns(config);
   const allowCredentials = parseBoolean(
     config.get<string>('CORS_ALLOW_CREDENTIALS'),
     false,
@@ -142,8 +234,7 @@ export const buildCorsOptions = (config: ConfigService): CorsOptions => {
         return callback(null, false);
       }
 
-      const normalizedOrigin = normalizeOrigin(origin);
-      if (allowedOrigins.includes(normalizedOrigin)) {
+      if (isOriginAllowed(origin, allowlistPatterns)) {
         return callback(null, true);
       }
 
@@ -158,7 +249,7 @@ export const buildCorsOptions = (config: ConfigService): CorsOptions => {
 export const createCorsOriginValidator = (
   config: ConfigService,
 ): RequestHandler => {
-  const allowedOrigins = resolveAllowedOrigins(config);
+  const allowlistPatterns = resolveAllowlistPatterns(config);
 
   return (req: Request, res: Response, next: NextFunction) => {
     const originHeader = req.headers.origin as string | string[] | undefined;
@@ -172,8 +263,7 @@ export const createCorsOriginValidator = (
       return;
     }
 
-    const normalizedOrigin = normalizeOrigin(origin);
-    if (!allowedOrigins.includes(normalizedOrigin)) {
+    if (!isOriginAllowed(origin, allowlistPatterns)) {
       res.status(403).send('Not allowed by CORS');
       return;
     }

@@ -37,6 +37,7 @@ import { ReissueClaimDto } from './dto/reissue-claim.dto';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
+import { SensitiveEndpoint } from 'src/common/guards/sensitive-endpoint.guard';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
 import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
@@ -121,6 +122,7 @@ export class ClaimsController {
   }
 
   @Post(':id/approve')
+  @SensitiveEndpoint()
   @Roles(AppRole.admin)
   @ApiOperation({
     summary: 'Approve a claim',
@@ -143,6 +145,7 @@ export class ClaimsController {
   }
 
   @Post(':id/disburse')
+  @SensitiveEndpoint()
   @Roles(AppRole.admin)
   @ApiOperation({
     summary: 'Disburse funds for a claim',

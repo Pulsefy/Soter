@@ -22,9 +22,11 @@ import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
+import { SensitiveEndpoint } from '../common/guards/sensitive-endpoint.guard';
 
 @ApiTags('Ledger Admin')
 @Controller('admin/ledger')
+@SensitiveEndpoint()
 export class LedgerAdminController {
   constructor(
     private readonly backfillService: LedgerBackfillService,

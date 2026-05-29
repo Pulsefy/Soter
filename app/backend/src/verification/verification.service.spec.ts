@@ -311,7 +311,6 @@ describe('VerificationService', () => {
     });
 
     it('should have valid fixture scores in test mode', () => {
-
       // Verify all fixtures produce valid scores
       const fixtures = (service as any)._fixtures as any[];
       for (const fixture of fixtures) {
