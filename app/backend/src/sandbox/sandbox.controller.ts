@@ -8,9 +8,11 @@ import {
 import { AppRole } from '../auth/app-role.enum';
 import { Roles } from '../auth/roles.decorator';
 import { SandboxGuard } from './sandbox.guard';
+import { SensitiveEndpoint } from '../common/guards/sensitive-endpoint.guard';
 import { SeedService } from './seed.service';
 
 @Controller({ path: 'admin/sandbox', version: '1' })
+@SensitiveEndpoint()
 @Roles(AppRole.admin)
 @UseGuards(SandboxGuard)
 export class SandboxController {

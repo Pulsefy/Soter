@@ -3,10 +3,12 @@ import { AdminSearchService } from './admin-search.service';
 import { ApiKeyGuard } from '../common/guards/api-key.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { SensitiveEndpoint } from '../common/guards/sensitive-endpoint.guard';
 import { AppRole } from '@prisma/client';
 import { AdaptiveRateLimitGuard } from '../common/guards/adaptive-rate-limit.guard';
 
 @Controller('admin')
+@SensitiveEndpoint()
 @UseGuards(ApiKeyGuard, RolesGuard, AdaptiveRateLimitGuard)
 export class AdminSearchController {
   constructor(private readonly searchService: AdminSearchService) {}
