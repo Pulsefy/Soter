@@ -38,13 +38,18 @@ from schemas.humanitarian import (
     HumanitarianVerificationResponse,
 )
 from services.humanitarian_verification import HumanitarianVerificationService
+from services.structured_logging import configure_structured_logging, get_logger
+from middleware.correlation_middleware import (
+    CorrelationIdMiddleware,
+    RequestMetadataMiddleware,
+)
 
 limiter = Limiter(key_func=get_remote_address)
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Configure structured JSON logging with guaranteed PII redaction (Issue #461)
+logger = get_logger(__name__)
+# Also configure root logger for other modules
+configure_structured_logging()
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +94,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Add structured logging middleware for request correlation and tracing (Issue #461)
+app.add_middleware(RequestMetadataMiddleware)
+app.add_middleware(CorrelationIdMiddleware)
 
 proof_of_life_analyzer = ProofOfLifeAnalyzer(
     config=ProofOfLifeConfig(

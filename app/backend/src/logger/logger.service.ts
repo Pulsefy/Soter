@@ -2,6 +2,7 @@ import { Injectable, LoggerService as NestLoggerService } from '@nestjs/common';
 import pino, { Logger as PinoLogger, Bindings, ChildLoggerOptions } from 'pino';
 import { AsyncLocalStorage } from 'async_hooks';
 import { CORRELATION_ID_KEY } from '../common/utils/correlation-id.util';
+import { redactLogData } from './log-redaction.util';
 
 // Type definitions
 type LogLevel = 'info' | 'error' | 'warn' | 'debug' | 'trace';
@@ -52,6 +53,14 @@ export class LoggerService implements NestLoggerService {
   }
 
   /**
+   * Apply redaction to log data to prevent PII leakage (Issue #461)
+   */
+  private redactMetadata(meta?: LogMeta): LogMeta {
+    if (!meta) return meta;
+    return redactLogData(meta) as LogMeta;
+  }
+
+  /**
    * Format message with correlation ID for methods that bypass Pino's formatters
    */
   private formatMessage(
@@ -85,19 +94,23 @@ export class LoggerService implements NestLoggerService {
 
   /**
    * Log a message with context
+   * Redacts sensitive data and PII to prevent data leaks (Issue #461)
    */
   log(message: LogMessage, context?: LogContext, meta?: LogMeta): void {
     const correlationId = this.getCorrelationId();
+    const redactedMeta = this.redactMetadata(meta);
 
     if (typeof message === 'object' && message !== null) {
-      this.logger.info({ context, correlationId, ...message, ...(meta || {}) });
+      const redactedMessage = redactLogData(message) as Record<string, unknown>;
+      this.logger.info({ context, correlationId, ...redactedMessage, ...(redactedMeta || {}) });
     } else {
-      this.logger.info({ context, correlationId, ...(meta || {}) }, message);
+      this.logger.info({ context, correlationId, ...(redactedMeta || {}) }, message);
     }
   }
 
   /**
    * Log an error message
+   * Redacts sensitive data and PII to prevent data leaks (Issue #461)
    */
   error(
     message: LogMessage,
@@ -106,18 +119,20 @@ export class LoggerService implements NestLoggerService {
     meta?: LogMeta,
   ): void {
     const correlationId = this.getCorrelationId();
+    const redactedMeta = this.redactMetadata(meta);
 
     if (typeof message === 'object' && message !== null) {
+      const redactedMessage = redactLogData(message) as Record<string, unknown>;
       this.logger.error({
         context,
         correlationId,
         trace,
-        ...message,
-        ...(meta || {}),
+        ...redactedMessage,
+        ...(redactedMeta || {}),
       });
     } else {
       this.logger.error(
-        { context, correlationId, trace, ...(meta || {}) },
+        { context, correlationId, trace, ...(redactedMeta || {}) },
         message,
       );
     }
@@ -125,50 +140,59 @@ export class LoggerService implements NestLoggerService {
 
   /**
    * Log a warning message
+   * Redacts sensitive data and PII to prevent data leaks (Issue #461)
    */
   warn(message: LogMessage, context?: LogContext, meta?: LogMeta): void {
     const correlationId = this.getCorrelationId();
+    const redactedMeta = this.redactMetadata(meta);
 
     if (typeof message === 'object' && message !== null) {
-      this.logger.warn({ context, correlationId, ...message, ...(meta || {}) });
+      const redactedMessage = redactLogData(message) as Record<string, unknown>;
+      this.logger.warn({ context, correlationId, ...redactedMessage, ...(redactedMeta || {}) });
     } else {
-      this.logger.warn({ context, correlationId, ...(meta || {}) }, message);
+      this.logger.warn({ context, correlationId, ...(redactedMeta || {}) }, message);
     }
   }
 
   /**
    * Log a debug message
+   * Redacts sensitive data and PII to prevent data leaks (Issue #461)
    */
   debug(message: LogMessage, context?: LogContext, meta?: LogMeta): void {
     const correlationId = this.getCorrelationId();
+    const redactedMeta = this.redactMetadata(meta);
 
     if (typeof message === 'object' && message !== null) {
+      const redactedMessage = redactLogData(message) as Record<string, unknown>;
       this.logger.debug({
         context,
         correlationId,
-        ...message,
-        ...(meta || {}),
+        ...redactedMessage,
+        ...(redactedMeta || {}),
       });
     } else {
-      this.logger.debug({ context, correlationId, ...(meta || {}) }, message);
+      this.logger.debug({ context, correlationId, ...(redactedMeta || {}) }, message);
     }
   }
 
   /**
    * Log a verbose message
+   * Redacts sensitive data and PII to prevent data leaks (Issue #461)
    */
   verbose(message: LogMessage, context?: LogContext, meta?: LogMeta): void {
     const correlationId = this.getCorrelationId();
+    const redactedMeta = this.redactMetadata(meta);
 
     if (typeof message === 'object' && message !== null) {
+      const redactedMessage = redactLogData(message) as Record<string, unknown>;
       this.logger.trace({
         context,
         correlationId,
-        ...message,
-        ...(meta || {}),
+        ...redactedMessage,
+        ...(redactedMeta || {}),
       });
     } else {
-      this.logger.trace({ context, correlationId, ...(meta || {}) }, message);
+      this.logger.trace({ context, correlationId, ...(redactedMeta || {}) }, message);
     }
   }
 
