@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { TextIntakeService, CanonicalAnalysis } from './text-intake.service';
+import { TextIntakeService } from './text-intake.service';
 
 jest.mock('openai', () => {
   return {

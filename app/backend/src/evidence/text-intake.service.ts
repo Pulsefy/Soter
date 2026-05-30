@@ -142,11 +142,11 @@ Only detect from these languages: en, es, fr, ar, ru, zh, pt, de, ja, ko, hi, id
     }
 
     return this.fallbackLanguageDetection(text);
-  }
+}
 
   private fallbackLanguageDetection(text: string): DetectedLanguage {
     const languagePatterns: Record<SupportedLanguage, RegExp[]> = {
-      en: [/^[a-zA-Z\s\.,!?'"-:]+$/],
+      en: [/^[a-zA-Z\s.,!?'"-:]+$/],
       es: [/\b(el|la|los|las|de|del|que|y|en|un|una)\b/i, /ñ/i, /[áéíóú]/i],
       fr: [/\b(le|la|les|du|des|que|et|en|un|une)\b/i, /[àâäéèêëïîôöùûüÿç]/i],
       ar: [/[\u0600-\u06FF]/],
