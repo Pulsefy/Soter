@@ -9,7 +9,9 @@ import { OnchainProcessor } from './onchain.processor';
 import { OnchainService } from './onchain.service';
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
+import { StateReconciliationService } from './state-reconciliation.service';
 import { LedgerAdminController } from './ledger-admin.controller';
+import { StateReconciliationController } from './state-reconciliation.controller';
 import { JobsModule } from '../jobs/jobs.module';
 import { LoggerModule } from '../logger/logger.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
@@ -59,7 +61,7 @@ const onchainAdapterProvider: Provider = {
     LoggerModule,
     MetricsModule,
   ],
-  controllers: [LedgerAdminController],
+  controllers: [LedgerAdminController, StateReconciliationController],
   providers: [
     MockOnchainAdapter,
     SorobanAdapter,
@@ -68,12 +70,14 @@ const onchainAdapterProvider: Provider = {
     OnchainService,
     LedgerBackfillService,
     LedgerReconciliationService,
+    StateReconciliationService,
   ],
   exports: [
     ONCHAIN_ADAPTER_TOKEN,
     OnchainService,
     LedgerBackfillService,
     LedgerReconciliationService,
+    StateReconciliationService,
   ],
 })
 export class OnchainModule {}

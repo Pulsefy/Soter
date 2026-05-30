@@ -227,6 +227,34 @@ curl -H "Authorization: Bearer $ADMIN_JWT_TOKEN" \
 - Discrepancy types: `missing`, `amount_mismatch`, `count_mismatch`
 - Severity levels: `low`, `medium`, `high`
 
+### State Reconciliation
+
+Periodically compares on-chain package statuses and locked totals against the backend cached state to detect and record any drift.
+
+**Reconciliation Schedule:**
+- Runs automatically every hour via a background cron task.
+
+**Manual Trigger:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $ADMIN_JWT_TOKEN" \
+  http://localhost:3001/api/v1/admin/reconciliation/trigger
+```
+
+**View Drift Logs:**
+```bash
+curl -H "Authorization: Bearer $ADMIN_JWT_TOKEN" \
+  http://localhost:3001/api/v1/admin/reconciliation/logs
+```
+
+**Drift Record Schema:**
+- `entityType`: The type of entity (e.g., "AidPackage", "Global")
+- `entityId`: The unique ID of the entity
+- `field`: The specific field where drift was detected (e.g., "status", "totalAmount", "totalCommitted")
+- `onChainValue`: The value currently on the blockchain
+- `cachedValue`: The value currently stored in the backend database
+- `timestamp`: When the drift was detected
+
 ### Monitoring and Observability
 
 **View Prometheus metrics:**
