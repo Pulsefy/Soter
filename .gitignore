@@ -3,6 +3,13 @@ node_modules/
 .pnp
 .pnp.js
 
+# Python
+__pycache__/
+*.pyc
+
+# Kiro
+.kiro/
+
 # Compiled output
 dist/
 build/
