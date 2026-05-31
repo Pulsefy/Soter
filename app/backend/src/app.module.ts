@@ -25,6 +25,7 @@ import { ApiKeyGuard } from './common/guards/api-key.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { ObservabilityModule } from './observability/observability.module';
 import { ClaimsModule } from './claims/claims.module';
+import { VerificationInboxModule } from './verification-inbox/verification-inbox.module';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { LoggerService } from './logger/logger.service';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
@@ -52,6 +53,7 @@ import { DeprecationInterceptor } from './common/interceptors/deprecation.interc
           join(__dirname, '..', '.env'),
           join(process.cwd(), '.env'),
           join(process.cwd(), 'app', 'backend', '.env'),
+          
         ];
 
         const existing = candidates.filter(p => existsSync(p));
@@ -125,6 +127,7 @@ import { DeprecationInterceptor } from './common/interceptors/deprecation.interc
         limit: 20, // default: 20 req/min
       },
     ]),
+    VerificationInboxModule,
   ],
 
   controllers: [AppController],
