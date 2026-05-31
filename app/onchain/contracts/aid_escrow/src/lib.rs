@@ -40,6 +40,10 @@ const KEY_PAUSE_WITHDRAW: Symbol = symbol_short!("p_wdrw");
 const KEY_TOTAL_CLAIMED: Symbol = symbol_short!("claimed"); // Map<Address, i128>
 const META_MERKLE_ROOT_KEY: &str = "merkle_root";
 
+/// Semantic version for the event schema. Bump whenever event topics or
+/// payload shapes change so off-chain indexers can detect incompatibilities.
+pub const EVENT_SCHEMA_VERSION: u32 = 2;
+
 // --- Data Types ---
 
 #[contracttype]
@@ -109,6 +113,8 @@ pub enum Error {
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
 // Topic = struct name in snake_case (e.g. package_created). Do not rename without versioning.
+// EVENT_SCHEMA_VERSION must be bumped whenever event fields or topics change.
+// No PII or opaque metadata maps are included — payloads are compact and safe.
 
 /// Emitted when the escrow pool is funded. Actor = funder.
 #[contractevent]
@@ -124,6 +130,7 @@ pub struct PackageCreated {
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub token: Address,
     pub actor: Address,
     pub timestamp: u64,
 }
@@ -133,6 +140,7 @@ pub struct PackageClaimed {
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub token: Address,
     pub actor: Address,
     pub timestamp: u64,
 }
@@ -142,6 +150,7 @@ pub struct PackageDisbursed {
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub token: Address,
     pub actor: Address,
     pub timestamp: u64,
 }
@@ -151,6 +160,7 @@ pub struct PackageRevoked {
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub token: Address,
     pub actor: Address,
     pub timestamp: u64,
 }
@@ -160,6 +170,7 @@ pub struct PackageRefunded {
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub token: Address,
     pub actor: Address,
     pub timestamp: u64,
 }
@@ -168,7 +179,9 @@ pub struct PackageRefunded {
 pub struct BatchCreatedEvent {
     pub ids: Vec<u64>,
     pub admin: Address,
+    pub token: Address,
     pub total_amount: i128,
+    pub timestamp: u64,
 }
 
 #[contractevent]
@@ -177,6 +190,7 @@ pub struct ExtendedEvent {
     pub admin: Address,
     pub old_expires_at: u64,
     pub new_expires_at: u64,
+    pub timestamp: u64,
 }
 
 #[contractevent]
@@ -184,28 +198,33 @@ pub struct SurplusWithdrawnEvent {
     pub to: Address,
     pub token: Address,
     pub amount: i128,
+    pub timestamp: u64,
 }
 
 #[contractevent]
 pub struct ContractPausedEvent {
     pub admin: Address,
+    pub timestamp: u64,
 }
 
 #[contractevent]
 pub struct ContractUnpausedEvent {
     pub admin: Address,
+    pub timestamp: u64,
 }
 
 #[contractevent]
 pub struct ActionPausedEvent {
     pub admin: Address,
     pub action: Symbol,
+    pub timestamp: u64,
 }
 
 #[contractevent]
 pub struct ActionUnpausedEvent {
     pub admin: Address,
     pub action: Symbol,
+    pub timestamp: u64,
 }
 
 #[contract]
@@ -364,7 +383,8 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &true);
-        ContractPausedEvent { admin }.publish(&env);
+        let timestamp = env.ledger().timestamp();
+        ContractPausedEvent { admin, timestamp }.publish(&env);
         Ok(())
     }
 
@@ -377,7 +397,8 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &false);
-        ContractUnpausedEvent { admin }.publish(&env);
+        let timestamp = env.ledger().timestamp();
+        ContractUnpausedEvent { admin, timestamp }.publish(&env);
         Ok(())
     }
 
@@ -390,7 +411,8 @@ impl AidEscrow {
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &true);
 
-        ActionPausedEvent { admin, action }.publish(&env);
+        let timestamp = env.ledger().timestamp();
+        ActionPausedEvent { admin, action, timestamp }.publish(&env);
         Ok(())
     }
 
@@ -403,7 +425,8 @@ impl AidEscrow {
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &false);
 
-        ActionUnpausedEvent { admin, action }.publish(&env);
+        let timestamp = env.ledger().timestamp();
+        ActionUnpausedEvent { admin, action, timestamp }.publish(&env);
         Ok(())
     }
 
@@ -602,6 +625,7 @@ impl AidEscrow {
             package_id: id,
             recipient: recipient.clone(),
             amount,
+            token,
             actor: operator,
             timestamp: created_at,
         }
@@ -727,6 +751,7 @@ impl AidEscrow {
                 package_id: id,
                 recipient: recipient.clone(),
                 amount,
+                token: token.clone(),
                 actor: operator.clone(),
                 timestamp: created_at,
             }
@@ -742,10 +767,13 @@ impl AidEscrow {
         env.storage().instance().set(&KEY_PKG_IDX, &idx);
 
         // Emit batch event
+        let batch_timestamp = env.ledger().timestamp();
         BatchCreatedEvent {
             ids: created_ids.clone(),
             admin: operator,
+            token,
             total_amount,
+            timestamp: batch_timestamp,
         }
         .publish(&env);
 
@@ -882,6 +910,7 @@ impl AidEscrow {
             package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
+            token: package.token.clone(),
             actor: admin.clone(),
             timestamp,
         }
@@ -918,6 +947,7 @@ impl AidEscrow {
             package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
+            token: package.token.clone(),
             actor: admin.clone(),
             timestamp,
         }
@@ -981,6 +1011,7 @@ impl AidEscrow {
             package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
+            token: package.token.clone(),
             actor: admin.clone(),
             timestamp,
         }
@@ -1026,6 +1057,7 @@ impl AidEscrow {
             package_id,
             recipient: package.recipient.clone(),
             amount: package.amount,
+            token: package.token.clone(),
             actor: admin.clone(),
             timestamp,
         }
@@ -1093,11 +1125,13 @@ impl AidEscrow {
         package.expires_at = new_expires_at;
         env.storage().persistent().set(&key, &package);
 
+        let ext_timestamp = env.ledger().timestamp();
         ExtendedEvent {
             id,
             admin,
             old_expires_at,
             new_expires_at,
+            timestamp: ext_timestamp,
         }
         .publish(&env);
 
@@ -1145,10 +1179,12 @@ impl AidEscrow {
         Self::transfer_token(&env, &token, &env.current_contract_address(), &to, &amount)?;
 
         // 7. Emit event
+        let surplus_timestamp = env.ledger().timestamp();
         SurplusWithdrawnEvent {
             to: to.clone(),
             token: token.clone(),
             amount,
+            timestamp: surplus_timestamp,
         }
         .publish(&env);
 
@@ -1310,6 +1346,7 @@ impl AidEscrow {
             package_id,
             recipient: payout_recipient.clone(),
             amount: package.amount,
+            token: package.token.clone(),
             actor: payout_recipient.clone(),
             timestamp: now,
         }

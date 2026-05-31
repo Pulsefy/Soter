@@ -124,15 +124,27 @@ pub struct Aggregates {
 
 ## Events
 
-All state-changing operations emit events with stable topics for indexer consumption:
+All state-changing operations emit events with stable topics and payloads optimized for off-chain indexers. Payloads are compact, exclude any dynamic maps/PII, and are structured under `EVENT_SCHEMA_VERSION = 2`.
 
-- `EscrowFunded` — pool funded
-- `PackageCreated` — package created
-- `PackageClaimed` — recipient claimed
-- `PackageDisbursed` — admin disbursed
-- `PackageRevoked` — admin revoked
-- `PackageRefunded` — admin refunded
-- `BatchCreatedEvent` — batch creation
+### Schema Versioning
+`EVENT_SCHEMA_VERSION` (currently `2`) is exported by the contract and should be tracked by the backend indexer to detect breaking schema updates.
+
+### Event Definitions
+
+- **`EscrowFunded`**: `from: Address`, `token: Address`, `amount: i128`, `timestamp: u64`
+- **`PackageCreated`**: `package_id: u64`, `recipient: Address`, `amount: i128`, `token: Address`, `actor: Address`, `timestamp: u64`
+- **`PackageClaimed`**: `package_id: u64`, `recipient: Address`, `amount: i128`, `token: Address`, `actor: Address`, `timestamp: u64`
+- **`PackageDisbursed`**: `package_id: u64`, `recipient: Address`, `amount: i128`, `token: Address`, `actor: Address`, `timestamp: u64`
+- **`PackageRevoked`**: `package_id: u64`, `recipient: Address`, `amount: i128`, `token: Address`, `actor: Address`, `timestamp: u64`
+- **`PackageRefunded`**: `package_id: u64`, `recipient: Address`, `amount: i128`, `token: Address`, `actor: Address`, `timestamp: u64`
+- **`BatchCreatedEvent`**: `ids: Vec<u64>`, `admin: Address`, `token: Address`, `total_amount: i128`, `timestamp: u64`
+- **`ExtendedEvent`**: `id: u64`, `admin: Address`, `old_expires_at: u64`, `new_expires_at: u64`, `timestamp: u64`
+- **`SurplusWithdrawnEvent`**: `to: Address`, `token: Address`, `amount: i128`, `timestamp: u64`
+- **`ContractPausedEvent`**: `admin: Address`, `timestamp: u64`
+- **`ContractUnpausedEvent`**: `admin: Address`, `timestamp: u64`
+- **`ActionPausedEvent`**: `admin: Address`, `action: Symbol`, `timestamp: u64`
+- **`ActionUnpausedEvent`**: `admin: Address`, `action: Symbol`, `timestamp: u64`
+
 
 ## Testing
 

@@ -96,6 +96,7 @@ fn test_escrow_funded_event() {
     let data = last_event_data(&env, &contract_id, "escrow_funded");
     assert_eq!(data_address(&env, &data, "from"), admin);
     assert_eq!(data_i128(&env, &data, "amount"), 5 * UNIT);
+    assert_field_exists(&env, &data, "token");
     assert_field_exists(&env, &data, "timestamp");
 }
 
@@ -130,6 +131,7 @@ fn test_package_created_event() {
     assert_eq!(data_address(&env, &data, "recipient"), recipient);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_eq!(data_address(&env, &data, "token"), token_client.address);
 }
 
 #[test]
@@ -162,6 +164,7 @@ fn test_package_claimed_event() {
     assert_eq!(data_u64(&env, &data, "package_id"), 0);
     assert_eq!(data_address(&env, &data, "recipient"), recipient);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+    assert_field_exists(&env, &data, "token");
 }
 
 #[test]
@@ -194,6 +197,7 @@ fn test_package_disbursed_event() {
     assert_eq!(data_u64(&env, &data, "package_id"), 0);
     assert_eq!(data_address(&env, &data, "recipient"), recipient);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+    assert_field_exists(&env, &data, "token");
 }
 
 #[test]
@@ -232,6 +236,7 @@ fn test_package_revoked_event() {
     assert_eq!(data_address(&env, &data, "recipient"), recipient);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_field_exists(&env, &data, "token");
 }
 
 #[test]
@@ -266,6 +271,7 @@ fn test_package_refunded_event() {
     let data = last_event_data(&env, &contract_id, "package_refunded");
     assert_eq!(data_u64(&env, &data, "package_id"), 0);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+    assert_field_exists(&env, &data, "token");
 }
 
 #[test]
@@ -300,4 +306,5 @@ fn test_extended_event_records_old_and_new_expiry() {
     assert_eq!(data_u64(&env, &data, "id"), 42);
     assert_eq!(data_u64(&env, &data, "old_expires_at"), old_expires_at);
     assert_eq!(data_u64(&env, &data, "new_expires_at"), new_expires_at);
+    assert_field_exists(&env, &data, "timestamp");
 }
