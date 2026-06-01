@@ -311,7 +311,6 @@ describe('VerificationService', () => {
     });
 
     it('should have valid fixture scores in test mode', () => {
-
       // Verify all fixtures produce valid scores
       const fixtures = (service as any)._fixtures as any[];
       for (const fixture of fixtures) {
@@ -339,8 +338,8 @@ describe('VerificationService', () => {
       );
 
       for (let i = 1; i < results.length; i++) {
-        expect(results[i]!.score).toEqual(results[0]!.score);
-        expect(results[i]!.confidence).toEqual(results[0]!.confidence);
+        expect(results[i].score).toEqual(results[0].score);
+        expect(results[i].confidence).toEqual(results[0].confidence);
       }
     });
   });

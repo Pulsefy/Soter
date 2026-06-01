@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AidDetails, fetchAidDetails } from './aidApi';
+import { AidDetails, fetchAidDetails, submitClaim } from './aidApi';
 
 import { config } from '../config';
 
@@ -17,8 +17,8 @@ const SAVER_BACKOFF_MULTIPLIER = 3;
 /** In saver mode, limit concurrent flush actions to this many per cycle. */
 const SAVER_MAX_ACTIONS_PER_FLUSH = 2;
 
-export type SyncActionType = 'status-refresh' | 'claim-confirmation' | 'evidence-upload';
-export type SyncActionState = 'pending' | 'retrying' | 'failed';
+export type SyncActionType = 'status-refresh' | 'claim-confirmation' | 'evidence-upload' | 'claim-submission';
+export type SyncActionState = 'pending' | 'retrying' | 'failed' | 'submitted';
 
 export interface StatusRefreshPayload {
   aidId: string;
@@ -37,10 +37,17 @@ export interface EvidenceUploadPayload {
   body?: string;
 }
 
+export interface ClaimSubmissionPayload {
+  aidId: string;
+  claimId: string;
+  idempotencyKey: string;
+}
+
 export type SyncActionPayload =
   | StatusRefreshPayload
   | ClaimConfirmationPayload
-  | EvidenceUploadPayload;
+  | EvidenceUploadPayload
+  | ClaimSubmissionPayload;
 
 export interface QueuedSyncAction<TPayload = SyncActionPayload> {
   id: string;
@@ -74,12 +81,14 @@ type SuccessSubscriber = (event: SyncActionSuccessEvent) => void;
 type SyncActionRequest =
   | { type: 'status-refresh'; payload: StatusRefreshPayload; maxRetries?: number }
   | { type: 'claim-confirmation'; payload: ClaimConfirmationPayload; maxRetries?: number }
-  | { type: 'evidence-upload'; payload: EvidenceUploadPayload; maxRetries?: number };
+  | { type: 'evidence-upload'; payload: EvidenceUploadPayload; maxRetries?: number }
+  | { type: 'claim-submission'; payload: ClaimSubmissionPayload; maxRetries?: number };
 
 type SyncExecutionResultMap = {
   'status-refresh': AidDetails;
   'claim-confirmation': unknown;
   'evidence-upload': unknown;
+  'claim-submission': unknown;
 };
 
 type SyncDispatchResult<T extends SyncActionType = SyncActionType> =
@@ -177,6 +186,20 @@ const replaceQueueItems = async (items: QueuedSyncAction[]) => {
 const enqueue = async (request: SyncActionRequest) => {
   await hydrateQueue();
 
+  // Idempotency: if a claim-submission with the same key is already queued
+  // (pending or retrying), return the existing action instead of duplicating.
+  if (request.type === 'claim-submission') {
+    const key = (request.payload as ClaimSubmissionPayload).idempotencyKey;
+    const existing = queueState.items.find(
+      (item) =>
+        item.type === 'claim-submission' &&
+        (item.payload as ClaimSubmissionPayload).idempotencyKey === key &&
+        item.state !== 'failed' &&
+        item.state !== 'submitted',
+    );
+    if (existing) return existing;
+  }
+
   const now = new Date().toISOString();
   const action: QueuedSyncAction = {
     id: makeActionId(),
@@ -224,6 +247,10 @@ const runAction = async (action: QueuedSyncAction) => {
       }
 
       return response.json();
+    }
+    case 'claim-submission': {
+      const { claimId, idempotencyKey } = action.payload as ClaimSubmissionPayload;
+      return submitClaim(claimId, idempotencyKey);
     }
     default:
       throw new Error(`Unsupported sync action type: ${String(action.type)}`);
@@ -334,7 +361,16 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
 
       try {
         const result = await runAction(action);
-        items = items.filter((item) => item.id !== action.id);
+        if (action.type === 'claim-submission') {
+          // Keep the item in the queue as 'submitted' for status display
+          items = items.map((item) =>
+            item.id === action.id
+              ? { ...item, state: 'submitted' as SyncActionState, updatedAt: new Date().toISOString() }
+              : item,
+          );
+        } else {
+          items = items.filter((item) => item.id !== action.id);
+        }
         queueState = {
           ...queueState,
           items,
@@ -392,6 +428,17 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
   });
 
   return syncingPromise;
+};
+
+export const retryFailedAction = async (actionId: string) => {
+  await hydrateQueue();
+  const now = new Date().toISOString();
+  const items = queueState.items.map((item) =>
+    item.id === actionId && item.state === 'failed'
+      ? { ...item, state: 'pending' as SyncActionState, retryCount: 0, nextRetryAt: now, lastError: null, updatedAt: now }
+      : item,
+  );
+  await replaceQueueItems(items);
 };
 
 export const clearSyncQueue = async () => {

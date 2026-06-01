@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ClaimStatus } from '@prisma/client';
 
 import { DlqService } from '../jobs/dlq.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 @Processor('onchain', {
   concurrency: 1, // Usually sequential for blockchain transactions
@@ -23,7 +24,10 @@ export class OnchainProcessor extends WorkerHost {
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
     private readonly dlqService: DlqService,
-    private readonly prisma: PrismaService,
+constructor(
+  private readonly prisma: PrismaService,
+  private readonly metricsService: MetricsService,
+) {}
   ) {
     super();
   }
@@ -31,8 +35,14 @@ export class OnchainProcessor extends WorkerHost {
   async process(
     job: Job<OnchainJobData, OnchainJobResult, string>,
   ): Promise<OnchainJobResult> {
+    const startedAt = Date.now();
+    const operation = String(job.data.type);
+    const correlationSuffix = job.data.correlationId
+      ? ` [correlationId=${job.data.correlationId}]`
+      : '';
+
     this.logger.log(
-      `Processing onchain ${job.data.type} (attempt ${job.attemptsMade + 1})`,
+      `Processing onchain ${operation} (attempt ${job.attemptsMade + 1})${correlationSuffix}`,
     );
 
     try {
@@ -66,6 +76,12 @@ export class OnchainProcessor extends WorkerHost {
         throw new Error(`Onchain operation failed: ${String(job.data.type)}`);
       }
 
+      this.metricsService.recordContractCallLatency(
+        operation,
+        'success',
+        (Date.now() - startedAt) / 1000,
+      );
+
       return {
         success: true,
         transactionHash: result?.transactionHash,
@@ -91,6 +107,17 @@ export class OnchainProcessor extends WorkerHost {
         this.logger.error(
           `Onchain job ${job.id} failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
           error instanceof Error ? error.stack : undefined,
+        );
+      }
+      this.metricsService.recordContractCallLatency(
+        operation,
+        'failed',
+        (Date.now() - startedAt) / 1000,
+      );
+      if (errMessage.includes('transaction') || errMessage.includes('tx_')) {
+        this.metricsService.incrementTxSubmissionFailure(
+          operation,
+          error instanceof Error ? error.message : String(error),
         );
       }
       throw error;
@@ -133,20 +160,23 @@ export class OnchainProcessor extends WorkerHost {
   async onFailed(job: Job<OnchainJobData> | undefined, error: Error) {
     if (job) {
       this.logger.error(`Onchain job ${job.id} failed: ${error.message}`);
-      
-      // If this is a disburse job that failed after max retries, revert claim status
-      if (
-        job.data.type === OnchainOperationType.DISBURSE &&
-        job.attemptsMade >= job.opts.attempts! - 1 &&
-        job.data.params.claimId
-      ) {
-        await this.revertClaimStatus(job.data.params.claimId);
-      }
-      
+
       await this.dlqService.moveToDlq('onchain', job, error);
     } else {
       this.logger.error(`Onchain job failed: ${error.message}`);
-    }
+    }this.metricsService.incrementCallbackFailure(
+  'onchain_job',
+  error.message,
+);
+
+// If this is a disburse job that failed after max retries, revert claim status
+if (
+  job.data.type === OnchainOperationType.DISBURSE &&
+  job.attemptsMade >= job.opts.attempts! - 1 &&
+  job.data.params.claimId
+) {
+  await this.revertClaimStatus(job.data.params.claimId);
+}
   }
 
   private async revertClaimStatus(claimId: string): Promise<void> {

@@ -37,6 +37,9 @@ import {
   PauseState,
   FeeConfig,
   PackageSummary,
+  GetTransactionStatusParams,
+  GetTransactionStatusResult,
+  TxStatus,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
@@ -656,6 +659,60 @@ export class SorobanAdapter implements OnchainAdapter {
       status: pkg.package.status,
       timestamp: new Date(),
     };
+  }
+
+  async getTransactionStatus(
+    params: GetTransactionStatusParams,
+  ): Promise<GetTransactionStatusResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    const hash = params.hash.toUpperCase();
+    this.logger.log(`[${cid}] getTransactionStatus hash=${hash}`);
+
+    const server = this.getServer();
+
+    try {
+      const result = await withRetryTimeout(
+        () => server.getTransaction(hash),
+        `getTransaction(${hash})`,
+        cid,
+        { maxRetries: 0, operationTimeoutMs: 30000 },
+        this.logger,
+      );
+
+      let status: TxStatus;
+      switch (result.status) {
+        case SorobanRpc.Api.GetTransactionStatus.SUCCESS:
+          status = 'succeeded';
+          break;
+        case SorobanRpc.Api.GetTransactionStatus.FAILED:
+          status = 'failed';
+          break;
+        case SorobanRpc.Api.GetTransactionStatus.NOT_FOUND:
+          status = 'pending';
+          break;
+        default:
+          status = 'unknown';
+      }
+
+      return {
+        hash,
+        status,
+        timestamp: new Date(),
+        ledger:
+          'ledger' in result && typeof result.ledger === 'number'
+            ? result.ledger
+            : undefined,
+        errorMessage:
+          status === 'failed' ? this.extractContractError(result) : undefined,
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('timed out')) {
+        return { hash, status: 'unknown', timestamp: new Date() };
+      }
+      throw error;
+    }
   }
 
   async createClaim(params: CreateClaimParams): Promise<CreateClaimResult> {

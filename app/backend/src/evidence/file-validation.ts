@@ -60,7 +60,10 @@ const EXTENSION_MIME_MAP: Record<string, readonly string[]> = {
  */
 const MAGIC_SIGNATURES: { mime: string; bytes: number[] }[] = [
   { mime: 'image/jpeg', bytes: [0xff, 0xd8, 0xff] },
-  { mime: 'image/png', bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
+  {
+    mime: 'image/png',
+    bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  },
   { mime: 'image/gif', bytes: [0x47, 0x49, 0x46, 0x38] }, // "GIF8"
   { mime: 'application/pdf', bytes: [0x25, 0x50, 0x44, 0x46] }, // "%PDF"
 ];
@@ -250,7 +253,7 @@ function assertContentMatchesType(file: Express.Multer.File): void {
     return;
   }
 
-  const signature = MAGIC_SIGNATURES.find((s) => s.mime === file.mimetype);
+  const signature = MAGIC_SIGNATURES.find(s => s.mime === file.mimetype);
   if (signature && !startsWith(buffer, signature.bytes)) {
     throw new BadRequestException(
       `File contents do not match the declared ${file.mimetype} type`,

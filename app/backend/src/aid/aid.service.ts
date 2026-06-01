@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { RedisService } from '../../cache/redis.service';
 import { AiTaskWebhookDto, TaskStatus } from './dto/ai-task-webhook.dto';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 @Injectable()
 export class AidService {
@@ -10,6 +11,7 @@ export class AidService {
   constructor(
     private auditService: AuditService,
     private redisService: RedisService,
+    private metricsService: MetricsService,
   ) {}
 
   async createCampaign(data: Record<string, unknown>) {
@@ -114,6 +116,10 @@ export class AidService {
           this.logger.log(`[AI Webhook] Result:`, payload.result);
         break;
       case TaskStatus.FAILED:
+        this.metricsService.incrementCallbackFailure(
+          'ai_task_webhook',
+          payload.error ?? 'task_failed',
+        );
         this.logger.error(
           `[AI Webhook] Task ${payload.taskId} failed:`,
           payload.error,

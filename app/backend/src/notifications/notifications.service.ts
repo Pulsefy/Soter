@@ -7,6 +7,7 @@ import {
   NotificationType,
 } from './interfaces/notification-job.interface';
 import { PrismaService } from '../prisma/prisma.service';
+import { LoggerService } from '../logger/logger.service';
 
 @Injectable()
 export class NotificationsService {
@@ -15,6 +16,7 @@ export class NotificationsService {
   constructor(
     @InjectQueue('notifications') private readonly notificationsQueue: Queue,
     private readonly prisma: PrismaService,
+    private readonly loggerService: LoggerService,
   ) {}
 
   async sendEmail(
@@ -35,6 +37,9 @@ export class NotificationsService {
     });
 
     // 2. Enqueue the BullMQ job (carries outboxId and correlationId)
+    const propagatedCorrelationId =
+      correlationId ?? this.loggerService.getCorrelationId();
+
     const data: NotificationJobData = {
       type: NotificationType.EMAIL,
       recipient,
@@ -42,7 +47,7 @@ export class NotificationsService {
       message,
       timestamp: Date.now(),
       outboxId: outbox.id,
-      correlationId,
+      correlationId: propagatedCorrelationId,
     };
 
     const job = await this.notificationsQueue.add('send-email', data, {
@@ -62,8 +67,11 @@ export class NotificationsService {
       },
     });
 
+    const correlationSuffix = propagatedCorrelationId
+      ? ` [correlationId=${propagatedCorrelationId}]`
+      : '';
     this.logger.log(
-      `Enqueued email job: ${job.id} for ${recipient} (outboxId: ${outbox.id})`,
+      `Enqueued email job: ${job.id} for ${recipient} (outboxId: ${outbox.id})${correlationSuffix}`,
     );
     return { outboxId: outbox.id, jobId: String(job.id) };
   }
@@ -84,13 +92,16 @@ export class NotificationsService {
     });
 
     // 2. Enqueue the BullMQ job (carries outboxId and correlationId)
+    const propagatedCorrelationId =
+      correlationId ?? this.loggerService.getCorrelationId();
+
     const data: NotificationJobData = {
       type: NotificationType.SMS,
       recipient,
       message,
       timestamp: Date.now(),
       outboxId: outbox.id,
-      correlationId,
+      correlationId: propagatedCorrelationId,
     };
 
     const job = await this.notificationsQueue.add('send-sms', data, {
@@ -110,8 +121,11 @@ export class NotificationsService {
       },
     });
 
+    const correlationSuffix = propagatedCorrelationId
+      ? ` [correlationId=${propagatedCorrelationId}]`
+      : '';
     this.logger.log(
-      `Enqueued SMS job: ${job.id} for ${recipient} (outboxId: ${outbox.id})`,
+      `Enqueued SMS job: ${job.id} for ${recipient} (outboxId: ${outbox.id})${correlationSuffix}`,
     );
     return { outboxId: outbox.id, jobId: String(job.id) };
   }
