@@ -145,6 +145,13 @@ Only detect from these languages: en, es, fr, ar, ru, zh, pt, de, ja, ko, hi, id
   }
 
   private fallbackLanguageDetection(text: string): DetectedLanguage {
+    const japaneseKanaPattern = /[\u3040-\u309f\u30a0-\u30ff]/;
+    // Also check for common Japanese particles/words (helps when text includes kanji)
+    const japaneseParticlesPattern = /(?:は|が|を|に|で|ます|です|これ|それ|あの)/u;
+    if (japaneseKanaPattern.test(text) || japaneseParticlesPattern.test(text)) {
+      return { language: 'ja', confidence: 1 };
+    }
+
     const languagePatterns: Record<SupportedLanguage, RegExp[]> = {
       en: [/^[a-zA-Z\s.,!?'"-:]+$/],
       es: [/\b(el|la|los|las|de|del|que|y|en|un|una)\b/i, /ñ/i, /[áéíóú]/i],
@@ -154,7 +161,6 @@ Only detect from these languages: en, es, fr, ar, ru, zh, pt, de, ja, ko, hi, id
       zh: [/[\u4e00-\u9fa5]/],
       pt: [/\b(o|a|os|as|de|do|da|que|e|em|um|uma)\b/i, /[ãõáéíóúç]/i],
       de: [/\b(der|die|das|und|in|von|zu|mit|für)\b/i, /[äöüß]/i],
-      ja: [/[\u3040-\u309f\u30a0-\u30ff]/],
       ko: [/[\uac00-\ud7af\u1100-\u11ff]/],
       hi: [/[\u0900-\u097f]/],
       id: [/\b(yang|dan|dari|untuk|dengan|ini|itu|tidak|ada)\b/i],
