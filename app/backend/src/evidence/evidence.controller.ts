@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  Body,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
@@ -23,6 +24,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { EvidenceService } from './evidence.service';
+import { TextIntakeService, CanonicalAnalysis } from './text-intake.service';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 import {
@@ -32,12 +34,16 @@ import {
   evidenceMulterOptions,
   validateUploadedFile,
 } from './file-validation';
+import { ProcessTextIntakeDto } from './dto/process-text-intake.dto';
 
 @ApiTags('Evidence Queue')
 @ApiBearerAuth('JWT-auth')
 @Controller('evidence')
 export class EvidenceController {
-  constructor(private readonly evidenceService: EvidenceService) {}
+  constructor(
+    private readonly evidenceService: EvidenceService,
+    private readonly textIntakeService: TextIntakeService,
+  ) {}
 
   @Post('upload')
   @Roles(AppRole.operator, AppRole.admin)
@@ -143,5 +149,23 @@ export class EvidenceController {
   remove(@Param('id') id: string, @Request() req: ExpressRequest) {
     const ownerId = req.user?.apiKeyId || req.user?.authType || 'system';
     return this.evidenceService.remove(id, ownerId);
+  }
+
+  @Post('intake')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Process text intake',
+    description:
+      'Detects language, translates, and normalizes extracted text into a canonical analysis format.',
+  })
+  @ApiBody({ type: ProcessTextIntakeDto })
+  @ApiOkResponse({
+    description: 'Canonical analysis of text',
+    type: Object,
+  })
+  async processTextIntake(
+    @Body() body: ProcessTextIntakeDto,
+  ): Promise<CanonicalAnalysis> {
+    return this.textIntakeService.processTextIntake(body.text);
   }
 }

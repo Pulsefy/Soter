@@ -13,6 +13,7 @@ import { AuditModule } from '../audit/audit.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { EncryptionModule } from '../common/encryption/encryption.module';
 import { JobsModule } from '../jobs/jobs.module';
+import { EvidenceModule } from '../evidence/evidence.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { JobsModule } from '../jobs/jobs.module';
       inject: [ConfigService],
     }),
     JobsModule,
+    EvidenceModule,
   ],
   controllers: [VerificationController, VerificationInboxController],
   providers: [

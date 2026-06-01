@@ -15,7 +15,7 @@ export function idempotencyMiddleware(store: IdempotencyStore) {
       const key = IdempotencyKey.fromHeaders(req);
 
       // 2. Fingerprint Body
-      const fingerprint = RequestFingerprint.fromBody(req.body);
+      const fingerprint = RequestFingerprint.fromBody(req.body as Record<string, unknown>);
 
       // 3. Check Store
       const existingRecord = await store.tryAcquire(key, fingerprint);

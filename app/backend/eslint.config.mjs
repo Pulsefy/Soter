@@ -20,7 +20,7 @@ export default tseslint.config(
       sourceType: 'commonjs',
       parserOptions: {
         projectService: true,
-        tsconfigRootDir: process.cwd(),
+        tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {
@@ -37,7 +37,7 @@ export default tseslint.config(
   },
   {
     // Specific configuration for error handling files
-    files: ['src/common/filters/*.ts', 'src/common/interceptors/*.ts'],
+    files: ['src/common/filters/*.ts', 'src/common/interceptors/*.ts', 'src/middleware/*.ts', 'src/onchain/*.ts', 'src/jobs/*.ts', 'src/search/*.ts', 'src/orgs/*.ts', 'src/verification/*.ts', 'src/sandbox/*.ts', 'src/idempotency/*.ts', 'src/evidence/*.ts', 'src/entity-linking/*.ts'],
     rules: {
       '@typescript-eslint/no-unsafe-argument': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',

@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { ClaimStatus, Prisma } from '@prisma/client';
 import { of } from 'rxjs';
+import { TextIntakeService } from '../evidence/text-intake.service';
 
 describe('VerificationService', () => {
   let service: VerificationService;
@@ -61,6 +62,7 @@ describe('VerificationService', () => {
                 QUEUE_MAX_RETRIES: '3',
                 AI_SERVICE_URL: 'http://localhost:8000',
                 AI_SERVICE_TIMEOUT_MS: '30000',
+                OPENAI_API_KEY: undefined,
               };
               return config[key];
             }),
@@ -85,6 +87,22 @@ describe('VerificationService', () => {
           provide: HttpService,
           useValue: {
             post: jest.fn().mockReturnValue(of({ data: {} })),
+          },
+        },
+        {
+          provide: TextIntakeService,
+          useValue: {
+            processTextIntake: jest.fn().mockResolvedValue({
+              originalText: '',
+              normalizedText: '',
+              language: 'en',
+              languageConfidence: 1,
+              translations: { english: undefined, confidence: 0 },
+              extractedEntities: { names: [], locations: [], dates: [], amounts: [] },
+              keyThemes: [],
+              sentiment: 'neutral',
+              processedAt: new Date(),
+            }),
           },
         },
       ],
@@ -216,49 +234,66 @@ describe('VerificationService', () => {
   describe('processVerification (test mode)', () => {
     beforeEach(async () => {
       const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          VerificationService,
-          {
-            provide: getQueueToken('verification'),
-            useValue: mockQueue,
-          },
-          {
-            provide: ConfigService,
-            useValue: {
-              get: jest.fn((key: string) => {
-                const config: Record<string, string> = {
-                  VERIFICATION_MODE: 'test',
-                  VERIFICATION_THRESHOLD: '0.7',
-                  QUEUE_MAX_RETRIES: '3',
-                  AI_SERVICE_URL: 'http://localhost:8000',
-                  AI_SERVICE_TIMEOUT_MS: '30000',
-                };
-                return config[key];
-              }),
-            },
-          },
-          {
-            provide: PrismaService,
-            useValue: {
-              claim: {
-                findUnique: jest.fn(),
-                update: jest.fn(),
-              },
-            },
-          },
-          {
-            provide: AuditService,
-            useValue: {
-              record: jest.fn().mockResolvedValue(undefined),
-            },
-          },
-          {
-            provide: HttpService,
-            useValue: {
-              post: jest.fn().mockReturnValue(of({ data: {} })),
-            },
-          },
-        ],
+providers: [
+           VerificationService,
+           {
+             provide: getQueueToken('verification'),
+             useValue: mockQueue,
+           },
+           {
+             provide: ConfigService,
+             useValue: {
+               get: jest.fn((key: string) => {
+                 const config: Record<string, string> = {
+                   VERIFICATION_MODE: 'test',
+                   VERIFICATION_THRESHOLD: '0.7',
+                   QUEUE_MAX_RETRIES: '3',
+                   AI_SERVICE_URL: 'http://localhost:8000',
+                   AI_SERVICE_TIMEOUT_MS: '30000',
+                   OPENAI_API_KEY: undefined,
+                 };
+                 return config[key];
+               }),
+             },
+           },
+           {
+             provide: PrismaService,
+             useValue: {
+               claim: {
+                 findUnique: jest.fn(),
+                 update: jest.fn(),
+               },
+             },
+           },
+           {
+             provide: AuditService,
+             useValue: {
+               record: jest.fn().mockResolvedValue(undefined),
+             },
+           },
+           {
+             provide: HttpService,
+             useValue: {
+               post: jest.fn().mockReturnValue(of({ data: {} })),
+             },
+           },
+           {
+             provide: TextIntakeService,
+             useValue: {
+               processTextIntake: jest.fn().mockResolvedValue({
+                 originalText: '',
+                 normalizedText: '',
+                 language: 'en',
+                 languageConfidence: 1,
+                 translations: { english: undefined, confidence: 0 },
+                 extractedEntities: { names: [], locations: [], dates: [], amounts: [] },
+                 keyThemes: [],
+                 sentiment: 'neutral',
+                 processedAt: new Date(),
+               }),
+             },
+           },
+         ],
       }).compile();
 
       service = module.get<VerificationService>(VerificationService);

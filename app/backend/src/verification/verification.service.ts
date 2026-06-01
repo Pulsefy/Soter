@@ -13,6 +13,7 @@ import { AuditService } from '../audit/audit.service';
 import { firstValueFrom } from 'rxjs';
 import OpenAI from 'openai';
 import * as crypto from 'crypto';
+import { TextIntakeService, CanonicalAnalysis } from '../evidence/text-intake.service';
 
 // ---------------------------------------------------------------------------
 // OCR service types
@@ -80,6 +81,7 @@ export class VerificationService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly httpService: HttpService,
+    private readonly textIntakeService: TextIntakeService,
   ) {
     this.verificationMode =
       this.configService.get<string>('VERIFICATION_MODE') || 'mock';
@@ -461,13 +463,32 @@ the JSON verdict.
         )
         .join('\n');
 
+      const ocrText = fieldLines || raw_text || '';
+      const analysis: CanonicalAnalysis = await this.textIntakeService.processTextIntake(ocrText);
+
+      const normalizedFieldLines = Object.entries(fields)
+        .filter(([, v]) => v.value)
+        .map(
+          ([k, v]) =>
+            `  ${k.replace(/_/g, ' ')}: "${v.value}" (confidence: ${(v.confidence * 100).toFixed(1)}%)`,
+        )
+        .join('\n');
+
       return [
         'Identity document – extracted fields:',
-        fieldLines || '  (no structured fields extracted)',
+        normalizedFieldLines || '  (no structured fields extracted)',
         '',
         'Full OCR text:',
         raw_text || '  (no raw text extracted)',
-      ].join('\n');
+        '',
+        'Text Analysis (normalized):',
+        `  Language: ${analysis.language} (confidence: ${analysis.languageConfidence})`,
+        `  Themes: ${analysis.keyThemes.join(', ')}`,
+        `  Sentiment: ${analysis.sentiment}`,
+        analysis.translations.english
+          ? `  Translation (EN): ${analysis.translations.english}`
+          : '',
+      ].filter(Boolean).join('\n');
     } catch (err) {
       this.logger.warn(
         `OCR service unavailable for claim ${claim.id}: ` +
