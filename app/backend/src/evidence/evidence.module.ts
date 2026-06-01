@@ -12,8 +12,8 @@ import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [ConfigModule, PrismaModule, EncryptionModule, AuditModule],
-  controllers: [EvidenceController],
-  providers: [EvidenceService, FingerprintService, TextIntakeService],
+  controllers: [EvidenceController, UploadSessionController],
+  providers: [EvidenceService, UploadSessionService, FingerprintService, TextIntakeService],
   exports: [EvidenceService, FingerprintService, TextIntakeService],
 })
 export class EvidenceModule {}
