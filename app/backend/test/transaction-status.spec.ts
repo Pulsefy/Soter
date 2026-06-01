@@ -182,13 +182,11 @@ describe('Transaction Status Polling', () => {
 
   describe('Timeout behaviour', () => {
     it('returns unknown status when adapter times out', async () => {
-      jest
-        .spyOn(mockAdapter, 'getTransactionStatus')
-        .mockResolvedValueOnce({
-          hash: 'TIMEOUT_HASH',
-          status: 'unknown',
-          timestamp: new Date(),
-        });
+      jest.spyOn(mockAdapter, 'getTransactionStatus').mockResolvedValueOnce({
+        hash: 'TIMEOUT_HASH',
+        status: 'unknown',
+        timestamp: new Date(),
+      });
 
       const result = await service.getTransactionStatus('TIMEOUT_HASH');
       expect(result.status).toBe('unknown');

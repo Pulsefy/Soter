@@ -263,7 +263,9 @@ export class AidEscrowService {
   /**
    * Get the status of a transaction by hash from Soroban RPC
    */
-  async getTransactionStatus(hash: string): Promise<GetTransactionStatusResult> {
+  async getTransactionStatus(
+    hash: string,
+  ): Promise<GetTransactionStatusResult> {
     this.logger.debug('Getting transaction status:', { hash });
 
     const result = await this.onchainAdapter.getTransactionStatus({ hash });

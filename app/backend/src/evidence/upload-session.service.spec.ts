@@ -92,14 +92,21 @@ describe('UploadSessionService', () => {
 
   describe('create', () => {
     it('creates a session and returns it', async () => {
-      const dto = { fileName: 'doc.txt', mimeType: 'text/plain', totalSize: 200, chunkSize: 100 };
+      const dto = {
+        fileName: 'doc.txt',
+        mimeType: 'text/plain',
+        totalSize: 200,
+        chunkSize: 100,
+      };
       const created = makeSession({ totalChunks: 2 });
       mockPrisma.uploadSession.create.mockResolvedValue(created);
 
       const result = await service.create(dto, 'owner-1');
 
       expect(mockPrisma.uploadSession.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ totalChunks: 2 }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({ totalChunks: 2 }),
+        }),
       );
       expect(result).toBe(created);
     });
@@ -107,7 +114,12 @@ describe('UploadSessionService', () => {
     it('rejects an unsafe fileName', async () => {
       await expect(
         service.create(
-          { fileName: '../../evil.txt', mimeType: 'text/plain', totalSize: 10, chunkSize: 10 },
+          {
+            fileName: '../../evil.txt',
+            mimeType: 'text/plain',
+            totalSize: 10,
+            chunkSize: 10,
+          },
           'owner-1',
         ),
       ).rejects.toThrow(BadRequestException);
@@ -116,7 +128,12 @@ describe('UploadSessionService', () => {
     it('rejects a disallowed mimeType', async () => {
       await expect(
         service.create(
-          { fileName: 'file.exe', mimeType: 'application/x-msdownload', totalSize: 10, chunkSize: 10 },
+          {
+            fileName: 'file.exe',
+            mimeType: 'application/x-msdownload',
+            totalSize: 10,
+            chunkSize: 10,
+          },
           'owner-1',
         ),
       ).rejects.toThrow(BadRequestException);
@@ -125,7 +142,12 @@ describe('UploadSessionService', () => {
     it('rejects totalSize exceeding MAX_FILE_SIZE', async () => {
       await expect(
         service.create(
-          { fileName: 'big.txt', mimeType: 'text/plain', totalSize: 11 * 1024 * 1024, chunkSize: 1024 * 1024 },
+          {
+            fileName: 'big.txt',
+            mimeType: 'text/plain',
+            totalSize: 11 * 1024 * 1024,
+            chunkSize: 1024 * 1024,
+          },
           'owner-1',
         ),
       ).rejects.toThrow(BadRequestException);
@@ -146,21 +168,44 @@ describe('UploadSessionService', () => {
     });
 
     it('accepts a valid chunk', async () => {
-      const result = await service.uploadChunk('sess-1', 0, checksum, chunk, 'owner-1');
-      expect(result).toMatchObject({ sessionId: 'sess-1', index: 0, received: true, duplicate: false });
+      const result = await service.uploadChunk(
+        'sess-1',
+        0,
+        checksum,
+        chunk,
+        'owner-1',
+      );
+      expect(result).toMatchObject({
+        sessionId: 'sess-1',
+        index: 0,
+        received: true,
+        duplicate: false,
+      });
       expect(fsPromises.writeFile).toHaveBeenCalled();
     });
 
     it('returns duplicate:true for an already-received chunk with matching checksum', async () => {
-      mockPrisma.uploadChunk.findUnique.mockResolvedValue({ index: 0, checksum });
+      mockPrisma.uploadChunk.findUnique.mockResolvedValue({
+        index: 0,
+        checksum,
+      });
 
-      const result = await service.uploadChunk('sess-1', 0, checksum, chunk, 'owner-1');
+      const result = await service.uploadChunk(
+        'sess-1',
+        0,
+        checksum,
+        chunk,
+        'owner-1',
+      );
       expect(result).toMatchObject({ duplicate: true });
       expect(fsPromises.writeFile).not.toHaveBeenCalled();
     });
 
     it('throws ConflictException for duplicate chunk with different checksum', async () => {
-      mockPrisma.uploadChunk.findUnique.mockResolvedValue({ index: 0, checksum: 'different' });
+      mockPrisma.uploadChunk.findUnique.mockResolvedValue({
+        index: 0,
+        checksum: 'different',
+      });
 
       await expect(
         service.uploadChunk('sess-1', 0, checksum, chunk, 'owner-1'),
@@ -216,7 +261,7 @@ describe('UploadSessionService', () => {
   describe('finalize', () => {
     const chunkBuf = Buffer.alloc(100, 0x61);
 
-    const chunks = [0, 1, 2].map((i) => ({
+    const chunks = [0, 1, 2].map(i => ({
       index: i,
       size: 100,
       checksum: sha256(chunkBuf),
@@ -227,7 +272,10 @@ describe('UploadSessionService', () => {
       mockPrisma.uploadSession.findUnique.mockResolvedValue(makeSession());
       mockPrisma.uploadChunk.findMany.mockResolvedValue(chunks);
       mockPrisma.evidenceQueueItem.findFirst.mockResolvedValue(null);
-      mockPrisma.evidenceQueueItem.create.mockResolvedValue({ id: 'ev-1', fileName: 'evidence.txt' });
+      mockPrisma.evidenceQueueItem.create.mockResolvedValue({
+        id: 'ev-1',
+        fileName: 'evidence.txt',
+      });
       mockPrisma.uploadSession.update.mockResolvedValue({});
       (fsPromises.readFile as jest.Mock).mockResolvedValue(chunkBuf);
       (fsPromises.writeFile as jest.Mock).mockResolvedValue(undefined);
@@ -239,19 +287,27 @@ describe('UploadSessionService', () => {
       expect(result).toMatchObject({ id: 'ev-1' });
       expect(mockPrisma.evidenceQueueItem.create).toHaveBeenCalled();
       expect(mockPrisma.uploadSession.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: UploadSessionStatus.completed } }),
+        expect.objectContaining({
+          data: { status: UploadSessionStatus.completed },
+        }),
       );
     });
 
     it('throws BadRequestException when chunks are missing', async () => {
       mockPrisma.uploadChunk.findMany.mockResolvedValue([chunks[0]]); // only 1 of 3
-      await expect(service.finalize('sess-1', 'owner-1')).rejects.toThrow(/Missing chunks/i);
+      await expect(service.finalize('sess-1', 'owner-1')).rejects.toThrow(
+        /Missing chunks/i,
+      );
     });
 
     it('throws ConflictException when assembled file is a duplicate', async () => {
-      mockPrisma.evidenceQueueItem.findFirst.mockResolvedValue({ id: 'existing' });
+      mockPrisma.evidenceQueueItem.findFirst.mockResolvedValue({
+        id: 'existing',
+      });
       (fsPromises.unlink as jest.Mock).mockResolvedValue(undefined);
-      await expect(service.finalize('sess-1', 'owner-1')).rejects.toThrow(ConflictException);
+      await expect(service.finalize('sess-1', 'owner-1')).rejects.toThrow(
+        ConflictException,
+      );
     });
 
     it('cleans up chunk files after finalization', async () => {
@@ -265,10 +321,17 @@ describe('UploadSessionService', () => {
   describe('getStatus', () => {
     it('returns received chunk indices for resume', async () => {
       mockPrisma.uploadSession.findUnique.mockResolvedValue(makeSession());
-      mockPrisma.uploadChunk.findMany.mockResolvedValue([{ index: 0 }, { index: 1 }]);
+      mockPrisma.uploadChunk.findMany.mockResolvedValue([
+        { index: 0 },
+        { index: 1 },
+      ]);
 
       const status = await service.getStatus('sess-1', 'owner-1');
-      expect(status).toEqual({ sessionId: 'sess-1', totalChunks: 3, receivedChunks: [0, 1] });
+      expect(status).toEqual({
+        sessionId: 'sess-1',
+        totalChunks: 3,
+        receivedChunks: [0, 1],
+      });
     });
 
     it('returns empty array when no chunks received yet', async () => {

@@ -15,7 +15,11 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { UploadSessionStatus } from '@prisma/client';
 import { CreateUploadSessionDto } from './upload-session.dto';
-import { ALLOWED_MIME_TYPES, MAX_FILE_SIZE, isSafeFilename } from './file-validation';
+import {
+  ALLOWED_MIME_TYPES,
+  MAX_FILE_SIZE,
+  isSafeFilename,
+} from './file-validation';
 
 /** Sessions expire after 24 hours of inactivity. */
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -24,7 +28,11 @@ const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 export class UploadSessionService {
   private readonly logger = new Logger(UploadSessionService.name);
   private readonly chunksDir = path.join(process.cwd(), 'uploads', 'chunks');
-  private readonly evidenceDir = path.join(process.cwd(), 'uploads', 'evidence');
+  private readonly evidenceDir = path.join(
+    process.cwd(),
+    'uploads',
+    'evidence',
+  );
 
   constructor(
     private readonly prisma: PrismaService,
@@ -69,7 +77,11 @@ export class UploadSessionService {
       entity: 'upload_session',
       entityId: session.id,
       action: 'session_created',
-      metadata: { fileName: dto.fileName, totalSize: dto.totalSize, totalChunks },
+      metadata: {
+        fileName: dto.fileName,
+        totalSize: dto.totalSize,
+        totalChunks,
+      },
     });
 
     return session;
@@ -121,9 +133,7 @@ export class UploadSessionService {
       .update(buffer)
       .digest('hex');
     if (actualChecksum !== checksum) {
-      throw new BadRequestException(
-        `Chunk ${index} checksum mismatch`,
-      );
+      throw new BadRequestException(`Chunk ${index} checksum mismatch`);
     }
 
     // Persist chunk to disk
@@ -131,7 +141,13 @@ export class UploadSessionService {
     await fs.writeFile(chunkFile, buffer);
 
     await this.prisma.uploadChunk.create({
-      data: { sessionId, index, size: buffer.length, checksum, filePath: chunkFile },
+      data: {
+        sessionId,
+        index,
+        size: buffer.length,
+        checksum,
+        filePath: chunkFile,
+      },
     });
 
     return { sessionId, index, received: true, duplicate: false };
@@ -146,26 +162,29 @@ export class UploadSessionService {
     });
 
     if (chunks.length !== session.totalChunks) {
-      const missing = Array.from({ length: session.totalChunks }, (_, i) => i).filter(
-        (i) => !chunks.find((c) => c.index === i),
-      );
-      throw new BadRequestException(
-        `Missing chunks: [${missing.join(', ')}]`,
-      );
+      const missing = Array.from(
+        { length: session.totalChunks },
+        (_, i) => i,
+      ).filter(i => !chunks.find(c => c.index === i));
+      throw new BadRequestException(`Missing chunks: [${missing.join(', ')}]`);
     }
 
     // Reassemble
-    const parts = await Promise.all(
-      chunks.map((c) => fs.readFile(c.filePath)),
-    );
+    const parts = await Promise.all(chunks.map(c => fs.readFile(c.filePath)));
     const assembled = Buffer.concat(parts);
 
     // Encrypt and persist as a regular evidence file
     const encrypted = this.encryptionService.encryptBuffer(assembled);
-    const evidenceFile = path.join(this.evidenceDir, `${crypto.randomUUID()}.enc`);
+    const evidenceFile = path.join(
+      this.evidenceDir,
+      `${crypto.randomUUID()}.enc`,
+    );
     await fs.writeFile(evidenceFile, encrypted);
 
-    const fileHash = crypto.createHash('sha256').update(assembled).digest('hex');
+    const fileHash = crypto
+      .createHash('sha256')
+      .update(assembled)
+      .digest('hex');
 
     // Check for exact duplicate in evidence queue
     const duplicate = await this.prisma.evidenceQueueItem.findFirst({
@@ -174,7 +193,7 @@ export class UploadSessionService {
     if (duplicate) {
       await fs.unlink(evidenceFile);
       await this.markSessionCompleted(sessionId);
-      await this.cleanupChunks(chunks.map((c) => c.filePath));
+      await this.cleanupChunks(chunks.map(c => c.filePath));
       throw new ConflictException('File already exists in evidence queue');
     }
 
@@ -192,7 +211,7 @@ export class UploadSessionService {
     });
 
     await this.markSessionCompleted(sessionId);
-    await this.cleanupChunks(chunks.map((c) => c.filePath));
+    await this.cleanupChunks(chunks.map(c => c.filePath));
 
     await this.auditService.record({
       actorId: ownerId,
@@ -216,7 +235,7 @@ export class UploadSessionService {
     return {
       sessionId,
       totalChunks: session.totalChunks,
-      receivedChunks: chunks.map((c) => c.index),
+      receivedChunks: chunks.map(c => c.index),
     };
   }
 
@@ -249,6 +268,6 @@ export class UploadSessionService {
   }
 
   private async cleanupChunks(filePaths: string[]) {
-    await Promise.allSettled(filePaths.map((p) => fs.unlink(p)));
+    await Promise.allSettled(filePaths.map(p => fs.unlink(p)));
   }
 }

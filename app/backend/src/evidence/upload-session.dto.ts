@@ -2,7 +2,7 @@ import { IsInt, IsString, Min, Max, IsIn } from 'class-validator';
 import { ALLOWED_MIME_TYPES, MAX_FILE_SIZE } from './file-validation';
 
 const MAX_CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB per chunk
-const MIN_CHUNK_SIZE = 64 * 1024;        // 64 KB minimum
+const MIN_CHUNK_SIZE = 64 * 1024; // 64 KB minimum
 
 export class CreateUploadSessionDto {
   @IsString()

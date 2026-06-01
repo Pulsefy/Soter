@@ -42,6 +42,7 @@ import { EntityLinkingModule } from './entity-linking/entity-linking.module';
 import { RedisModule } from '@liaoliaots/nestjs-redis';
 import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guard';
 import { DeprecationInterceptor } from './common/interceptors/deprecation.interceptor';
+import { SandboxModule } from './sandbox/sandbox.module';
 
 @Module({
   imports: [
@@ -109,6 +110,7 @@ import { DeprecationInterceptor } from './common/interceptors/deprecation.interc
     InvitesModule,
     AdminSearchModule,
     EntityLinkingModule,
+    SandboxModule,
     RedisModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({

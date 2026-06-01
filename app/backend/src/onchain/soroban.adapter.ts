@@ -704,9 +704,7 @@ export class SorobanAdapter implements OnchainAdapter {
             ? result.ledger
             : undefined,
         errorMessage:
-          status === 'failed'
-            ? this.extractContractError(result)
-            : undefined,
+          status === 'failed' ? this.extractContractError(result) : undefined,
       };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
