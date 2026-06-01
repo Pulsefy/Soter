@@ -1,5 +1,5 @@
 # Soter Mobile Diagnostics Feature
-
+//WIP
 ## Overview
 
 This repository contains the **Soter** mobile application. The **Diagnostics** screen provides developers and support personnel with quick access to key runtime information, helping them troubleshoot issues without exposing sensitive data.
