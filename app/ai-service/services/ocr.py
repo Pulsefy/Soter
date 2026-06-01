@@ -28,8 +28,8 @@ class OCRResult:
 class FieldDetector:
     PATTERNS = {
         "name": [
-            r"(?:Full\s+)?[Nn]ame[:\s]+\n?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)",
-            r"(?:Full\s+)?[Nn]ame[:\s]+([A-Z]+(?:\s+[A-Z]+)+)",
+            r"(?:Full\s+)?[Nn]ame[:\s]+\n?([A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+)+)",
+            r"(?:Full\s+)?[Nn]ame[:\s]+\n?([A-Z]+(?:[ \t]+[A-Z]+)+)",
         ],
         "date_of_birth": [
             r"[Dd]ate\s+(?:of\s+)?[Bb]irth[:\s]*(\d{2}[-./]\d{2}[-./]\d{4})",
