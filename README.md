@@ -12,6 +12,10 @@ This repository contains the **Soter** mobile application. The **Diagnostics** s
 - **Configured Contract ID** – pulls the Soroban contract identifier from the app config.  No secrets/tokens are displayed.
 - **Copy‑to‑Clipboard** – a button that copies a sanitized diagnostics string to the clipboard for easy sharing with support.
 
+## Testnet Observability
+
+The backend exposes Prometheus metrics at `/metrics`, queue health at `/jobs/health`, and request correlation IDs in `x-correlation-id` / `x-request-id` headers. For Testnet incident response, use [docs/testnet-observability-dashboard.md](docs/testnet-observability-dashboard.md) to track contract call latency, transaction submission failures, callback failures, and correlated job logs.
+
 ## Why this matters
 - **Fast troubleshooting** – no need to open a debugger or logs; the relevant info is right in the UI.
 - **No secrets exposed** – the clipboard string omits any API keys or private tokens.

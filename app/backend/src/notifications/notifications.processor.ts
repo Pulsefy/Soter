@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 
 import { DlqService } from '../jobs/dlq.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 @Processor('notifications', {
   concurrency: parseInt(process.env.QUEUE_CONCURRENCY || '5'),
@@ -18,6 +19,7 @@ export class NotificationProcessor extends WorkerHost {
   constructor(
     private readonly prisma: PrismaService,
     private readonly dlqService: DlqService,
+    private readonly metricsService: MetricsService,
   ) {
     super();
   }
@@ -67,6 +69,10 @@ export class NotificationProcessor extends WorkerHost {
         `Notification job ${job.id} failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
         error instanceof Error ? error.stack : undefined,
       );
+      this.metricsService.incrementCallbackFailure(
+        'notification_delivery',
+        error instanceof Error ? error.message : String(error),
+      );
       throw error;
     }
   }
@@ -105,6 +111,10 @@ export class NotificationProcessor extends WorkerHost {
     if (job) {
       this.logger.error(
         `Notification job ${job.id} for ${job.data.recipient} failed: ${error.message}`,
+      );
+      this.metricsService.incrementCallbackFailure(
+        'notification_job',
+        error.message,
       );
       await this.dlqService.moveToDlq('notifications', job, error);
     } else {

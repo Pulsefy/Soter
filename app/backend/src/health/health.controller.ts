@@ -125,4 +125,25 @@ export class HealthController {
     // Throw an error to test exception handling
     throw new Error('This is a test error for logging demonstration');
   }
+
+  @Get('onchain')
+  @Version(API_VERSIONS.V1)
+  @ApiOperation({
+    summary: 'On-chain contract health probe (internal use)',
+    description:
+      'Performs a read-only contract call to verify connectivity to Soroban RPC and contract functionality. Requires authentication.',
+  })
+  @ApiOkResponse({
+    description: 'On-chain health check completed successfully',
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'On-chain health check failed',
+  })
+  async onchainHealth(@Res({ passthrough: true }) res: Response) {
+    const result = await this.healthService.checkOnchainContract();
+    if (result.status === 'down') {
+      res.status(HttpStatus.SERVICE_UNAVAILABLE);
+    }
+    return result;
+  }
 }

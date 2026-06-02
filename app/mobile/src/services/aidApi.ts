@@ -76,6 +76,21 @@ export const getMockAidList = (): AidItem[] => [
   },
 ];
 
+/** Submit a claim to the backend with an idempotency key */
+export const submitClaim = async (claimId: string, idempotencyKey: string): Promise<unknown> => {
+  const response = await fetch(`${API_URL}/claims/${claimId}/submit`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+};
+
 /** Fallback mock detail data */
 export const getMockAidDetails = (aidId: string): AidDetails => ({
   id: aidId,

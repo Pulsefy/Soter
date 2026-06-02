@@ -46,7 +46,7 @@ export class LoggerService implements NestLoggerService {
   /**
    * Get correlation ID from async local storage
    */
-  private getCorrelationId(): string | undefined {
+  getCorrelationId(): string | undefined {
     const store = this.asyncLocalStorage.getStore();
     return store?.get(CORRELATION_ID_KEY) as string | undefined;
   }

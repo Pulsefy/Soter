@@ -459,6 +459,49 @@ model EvidenceQueueItem {
   @@index([nearDuplicateOf])
 }
 
+enum UploadSessionStatus {
+  active
+  completed
+  expired
+  aborted
+}
+
+model UploadSession {
+  id          String              @id @default(cuid())
+  ownerId     String
+  orgId       String?
+  fileName    String
+  mimeType    String
+  totalSize   Int
+  chunkSize   Int
+  totalChunks Int
+  status      UploadSessionStatus @default(active)
+  expiresAt   DateTime
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  chunks      UploadChunk[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model UploadChunk {
+  id        String   @id @default(cuid())
+  sessionId String
+  index     Int
+  size      Int
+  checksum  String
+  filePath  String
+  createdAt DateTime @default(now())
+
+  session   UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, index])
+  @@index([sessionId])
+}
+
 enum NotificationOutboxStatus {
   pending
   enqueued
@@ -500,4 +543,142 @@ model IdempotencyKey {
 
   @@index([key])
   @@index([expiresAt])
+}
+
+// ============================================================================
+// ENTITY REGISTRY & LINKING
+// ============================================================================
+
+enum RegistryEntityType {
+  organization
+  location
+  asset
+  project
+}
+
+/// Canonical registry for organizations with stable IDs
+model RegistryOrganization {
+  id          String   @id @default(cuid())
+  registryId  String   @unique // Stable canonical ID (e.g., "ORG-001")
+  name        String
+  aliases     String?  // JSON array of alternative names
+  externalId  String?  // External system identifier
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entityLinks EntityLink[]
+
+  @@index([registryId])
+  @@index([name])
+}
+
+/// Canonical registry for locations with stable IDs
+model RegistryLocation {
+  id          String   @id @default(cuid())
+  registryId  String   @unique // Stable canonical ID (e.g., "LOC-001")
+  name        String
+  type        String?  // e.g., "city", "camp", "region", "country"
+  country     String?
+  region      String?
+  coordinates Json?    // { lat: number, lng: number }
+  aliases     String?  // JSON array of alternative names
+  externalId  String?  // External system identifier
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entityLinks EntityLink[]
+
+  @@index([registryId])
+  @@index([name])
+  @@index([country, region])
+}
+
+/// Canonical registry for assets with stable IDs
+model RegistryAsset {
+  id          String   @id @default(cuid())
+  registryId  String   @unique // Stable canonical ID (e.g., "AST-001")
+  name        String
+  type        String?  // e.g., "vehicle", "warehouse", "equipment"
+  category    String?
+  externalId  String?  // External system identifier
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entityLinks EntityLink[]
+
+  @@index([registryId])
+  @@index([name])
+  @@index([type])
+}
+
+/// Canonical registry for projects with stable IDs
+model RegistryProject {
+  id          String   @id @default(cuid())
+  registryId  String   @unique // Stable canonical ID (e.g., "PRJ-001")
+  name        String
+  description String?
+  status      String   @default("active")
+  startDate   DateTime?
+  endDate     DateTime?
+  externalId  String?  // External system identifier
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entityLinks EntityLink[]
+
+  @@index([registryId])
+  @@index([name])
+  @@index([status])
+}
+
+enum EntityLinkSourceType {
+  campaign
+  claim
+  verification
+}
+
+/// Links extracted entities to canonical registry records
+model EntityLink {
+  id              String             @id @default(cuid())
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  // Source entity reference
+  sourceType      EntityLinkSourceType
+  sourceId        String             // ID of campaign/claim/verification
+  extractedName   String             // Original extracted entity name
+  extractedType   String?            // Type hint from extraction (e.g., "organization", "location")
+
+  // Link to canonical registry
+  entityType      RegistryEntityType
+  organizationId  String?
+  organization    RegistryOrganization? @relation(fields: [organizationId], references: [id])
+  locationId      String?
+  location        RegistryLocation?     @relation(fields: [locationId], references: [id])
+  assetId         String?
+  asset           RegistryAsset?        @relation(fields: [assetId], references: [id])
+  projectId       String?
+  project         RegistryProject?      @relation(fields: [projectId], references: [id])
+
+  // Confidence & auditability
+  confidenceScore Float              // 0.0 to 1.0
+  matchMethod     String?            // e.g., "exact", "fuzzy", "manual"
+  reviewedBy      String?            // User ID if manually reviewed
+  reviewedAt      DateTime?
+  reviewNotes     String?
+  isActive        Boolean            @default(true)
+  metadata        Json?
+
+  @@index([sourceType, sourceId])
+  @@index([entityType])
+  @@index([organizationId])
+  @@index([locationId])
+  @@index([assetId])
+  @@index([projectId])
+  @@index([confidenceScore])
+  @@index([isActive])
 }

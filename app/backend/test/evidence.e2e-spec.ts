@@ -78,7 +78,9 @@ describe('Evidence Queue (e2e)', () => {
       .set('x-org-id', orgId)
       .expect(400);
 
-    expect(res.body.message).toContain('already exists in queue for this organization');
+    expect(res.body.message).toContain(
+      'already exists in queue for this organization',
+    );
   });
 
   it('POST /evidence/upload allows same file in different organizations (tenant isolation)', async () => {

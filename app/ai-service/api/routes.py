@@ -9,6 +9,7 @@ from slowapi.util import get_remote_address
 
 from schemas.ocr import OCRData, OCRFieldResult, OCRResponse
 from services.ocr import OCRService
+from config import settings
 
 router = APIRouter(tags=["ai"])
 limiter = Limiter(key_func=get_remote_address)
@@ -26,7 +27,7 @@ ocr_service = OCRService()
 
 
 @router.post("/ai/ocr")
-@limiter.limit("10/minute")
+@limiter.limit(settings.request_rate_limit)
 async def process_ocr(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],

@@ -9,7 +9,6 @@ import {
 } from './interfaces/onchain-job.interface';
 import { ONCHAIN_ADAPTER_TOKEN, OnchainAdapter } from './onchain.adapter';
 import { MetricsService } from '../observability/metrics/metrics.service';
-
 import { DlqService } from '../jobs/dlq.service';
 
 @Processor('onchain', {
@@ -33,7 +32,7 @@ export class OnchainProcessor extends WorkerHost {
     const startedAt = Date.now();
     const operation = String(job.data.type);
     const correlationSuffix = job.data.correlationId
-      ? ` [correlationId=${job.data.correlationId}]` 
+      ? ` [correlationId=${job.data.correlationId}]`
       : '';
 
     this.logger.log(

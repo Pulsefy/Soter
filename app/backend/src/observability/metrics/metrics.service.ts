@@ -23,12 +23,18 @@ export class MetricsService {
     public onchainOperationsCounter: Counter<string>,
     @InjectMetric('onchain_operation_duration_seconds')
     public onchainOperationDuration: Histogram<string>,
+    @InjectMetric('contract_call_latency_seconds')
+    public contractCallLatency: Histogram<string>,
+    @InjectMetric('tx_submission_failures_total')
+    public txSubmissionFailuresCounter: Counter<string>,
     @InjectMetric('ingestion_lag_seconds')
     public ingestionLagGauge: Gauge<string>,
     @InjectMetric('webhook_retries_total')
     public webhookRetriesCounter: Counter<string>,
     @InjectMetric('webhook_delivery_duration_seconds')
     public webhookDeliveryDuration: Histogram<string>,
+    @InjectMetric('callback_failures_total')
+    public callbackFailuresCounter: Counter<string>,
     @InjectMetric('error_rate_total')
     public errorRateCounter: Counter<string>,
     @InjectMetric('analytics_cache_hits_total')
@@ -150,6 +156,21 @@ export class MetricsService {
     );
   }
 
+  recordContractCallLatency(
+    operation: string,
+    status: 'success' | 'failed',
+    durationSeconds: number,
+  ): void {
+    this.contractCallLatency.observe({ operation, status }, durationSeconds);
+  }
+
+  incrementTxSubmissionFailure(operation: string, reason: string): void {
+    this.txSubmissionFailuresCounter.inc({
+      operation,
+      reason: reason.slice(0, 80),
+    });
+  }
+
   /**
    * Set ingestion lag gauge (time between event creation and processing)
    */
@@ -177,6 +198,13 @@ export class MetricsService {
       },
       duration,
     );
+  }
+
+  incrementCallbackFailure(callbackType: string, reason: string): void {
+    this.callbackFailuresCounter.inc({
+      callback_type: callbackType,
+      reason: reason.slice(0, 80),
+    });
   }
 
   /**

@@ -41,8 +41,11 @@ from services.humanitarian_verification import HumanitarianVerificationService
 
 limiter = Limiter(key_func=get_remote_address)
 
+log_level_name = settings.log_level.upper() if hasattr(settings, "log_level") else "INFO"
+log_level = getattr(logging, log_level_name, logging.INFO)
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=log_level,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
