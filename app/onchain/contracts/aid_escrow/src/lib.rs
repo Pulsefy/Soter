@@ -412,7 +412,12 @@ impl AidEscrow {
         env.storage().instance().set(&key, &true);
 
         let timestamp = env.ledger().timestamp();
-        ActionPausedEvent { admin, action, timestamp }.publish(&env);
+        ActionPausedEvent {
+            admin,
+            action,
+            timestamp,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -426,7 +431,12 @@ impl AidEscrow {
         env.storage().instance().set(&key, &false);
 
         let timestamp = env.ledger().timestamp();
-        ActionUnpausedEvent { admin, action, timestamp }.publish(&env);
+        ActionUnpausedEvent {
+            admin,
+            action,
+            timestamp,
+        }
+        .publish(&env);
         Ok(())
     }
 
