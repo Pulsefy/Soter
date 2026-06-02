@@ -8,8 +8,7 @@ import {
   OnchainOperationType,
 } from './interfaces/onchain-job.interface';
 import { ONCHAIN_ADAPTER_TOKEN, OnchainAdapter } from './onchain.adapter';
-import { PrismaService } from '../prisma/prisma.service';
-import { ClaimStatus } from '@prisma/client';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 import { DlqService } from '../jobs/dlq.service';
 
@@ -23,7 +22,7 @@ export class OnchainProcessor extends WorkerHost {
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
     private readonly dlqService: DlqService,
-    private readonly prisma: PrismaService,
+    private readonly metricsService: MetricsService,
   ) {
     super();
   }
@@ -31,8 +30,14 @@ export class OnchainProcessor extends WorkerHost {
   async process(
     job: Job<OnchainJobData, OnchainJobResult, string>,
   ): Promise<OnchainJobResult> {
+    const startedAt = Date.now();
+    const operation = String(job.data.type);
+    const correlationSuffix = job.data.correlationId
+      ? ` [correlationId=${job.data.correlationId}]` 
+      : '';
+
     this.logger.log(
-      `Processing onchain ${job.data.type} (attempt ${job.attemptsMade + 1})`,
+      `Processing onchain ${operation} (attempt ${job.attemptsMade + 1})${correlationSuffix}`,
     );
 
     try {
@@ -46,15 +51,6 @@ export class OnchainProcessor extends WorkerHost {
           break;
         case OnchainOperationType.DISBURSE:
           result = await this.onchainAdapter.disburse(job.data.params);
-          // Update claim status from disbursing to disbursed on success
-          if (result && result.status === 'success' && job.data.params.claimId) {
-            await this.updateClaimStatus(
-              job.data.params.claimId,
-              ClaimStatus.disbursing,
-              ClaimStatus.disbursed,
-              result.transactionHash,
-            );
-          }
           break;
         default:
           throw new Error(
@@ -65,6 +61,12 @@ export class OnchainProcessor extends WorkerHost {
       if (result && 'status' in result && result.status === 'failed') {
         throw new Error(`Onchain operation failed: ${String(job.data.type)}`);
       }
+
+      this.metricsService.recordContractCallLatency(
+        operation,
+        'success',
+        (Date.now() - startedAt) / 1000,
+      );
 
       return {
         success: true,
@@ -93,34 +95,18 @@ export class OnchainProcessor extends WorkerHost {
           error instanceof Error ? error.stack : undefined,
         );
       }
+      this.metricsService.recordContractCallLatency(
+        operation,
+        'failed',
+        (Date.now() - startedAt) / 1000,
+      );
+      if (errMessage.includes('transaction') || errMessage.includes('tx_')) {
+        this.metricsService.incrementTxSubmissionFailure(
+          operation,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
       throw error;
-    }
-  }
-
-  private async updateClaimStatus(
-    claimId: string,
-    fromStatus: ClaimStatus,
-    toStatus: ClaimStatus,
-    transactionHash?: string,
-  ): Promise<void> {
-    try {
-      await this.prisma.claim.update({
-        where: { id: claimId },
-        data: {
-          status: toStatus,
-          metadata: transactionHash
-            ? { transactionHash }
-            : undefined,
-        },
-      });
-      this.logger.log(
-        `Updated claim ${claimId} status from ${fromStatus} to ${toStatus}`,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Failed to update claim ${claimId} status: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
-      // Don't throw - the on-chain operation succeeded, we should log but not fail the job
     }
   }
 
@@ -133,41 +119,13 @@ export class OnchainProcessor extends WorkerHost {
   async onFailed(job: Job<OnchainJobData> | undefined, error: Error) {
     if (job) {
       this.logger.error(`Onchain job ${job.id} failed: ${error.message}`);
-      
-      // If this is a disburse job that failed after max retries, revert claim status
-      if (
-        job.data.type === OnchainOperationType.DISBURSE &&
-        job.attemptsMade >= job.opts.attempts! - 1 &&
-        job.data.params.claimId
-      ) {
-        await this.revertClaimStatus(job.data.params.claimId);
-      }
-      
+      this.metricsService.incrementCallbackFailure(
+        'onchain_job',
+        error.message,
+      );
       await this.dlqService.moveToDlq('onchain', job, error);
     } else {
       this.logger.error(`Onchain job failed: ${error.message}`);
-    }
-  }
-
-  private async revertClaimStatus(claimId: string): Promise<void> {
-    try {
-      const claim = await this.prisma.claim.findUnique({
-        where: { id: claimId },
-      });
-
-      if (claim && claim.status === ClaimStatus.disbursing) {
-        await this.prisma.claim.update({
-          where: { id: claimId },
-          data: { status: ClaimStatus.approved },
-        });
-        this.logger.log(
-          `Reverted claim ${claimId} from disbursing to approved after failed disbursement`,
-        );
-      }
-    } catch (error) {
-      this.logger.error(
-        `Failed to revert claim ${claimId} status: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
     }
   }
 }
