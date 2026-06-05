@@ -513,7 +513,11 @@ fn test_multiple_events_in_workflow() {
         .collect();
 
     // Verify ordering: escrow_funded → package_created → package_claimed
-    assert!(topics.len() >= 3, "Expected at least 3 events, got {}", topics.len());
+    assert!(
+        topics.len() >= 3,
+        "Expected at least 3 events, got {}",
+        topics.len()
+    );
 }
 
 // ── Multiple Packages Emit Separate Events ───────────────────────────────
