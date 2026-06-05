@@ -64,6 +64,7 @@ fn last_event_data(env: &Env, contract_id: &Address, topic: &str) -> Val {
 }
 
 /// Extracts field names from an event data map.
+#[allow(dead_code)]
 fn event_field_names(env: &Env, data: &Val) -> std::vec::Vec<std::string::String> {
     let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(env, data).unwrap();
     let keys = map.keys();
@@ -580,7 +581,7 @@ fn test_no_events_on_failed_operations() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let (_, token_admin_client) = setup_token(&env, &admin);
+    let (_, _token_admin_client) = setup_token(&env, &admin);
 
     let contract_id = env.register(AidEscrow, ());
     let client = AidEscrowClient::new(&env, &contract_id);
