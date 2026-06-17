@@ -531,6 +531,19 @@ model NotificationOutbox {
   @@index([createdAt])
 }
 
+model DriftIncidentLog {
+  id            String   @id @default(cuid())
+  entityType    String   // e.g., "AidPackage", "Campaign"
+  entityId      String
+  field         String
+  onChainValue  String
+  cachedValue   String
+  timestamp     DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([timestamp])
+}
+
 /// Stores idempotency keys to prevent duplicate requests
 model IdempotencyKey {
   id             String   @id @default(cuid())
