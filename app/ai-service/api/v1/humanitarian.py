@@ -26,24 +26,51 @@ async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
     logger.info("Processing humanitarian verification request")
 
     try:
-        try:
-            result = _main.humanitarian_verification_service.verify_claim(
-                aid_claim=request.aid_claim,
-                supporting_evidence=request.supporting_evidence,
-                context_factors=request.context_factors,
-                provider_preference=request.provider_preference,
-                timeout=request.timeout,
-            )
-        except TypeError as exc:
-            if "timeout" in str(exc):
+        base_kwargs = {
+            "aid_claim": request.aid_claim,
+            "supporting_evidence": request.supporting_evidence,
+            "context_factors": request.context_factors,
+            "anchor_metadata": (
+                request.anchor_metadata.model_dump(exclude_none=True)
+                if request.anchor_metadata
+                else None
+            ),
+            "provider_preference": request.provider_preference,
+        }
+        optional_variants = [
+            {"timeout": request.timeout},
+            {},
+        ]
+
+        result = None
+        last_error = None
+        for optional_kwargs in optional_variants:
+            try:
                 result = _main.humanitarian_verification_service.verify_claim(
-                    aid_claim=request.aid_claim,
-                    supporting_evidence=request.supporting_evidence,
-                    context_factors=request.context_factors,
-                    provider_preference=request.provider_preference,
+                    **base_kwargs,
+                    **optional_kwargs,
                 )
-            else:
+                break
+            except TypeError as exc:
+                last_error = exc
+                message = str(exc)
+                if "timeout" in message or "anchor_metadata" in message or "unexpected keyword argument" in message:
+                    fallback_kwargs = dict(base_kwargs)
+                    fallback_kwargs.pop("anchor_metadata", None)
+                    if optional_kwargs:
+                        try:
+                            result = _main.humanitarian_verification_service.verify_claim(
+                                **fallback_kwargs,
+                            )
+                            break
+                        except TypeError as inner_exc:
+                            last_error = inner_exc
+                            continue
+                    continue
                 raise exc
+
+        if result is None and last_error is not None:
+            raise last_error
         return HumanitarianVerificationResponse(success=True, **result)
     except Exception as e:
         logger.error("Humanitarian verification failed: %s", str(e), exc_info=True)

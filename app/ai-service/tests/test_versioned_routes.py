@@ -294,8 +294,14 @@ class TestHumanitarianV1:
             aid_claim,
             supporting_evidence=None,
             context_factors=None,
+            anchor_metadata=None,
             provider_preference="auto",
         ):
+            assert anchor_metadata == {
+                "campaign_ref": "campaign-demo-001",
+                "claim_id": "claim-demo-123",
+                "package_id": "pkg-demo-789",
+            }
             return {
                 "provider": "openai",
                 "model": "gpt-4o-mini",
@@ -305,6 +311,7 @@ class TestHumanitarianV1:
                     "confidence": 0.88,
                     "summary": "Claim is well-supported.",
                 },
+                "anchor_metadata": anchor_metadata,
                 "raw_response": "{}",
             }
 
@@ -318,6 +325,11 @@ class TestHumanitarianV1:
                 "aid_claim": "Teams distributed kits to all households.",
                 "supporting_evidence": ["List #B-17"],
                 "context_factors": {},
+                "anchor_metadata": {
+                    "campaign_ref": "campaign-demo-001",
+                    "claim_id": "claim-demo-123",
+                    "package_id": "pkg-demo-789",
+                },
                 "provider_preference": "auto",
             },
         )
@@ -325,12 +337,29 @@ class TestHumanitarianV1:
         data = response.json()
         assert data["success"] is True
         assert data["verification"]["verdict"] == "credible"
+        assert data["anchor_metadata"]["package_id"] == "pkg-demo-789"
+
+    def test_v1_humanitarian_verify_rejects_malformed_anchor_metadata(self, following_client):
+        response = following_client.post(
+            "/v1/ai/humanitarian/verify",
+            json={
+                "aid_claim": "Teams distributed kits to all households.",
+                "supporting_evidence": ["List #B-17"],
+                "context_factors": {},
+                "anchor_metadata": {
+                    "claim_id": "bad claim id with spaces",
+                },
+                "provider_preference": "auto",
+            },
+        )
+        assert response.status_code == 422
 
     def test_v1_humanitarian_verify_failure_path(self, following_client, monkeypatch):
         def fake_verify(
             aid_claim,
             supporting_evidence=None,
             context_factors=None,
+            anchor_metadata=None,
             provider_preference="auto",
         ):
             raise RuntimeError("all providers unavailable")

@@ -87,6 +87,32 @@ class TestHumanitarianVerificationService:
             "verdict": "credible",
         }
 
+    def test_verify_claim_propagates_anchor_metadata(self, monkeypatch):
+        monkeypatch.setattr(settings, "ai_deterministic_mode", True)
+        monkeypatch.setattr(settings, "openai_api_key", "test-api-key")
+        monkeypatch.setattr(
+            self.service, "_provider_attempt_order", lambda provider_preference: ["openai"]
+        )
+        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda provider: "test-model")
+
+        result = self.service.verify_claim(
+            aid_claim="Aid package reached all households.",
+            supporting_evidence=["monitoring sheet"],
+            context_factors={"weather": "flooding"},
+            anchor_metadata={
+                "campaign_ref": "campaign-demo-001",
+                "claim_id": "claim-demo-123",
+                "package_id": "pkg-demo-789",
+            },
+            provider_preference="openai",
+        )
+
+        assert result["anchor_metadata"] == {
+            "campaign_ref": "campaign-demo-001",
+            "claim_id": "claim-demo-123",
+            "package_id": "pkg-demo-789",
+        }
+
     def test_deterministic_verify_claim_outputs_remain_stable_across_runs(self, monkeypatch):
         monkeypatch.setattr(settings, "ai_deterministic_mode", True)
         monkeypatch.setattr(settings, "openai_api_key", "test-api-key")

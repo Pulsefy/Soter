@@ -41,6 +41,7 @@ class HumanitarianVerificationService:
         aid_claim: str,
         supporting_evidence: Optional[List[str]] = None,
         context_factors: Optional[Dict[str, Any]] = None,
+        anchor_metadata: Optional[Dict[str, str]] = None,
         provider_preference: str = "auto",
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
@@ -48,6 +49,7 @@ class HumanitarianVerificationService:
         try:
             evidence = supporting_evidence or []
             context = context_factors or {}
+            anchor = dict(anchor_metadata or {})
 
             primary_prompt = self.prompt_engine.build_primary_prompt(
                 aid_claim=aid_claim,
@@ -97,6 +99,7 @@ class HumanitarianVerificationService:
                             "model": model,
                             "prompt_variant": prompt_variant,
                             "verification": parsed,
+                            "anchor_metadata": anchor or None,
                             "raw_response": raw_content,
                         }
                     except Exception as exc:
