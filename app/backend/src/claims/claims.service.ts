@@ -1,0 +1,844 @@
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  Optional,
+  Inject,
+  Logger,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { createHash } from 'crypto';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateClaimDto } from './dto/create-claim.dto';
+import { ClaimReceiptDto, SendReceiptShareDto } from './dto/claim-receipt.dto';
+import { ExportClaimsQueryDto } from './dto/export-claims.dto';
+import { ClaimStatus, Prisma } from '@prisma/client';
+import {
+  OnchainAdapter,
+  DisburseResult,
+  ONCHAIN_ADAPTER_TOKEN,
+} from '../onchain/onchain.adapter';
+import { LoggerService } from '../logger/logger.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
+import { AuditService } from '../audit/audit.service';
+import { EncryptionService } from '../common/encryption/encryption.service';
+import { BudgetService } from '../common/budget/budget.service';
+
+type ExpirationCleanupCapableAdapter = OnchainAdapter & {
+  revokeAidPackage?: (params: {
+    packageId: string;
+    operatorAddress: string;
+  }) => Promise<{
+    transactionHash: string;
+    status: 'success' | 'failed';
+  }>;
+  refundAidPackage?: (params: {
+    packageId: string;
+    operatorAddress: string;
+  }) => Promise<{
+    transactionHash: string;
+    status: 'success' | 'failed';
+    amountRefunded?: string;
+  }>;
+};
+
+const DEFAULT_CLAIM_EXPIRY_DAYS = 30;
+
+@Injectable()
+export class ClaimsService {
+  private readonly logger = new Logger(ClaimsService.name);
+  private readonly onchainEnabled: boolean;
+
+  constructor(
+    private prisma: PrismaService,
+    @Optional()
+    @Inject(ONCHAIN_ADAPTER_TOKEN)
+    private readonly onchainAdapter: OnchainAdapter | null,
+    private readonly configService: ConfigService,
+    private readonly loggerService: LoggerService,
+    private readonly metricsService: MetricsService,
+    private readonly auditService: AuditService,
+    private readonly encryptionService: EncryptionService,
+    private readonly budgetService: BudgetService,
+  ) {
+    this.onchainEnabled =
+      this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
+  }
+
+  async create(createClaimDto: CreateClaimDto) {
+    // Check if campaign exists
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: createClaimDto.campaignId },
+    });
+    if (!campaign) {
+      throw new NotFoundException('Campaign not found');
+    }
+
+    // Enforce campaign funding cap
+    await this.budgetService.assertWithinBudget(
+      createClaimDto.campaignId,
+      createClaimDto.amount,
+    );
+
+    const claim = await this.prisma.claim.create({
+      data: {
+        campaignId: createClaimDto.campaignId,
+        amount: createClaimDto.amount,
+        recipientRef: this.encryptionService.encrypt(
+          createClaimDto.recipientRef,
+        ),
+        evidenceRef: createClaimDto.evidenceRef,
+        expiresAt:
+          createClaimDto.expiresAt ??
+          new Date(
+            Date.now() + DEFAULT_CLAIM_EXPIRY_DAYS * 24 * 60 * 60 * 1000,
+          ),
+        // Store tokenAddress in metadata for multi-token support
+        // Note: This would require a schema migration to add tokenAddress field
+        // For now, we pass it to on-chain operations directly
+      },
+      include: {
+        campaign: true,
+      },
+    });
+
+    claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
+
+    // Stub audit hook
+    void this.auditLog('claim', claim.id, 'created', {
+      status: claim.status,
+      tokenAddress: createClaimDto.tokenAddress,
+    });
+
+    return claim;
+  }
+
+  async findAll() {
+    const claims = await this.prisma.claim.findMany({
+      where: { deletedAt: null },
+      include: {
+        campaign: true,
+      },
+    });
+    return claims.map(claim => ({
+      ...claim,
+      recipientRef: this.encryptionService.decrypt(claim.recipientRef),
+    }));
+  }
+
+  async findOne(id: string) {
+    const claimResult = await this.prisma.claim.findUnique({
+      where: { id },
+      include: {
+        campaign: true,
+      },
+    });
+    // Type assertion for stale Prisma types
+    const claim = claimResult as
+      | (typeof claimResult & { deletedAt: Date | null })
+      | null;
+    if (!claim || claim.deletedAt) {
+      throw new NotFoundException('Claim not found');
+    }
+    return {
+      ...claim,
+      recipientRef: this.encryptionService.decrypt(claim.recipientRef),
+    };
+  }
+
+  async verify(id: string) {
+    return this.transitionStatus(
+      id,
+      ClaimStatus.requested,
+      ClaimStatus.verified,
+    );
+  }
+
+  async approve(id: string) {
+    return this.transitionStatus(
+      id,
+      ClaimStatus.verified,
+      ClaimStatus.approved,
+    );
+  }
+
+  async disburse(id: string) {
+    const claim = await this.prisma.claim.findUnique({
+      where: { id },
+      include: { campaign: true },
+    });
+
+    if (!claim) {
+      throw new NotFoundException('Claim not found');
+    }
+
+    if (claim.status !== ClaimStatus.approved) {
+      throw new BadRequestException(
+        `Cannot transition from ${claim.status} to ${ClaimStatus.disbursed}`,
+      );
+    }
+
+    // Call on-chain adapter if enabled
+    let onchainResult: DisburseResult | null = null;
+    if (this.onchainEnabled && this.onchainAdapter) {
+      const startTime = Date.now();
+      const adapterType =
+        this.configService.get<string>('ONCHAIN_ADAPTER')?.toLowerCase() ||
+        'mock';
+
+      try {
+        this.logger.log(`Calling on-chain adapter for claim ${id}`, {
+          claimId: id,
+          adapter: adapterType,
+        });
+
+        // Generate a mock package ID for the disburse call
+        // In a real implementation, this would come from createClaim
+        const packageId = this.generateMockPackageId(id);
+
+        // Get tokenAddress from claim metadata or use a default
+        // In production, this should be stored in the claim record
+        const tokenAddress = this.getTokenAddressForClaim(claim);
+
+        onchainResult = await this.onchainAdapter.disburse({
+          claimId: id,
+          packageId,
+          recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
+          amount: claim.amount.toString(),
+          tokenAddress,
+        });
+
+        const duration = (Date.now() - startTime) / 1000;
+
+        // Record metrics
+        this.metricsService.incrementOnchainOperation(
+          'disburse',
+          adapterType,
+          onchainResult.status,
+        );
+        this.metricsService.recordOnchainDuration(
+          'disburse',
+          adapterType,
+          duration,
+        );
+
+        this.logger.log(`On-chain disbursement completed for claim ${id}`, {
+          claimId: id,
+          transactionHash: onchainResult.transactionHash,
+          status: onchainResult.status,
+          duration,
+        });
+
+        // Audit log for on-chain operation
+        await this.auditService.record({
+          actorId: 'system',
+          entity: 'onchain',
+          entityId: id,
+          action: 'disburse',
+          metadata: {
+            transactionHash: onchainResult.transactionHash,
+            status: onchainResult.status,
+            amountDisbursed: onchainResult.amountDisbursed,
+            adapter: adapterType,
+          },
+        });
+      } catch (error) {
+        const duration = (Date.now() - startTime) / 1000;
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+
+        this.logger.error(
+          `On-chain disbursement failed for claim ${id}: ${errorMessage}`,
+          error instanceof Error ? error.stack : undefined,
+          'ClaimsService',
+          { claimId: id, adapter: adapterType },
+        );
+
+        // Record failed metric
+        this.metricsService.incrementOnchainOperation(
+          'disburse',
+          adapterType,
+          'failed',
+        );
+        this.metricsService.recordOnchainDuration(
+          'disburse',
+          adapterType,
+          duration,
+        );
+
+        // Audit log for failed operation
+        await this.auditService.record({
+          actorId: 'system',
+          entity: 'onchain',
+          entityId: id,
+          action: 'disburse_failed',
+          metadata: {
+            error: errorMessage,
+            adapter: adapterType,
+          },
+        });
+
+        // Don't throw - allow disbursement to proceed even if on-chain call fails
+        // This is configurable behavior for resilience
+      }
+    }
+
+    // Proceed with status transition
+    return this.transitionStatus(
+      id,
+      ClaimStatus.approved,
+      ClaimStatus.disbursed,
+      onchainResult,
+    );
+  }
+
+  /**
+   * Generate a deterministic mock package ID from claim ID
+   * In production, this would come from the createClaim on-chain call
+   */
+  private generateMockPackageId(claimId: string): string {
+    // Simple hash-based approach for mock
+    const hash = createHash('sha256')
+      .update(`package-${claimId}`)
+      .digest('hex');
+    return BigInt('0x' + hash.substring(0, 16)).toString();
+  }
+
+  /**
+   * Get token address for a claim
+   * In production, this should be retrieved from the claim record
+   * For now, uses a default or derives from campaign metadata
+   */
+  private getTokenAddressForClaim(
+    claim: {
+      metadata?: any;
+      campaign?: { metadata?: any } | null;
+    } & Record<string, any>,
+  ): string {
+    // Default USDC on Stellar testnet
+    // In production, this should come from the claim record or campaign config
+    const defaultTokenAddress =
+      'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
+
+    // If claim has tokenAddress in metadata, use it
+
+    const claimMetadata = claim.metadata as Record<string, unknown> | undefined;
+    if (claimMetadata?.tokenAddress) {
+      return claimMetadata.tokenAddress as string;
+    }
+
+    // If campaign has tokenAddress in metadata, use it
+
+    const campaignMetadata = claim.campaign?.metadata as
+      | Record<string, unknown>
+      | undefined;
+    if (campaignMetadata?.tokenAddress) {
+      return campaignMetadata.tokenAddress as string;
+    }
+
+    return defaultTokenAddress;
+  }
+
+  async archive(id: string) {
+    return this.transitionStatus(
+      id,
+      ClaimStatus.disbursed,
+      ClaimStatus.archived,
+    );
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async handleExpiredClaimsCron(): Promise<void> {
+    try {
+      await this.cleanupExpiredClaims();
+    } catch (error) {
+      this.logger.error(
+        'Failed to clean up expired claims',
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
+  async cleanupExpiredClaims(now: Date = new Date()): Promise<{
+    processed: number;
+    archived: number;
+  }> {
+    const expiredClaims = await this.prisma.claim.findMany({
+      where: {
+        deletedAt: null,
+        status: {
+          in: [ClaimStatus.requested, ClaimStatus.verified],
+        },
+        expiresAt: {
+          lt: now,
+        },
+      },
+    });
+
+    if (expiredClaims.length === 0) {
+      this.logger.log('No expired claims found for cleanup');
+      return { processed: 0, archived: 0 };
+    }
+
+    let archived = 0;
+
+    for (const claim of expiredClaims) {
+      const onchainMetadata = await this.cleanupExpiredClaimOnchain(claim.id);
+
+      await this.prisma.claim.update({
+        where: { id: claim.id },
+        data: { status: ClaimStatus.archived },
+      });
+
+      await this.auditService.record({
+        actorId: 'system',
+        entity: 'claim',
+        entityId: claim.id,
+        action: 'expired_cleanup',
+        metadata: {
+          previousStatus: claim.status,
+          nextStatus: ClaimStatus.archived,
+          expiresAt: claim.expiresAt?.toISOString() ?? null,
+          onchain: onchainMetadata,
+        },
+      });
+
+      archived += 1;
+    }
+
+    this.logger.log(
+      `Expired claim cleanup completed: archived ${archived} claim(s)`,
+    );
+
+    return {
+      processed: expiredClaims.length,
+      archived,
+    };
+  }
+
+  private async cleanupExpiredClaimOnchain(claimId: string): Promise<{
+    attempted: boolean;
+    revoked?: string;
+    refunded?: string;
+    skippedReason?: string;
+  }> {
+    if (!this.onchainEnabled || !this.onchainAdapter) {
+      return {
+        attempted: false,
+        skippedReason: 'onchain_disabled',
+      };
+    }
+
+    const cleanupAdapter = this
+      .onchainAdapter as ExpirationCleanupCapableAdapter;
+
+    if (!cleanupAdapter.revokeAidPackage || !cleanupAdapter.refundAidPackage) {
+      return {
+        attempted: false,
+        skippedReason: 'adapter_missing_cleanup_methods',
+      };
+    }
+
+    const packageId = this.generateMockPackageId(claimId);
+
+    const revokeResult = await cleanupAdapter.revokeAidPackage({
+      packageId,
+      operatorAddress: 'system',
+    });
+    const refundResult = await cleanupAdapter.refundAidPackage({
+      packageId,
+      operatorAddress: 'system',
+    });
+
+    return {
+      attempted: true,
+      revoked: revokeResult.transactionHash,
+      refunded: refundResult.transactionHash,
+    };
+  }
+
+  private async transitionStatus(
+    id: string,
+    fromStatus: ClaimStatus,
+    toStatus: ClaimStatus,
+    onchainResult?: DisburseResult | null,
+  ) {
+    const claim = await this.prisma.claim.findUnique({ where: { id } });
+    if (!claim) {
+      throw new NotFoundException('Claim not found');
+    }
+    if (claim.status !== fromStatus) {
+      throw new BadRequestException(
+        `Cannot transition from ${claim.status} to ${toStatus}`,
+      );
+    }
+
+    // For disburse, check budget? But for now, skip as per requirements.
+
+    const updatedClaim = await this.prisma.$transaction(async tx => {
+      const updated = await tx.claim.update({
+        where: { id },
+        data: { status: toStatus },
+        include: { campaign: true },
+      });
+
+      // Audit log for status change
+      void this.auditLog('claim', id, `status_changed_to_${toStatus}`, {
+        from: fromStatus,
+        to: toStatus,
+        onchainResult: onchainResult
+          ? {
+              transactionHash: onchainResult.transactionHash,
+              status: onchainResult.status,
+            }
+          : undefined,
+      });
+
+      return updated;
+    });
+
+    return updatedClaim;
+  }
+
+  private auditLog(
+    entity: string,
+    entityId: string,
+    action: string,
+    metadata?: Record<string, unknown>,
+  ) {
+    // Stub: In production, this would log to audit table or external system
+    console.log(`Audit: ${entity} ${entityId} ${action}`, metadata);
+  }
+
+  /**
+   * Generate a receipt DTO for a claim
+   */
+  async getReceipt(id: string): Promise<ClaimReceiptDto> {
+    const claim = await this.findOne(id);
+
+    if (!claim) {
+      throw new NotFoundException('Claim not found');
+    }
+
+    const tokenAddress = this.getTokenAddressForClaim(claim);
+
+    return {
+      claimId: claim.id,
+      packageId: claim.campaignId,
+      status: claim.status,
+      amount: claim.amount,
+      timestamp: claim.createdAt.toISOString(),
+      tokenAddress,
+      recipientRef: claim.recipientRef,
+    };
+  }
+
+  /**
+   * Generate and share a claim receipt
+   * Supports email, SMS, and inline sharing
+   */
+  async shareReceipt(
+    id: string,
+    shareDto: SendReceiptShareDto,
+  ): Promise<{
+    receiptData: string;
+    mimeType: string;
+    filename: string;
+    text: string;
+  }> {
+    const receipt = await this.getReceipt(id);
+
+    // Generate receipt text
+    const receiptText = this.generateReceiptText(receipt);
+
+    // Generate filename
+    const filename = `claim-receipt-${receipt.claimId}.txt`;
+
+    // Base64 encode the receipt text
+    const receiptData = Buffer.from(receiptText).toString('base64');
+
+    // Handle different sharing channels
+    if (shareDto.channel === 'email' && shareDto.emailAddresses?.length) {
+      this.sendReceiptViaEmail(
+        shareDto.emailAddresses,
+        receipt,
+        receiptText,
+        shareDto.message ?? undefined,
+      );
+    } else if (shareDto.channel === 'sms' && shareDto.phoneNumbers?.length) {
+      this.sendReceiptViaSMS(
+        shareDto.phoneNumbers,
+        receipt,
+        shareDto.message ?? undefined,
+      );
+    }
+    // Audit log the share action
+    void this.auditLog('claim', id, 'receipt_shared', {
+      channel: shareDto.channel,
+      emailCount: shareDto.emailAddresses?.length || 0,
+      smsCount: shareDto.phoneNumbers?.length || 0,
+    });
+
+    return {
+      receiptData,
+      mimeType: 'text/plain',
+      filename,
+      text: receiptText,
+    };
+  }
+
+  /**
+   * Generate formatted receipt text
+   */
+  private generateReceiptText(receipt: ClaimReceiptDto): string {
+    const lines = [
+      '═══════════════════════════════════════',
+      '         CLAIM RECEIPT',
+      '═══════════════════════════════════════',
+      '',
+      `Claim ID:        ${receipt.claimId}`,
+      `Package ID:      ${receipt.packageId}`,
+      `Status:          ${receipt.status.toUpperCase()}`,
+      `Amount:          ${receipt.amount} tokens`,
+      `Date:            ${receipt.timestamp}`,
+    ];
+
+    if (receipt.tokenAddress) {
+      lines.push(`Token Address:   ${receipt.tokenAddress}`);
+    }
+
+    if (receipt.recipientRef) {
+      lines.push(`Recipient:       ${receipt.recipientRef}`);
+    }
+
+    lines.push('');
+    lines.push('═══════════════════════════════════════');
+    lines.push('This is an automated proof of claim');
+    lines.push('completion on the Soter platform.');
+    lines.push('═══════════════════════════════════════');
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Send receipt via email
+   * Stub implementation - replace with actual email service
+   */
+  private sendReceiptViaEmail(
+    emailAddresses: string[],
+    receipt: ClaimReceiptDto,
+    receiptText: string,
+    _message?: string,
+  ): void {
+    this.logger.log(
+      `Sending receipt via email to ${emailAddresses.length} recipient(s)`,
+      {
+        claimId: receipt.claimId,
+        recipients: emailAddresses,
+      },
+    );
+
+    // TODO: Integrate with email service (SendGrid, AWS SES, etc.)
+    // For now, this is a stub that logs the action
+    for (const email of emailAddresses) {
+      this.logger.debug(
+        `[EMAIL STUB] Would send receipt to ${email}`,
+        receiptText.substring(0, 100),
+      );
+    }
+  }
+
+  /**
+   * Send receipt via SMS
+   * Stub implementation - replace with actual SMS service
+   */
+  private sendReceiptViaSMS(
+    phoneNumbers: string[],
+    receipt: ClaimReceiptDto,
+    _message?: string,
+  ): void {
+    this.logger.log(
+      `Sending receipt via SMS to ${phoneNumbers.length} recipient(s)`,
+      {
+        claimId: receipt.claimId,
+        recipients: phoneNumbers,
+      },
+    );
+
+    // TODO: Integrate with SMS service (Twilio, AWS SNS, etc.)
+    // For now, this is a stub that logs the action
+    const smsText = `Claim ${receipt.claimId} - Status: ${receipt.status} - Amount: ${receipt.amount} tokens`;
+    for (const phone of phoneNumbers) {
+      this.logger.debug(`[SMS STUB] Would send to ${phone}: ${smsText}`);
+    }
+  }
+
+  async exportClaims(query: ExportClaimsQueryDto): Promise<{
+    data: Array<{
+      id: string;
+      campaignId: string;
+      campaignName: string;
+      status: string;
+      amount: number;
+      evidenceRef: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+      cancelledAt: Date | null;
+      cancelledBy: string | null;
+      cancelReason: string | null;
+      reissuedFromId: string | null;
+      tokenAddress: string | null;
+    }>;
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(200, Math.max(1, query.limit ?? 50));
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.ClaimWhereInput = {
+      deletedAt: null,
+    };
+
+    if (query.status) where.status = query.status;
+    if (query.campaignId) where.campaignId = query.campaignId;
+
+    if (query.from || query.to) {
+      if (query.from && isNaN(Date.parse(query.from))) {
+        throw new BadRequestException(`Invalid 'from' date: ${query.from}`);
+      }
+      if (query.to && isNaN(Date.parse(query.to))) {
+        throw new BadRequestException(`Invalid 'to' date: ${query.to}`);
+      }
+      where.createdAt = {};
+      if (query.from) where.createdAt.gte = new Date(query.from);
+      if (query.to) where.createdAt.lte = new Date(query.to);
+    }
+
+    // Filter by orgId through campaign relation
+    if (query.orgId) {
+      where.campaign = { orgId: query.orgId };
+    }
+
+    // Filter by tokenAddress through claim or campaign metadata
+    // Note: Since tokenAddress is not a direct field, we filter by checking metadata
+    // This is a simplified approach - in production, tokenAddress should be a direct field
+    if (query.tokenAddress) {
+      // Check if either claim or campaign metadata contains the token address
+      where.OR = [
+        {
+          campaign: {
+            metadata: { path: 'tokenAddress', equals: query.tokenAddress },
+          },
+        },
+      ];
+    }
+
+    const [claimsResult, total] = await this.prisma.$transaction([
+      this.prisma.claim.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: { campaign: true },
+      }),
+      this.prisma.claim.count({ where }),
+    ]);
+
+    // Use type assertion to handle Prisma client type limitations
+    const claims = claimsResult as unknown as Array<{
+      id: string;
+      campaignId: string;
+      campaign: {
+        name: string;
+        metadata: unknown;
+      } | null;
+      status: ClaimStatus;
+      amount: number;
+      evidenceRef: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+      deletedAt: Date | null;
+      cancelledAt: Date | null;
+      cancelledBy: string | null;
+      cancelReason: string | null;
+      reissuedFromId: string | null;
+      metadata: unknown;
+    }>;
+
+    const data = claims.map(c => {
+      const claimMetadata = c.metadata as Record<string, unknown> | undefined;
+      const campaignMetadata = c.campaign?.metadata as
+        | Record<string, unknown>
+        | undefined;
+
+      return {
+        id: c.id,
+        campaignId: c.campaignId,
+        campaignName: c.campaign?.name ?? '',
+        status: c.status,
+        amount: c.amount,
+        evidenceRef: c.evidenceRef ?? null,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+        cancelledAt: c.cancelledAt ?? null,
+        cancelledBy: c.cancelledBy ?? null,
+        cancelReason: c.cancelReason ?? null,
+        reissuedFromId: c.reissuedFromId ?? null,
+        // Extract tokenAddress from metadata (keeping it secure - no decryption of recipientRef)
+        tokenAddress: (claimMetadata?.tokenAddress ??
+          campaignMetadata?.tokenAddress ??
+          null) as string | null,
+      };
+    });
+
+    return { data, total, page, limit };
+  }
+
+  buildCsv(
+    rows: Array<{
+      id: string;
+      campaignId: string;
+      campaignName: string;
+      status: string;
+      amount: number;
+      evidenceRef: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+      cancelledAt: Date | null;
+      cancelledBy: string | null;
+      cancelReason: string | null;
+      reissuedFromId: string | null;
+      tokenAddress: string | null;
+    }>,
+  ): string {
+    const escape = (value: string | number | null): string => {
+      const str = String(value ?? '').replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const header =
+      'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress';
+    const lines = rows.map(r =>
+      [
+        escape(r.id),
+        escape(r.campaignId),
+        escape(r.campaignName),
+        escape(r.status),
+        escape(r.amount.toFixed(2)),
+        escape(r.evidenceRef),
+        escape(r.createdAt.toISOString()),
+        escape(r.updatedAt.toISOString()),
+        escape(r.cancelledAt?.toISOString() ?? ''),
+        escape(r.cancelledBy),
+        escape(r.cancelReason),
+        escape(r.reissuedFromId),
+        escape(r.tokenAddress),
+      ].join(','),
+    );
+
+    return [header, ...lines].join('\r\n');
+  }
+}

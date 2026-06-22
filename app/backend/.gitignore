@@ -1,0 +1,75 @@
+# compiled output
+/dist
+/node_modules
+/build
+.jest-cache/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Lockfiles
+yarn.lock
+pnpm-lock.yaml
+pnpm-lock.json
+npm-shrinkwrap.json
+package-json.lock
+
+# OS
+.DS_Store
+
+# Tests
+/coverage
+/.nyc_output
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+.env.development
+
+# temp directory
+.temp
+.tmp
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+.qodo
+
+# Stryker mutation testing
+stryker-tmp/
+.stryker-tmp/
+reports/mutation/
+
+# Keep reports directory but ignore contents
+reports/*
+!reports/.gitkeep

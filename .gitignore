@@ -1,0 +1,152 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Python
+__pycache__/
+*.pyc
+
+# Kiro
+.kiro/
+
+# Compiled output
+dist/
+build/
+
+# Testing
+coverage/
+.jest-cache/
+.nyc_output/
+
+# Production
+build/
+dist/
+
+# Misc
+.DS_Store
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.development
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Expo
+.expo/
+web-build/
+expo-env.d.ts
+
+# TypeScript
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local dumps
+output.txt
+
+# IDE
+.idea/
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+.vscode/
+
+# Lockfiles
+yarn.lock
+pnpm-lock.json
+npm-shrinkwrap.json
+package-json.lock
+
+# OS
+.DS_Store
+
+# Temp
+.temp
+.tmp
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Diagnostic reports
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+.qodo
+
+# Stryker
+stryker-tmp/
+.stryker-tmp/
+reports/mutation/
+
+# Reports
+reports/*
+!reports/.gitkeep
+
+.trae/
+.env.test
+.env
+# ---------------------------------------------------------------------------
+# AI assistant / coding-agent artifacts
+# Keep tool-specific config, history and caches out of the repo so the project
+# does not advertise which AI tooling (if any) was used.
+# ---------------------------------------------------------------------------
+# Anthropic Claude / Claude Code
+.claude/
+.claude.json
+.claude.local.json
+CLAUDE.md
+CLAUDE.local.md
+.anthropic/
+# Model Context Protocol
+.mcp.json
+# Cursor
+.cursor/
+.cursorrules
+.cursorignore
+# GitHub Copilot
+.github/copilot-instructions.md
+.github/instructions/
+.copilot/
+# Aider
+.aider*
+# Continue
+.continue/
+# Codeium / Windsurf
+.codeium/
+.windsurf/
+.windsurfrules
+# Cline / Roo Code
+.clinerules
+.cline/
+.roo/
+.roomodes
+# Tabnine
+.tabnine/
+# Google Gemini CLI
+.gemini/
+GEMINI.md
+# Sourcegraph Cody
+.cody/
+# SpecStory
+.specstory/

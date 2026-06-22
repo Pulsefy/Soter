@@ -1,0 +1,341 @@
+import {
+  BadRequestException,
+  InternalServerErrorException,
+} from '@nestjs/common';
+
+/**
+ * Maps Soroban contract errors to standardized backend error responses
+ * Aligns with the global error handling strategy
+ */
+export class SorobanErrorMapper {
+  /**
+   * Soroban contract error codes from AidEscrow (Rust contract)
+   */
+  private readonly contractErrors: Record<
+    number,
+    { code: number; message: string }
+  > = {
+    1: { code: 400, message: 'Escrow not initialized' },
+    2: { code: 409, message: 'Escrow already initialized' },
+    3: { code: 403, message: 'Not authorized to perform this action' },
+    4: { code: 400, message: 'Invalid amount' },
+    5: { code: 404, message: 'Package not found' },
+    6: { code: 400, message: 'Package is not active' },
+    7: { code: 410, message: 'Package has expired' },
+    8: { code: 400, message: 'Package has not expired' },
+    9: { code: 400, message: 'Insufficient funds in escrow' },
+    10: { code: 409, message: 'Package ID already exists' },
+    11: { code: 400, message: 'Invalid state transition' },
+    12: {
+      code: 400,
+      message: 'Recipients and amounts arrays have different lengths',
+    },
+    13: { code: 400, message: 'Insufficient surplus funds' },
+    14: { code: 503, message: 'Contract is paused' },
+    15: { code: 400, message: 'Claim window has not started' },
+    16: { code: 400, message: 'Invalid claim proof' },
+    17: { code: 400, message: 'Invalid token contract address' },
+    18: { code: 502, message: 'Token transfer failed' },
+  };
+
+  /**
+   * Maps a Soroban error to a backend-compatible error with HTTP status code
+   */
+  mapError(error: any): {
+    statusCode: number;
+    message: string;
+    details?: Record<string, unknown>;
+  } {
+    // Handle RPC/Network errors
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    if (error?.code === 'ECONNREFUSED' || error?.code === 'ENOTFOUND') {
+      return {
+        statusCode: 503,
+        message: 'Blockchain network unreachable',
+        details: {
+          error_type: 'network_error',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          original_error: error?.message,
+        },
+      };
+    }
+
+    // Handle JSON-RPC errors (Soroban RPC Server responses)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    if (error?.response?.data?.error) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
+      const jsonRpcError = error.response.data.error;
+      return this.mapJsonRpcError(jsonRpcError);
+    }
+
+    // Handle Soroban SDK errors with specific error codes
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    if (error?.errorCode !== undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const mapping = this.contractErrors[error.errorCode as number];
+      if (mapping) {
+        return {
+          statusCode: mapping.code,
+          message: mapping.message,
+          details: {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+            error_code: error.errorCode,
+            error_type: 'contract_error',
+          },
+        };
+      }
+    }
+
+    // Handle contract invocation errors
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const message = error?.message as string | undefined;
+    if (
+      message &&
+      (message.includes('NotInitialized') ||
+        message.includes('AlreadyInitialized') ||
+        message.includes('NotAuthorized') ||
+        message.includes('PackageNotFound') ||
+        message.includes('PackageExpired') ||
+        message.includes('ClaimTooEarly') ||
+        message.includes('InvalidProof') ||
+        message.includes('InvalidToken') ||
+        message.includes('TokenTransferFailed'))
+    ) {
+      return this.mapContractErrorMessage(message);
+    }
+
+    // Handle timeout errors
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    if (error?.code === 'ETIMEDOUT' || message?.includes('timeout')) {
+      return {
+        statusCode: 504,
+        message: 'Blockchain operation timed out',
+        details: {
+          error_type: 'timeout',
+          original_error: message,
+        },
+      };
+    }
+
+    // Handle transaction submission errors
+    if (message?.includes('transaction')) {
+      return {
+        statusCode: 400,
+        message: 'Transaction submission failed',
+        details: {
+          error_type: 'transaction_error',
+          original_error: message,
+        },
+      };
+    }
+
+    // Default: Internal server error
+    return {
+      statusCode: 500,
+      message: 'An error occurred while communicating with the blockchain',
+      details: {
+        error_type: 'unknown_error',
+        original_message: message,
+      },
+    };
+  }
+
+  /**
+   * Maps JSON-RPC error responses (from Soroban RPC)
+   */
+  private mapJsonRpcError(jsonRpcError: any): {
+    statusCode: number;
+    message: string;
+    details?: Record<string, unknown>;
+  } {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+    const code = jsonRpcError.code;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const message = (jsonRpcError.message as string) || '';
+
+    if (message.includes('Error(Contract')) {
+      return this.mapContractErrorMessage(message);
+    }
+
+    // JSON-RPC error codes mapping
+    switch (code) {
+      case -32600: // Invalid Request
+      case -32602: // Invalid params
+        return {
+          statusCode: 400,
+          message: 'Invalid request parameters',
+          details: { error_code: code, rpc_message: message },
+        };
+
+      case -32601: // Method not found
+        return {
+          statusCode: 404,
+          message: 'RPC method not available',
+          details: { error_code: code, rpc_message: message },
+        };
+
+      case -32603: // Internal error
+        return {
+          statusCode: 500,
+          message: 'Blockchain RPC internal error',
+          details: { error_code: code as number, rpc_message: message },
+        };
+
+      default:
+        // Check if code is in server error range (-32000 to -32099)
+        if (code >= -32099 && code <= -32000) {
+          return {
+            statusCode: 500,
+            message: 'Blockchain RPC server error',
+            details: { error_code: code as number, rpc_message: message },
+          };
+        }
+        return {
+          statusCode: 500,
+          message: 'Blockchain RPC error',
+          details: { error_code: code as number, rpc_message: message },
+        };
+    }
+  }
+
+  /**
+   * Maps contract error messages (as strings) to HTTP status codes
+   */
+  private mapContractErrorMessage(message: string): {
+    statusCode: number;
+    message: string;
+    details?: Record<string, unknown>;
+  } {
+    const errorMap: Record<string, { code: number; message: string }> = {
+      NotInitialized: { code: 400, message: 'Escrow not initialized' },
+      AlreadyInitialized: { code: 409, message: 'Escrow already initialized' },
+      NotAuthorized: {
+        code: 403,
+        message: 'Not authorized to perform this action',
+      },
+      InvalidAmount: { code: 400, message: 'Invalid amount' },
+      PackageNotFound: { code: 404, message: 'Package not found' },
+      PackageNotActive: { code: 400, message: 'Package is not active' },
+      PackageExpired: { code: 410, message: 'Package has expired' },
+      PackageNotExpired: { code: 400, message: 'Package has not expired' },
+      InsufficientFunds: { code: 400, message: 'Insufficient funds in escrow' },
+      PackageIdExists: { code: 409, message: 'Package ID already exists' },
+      InvalidState: { code: 400, message: 'Invalid state transition' },
+      MismatchedArrays: {
+        code: 400,
+        message: 'Recipients and amounts arrays have different lengths',
+      },
+      InsufficientSurplus: { code: 400, message: 'Insufficient surplus funds' },
+      ContractPaused: { code: 503, message: 'Contract is paused' },
+      ClaimTooEarly: { code: 400, message: 'Claim window has not started' },
+      InvalidProof: { code: 400, message: 'Invalid claim proof' },
+      InvalidToken: { code: 400, message: 'Invalid token contract address' },
+      TokenTransferFailed: { code: 502, message: 'Token transfer failed' },
+    };
+
+    for (const [errorKey, errorInfo] of Object.entries(errorMap)) {
+      if (message.includes(errorKey)) {
+        return {
+          statusCode: errorInfo.code,
+          message: errorInfo.message,
+          details: {
+            error_type: 'contract_error',
+            error_name: errorKey,
+          },
+        };
+      }
+    }
+
+    for (const [errorCode, errorInfo] of Object.entries(this.contractErrors)) {
+      if (new RegExp(`#${errorCode}(?!\\d)`).test(message)) {
+        return {
+          statusCode: errorInfo.code,
+          message: errorInfo.message,
+          details: {
+            error_type: 'contract_error',
+            error_code: Number(errorCode),
+          },
+        };
+      }
+    }
+
+    // Default mapping
+    return {
+      statusCode: 500,
+      message: 'Contract error occurred',
+      details: {
+        error_type: 'contract_error',
+        original_message: message,
+      },
+    };
+  }
+
+  /**
+   * Throws an appropriate NestJS exception based on the mapped error
+   */
+  throwMappedError(error: unknown): never {
+    const mapped = this.mapError(error);
+
+    if (mapped.statusCode === 400) {
+      throw new BadRequestException({
+        code: mapped.statusCode,
+        message: mapped.message,
+        details: mapped.details,
+      });
+    }
+
+    if (mapped.statusCode === 403) {
+      throw new BadRequestException({
+        code: 403,
+        message: mapped.message,
+        details: mapped.details,
+      });
+    }
+
+    if (mapped.statusCode === 404) {
+      throw new BadRequestException({
+        code: 404,
+        message: mapped.message,
+        details: mapped.details,
+      });
+    }
+
+    if (mapped.statusCode === 409) {
+      throw new BadRequestException({
+        code: 409,
+        message: mapped.message,
+        details: mapped.details,
+      });
+    }
+
+    if (mapped.statusCode === 410) {
+      throw new BadRequestException({
+        code: 410,
+        message: mapped.message,
+        details: mapped.details,
+      });
+    }
+
+    if (mapped.statusCode === 503) {
+      throw new InternalServerErrorException({
+        code: 503,
+        message: mapped.message,
+        details: mapped.details,
+      });
+    }
+
+    if (mapped.statusCode === 502) {
+      throw new InternalServerErrorException({
+        code: 502,
+        message: mapped.message,
+        details: mapped.details,
+      });
+    }
+
+    throw new InternalServerErrorException({
+      code: mapped.statusCode,
+      message: mapped.message,
+      details: mapped.details,
+    });
+  }
+}

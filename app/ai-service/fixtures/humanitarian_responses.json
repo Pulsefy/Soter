@@ -1,0 +1,32 @@
+[
+  {
+    "verdict": "credible",
+    "confidence": 0.74,
+    "summary": "The claim is well-supported by the provided evidence and aligns with humanitarian distribution records."
+  },
+  {
+    "verdict": "credible",
+    "confidence": 0.68,
+    "summary": "Claim is consistent with field reports and monitoring data from the region."
+  },
+  {
+    "verdict": "inconclusive",
+    "confidence": 0.45,
+    "summary": "Insufficient evidence to confirm or refute the claim. Additional documentation is required."
+  },
+  {
+    "verdict": "not_credible",
+    "confidence": 0.72,
+    "summary": "Claim contradicts verified distribution records and witness statements."
+  },
+  {
+    "verdict": "credible",
+    "confidence": 0.91,
+    "summary": "Strong corroborating evidence from multiple independent sources supports this claim."
+  },
+  {
+    "verdict": "inconclusive",
+    "confidence": 0.30,
+    "summary": "Limited evidence available. Further investigation and site visits are recommended."
+  }
+]

@@ -1,0 +1,20 @@
+[package]
+name = "aid_escrow"
+version = "0.1.0"
+edition = "2021"
+description = "Soroban contract for aid package escrow functionality"
+license = "MIT OR Apache-2.0"
+authors = ["Soter Team"]
+repository = "https://github.com/soter/aid-escrow"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+ed25519-dalek = "2.2"
+serde_json = "1.0"
+rand = "0.8"

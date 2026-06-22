@@ -1,0 +1,174 @@
+import React from 'react';
+import { Text } from 'react-native';
+import { act, render, waitFor } from '@testing-library/react-native';
+import * as Notifications from 'expo-notifications';
+import * as notificationService from '../services/notificationService';
+import {
+  NotificationProvider,
+  useNotification,
+} from '../contexts/NotificationContext';
+import { deepLinkToNavParams } from '../navigation/types';
+
+type NotificationResponse = {
+  notification: {
+    request: {
+      content: {
+        data: Record<string, unknown>;
+      };
+    };
+  };
+};
+
+jest.mock('expo-notifications', () => ({
+  setNotificationHandler: jest.fn(),
+  getLastNotificationResponseAsync: jest.fn(),
+  addNotificationResponseReceivedListener: jest.fn(() => ({
+    remove: jest.fn(),
+  })),
+  addNotificationReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+}));
+
+jest.mock('../services/notificationService', () => {
+  const actual = jest.requireActual('../services/notificationService');
+  return {
+    __esModule: true,
+    ...actual,
+    requestNotificationPermission: jest.fn(),
+    getExpoPushToken: jest.fn(),
+    configureAndroidChannel: jest.fn(),
+  };
+});
+
+const MockConsumer = () => {
+  const { pendingDeepLink } = useNotification();
+  return (
+    <Text testID="pending-deep-link">
+      {pendingDeepLink
+        ? `${pendingDeepLink.screen}:${JSON.stringify(pendingDeepLink.params)}`
+        : 'none'}
+    </Text>
+  );
+};
+
+describe('notification deep link routing', () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+    (
+      Notifications.addNotificationResponseReceivedListener as jest.Mock
+    ).mockImplementation(() => ({ remove: jest.fn() }));
+    (
+      Notifications.addNotificationReceivedListener as jest.Mock
+    ).mockImplementation(() => ({ remove: jest.fn() }));
+  });
+
+  it('maps claim receipt and package detail targets to navigation params', () => {
+    expect(
+      deepLinkToNavParams({
+        screen: 'ClaimReceipt',
+        params: { claimId: 'claim-999' },
+      }),
+    ).toEqual({ screen: 'ClaimReceipt', params: { claimId: 'claim-999' } });
+
+    expect(
+      deepLinkToNavParams({
+        screen: 'AidDetails',
+        params: { aidId: 'aid-888' },
+      }),
+    ).toEqual({ screen: 'AidDetails', params: { aidId: 'aid-888' } });
+  });
+
+  it('handles a cold-start notification tap and exposes a pending deep link', async () => {
+    const getLastNotificationResponseAsync =
+      Notifications.getLastNotificationResponseAsync as jest.Mock;
+    const requestNotificationPermission =
+      notificationService.requestNotificationPermission as jest.Mock;
+    const getExpoPushToken = notificationService.getExpoPushToken as jest.Mock;
+    const configureAndroidChannel =
+      notificationService.configureAndroidChannel as jest.Mock;
+
+    getLastNotificationResponseAsync.mockResolvedValue({
+      notification: {
+        request: {
+          content: {
+            data: {
+              target: { screen: 'AidDetails', params: { aidId: 'aid-123' } },
+            },
+          },
+        },
+      },
+    } as NotificationResponse);
+    requestNotificationPermission.mockResolvedValue(true);
+    getExpoPushToken.mockResolvedValue('expo-token');
+    configureAndroidChannel.mockResolvedValue(undefined);
+
+    const { getByTestId } = render(
+      <NotificationProvider>
+        <MockConsumer />
+      </NotificationProvider>,
+    );
+
+    await waitFor(() => {
+      expect(getByTestId('pending-deep-link').props.children).toContain(
+        'AidDetails',
+      );
+      expect(getByTestId('pending-deep-link').props.children).toContain(
+        'aid-123',
+      );
+    });
+  });
+
+  it('handles a background notification tap and exposes a pending deep link', async () => {
+    const addNotificationResponseReceivedListener =
+      Notifications.addNotificationResponseReceivedListener as jest.Mock;
+    const requestNotificationPermission =
+      notificationService.requestNotificationPermission as jest.Mock;
+    const getExpoPushToken = notificationService.getExpoPushToken as jest.Mock;
+    const configureAndroidChannel =
+      notificationService.configureAndroidChannel as jest.Mock;
+
+    let responseHandler: (response: NotificationResponse) => void = () => {};
+    addNotificationResponseReceivedListener.mockImplementation(handler => {
+      responseHandler = handler;
+      return { remove: jest.fn() };
+    });
+
+    (
+      Notifications.getLastNotificationResponseAsync as jest.Mock
+    ).mockResolvedValue(null);
+    requestNotificationPermission.mockResolvedValue(true);
+    getExpoPushToken.mockResolvedValue('expo-token');
+    configureAndroidChannel.mockResolvedValue(undefined);
+
+    const { getByTestId } = render(
+      <NotificationProvider>
+        <MockConsumer />
+      </NotificationProvider>,
+    );
+
+    await act(async () => {
+      responseHandler({
+        notification: {
+          request: {
+            content: {
+              data: {
+                target: {
+                  screen: 'ClaimReceipt',
+                  params: { claimId: 'claim-456' },
+                },
+              },
+            },
+          },
+        },
+      } as NotificationResponse);
+    });
+
+    await waitFor(() => {
+      expect(getByTestId('pending-deep-link').props.children).toContain(
+        'ClaimReceipt',
+      );
+      expect(getByTestId('pending-deep-link').props.children).toContain(
+        'claim-456',
+      );
+    });
+  });
+});

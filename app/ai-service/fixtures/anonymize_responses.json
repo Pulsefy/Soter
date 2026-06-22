@@ -1,0 +1,108 @@
+[
+  {
+    "original_length": 120,
+    "anonymized_text": "[RECIPIENT_NAME] reported that [LOCATION] received aid on [EVENT_DATE]. The distribution was coordinated by the local team.",
+    "pii_summary": {
+      "names": 1,
+      "locations": 1,
+      "dates": 1,
+      "emails": 0,
+      "phones": 0,
+      "ids": 0,
+      "total": 3
+    },
+    "token_counts": {
+      "[RECIPIENT_NAME]": 1,
+      "[LOCATION]": 1,
+      "[EVENT_DATE]": 1
+    }
+  },
+  {
+    "original_length": 85,
+    "anonymized_text": "Application for aid submitted by [RECIPIENT_NAME] from [LOCATION]. Contact: [PHONE_NUMBER].",
+    "pii_summary": {
+      "names": 1,
+      "locations": 1,
+      "dates": 0,
+      "emails": 0,
+      "phones": 1,
+      "ids": 0,
+      "total": 3
+    },
+    "token_counts": {
+      "[RECIPIENT_NAME]": 1,
+      "[LOCATION]": 1,
+      "[PHONE_NUMBER]": 1
+    }
+  },
+  {
+    "original_length": 200,
+    "anonymized_text": "Verification report for [RECIPIENT_NAME]. Identity document [ID_NUMBER] verified at [LOCATION] on [EVENT_DATE]. Email [EMAIL_ADDRESS] confirmed.",
+    "pii_summary": {
+      "names": 1,
+      "locations": 1,
+      "dates": 1,
+      "emails": 1,
+      "phones": 0,
+      "ids": 1,
+      "total": 5
+    },
+    "token_counts": {
+      "[RECIPIENT_NAME]": 1,
+      "[LOCATION]": 1,
+      "[EVENT_DATE]": 1,
+      "[EMAIL_ADDRESS]": 1,
+      "[ID_NUMBER]": 1
+    }
+  },
+  {
+    "original_length": 60,
+    "anonymized_text": "Camp distribution complete. All households received their supplies.",
+    "pii_summary": {
+      "names": 0,
+      "locations": 0,
+      "dates": 0,
+      "emails": 0,
+      "phones": 0,
+      "ids": 0,
+      "total": 0
+    },
+    "token_counts": {}
+  },
+  {
+    "original_length": 150,
+    "anonymized_text": "Refugee [RECIPIENT_NAME] from [LOCATION] confirmed receipt of aid package. Interview conducted on [EVENT_DATE] by field officer.",
+    "pii_summary": {
+      "names": 1,
+      "locations": 1,
+      "dates": 1,
+      "emails": 0,
+      "phones": 0,
+      "ids": 0,
+      "total": 3
+    },
+    "token_counts": {
+      "[RECIPIENT_NAME]": 1,
+      "[LOCATION]": 1,
+      "[EVENT_DATE]": 1
+    }
+  },
+  {
+    "original_length": 95,
+    "anonymized_text": "Medical report for [RECIPIENT_NAME] (DOB: [EVENT_DATE]). Patient treated at [LOCATION] clinic.",
+    "pii_summary": {
+      "names": 1,
+      "locations": 1,
+      "dates": 1,
+      "emails": 0,
+      "phones": 0,
+      "ids": 0,
+      "total": 3
+    },
+    "token_counts": {
+      "[RECIPIENT_NAME]": 1,
+      "[LOCATION]": 1,
+      "[EVENT_DATE]": 1
+    }
+  }
+]
