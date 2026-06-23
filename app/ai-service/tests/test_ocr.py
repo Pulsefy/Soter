@@ -90,7 +90,7 @@ class TestOCRService:
                 "conf": [90, 92, 91, 88, 95],
             }
 
-        monkeypatch.setattr(self.ocr, "_run_tesseract", fake_run_tesseract)
+        monkeypatch.setattr(self.ocr.provider.__class__, "_run_tesseract", lambda _self, image: fake_run_tesseract(image))
 
         img = Image.new("RGB", (200, 100), color="white")
         result = self.ocr.process_image(img)
