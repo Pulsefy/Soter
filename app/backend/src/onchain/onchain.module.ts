@@ -14,6 +14,8 @@ import { JobsModule } from '../jobs/jobs.module';
 import { LoggerModule } from '../logger/logger.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
 
+import { FixtureOnchainAdapter } from './onchain.adapter.fixture';
+
 /**
  * Factory function to create the appropriate adapter based on configuration
  */
@@ -28,9 +30,11 @@ export const createOnchainAdapter = (
       return new MockOnchainAdapter();
     case 'soroban':
       return new SorobanAdapter(configService);
+    case 'fixture':
+      return new FixtureOnchainAdapter();
     default:
       throw new Error(
-        `Unknown ONCHAIN_ADAPTER: ${adapterType}. Supported values: mock, soroban`,
+        `Unknown ONCHAIN_ADAPTER: ${adapterType}. Supported values: mock, soroban, fixture`,
       );
   }
 };
@@ -63,6 +67,7 @@ const onchainAdapterProvider: Provider = {
   providers: [
     MockOnchainAdapter,
     SorobanAdapter,
+    FixtureOnchainAdapter,
     onchainAdapterProvider,
     OnchainProcessor,
     OnchainService,

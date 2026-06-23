@@ -1,0 +1,11 @@
+{
+  "default": {
+    "transactionHash": "FIXTURE000000000000000000000000000000000000000000000DISBURSE001",
+    "timestamp": "2024-01-15T12:00:00.000Z",
+    "status": "success",
+    "amountDisbursed": "1000000000",
+    "metadata": {
+      "adapter": "fixture"
+    }
+  }
+}
