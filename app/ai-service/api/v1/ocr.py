@@ -7,9 +7,9 @@ single place and is referenced by both the /v1 and the legacy /ai mounts.
 
 import io
 import time
-from typing import Annotated
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 import metrics
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -38,6 +38,7 @@ ocr_service = OCRService()
 async def process_ocr(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
+    anchor_metadata: Annotated[Optional[str], Form(description="JSON encoded AnchorMetadata")] = None,
 ) -> OCRResponse:
     """Extract text fields from an uploaded document image."""
     start_time = time.time()
@@ -88,6 +89,14 @@ async def process_ocr(
 
         processing_time_ms = int((time.time() - start_time) * 1000)
 
+        parsed_metadata = None
+        if anchor_metadata:
+            try:
+                from schemas.common import AnchorMetadata
+                parsed_metadata = AnchorMetadata.model_validate_json(anchor_metadata)
+            except Exception:
+                pass
+
         return OCRResponse(
             success=True,
             data=OCRData(
@@ -99,6 +108,7 @@ async def process_ocr(
                 processing_time_ms=processing_time_ms,
             ),
             processing_time_ms=processing_time_ms,
+            anchor_metadata=parsed_metadata,
         )
 
     except HTTPException:
@@ -112,4 +122,5 @@ async def process_ocr(
                 "message": str(e),
             },
             processing_time_ms=processing_time_ms,
+            anchor_metadata=None, # Cannot easily re-parse here without duplicating, so omit or ignore
         )
