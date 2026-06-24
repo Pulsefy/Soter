@@ -1,6 +1,7 @@
 import { Module, Provider } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { ScheduleModule } from '@nestjs/schedule';
 import { OnchainAdapter, ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
 export { ONCHAIN_ADAPTER_TOKEN };
 import { MockOnchainAdapter } from './onchain.adapter.mock';
@@ -10,6 +11,10 @@ import { OnchainService } from './onchain.service';
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { LedgerAdminController } from './ledger-admin.controller';
+import { SorobanTransactionService } from './soroban-transaction.service';
+import { SorobanTransactionProcessor } from './soroban-transaction.processor';
+import { SorobanTransactionScheduler } from './soroban-transaction.scheduler';
+import { SorobanTransactionController } from './soroban-transaction.controller';
 import { JobsModule } from '../jobs/jobs.module';
 import { LoggerModule } from '../logger/logger.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
@@ -44,6 +49,7 @@ const onchainAdapterProvider: Provider = {
 @Module({
   imports: [
     ConfigModule,
+    ScheduleModule,
     BullModule.registerQueueAsync({
       name: 'onchain',
       imports: [ConfigModule],
@@ -55,11 +61,31 @@ const onchainAdapterProvider: Provider = {
       }),
       inject: [ConfigService],
     }),
+    BullModule.registerQueueAsync({
+      name: 'soroban-transactions',
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get<string>('REDIS_HOST') || 'localhost',
+          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+        },
+        defaultJobOptions: {
+          removeOnComplete: 100,
+          removeOnFail: 50,
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 2000,
+          },
+        },
+      }),
+      inject: [ConfigService],
+    }),
     JobsModule,
     LoggerModule,
     MetricsModule,
   ],
-  controllers: [LedgerAdminController],
+  controllers: [LedgerAdminController, SorobanTransactionController],
   providers: [
     MockOnchainAdapter,
     SorobanAdapter,
@@ -68,12 +94,17 @@ const onchainAdapterProvider: Provider = {
     OnchainService,
     LedgerBackfillService,
     LedgerReconciliationService,
+    SorobanTransactionService,
+    SorobanTransactionProcessor,
+    SorobanTransactionScheduler,
   ],
   exports: [
     ONCHAIN_ADAPTER_TOKEN,
     OnchainService,
     LedgerBackfillService,
     LedgerReconciliationService,
+    SorobanTransactionService,
+    SorobanTransactionScheduler,
   ],
 })
 export class OnchainModule {}

@@ -448,4 +448,93 @@ export class ClaimsController {
 
     return csv;
   }
+
+  // ---------------------------------------------------------------------------
+  // Soroban Transaction Lifecycle
+  // ---------------------------------------------------------------------------
+
+  @Get(':id/transactions')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Get Soroban transaction status for a claim',
+    description: 'Retrieves all Soroban transactions and their lifecycle status for a specific claim.',
+  })
+  @ApiOkResponse({
+    description: 'Soroban transaction status retrieved successfully.',
+    schema: {
+      type: 'object',
+      properties: {
+        claimId: { type: 'string' },
+        transactions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              operation: { type: 'string' },
+              status: { type: 'string' },
+              txHash: { type: 'string', nullable: true },
+              attemptCount: { type: 'number' },
+              maxAttempts: { type: 'number' },
+              lastError: { type: 'string', nullable: true },
+              errorType: { type: 'string', nullable: true },
+              isRetryable: { type: 'boolean' },
+              nextRetryAt: { type: 'string', format: 'date-time', nullable: true },
+              createdAt: { type: 'string', format: 'date-time' },
+              submittedAt: { type: 'string', format: 'date-time', nullable: true },
+              confirmedAt: { type: 'string', format: 'date-time', nullable: true },
+              failedAt: { type: 'string', format: 'date-time', nullable: true },
+              correlationId: { type: 'string', nullable: true },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - operator role required.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Claim not found.',
+  })
+  getTransactionStatus(@Param('id') id: string) {
+    return this.claimsService.getClaimTransactionStatus(id);
+  }
+
+  @Post(':claimId/transactions/:transactionId/retry')
+  @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'Retry a failed Soroban transaction',
+    description: 'Manually retry a failed Soroban transaction for a specific claim. Supports force retry to bypass normal retry limits.',
+  })
+  @ApiOkResponse({
+    description: 'Transaction retry initiated successfully.',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'Transaction cannot be retried or does not belong to claim.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - admin role required.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Claim or transaction not found.',
+  })
+  retryTransaction(
+    @Param('claimId') claimId: string,
+    @Param('transactionId') transactionId: string,
+    @Body() body: { forceRetry?: boolean } = {},
+  ) {
+    return this.claimsService.retryClaimTransaction(
+      claimId,
+      transactionId,
+      body.forceRetry || false,
+    );
+  }
 }

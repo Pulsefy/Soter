@@ -13,7 +13,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { ClaimReceiptDto, SendReceiptShareDto } from './dto/claim-receipt.dto';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
-import { ClaimStatus, Prisma } from '@prisma/client';
+import { ClaimStatus, Prisma, SorobanOperationType } from '@prisma/client';
 import {
   OnchainAdapter,
   DisburseResult,
@@ -24,6 +24,8 @@ import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { BudgetService } from '../common/budget/budget.service';
+import { SorobanTransactionService } from '../onchain/soroban-transaction.service';
+import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
 
 type ExpirationCleanupCapableAdapter = OnchainAdapter & {
   revokeAidPackage?: (params: {
@@ -61,6 +63,8 @@ export class ClaimsService {
     private readonly auditService: AuditService,
     private readonly encryptionService: EncryptionService,
     private readonly budgetService: BudgetService,
+    private readonly sorobanTransactionService: SorobanTransactionService,
+    private readonly sorobanTransactionScheduler: SorobanTransactionScheduler,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
@@ -179,45 +183,128 @@ export class ClaimsService {
       );
     }
 
-    // Call on-chain adapter if enabled
-    let onchainResult: DisburseResult | null = null;
+    // Create Soroban transaction record for tracking
+    let sorobanTransaction;
     if (this.onchainEnabled && this.onchainAdapter) {
-      const startTime = Date.now();
-      const adapterType =
-        this.configService.get<string>('ONCHAIN_ADAPTER')?.toLowerCase() ||
-        'mock';
+      const packageId = this.generateMockPackageId(id);
+      const tokenAddress = this.getTokenAddressForClaim(claim);
+      const correlationId = `disburse-${id}-${Date.now()}`;
 
-      try {
-        this.logger.log(`Calling on-chain adapter for claim ${id}`, {
-          claimId: id,
-          adapter: adapterType,
-        });
+      // Create transaction record in database
+      sorobanTransaction = await this.sorobanTransactionService.createTransaction({
+        claimId: id,
+        operation: 'disburse_claim',
+        packageId,
+        operatorAddress: 'admin', // In production, get from context
+        recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
+        amount: claim.amount.toString(),
+        tokenAddress,
+        correlationId,
+        metadata: {
+          campaignId: claim.campaignId,
+          claimAmount: claim.amount,
+        },
+        maxAttempts: 5,
+      });
 
-        // Generate a mock package ID for the disburse call
-        // In a real implementation, this would come from createClaim
-        const packageId = this.generateMockPackageId(id);
+      // Schedule for immediate execution
+      await this.sorobanTransactionScheduler.scheduleTransaction(
+        sorobanTransaction.id,
+        { correlationId },
+      );
 
-        // Get tokenAddress from claim metadata or use a default
-        // In production, this should be stored in the claim record
-        const tokenAddress = this.getTokenAddressForClaim(claim);
+      this.logger.log(`Scheduled Soroban transaction for claim disbursement`, {
+        claimId: id,
+        transactionId: sorobanTransaction.id,
+        packageId,
+        correlationId,
+      });
+    }
 
-        onchainResult = await this.onchainAdapter.disburse({
-          claimId: id,
-          packageId,
-          recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
-          amount: claim.amount.toString(),
-          tokenAddress,
-        });
+    // Update claim status immediately (optimistic)
+    // The Soroban transaction will be processed asynchronously
+    const updatedClaim = await this.transitionStatus(
+      id,
+      ClaimStatus.approved,
+      ClaimStatus.disbursed,
+    );
 
-        const duration = (Date.now() - startTime) / 1000;
+    // If onchain is enabled, record the transaction reference
+    if (sorobanTransaction) {
+      // Add metadata to the updated claim about the Soroban transaction
+      await this.prisma.claim.update({
+        where: { id },
+        data: {
+          // Store transaction ID in metadata or a separate field if needed
+          // For now, the relationship is maintained through the transactions relation
+        },
+      });
 
-        // Record metrics
-        this.metricsService.incrementOnchainOperation(
-          'disburse',
-          adapterType,
-          onchainResult.status,
-        );
-        this.metricsService.recordOnchainDuration(
+      this.metricsService.incrementCounter('soroban_disbursement_scheduled', {
+        claimId: id,
+        transactionId: sorobanTransaction.id,
+      });
+    }
+
+    return updatedClaim;
+  }
+
+  /**
+   * Get Soroban transaction status for a claim
+   */
+  async getClaimTransactionStatus(claimId: string) {
+    const transactions = await this.sorobanTransactionService.getClaimTransactions(claimId);
+    
+    return {
+      claimId,
+      transactions: transactions.map(tx => ({
+        id: tx.id,
+        operation: tx.operation,
+        status: tx.status,
+        txHash: tx.txHash,
+        attemptCount: tx.attemptCount,
+        maxAttempts: tx.maxAttempts,
+        lastError: tx.lastError,
+        errorType: tx.errorType,
+        isRetryable: tx.isRetryable,
+        nextRetryAt: tx.nextRetryAt,
+        createdAt: tx.createdAt,
+        submittedAt: tx.submittedAt,
+        confirmedAt: tx.confirmedAt,
+        failedAt: tx.failedAt,
+        correlationId: tx.correlationId,
+      })),
+    };
+  }
+
+  /**
+   * Manually retry a failed Soroban transaction for a claim
+   */
+  async retryClaimTransaction(claimId: string, transactionId: string, forceRetry = false) {
+    // Verify the transaction belongs to this claim
+    const transaction = await this.sorobanTransactionService.getTransactionStatus(transactionId);
+    
+    if (!transaction) {
+      throw new NotFoundException(`Transaction ${transactionId} not found`);
+    }
+
+    if (transaction.claimId !== claimId) {
+      throw new BadRequestException(`Transaction ${transactionId} does not belong to claim ${claimId}`);
+    }
+
+    await this.sorobanTransactionService.retryTransaction({
+      transactionId,
+      forceRetry,
+    });
+
+    this.logger.log(`Manual retry initiated for transaction ${transactionId}`, {
+      claimId,
+      transactionId,
+      forceRetry,
+    });
+
+    return { success: true, message: 'Transaction retry initiated' };
+  }
           'disburse',
           adapterType,
           duration,
