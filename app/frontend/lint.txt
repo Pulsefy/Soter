@@ -1,0 +1,174 @@
+﻿
+> soter@0.1.0 lint
+> eslint
+
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\app\[locale]\campaigns\page.tsx
+    9:29   warning  'useCampaignActions' is defined but never used          @typescript-eslint/no-unused-vars
+   18:7    warning  'statusStyles' is assigned a value but never used       @typescript-eslint/no-unused-vars
+   56:12   warning  'updateParam' is defined but never used                 @typescript-eslint/no-unused-vars
+   63:9    warning  'handleApplyPreset' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  304:180  error    Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\app\[locale]\claim-receipt\page.tsx
+  19:7  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\app\[locale]\claim-receipt\page.tsx:19:7
+  17 |   useEffect(() => {
+  18 |     if (!claimId) {
+> 19 |       setError('Claim ID not provided');
+     |       ^^^^^^^^ Avoid calling setState() directly within an effect
+  20 |       setLoading(false);
+  21 |       return;
+  22 |     }  react-hooks/set-state-in-effect
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\app\[locale]\demo-checklist\page.tsx
+  148:7   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\app\[locale]\demo-checklist\page.tsx:148:7
+  146 |       router.replace('/');
+  147 |     } else {
+> 148 |       setAllowed(true);
+      |       ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  149 |     }
+  150 |     setChecked(true);
+  151 |   }, [router]);                                                                        react-hooks/set-state-in-effect
+  161:19  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\app\[locale]\demo-checklist\page.tsx:161:19
+  159 |     try {
+  160 |       const stored = localStorage.getItem(STORAGE_KEY);
+> 161 |       if (stored) setCheckedSteps(JSON.parse(stored));
+      |                   ^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  162 |     } catch {
+  163 |       /* ignore */
+  164 |     }  react-hooks/set-state-in-effect
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\app\layout.tsx
+   5:10  warning  'notFound' is defined but never used  @typescript-eslint/no-unused-vars
+  14:10  warning  'locales' is defined but never used   @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\components\ActivityCenter.tsx
+  27:11  warning  'formatDateTime' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  32:40  error    Unexpected any. Specify a different type             @typescript-eslint/no-explicit-any
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\components\ClaimReceipt.tsx
+  32:11  warning  'theme' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\components\EvidenceArtifactViewer.tsx
+   10:3   warning  'PIIDetectionResult' is defined but never used                                                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+  225:13  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\components\Navbar.tsx
+  45:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\components\Navbar.tsx:45:5
+  43 |
+  44 |   useEffect(() => {
+> 45 |     setIsOpen(false);
+     |     ^^^^^^^^^ Avoid calling setState() directly within an effect
+  46 |   }, [pathname]);
+  47 |
+  48 |   return (  react-hooks/set-state-in-effect
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\components\dashboard\DashboardContent.tsx
+  31:7  error  Error: Cannot access variable before it is declared
+
+`updateParam` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\components\dashboard\DashboardContent.tsx:31:7
+  29 |   useEffect(() => {
+  30 |     const timer = setTimeout(() => {
+> 31 |       updateParam('search', localSearch);
+     |       ^^^^^^^^^^^ `updateParam` accessed before it is declared
+  32 |     }, 300);
+  33 |     return () => clearTimeout(timer);
+  34 |     // eslint-disable-next-line react-hooks/exhaustive-deps
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\components\dashboard\DashboardContent.tsx:37:3
+  35 |   }, [localSearch]);
+  36 |
+> 37 |   const updateParam = useCallback(
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 38 |     (key: string, value: string) => {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 39 |       const params = new URLSearchParams(searchParams.toString());
+     ΓÇª
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 47 |     [router, searchParams],
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 48 |   );
+     | ^^^^^ `updateParam` is declared here
+  49 |
+  50 |   const handleSearchChange = useCallback((value: string) => {
+  51 |     setLocalSearch(value);                                                                                                                  react-hooks/immutability
+  38:5  error  Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. This value was memoized in source but not in compilation output.
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\components\dashboard\DashboardContent.tsx:38:5
+  36 |
+  37 |   const updateParam = useCallback(
+> 38 |     (key: string, value: string) => {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 39 |       const params = new URLSearchParams(searchParams.toString());
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 40 |       if (value) {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 41 |         params.set(key, value);
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 42 |       } else {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 43 |         params.delete(key);
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 44 |       }
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 45 |       router.replace(`?${params.toString()}`, { scroll: false });
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 46 |     },
+     | ^^^^^^ Could not preserve existing memoization
+  47 |     [router, searchParams],
+  48 |   );
+  49 |  react-hooks/preserve-manual-memoization
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\hooks\useActivity.ts
+  15:28  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  54:27  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  56:35  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  57:28  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\i18n.ts
+  19:46  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\lib\activityStore.ts
+  8:11  warning  'get' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\ADMIN\Desktop\innovative-drips\Soter\app\frontend\src\types\activity.ts
+  18:31  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+Γ£û 25 problems (14 errors, 11 warnings)
+
