@@ -3,6 +3,7 @@ v1 humanitarian verification endpoint.
 """
 
 import logging
+import uuid
 
 from fastapi import APIRouter
 
@@ -23,6 +24,7 @@ async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
     # tests (and any future dependency-injection wiring) works transparently.
     import main as _main
 
+    trace_id = str(uuid.uuid4())
     logger.info("Processing humanitarian verification request")
 
     try:
@@ -44,7 +46,47 @@ async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
                 )
             else:
                 raise exc
-        return HumanitarianVerificationResponse(success=True, **result)
+
+        # Extract envelope fields from the nested verification dict.
+        verification = result.get("verification") or {}
+        confidence_raw = verification.get("confidence")
+        confidence = float(confidence_raw) if confidence_raw is not None else None
+        verdict = verification.get("verdict")
+        summary = verification.get("summary")
+
+        result_label = f"humanitarian_{verdict}" if verdict else "humanitarian_verified"
+
+        reasons: list[str] = []
+        if verdict:
+            reasons.append(f"Verdict: {verdict}")
+        if summary:
+            reasons.append(summary)
+
+        # Strip any envelope-conflicting keys from the service result dict before
+        # spreading, so our explicit envelope values always take precedence.
+        _ENVELOPE_KEYS = {"result", "confidence", "reasons", "anchor_metadata", "trace_id"}
+        safe_result = {k: v for k, v in result.items() if k not in _ENVELOPE_KEYS}
+
+        return HumanitarianVerificationResponse(
+            success=True,
+            **safe_result,
+            # Standard result envelope fields (Issue #609)
+            result=result_label,
+            confidence=confidence,
+            reasons=reasons or None,
+            anchor_metadata={
+                "provider": result.get("provider"),
+                "model": result.get("model"),
+                "prompt_variant": result.get("prompt_variant"),
+            },
+            trace_id=trace_id,
+        )
     except Exception as e:
         logger.error("Humanitarian verification failed: %s", str(e), exc_info=True)
-        return HumanitarianVerificationResponse(success=False, error=str(e))
+        return HumanitarianVerificationResponse(
+            success=False,
+            error=str(e),
+            result="humanitarian_error",
+            reasons=[str(e)],
+            trace_id=trace_id,
+        )
