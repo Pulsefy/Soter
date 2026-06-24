@@ -1,6 +1,8 @@
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
+from schemas.envelope import ResultEnvelope
+
 
 class ClaimMetadata(BaseModel):
     claim_id: str
@@ -22,6 +24,8 @@ class ClaimFraudResult(BaseModel):
     reason: Optional[str] = None
 
 
-class FraudDetectionResponse(BaseModel):
+class FraudDetectionResponse(ResultEnvelope):
+    """Fraud detection endpoint response – includes the standardised result envelope (Issue #609)."""
+
     results: List[ClaimFraudResult]
     flagged_count: int

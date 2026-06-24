@@ -7,6 +7,7 @@ single place and is referenced by both the /v1 and the legacy /ai mounts.
 
 import io
 import time
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -40,6 +41,7 @@ async def process_ocr(
 ) -> OCRResponse:
     """Extract text fields from an uploaded document image."""
     start_time = time.time()
+    trace_id = str(uuid.uuid4())
 
     if image.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
@@ -87,6 +89,16 @@ async def process_ocr(
 
         processing_time_ms = int((time.time() - start_time) * 1000)
 
+        # Derive top-level confidence as the mean of all extracted field confidences.
+        field_confidences = [f.confidence for f in result.fields.values()]
+        avg_confidence = (
+            sum(field_confidences) / len(field_confidences) if field_confidences else None
+        )
+
+        reasons = ["OCR extraction completed successfully"]
+        if avg_confidence is not None:
+            reasons.append(f"Average field confidence: {avg_confidence:.2f}")
+
         return OCRResponse(
             success=True,
             data=OCRData(
@@ -98,6 +110,15 @@ async def process_ocr(
                 processing_time_ms=processing_time_ms,
             ),
             processing_time_ms=processing_time_ms,
+            # Standard result envelope fields (Issue #609)
+            result="ocr_complete",
+            confidence=avg_confidence,
+            reasons=reasons,
+            anchor_metadata={
+                "filename": image.filename,
+                "content_type": image.content_type,
+            },
+            trace_id=trace_id,
         )
 
     except HTTPException:
@@ -111,4 +132,9 @@ async def process_ocr(
                 "message": str(e),
             },
             processing_time_ms=processing_time_ms,
+            # Standard result envelope fields (Issue #609)
+            result="ocr_error",
+            reasons=[str(e)],
+            anchor_metadata={"filename": image.filename},
+            trace_id=trace_id,
         )

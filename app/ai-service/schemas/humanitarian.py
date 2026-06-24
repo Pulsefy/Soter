@@ -2,6 +2,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from schemas.envelope import ResultEnvelope
+
 
 class HumanitarianVerificationRequest(BaseModel):
     aid_claim: str = Field(min_length=10, description="Aid claim to verify")
@@ -11,7 +13,9 @@ class HumanitarianVerificationRequest(BaseModel):
     timeout: Optional[float] = Field(default=None, description="Request-level timeout in seconds for provider call")
 
 
-class HumanitarianVerificationResponse(BaseModel):
+class HumanitarianVerificationResponse(ResultEnvelope):
+    """Humanitarian verification endpoint response – includes the standardised result envelope (Issue #609)."""
+
     success: bool
     provider: Optional[str] = None
     model: Optional[str] = None
