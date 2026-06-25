@@ -1,28 +1,10 @@
 import re
-import time
-from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Optional
 
-import pytesseract
 from PIL import Image
 
-import metrics
-from config import settings
-from services.preprocessing import ImagePreprocessor
-from services.test_provider import TestProvider
-
-
-@dataclass
-class FieldMatch:
-    value: str
-    confidence: float
-
-
-@dataclass
-class OCRResult:
-    fields: dict[str, FieldMatch]
-    raw_text: str
-    processing_time_ms: int
+from services.provider_interface import OCRProvider
+from services.provider_types import FieldMatch, OCRResult
 
 
 class FieldDetector:
@@ -78,66 +60,22 @@ class FieldDetector:
 
 
 class OCRService:
-    def __init__(self):
-        self.preprocessor = ImagePreprocessor()
-        self.field_detector = FieldDetector()
-        self.test_provider = TestProvider()
+    def __init__(self, provider: Optional[OCRProvider] = None):
+        from services.provider_factory import get_ocr_provider
+
+        self.provider = provider or get_ocr_provider()
 
     def process_image(self, image: Image.Image) -> OCRResult:
-        if settings.test_provider_mode:
-            response = self.test_provider.get_response("ocr", {"image_size": str(image.size)})
-            fields: Dict[str, FieldMatch] = {}
-            for name, fdata in response.get("fields", {}).items():
-                fields[name] = FieldMatch(value=fdata["value"], confidence=fdata["confidence"])
-            return OCRResult(
-                fields=fields,
-                raw_text=response.get("raw_text", ""),
-                processing_time_ms=response.get("processing_time_ms", 0),
-            )
-
-        start_time = time.time()
-
-        preprocessed = self.preprocessor.preprocess(
-            image, threshold_method="otsu", denoise=True
-        )
-
-        if preprocessed.size[0] == 0 or preprocessed.size[1] == 0:
-            return OCRResult(
-                fields={},
-                raw_text="",
-                processing_time_ms=int((time.time() - start_time) * 1000),
-            )
-
-        tesseract_data = self._run_tesseract(preprocessed)
-
-        raw_text = tesseract_data.get("text", "")
-        if isinstance(raw_text, list):
-            raw_text = " ".join(str(t) for t in raw_text if t)
-        raw_text = str(raw_text) if raw_text else ""
-
-        fields = self.field_detector.detect_fields(raw_text)
-
-        for field_name, field_match in fields.items():
-            field_chars = self._extract_field_chars(tesseract_data, field_match.value)
-            field_match.confidence = self.field_detector.aggregate_confidence(
-                field_chars
-            )
-
-        latency = time.time() - start_time
-        metrics.PIPELINE_STEP_LATENCY.labels(step_name='ocr').observe(latency)
-
-        return OCRResult(
-            fields=fields,
-            raw_text=raw_text,
-            processing_time_ms=int(latency * 1000),
-        )
+        return self.provider.process_image(image)
 
     def _run_tesseract(self, image: Image.Image) -> dict:
-        config = "--psm 6 --oem 3"
-        data = pytesseract.image_to_data(
-            image, config=config, output_type=pytesseract.Output.DICT
-        )
-        return data
+        # Preserve backwards compatibility for tests and legacy mocks.
+        return self.provider._run_tesseract(image)
+
+    def _extract_field_chars(
+        self, tesseract_data: dict, field_value: str
+    ) -> list[float]:
+        return self.provider._extract_field_chars(tesseract_data, field_value)
 
     def _extract_field_chars(
         self, tesseract_data: dict, field_value: str
