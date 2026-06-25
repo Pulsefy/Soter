@@ -6,6 +6,14 @@ export type CacheResult = 'hit' | 'miss';
 
 @Injectable()
 export class MetricsService {
+  // Dynamic metrics maps for flexible metric creation
+  private readonly counters = new Map<string, Counter<string>>();
+  private readonly histograms = new Map<string, Histogram<string>>();
+  private readonly gauges = new Map<string, Gauge<string>>();
+  
+  // Soroban-specific metrics
+  public sorobanTransactionLatency?: Histogram<string>;
+  
   constructor(
     @InjectMetric('http_requests_total')
     public httpRequestsCounter: Counter<string>,
@@ -43,7 +51,14 @@ export class MetricsService {
     public analyticsCacheMissesCounter: Counter<string>,
     @InjectMetric('analytics_cache_invalidations_total')
     public analyticsCacheInvalidationsCounter: Counter<string>,
-  ) {}
+  ) {
+    // Import prometheus for dynamic metric creation
+    this.prometheus = require('prom-client');
+    this.registry = this.prometheus.register;
+  }
+
+  private readonly prometheus: typeof import('prom-client');
+  private readonly registry: import('prom-client').Registry;
 
   /**
    * Increment HTTP request counter
@@ -154,6 +169,99 @@ export class MetricsService {
       },
       duration,
     );
+  }
+
+  /**
+   * Increment transaction submission failure counter
+   */
+  incrementTxSubmissionFailure(operation: string, error: string): void {
+    this.errorRateCounter.inc({
+      operation,
+      error_type: 'tx_submission_failure',
+      error: error.substring(0, 100), // Truncate for metrics
+    });
+  }
+
+  /**
+   * Record Soroban transaction latency
+   */
+  recordSorobanTransactionLatency(
+    operation: string,
+    status: 'success' | 'failed',
+    duration: number,
+  ): void {
+    if (!this.sorobanTransactionLatency) {
+      this.sorobanTransactionLatency = new this.prometheus.Histogram({
+        name: 'soroban_transaction_duration_seconds',
+        help: 'Duration of Soroban transaction operations',
+        labelNames: ['operation', 'status'],
+        buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300],
+        registers: [this.registry],
+      });
+    }
+
+    this.sorobanTransactionLatency.observe(
+      {
+        operation,
+        status,
+      },
+      duration,
+    );
+  }
+
+  /**
+   * Record general histogram metrics
+   */
+  recordHistogram(name: string, value: number, labels?: Record<string, string>): void {
+    if (!this.histograms.has(name)) {
+      this.histograms.set(name, new this.prometheus.Histogram({
+        name,
+        help: `Histogram for ${name}`,
+        labelNames: labels ? Object.keys(labels) : [],
+        registers: [this.registry],
+      }));
+    }
+
+    const histogram = this.histograms.get(name)!;
+    histogram.observe(labels || {}, value);
+  }
+
+  /**
+   * Set gauge value
+   */
+  setGauge(name: string, value: number, labels?: Record<string, string>): void {
+    if (!this.gauges.has(name)) {
+      this.gauges.set(name, new this.prometheus.Gauge({
+        name,
+        help: `Gauge for ${name}`,
+        labelNames: labels ? Object.keys(labels) : [],
+        registers: [this.registry],
+      }));
+    }
+
+    const gauge = this.gauges.get(name)!;
+    if (labels) {
+      gauge.set(labels, value);
+    } else {
+      gauge.set(value);
+    }
+  }
+
+  /**
+   * Increment counter with custom labels
+   */
+  incrementCounter(name: string, labels?: Record<string, string>): void {
+    if (!this.counters.has(name)) {
+      this.counters.set(name, new this.prometheus.Counter({
+        name,
+        help: `Counter for ${name}`,
+        labelNames: labels ? Object.keys(labels) : [],
+        registers: [this.registry],
+      }));
+    }
+
+    const counter = this.counters.get(name)!;
+    counter.inc(labels || {});
   }
 
   recordContractCallLatency(
