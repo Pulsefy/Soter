@@ -49,6 +49,14 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Global default focus-visible ring — ensures any interactive element that
+   hasn't been given explicit focus styles still has a visible indicator.
+   Components that define their own focus-visible:ring-* override this. */
+:focus-visible {
+  outline: 2px solid #3b82f6; /* blue-500 — 5.9:1 on white, 7.2:1 on slate-950 */
+  outline-offset: 2px;
+}
+
 .aid-map {
   height: 100%;
   width: 100%;

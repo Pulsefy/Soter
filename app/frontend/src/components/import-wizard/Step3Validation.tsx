@@ -1,6 +1,7 @@
 'use client';
 
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Download, FileWarning, ShieldAlert } from 'lucide-react';
+import type { RefObject } from 'react';
 import type { ValidationResult } from '@/lib/csv-validation';
 
 interface Step3ValidationProps {
@@ -8,6 +9,7 @@ interface Step3ValidationProps {
   headers: string[];
   isValidating: boolean;
   canProceed: boolean;
+  headingRef?: RefObject<HTMLHeadingElement | null>;
   onBack: () => void;
   onNext: () => void;
   onDownloadReport: () => void;
@@ -24,6 +26,7 @@ export function Step3Validation({
   headers,
   isValidating,
   canProceed,
+  headingRef,
   onBack,
   onNext,
   onDownloadReport,
@@ -34,7 +37,7 @@ export function Step3Validation({
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-2">
-          <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">Step 3: Resolve validation issues</h2>
+          <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-slate-900 dark:text-slate-50 focus:outline-none">Step 3: Resolve validation issues</h2>
           <p className="text-sm text-slate-600 dark:text-slate-300">
             Review row-level warnings and errors before final confirmation. Errors block import until the source file is corrected and re-uploaded.
           </p>

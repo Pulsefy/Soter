@@ -1,6 +1,7 @@
 'use client';
 
 import { AlertCircle, CheckCircle2, ChevronLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
+import type { RefObject } from 'react';
 import type { ValidationResult } from '@/lib/csv-validation';
 
 interface Step4ConfirmProps {
@@ -9,6 +10,7 @@ interface Step4ConfirmProps {
   hasBlockingErrors: boolean;
   submitMessage: string | null;
   submitError: string | null;
+  headingRef?: RefObject<HTMLHeadingElement | null>;
   onBack: () => void;
   onConfirm: () => void | Promise<void>;
   onStartOver: () => void;
@@ -20,6 +22,7 @@ export function Step4Confirm({
   hasBlockingErrors,
   submitMessage,
   submitError,
+  headingRef,
   onBack,
   onConfirm,
   onStartOver,
@@ -27,7 +30,7 @@ export function Step4Confirm({
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">Step 4: Confirm import</h2>
+        <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-slate-900 dark:text-slate-50 focus:outline-none">Step 4: Confirm import</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300">
           Review the summary below, then submit the validated recipient list to complete the import.
         </p>

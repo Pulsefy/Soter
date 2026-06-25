@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronLeft, Download, FileSpreadsheet, RefreshCcw, UploadCloud } from 'lucide-react';
 import { useToast } from '@/components/ToastProvider';
 import {
@@ -41,6 +41,17 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [liveMessage, setLiveMessage] = useState('');
+
+  /** Focus target for each step — set on the heading of the active step panel. */
+  const stepHeadingRef = useRef<HTMLHeadingElement>(null);
+  /** Polite live region for step transitions and CSV feedback. */
+  const liveRegionRef = useRef<HTMLDivElement>(null);
+
+  /** Move focus to the step heading whenever the active step changes. */
+  useEffect(() => {
+    stepHeadingRef.current?.focus();
+  }, [step]);
 
   const summary = validationResult?.summary;
   const canAdvanceToPreview = Boolean(file && parsedData && !fileError);
@@ -48,6 +59,11 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
   const canAdvanceToConfirm = Boolean(validationResult);
   const hasBlockingErrors = Boolean(summary && summary.errorRows > 0);
   const previewRows = useMemo(() => parsedData?.rows.slice(0, 12) ?? [], [parsedData]);
+
+  /** Update the polite live region for screen-reader announcements. */
+  const announce = (message: string) => {
+    setLiveMessage(message);
+  };
 
   async function handleFileSelected(nextFile: File | null) {
     setFile(nextFile);
@@ -71,6 +87,7 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
       const data = await parseRecipientsCsv(nextFile);
       setParsedData(data);
       toast('CSV ready', `Loaded ${data.rows.length} recipient rows for review.`, 'success');
+      announce(`CSV ready, ${data.rows.length} rows loaded.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to parse the selected CSV file.';
       setFileError(message);
@@ -96,8 +113,10 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
 
       if (result.summary.errorRows > 0) {
         toast('Validation found issues', `${result.summary.errorRows} row(s) need correction before import.`, 'warning');
+        announce(`Validation complete. ${result.summary.errorRows} row(s) have errors that need correction.`);
       } else {
         toast('Validation complete', `${result.summary.validRows} valid row(s) ready to import.`, 'success');
+        announce(`Validation complete. ${result.summary.validRows} valid row(s) ready to import.`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to validate this import.';
@@ -157,6 +176,7 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
     setIsSubmitting(false);
     setSubmitMessage(null);
     setSubmitError(null);
+    announce('Started over. Step 1: Upload recipient file.');
   }
 
   return (
@@ -209,8 +229,9 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
                 fileError={fileError}
                 isParsing={isParsing}
                 onFileSelected={handleFileSelected}
-                onNext={() => setStep(2)}
+                onNext={() => { setStep(2); announce('Step 2: Preview recipient data'); }}
                 canProceed={canAdvanceToPreview}
+                headingRef={stepHeadingRef}
               />
             )}
 
@@ -220,10 +241,11 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
                 headers={parsedData.headers}
                 previewRows={previewRows}
                 totalRows={parsedData.rows.length}
-                onBack={() => setStep(1)}
+                onBack={() => { setStep(1); announce('Step 1: Upload recipient file'); }}
                 onNext={handleRunValidation}
                 isValidating={isValidating}
                 canProceed={canAdvanceToValidation}
+                headingRef={stepHeadingRef}
               />
             )}
 
@@ -231,11 +253,12 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
               <Step3Validation
                 result={validationResult}
                 headers={parsedData.headers}
-                onBack={() => setStep(2)}
-                onNext={() => setStep(4)}
+                onBack={() => { setStep(2); announce('Step 2: Preview recipient data'); }}
+                onNext={() => { setStep(4); announce('Step 4: Confirm import'); }}
                 onDownloadReport={handleDownloadReport}
                 isValidating={isValidating}
                 canProceed={canAdvanceToConfirm}
+                headingRef={stepHeadingRef}
               />
             )}
 
@@ -246,14 +269,25 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
                 hasBlockingErrors={hasBlockingErrors}
                 submitMessage={submitMessage}
                 submitError={submitError}
-                onBack={() => setStep(3)}
+                onBack={() => { setStep(3); announce('Step 3: Resolve validation issues'); }}
                 onConfirm={handleConfirmImport}
                 onStartOver={handleStartOver}
+                headingRef={stepHeadingRef}
               />
             )}
           </div>
 
           <aside className="space-y-4">
+            {/* Visually hidden polite live region for screen-reader announcements */}
+            <div
+              ref={liveRegionRef}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {liveMessage}
+            </div>
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Progress</h2>
               <ol className="mt-4 space-y-3">
@@ -262,7 +296,11 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
                   const isComplete = item.id < step;
 
                   return (
-                    <li key={item.id} className="flex items-start gap-3">
+                    <li
+                      key={item.id}
+                      aria-current={isActive ? 'step' : undefined}
+                      className="flex items-start gap-3"
+                    >
                       <div
                         className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-semibold ${
                           isComplete
