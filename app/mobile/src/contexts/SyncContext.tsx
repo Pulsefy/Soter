@@ -16,6 +16,7 @@ import {
   dispatchNetworkAction,
   flushPendingNetworkActions,
   getSyncQueueState,
+  retryFailedAction,
   subscribeToSyncQueue,
   subscribeToSyncSuccess,
 } from '../services/syncQueue';
@@ -45,6 +46,10 @@ interface SyncContextValue extends SyncQueueState {
   ) => Promise<
     { status: 'completed'; result: unknown } | { status: 'queued'; action: QueuedSyncAction }
   >;
+  queueClaimSubmission: (aidId: string, claimId: string, idempotencyKey: string) => Promise<
+    { status: 'completed'; result: unknown } | { status: 'queued'; action: QueuedSyncAction }
+  >;
+  retryAction: (actionId: string) => Promise<void>;
   getActionsForAid: (aidId: string) => QueuedSyncAction[];
 }
 
@@ -61,6 +66,8 @@ const defaultValue: SyncContextValue = {
   queueStatusRefresh: async () => ({ status: 'queued', action: {} as QueuedSyncAction }),
   queueClaimConfirmation: async () => ({ status: 'queued', action: {} as QueuedSyncAction }),
   queueEvidenceUpload: async () => ({ status: 'queued', action: {} as QueuedSyncAction }),
+  queueClaimSubmission: async () => ({ status: 'queued', action: {} as QueuedSyncAction }),
+  retryAction: async () => {},
   getActionsForAid: () => [],
 };
 
@@ -149,6 +156,15 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
           },
           { online: isConnected },
         ),
+      queueClaimSubmission: (aidId: string, claimId: string, idempotencyKey: string) =>
+        dispatchNetworkAction(
+          { type: 'claim-submission', payload: { aidId, claimId, idempotencyKey } },
+          { online: isConnected },
+        ),
+      retryAction: async (actionId: string) => {
+        await retryFailedAction(actionId);
+        await flushPendingNetworkActions({ online: isConnected, saverMode: saverModeActive });
+      },
       getActionsForAid: (aidId: string) =>
         syncState.items.filter((item) => {
           const payload = item.payload as { aidId?: string };

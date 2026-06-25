@@ -37,7 +37,12 @@ export default async function RootLayout({
   // Fail fast: validate required environment variables before rendering anything.
   // This runs server-side only; no secret values are forwarded to the client.
   const envResult = validateEnv();
-  if (!envResult.ok) {
+  const allowBootWithoutFullConfig =
+    process.env.NODE_ENV !== 'production' ||
+    process.env.NEXT_PUBLIC_USE_MOCKS === 'true' ||
+    !process.env.NEXT_PUBLIC_API_URL;
+
+  if (!envResult.ok && !allowBootWithoutFullConfig) {
     return (
       <MisconfiguredPage
         missing={envResult.missing}

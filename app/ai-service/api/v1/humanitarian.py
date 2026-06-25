@@ -80,6 +80,10 @@ async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
                 "prompt_variant": result.get("prompt_variant"),
             },
             trace_id=trace_id,
+        return HumanitarianVerificationResponse(
+            success=True,
+            anchor_metadata=request.anchor_metadata,
+            **result
         )
     except Exception as e:
         logger.error("Humanitarian verification failed: %s", str(e), exc_info=True)
@@ -89,4 +93,5 @@ async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
             result="humanitarian_error",
             reasons=[str(e)],
             trace_id=trace_id,
+            anchor_metadata=request.anchor_metadata
         )

@@ -1,0 +1,74 @@
+[
+  {
+    "is_real_person": true,
+    "confidence": 0.87,
+    "threshold": 0.65,
+    "checks": {
+      "face_detected": true,
+      "blink_detected": true,
+      "head_movement_detected": true,
+      "processed_burst_frames": 5
+    },
+    "reason": "Face detected and confidence threshold met"
+  },
+  {
+    "is_real_person": true,
+    "confidence": 0.74,
+    "threshold": 0.65,
+    "checks": {
+      "face_detected": true,
+      "blink_detected": true,
+      "head_movement_detected": false,
+      "processed_burst_frames": 3
+    },
+    "reason": "Face detected and confidence threshold met"
+  },
+  {
+    "is_real_person": false,
+    "confidence": 0.42,
+    "threshold": 0.65,
+    "checks": {
+      "face_detected": true,
+      "blink_detected": false,
+      "head_movement_detected": false,
+      "processed_burst_frames": 0
+    },
+    "reason": "No liveness signal detected from burst frames"
+  },
+  {
+    "is_real_person": false,
+    "confidence": 0.05,
+    "threshold": 0.65,
+    "checks": {
+      "face_detected": false,
+      "blink_detected": false,
+      "head_movement_detected": false,
+      "processed_burst_frames": 0
+    },
+    "reason": "No face detected in selfie image"
+  },
+  {
+    "is_real_person": true,
+    "confidence": 0.93,
+    "threshold": 0.65,
+    "checks": {
+      "face_detected": true,
+      "blink_detected": true,
+      "head_movement_detected": true,
+      "processed_burst_frames": 8
+    },
+    "reason": "Face detected and confidence threshold met"
+  },
+  {
+    "is_real_person": false,
+    "confidence": 0.55,
+    "threshold": 0.70,
+    "checks": {
+      "face_detected": true,
+      "blink_detected": false,
+      "head_movement_detected": false,
+      "processed_burst_frames": 0
+    },
+    "reason": "Confidence score is below threshold"
+  }
+]

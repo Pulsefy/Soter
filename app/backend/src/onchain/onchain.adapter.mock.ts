@@ -22,6 +22,13 @@ import {
   AidPackage,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
+  ContractMetadata,
+  PauseState,
+  FeeConfig,
+  PackageSummary,
+  GetTransactionStatusParams,
+  GetTransactionStatusResult,
+  TxStatus,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 
@@ -227,6 +234,72 @@ export class MockOnchainAdapter implements OnchainAdapter {
     // Use first 10 hex chars to generate a balance between 0 and ~17B stroops
     const balanceValue = parseInt(hash.substring(0, 10), 16);
     return balanceValue.toString();
+  }
+
+  async getContractMetadata(): Promise<ContractMetadata> {
+    await Promise.resolve();
+    return {
+      version: '1.0.0',
+      name: 'Mock Contract',
+      timestamp: new Date(),
+    };
+  }
+
+  async getPauseState(): Promise<PauseState> {
+    await Promise.resolve();
+    return {
+      isPaused: false,
+      timestamp: new Date(),
+    };
+  }
+
+  async getFeeConfig(): Promise<FeeConfig> {
+    await Promise.resolve();
+    return {
+      feePercentage: '0',
+      maxFee: '0',
+      timestamp: new Date(),
+    };
+  }
+
+  async getPackageSummary(packageId: string): Promise<PackageSummary> {
+    await Promise.resolve();
+    return {
+      packageId,
+      totalAmount: '0',
+      claimedAmount: '0',
+      status: 'Active',
+      timestamp: new Date(),
+    };
+  }
+
+  async getTransactionStatus(
+    params: GetTransactionStatusParams,
+  ): Promise<GetTransactionStatusResult> {
+    await Promise.resolve();
+    const hash = params.hash.toUpperCase();
+
+    // Deterministically map hash prefix to a status for predictable tests
+    const firstChar = hash.charAt(0);
+    let status: TxStatus;
+    if (firstChar >= '0' && firstChar <= '7') {
+      status = 'succeeded';
+    } else if (firstChar >= '8' && firstChar <= 'B') {
+      status = 'pending';
+    } else if (firstChar >= 'C' && firstChar <= 'D') {
+      status = 'failed';
+    } else {
+      status = 'unknown';
+    }
+
+    return {
+      hash,
+      status,
+      timestamp: new Date(),
+      ledger: status === 'succeeded' ? 12345 : undefined,
+      errorMessage:
+        status === 'failed' ? 'Mock contract transaction failed' : undefined,
+    };
   }
 
   // Legacy methods for backward compatibility

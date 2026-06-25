@@ -23,7 +23,7 @@ class TestHumanitarianVerificationService:
         def fake_model(provider):
             return "test-model"
 
-        def fake_call_provider(provider, model, system_prompt, user_prompt):
+        def fake_call_provider(provider, model, system_prompt, user_prompt, timeout=None):
             calls.append((provider, model, system_prompt, user_prompt))
             if len(calls) == 1:
                 raise RuntimeError("primary model failure")
@@ -108,3 +108,115 @@ class TestHumanitarianVerificationService:
         )
 
         assert first_result == second_result
+
+
+class TestTestProvider:
+    """Tests for the fixture-driven test provider mode."""
+
+    def setup_method(self):
+        self.service = HumanitarianVerificationService()
+
+    def test_test_provider_returns_stable_results_across_runs(self, monkeypatch):
+        monkeypatch.setattr(settings, "test_provider_mode", True)
+        monkeypatch.setattr(settings, "openai_api_key", None)
+        monkeypatch.setattr(settings, "groq_api_key", None)
+
+        first = self.service.verify_claim(
+            aid_claim="Food distribution reached 500 households in the flood-affected region.",
+            supporting_evidence=["WFP distribution log #A-42"],
+            context_factors={"disaster_type": "flooding"},
+            provider_preference="auto",
+        )
+        second = self.service.verify_claim(
+            aid_claim="Food distribution reached 500 households in the flood-affected region.",
+            supporting_evidence=["WFP distribution log #A-42"],
+            context_factors={"disaster_type": "flooding"},
+            provider_preference="auto",
+        )
+
+        assert first == second
+
+    def test_test_provider_provider_string_in_response(self, monkeypatch):
+        monkeypatch.setattr(settings, "test_provider_mode", True)
+        monkeypatch.setattr(settings, "openai_api_key", None)
+        monkeypatch.setattr(settings, "groq_api_key", None)
+
+        result = self.service.verify_claim(
+            aid_claim="Medical supplies delivered to clinic.",
+            supporting_evidence=["delivery receipt"],
+            context_factors={},
+            provider_preference="auto",
+        )
+
+        assert result["provider"] == "test"
+        assert result["model"] == "test-provider/fixture"
+
+    def test_test_provider_verdict_is_valid(self, monkeypatch):
+        monkeypatch.setattr(settings, "test_provider_mode", True)
+        monkeypatch.setattr(settings, "openai_api_key", None)
+        monkeypatch.setattr(settings, "groq_api_key", None)
+
+        known_verdicts = {"credible", "inconclusive", "not_credible"}
+
+        for i in range(12):
+            result = self.service.verify_claim(
+                aid_claim=f"Test claim number {i} with unique content to exercise different fixtures.",
+                supporting_evidence=[f"doc_{i}"],
+                context_factors={"iteration": i},
+                provider_preference="auto",
+            )
+            verdict = result["verification"]["verdict"]
+            assert verdict in known_verdicts, (
+                f"Unexpected verdict '{verdict}' at iteration {i}"
+            )
+
+    def test_test_provider_different_inputs_can_produce_different_results(self, monkeypatch):
+        monkeypatch.setattr(settings, "test_provider_mode", True)
+        monkeypatch.setattr(settings, "openai_api_key", None)
+        monkeypatch.setattr(settings, "groq_api_key", None)
+
+        results = set()
+        for i in range(20):
+            result = self.service.verify_claim(
+                aid_claim=f"Unique aid claim description with varying details {i}.",
+                supporting_evidence=[f"evidence_{i}"],
+                context_factors={"seed": i},
+                provider_preference="auto",
+            )
+            results.add(result["verification"]["verdict"])
+
+        assert len(results) > 1, (
+            "Test provider should produce more than one distinct verdict "
+            "across different inputs"
+        )
+
+    def test_test_provider_confidence_in_expected_range(self, monkeypatch):
+        monkeypatch.setattr(settings, "test_provider_mode", True)
+        monkeypatch.setattr(settings, "openai_api_key", None)
+        monkeypatch.setattr(settings, "groq_api_key", None)
+
+        for i in range(10):
+            result = self.service.verify_claim(
+                aid_claim=f"Confidence range check iteration {i}.",
+                supporting_evidence=[],
+                context_factors={},
+                provider_preference="auto",
+            )
+            confidence = result["verification"]["confidence"]
+            assert 0.0 <= confidence <= 1.0, (
+                f"Confidence {confidence} out of range at iteration {i}"
+            )
+
+    def test_test_provider_does_not_require_api_keys(self, monkeypatch):
+        monkeypatch.setattr(settings, "test_provider_mode", True)
+        monkeypatch.setattr(settings, "openai_api_key", None)
+        monkeypatch.setattr(settings, "groq_api_key", None)
+
+        result = self.service.verify_claim(
+            aid_claim="No API keys configured, but test provider should still work.",
+            supporting_evidence=["test"],
+            context_factors={},
+        )
+
+        assert result["provider"] == "test"
+        assert result["verification"]["verdict"] in {"credible", "inconclusive", "not_credible"}

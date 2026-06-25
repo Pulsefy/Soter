@@ -23,7 +23,8 @@ describe('ClaimsService', () => {
   let _auditService: AuditService;
   let configService: ConfigService;
 
-  const mockClaim = {
+  // Typed as any to bypass strict checks on newer structural fields like expiresAt, cancelledAt, etc.
+  const mockClaim: any = {
     id: 'claim-123',
     campaignId: 'campaign-1',
     status: ClaimStatus.approved,
@@ -263,7 +264,6 @@ describe('ClaimsService', () => {
           return undefined;
         });
 
-      // Recreate service with new config
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           ClaimsService,
@@ -371,15 +371,12 @@ describe('ClaimsService', () => {
 
       await service.disburse('claim-123');
 
-      // Should still proceed with disbursement
       expect(transactionSpy).toHaveBeenCalled();
-      // Should record failed metric
       expect(mockMetricsService.incrementOnchainOperation).toHaveBeenCalledWith(
         'disburse',
         'mock',
         'failed',
       );
-      // Should record failed audit
       expect(mockAuditService.record).toHaveBeenCalledWith(
         expect.objectContaining<{ action: string }>({
           action: 'disburse_failed',

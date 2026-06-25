@@ -37,6 +37,10 @@ export default function ClaimReceiptPage() {
           amount: 150.5,
           tokenAddress:
             'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+          transactionHash:
+            '439d564ab3b4df9d1d1f057bb081f9a26be4cd8cf9d564ab3b4df9d1d1f057bb',
+          contractAddress:
+            'CDA4BEYKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
           timestamp: new Date().toISOString(),
         };
 

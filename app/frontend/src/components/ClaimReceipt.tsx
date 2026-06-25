@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Share2, Download, Copy, Check } from 'lucide-react';
+import { Share2, Download, Copy, Check, ExternalLink } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { format } from 'date-fns';
+import { buildExplorerUrl } from '../lib/explorer';
 
 export interface ClaimReceiptData {
   claimId: string;
@@ -11,6 +12,8 @@ export interface ClaimReceiptData {
   status: 'requested' | 'verified' | 'approved' | 'disbursed' | 'archived';
   amount: number;
   tokenAddress?: string;
+  transactionHash?: string;
+  contractAddress?: string;
   timestamp: string;
   recipientRef?: string;
 }
@@ -61,7 +64,9 @@ Package ID: ${claim.packageId}
 Status: ${claim.status.toUpperCase()}
 Amount: ${claim.amount} tokens
 Date: ${formattedDate}
-${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}`;
+${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}
+${claim.contractAddress ? `Contract Address: ${claim.contractAddress}` : ''}
+${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}`.trim();
   }, [claim, formattedDate]);
 
   const handleCopy = async () => {
@@ -162,7 +167,43 @@ ${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}`;
         {claim.tokenAddress && (
           <div className="col-span-2">
             <p className="text-xs font-semibold opacity-75 mb-1">TOKEN ADDRESS</p>
-            <p className="font-mono text-xs break-all">{claim.tokenAddress}</p>
+            <a
+              href={buildExplorerUrl('address', claim.tokenAddress)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1 inline-flex"
+            >
+              {claim.tokenAddress}
+              <ExternalLink size={12} className="shrink-0" />
+            </a>
+          </div>
+        )}
+        {claim.contractAddress && (
+          <div className="col-span-2">
+            <p className="text-xs font-semibold opacity-75 mb-1">CONTRACT ADDRESS</p>
+            <a
+              href={buildExplorerUrl('contract', claim.contractAddress)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1 inline-flex"
+            >
+              {claim.contractAddress}
+              <ExternalLink size={12} className="shrink-0" />
+            </a>
+          </div>
+        )}
+        {claim.transactionHash && (
+          <div className="col-span-2">
+            <p className="text-xs font-semibold opacity-75 mb-1">TRANSACTION HASH</p>
+            <a
+              href={buildExplorerUrl('tx', claim.transactionHash)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1 inline-flex"
+            >
+              {claim.transactionHash}
+              <ExternalLink size={12} className="shrink-0" />
+            </a>
           </div>
         )}
       </div>

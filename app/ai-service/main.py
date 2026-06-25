@@ -8,11 +8,14 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 import logging
+import uuid
+from contextvars import ContextVar
+from pythonjsonlogger import jsonlogger
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 from exceptions import AIServiceError
 from schemas.errors import ErrorDetail, ErrorEnvelope
 import time
@@ -39,11 +42,42 @@ from schemas.humanitarian import (
 )
 from services.humanitarian_verification import HumanitarianVerificationService
 
+# Context variable for correlation ID
+correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
+
+
+class CorrelationIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.correlationId = correlation_id_var.get()
+        return True
+
+
 limiter = Limiter(key_func=get_remote_address)
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# Set up structured logging with correlation ID
+log_level_name = settings.log_level.upper() if hasattr(settings, "log_level") else "INFO"
+log_level = getattr(logging, log_level_name, logging.INFO)
+
+# Configure root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(log_level)
+
+# Remove default handlers
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+
+# Create JSON formatter
+json_formatter = jsonlogger.JsonFormatter(
+    "%(asctime)s %(levelname)s %(name)s %(message)s %(correlationId)s"
 )
+
+# Create stream handler with JSON formatter
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(json_formatter)
+stream_handler.addFilter(CorrelationIdFilter())
+root_logger.addHandler(stream_handler)
+
+# Get logger for this module
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +97,7 @@ _LEGACY_TO_V1: dict = {
 # Prefix-based redirects for parameterised routes (matched in order).
 _LEGACY_PREFIX_MAP: list = [
     ("/ai/status/", "/v1/ai/status/"),
+    ("/ai/jobs/", "/v1/ai/jobs/"),
     ("/ai/task/", "/v1/ai/task/"),
 ]
 
@@ -178,6 +213,29 @@ async def legacy_redirect_middleware(request: Request, call_next):
 
 
 @app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    correlation_id = request.headers.get("x-correlation-id") or request.headers.get("x-request-id") or str(uuid.uuid4())
+    
+    # Attach correlation ID to request state
+    request.state.correlation_id = correlation_id
+    
+    # Set context variable for logging
+    correlation_id_token = correlation_id_var.set(correlation_id)
+    
+    try:
+        response = await call_next(request)
+    finally:
+        correlation_id_var.reset(correlation_id_token)
+    
+    # Set correlation ID headers in response
+    response.headers["x-correlation-id"] = correlation_id
+    response.headers["x-request-id"] = correlation_id
+    response.headers["trace_id"] = correlation_id
+    
+    return response
+
+
+@app.middleware("http")
 async def monitor_requests(request: Request, call_next):
     path = request.url.path
 
@@ -269,6 +327,50 @@ async def get_metrics():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "soter-ai-service", "version": "1.0.0"}
+
+
+@app.get("/health/dependencies")
+async def health_dependencies():
+    """Lightweight dependency probe for staging and CI.
+
+    Checks Redis connectivity, provider configuration readiness, and
+    filesystem/temp access.  Never exposes secrets or PII.
+    """
+    import tempfile
+    import os
+
+    checks: Dict[str, Any] = {}
+
+    # --- Redis ---
+    try:
+        import redis as redis_lib
+
+        r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=2)
+        r.ping()
+        checks["redis"] = {"ok": True}
+    except Exception as exc:
+        checks["redis"] = {"ok": False, "error": type(exc).__name__}
+
+    # --- Provider config ---
+    provider = settings.get_active_provider()
+    checks["provider_config"] = {
+        "ok": provider is not None,
+        "provider": provider or "none",
+    }
+
+    # --- Filesystem / temp ---
+    try:
+        with tempfile.NamedTemporaryFile(delete=True) as tmp:
+            tmp.write(b"probe")
+        checks["filesystem"] = {"ok": True}
+    except Exception as exc:
+        checks["filesystem"] = {"ok": False, "error": type(exc).__name__}
+
+    overall_ok = all(v["ok"] for v in checks.values())
+    return {
+        "status": "ok" if overall_ok else "degraded",
+        "checks": checks,
+    }
 
 
 @app.get("/")

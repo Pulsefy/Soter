@@ -1,6 +1,5 @@
 'use client';
 
-import React from 'react';
 import { 
   AlertTriangle, 
   WifiOff, 
@@ -35,12 +34,31 @@ export function ErrorInline({
   
   const errorMessage = typeof error === 'string' ? error : error.message;
 
-  const CategoryIcon = {
-    wallet: Wallet,
-    network: WifiOff,
-    server: ServerCrash,
-    unknown: AlertTriangle,
-  }[category];
+  const getCategoryIcon = () => {
+    switch (category) {
+      case 'wallet':
+        return <Wallet size={18} className="shrink-0 opacity-80" />;
+      case 'network':
+        return <WifiOff size={18} className="shrink-0 opacity-80" />;
+      case 'server':
+        return <ServerCrash size={18} className="shrink-0 opacity-80" />;
+      default:
+        return <AlertTriangle size={18} className="shrink-0 opacity-80" />;
+    }
+  };
+
+  const getCardIcon = () => {
+    switch (category) {
+      case 'wallet':
+        return <Wallet size={20} />;
+      case 'network':
+        return <WifiOff size={20} />;
+      case 'server':
+        return <ServerCrash size={20} />;
+      default:
+        return <AlertTriangle size={20} />;
+    }
+  };
 
   if (variant === 'banner') {
     return (
@@ -51,7 +69,7 @@ export function ErrorInline({
         'border-slate-400/20 bg-slate-400/5 text-slate-200'
       }`}>
         <div className="flex items-start gap-3 sm:items-center">
-          <CategoryIcon size={18} className="shrink-0 opacity-80" />
+          {getCategoryIcon()}
           <div className="space-y-1">
             <p className="text-sm font-semibold leading-none">{metadata.title}</p>
             <p className="text-xs opacity-70 leading-relaxed">{errorMessage}</p>
@@ -89,13 +107,13 @@ export function ErrorInline({
       'border-slate-400/20'
     }`}>
       <div className="flex items-start justify-between gap-4">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border bg-gradient-to-br ${
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border bg-linear-to-br ${
           category === 'wallet' ? 'border-amber-400/30 from-amber-400/20 to-amber-400/5 text-amber-400' :
           category === 'network' ? 'border-cyan-400/30 from-cyan-400/20 to-cyan-400/5 text-cyan-400' :
           category === 'server' ? 'border-rose-400/30 from-rose-400/20 to-rose-400/5 text-rose-400' :
           'border-slate-400/30 from-slate-400/20 to-slate-400/5 text-slate-400'
         }`}>
-          <CategoryIcon size={20} />
+          {getCardIcon()}
         </div>
         
         {onClose && (

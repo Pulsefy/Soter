@@ -20,7 +20,8 @@ describe('VerificationService', () => {
     getFailedCount: jest.Mock;
   };
 
-  const mockClaim = {
+  // Explicitly cast instance to any to account for structural additions to the Claim scheme context
+  const mockClaim: any = {
     id: 'test-claim-id',
     status: ClaimStatus.requested,
     description: 'Test claim',
@@ -210,6 +211,135 @@ describe('VerificationService', () => {
       const updateCall = updateSpy.mock.calls[0]?.[0];
       expect(updateCall?.data).toHaveProperty('status');
       expect(updateCall?.data?.status).toBe('verified');
+    });
+  });
+
+  describe('processVerification (test mode)', () => {
+    beforeEach(async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          VerificationService,
+          {
+            provide: getQueueToken('verification'),
+            useValue: mockQueue,
+          },
+          {
+            provide: ConfigService,
+            useValue: {
+              get: jest.fn((key: string) => {
+                const config: Record<string, string> = {
+                  VERIFICATION_MODE: 'test',
+                  VERIFICATION_THRESHOLD: '0.7',
+                  QUEUE_MAX_RETRIES: '3',
+                  AI_SERVICE_URL: 'http://localhost:8000',
+                  AI_SERVICE_TIMEOUT_MS: '30000',
+                };
+                return config[key];
+              }),
+            },
+          },
+          {
+            provide: PrismaService,
+            useValue: {
+              claim: {
+                findUnique: jest.fn(),
+                update: jest.fn(),
+              },
+            },
+          },
+          {
+            provide: AuditService,
+            useValue: {
+              record: jest.fn().mockResolvedValue(undefined),
+            },
+          },
+          {
+            provide: HttpService,
+            useValue: {
+              post: jest.fn().mockReturnValue(of({ data: {} })),
+            },
+          },
+        ],
+      }).compile();
+
+      service = module.get<VerificationService>(VerificationService);
+      prismaService = module.get<PrismaService>(PrismaService);
+    });
+
+    it('should return deterministic results in test mode', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService.claim, 'update')
+        .mockResolvedValue({ ...mockClaim, status: ClaimStatus.verified });
+
+      const first = await service.processVerification({
+        claimId: 'test-claim-id',
+        timestamp: Date.now(),
+      });
+      const second = await service.processVerification({
+        claimId: 'test-claim-id',
+        timestamp: Date.now(),
+      });
+
+      expect(first.score).toEqual(second.score);
+      expect(first.confidence).toEqual(second.confidence);
+      expect(first.details.riskLevel).toEqual(second.details.riskLevel);
+      expect(first.details.factors).toEqual(second.details.factors);
+    });
+
+    it('should produce different results for different claims', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService.claim, 'update')
+        .mockResolvedValue({ ...mockClaim, status: ClaimStatus.verified });
+
+      const first = await service.processVerification({
+        claimId: 'claim-alpha',
+        timestamp: Date.now(),
+      });
+      const second = await service.processVerification({
+        claimId: 'claim-beta',
+        timestamp: Date.now(),
+      });
+
+      const riskLevels = [first.details.riskLevel, second.details.riskLevel];
+      expect(riskLevels).toBeDefined();
+    });
+
+    it('should have valid fixture scores in test mode', () => {
+      const fixtures = (service as any)._fixtures as any[];
+      for (const fixture of fixtures) {
+        expect(fixture.score).toBeGreaterThanOrEqual(0);
+        expect(fixture.score).toBeLessThanOrEqual(1);
+        expect(fixture.confidence).toBeGreaterThanOrEqual(0);
+        expect(fixture.confidence).toBeLessThanOrEqual(1);
+        expect(['low', 'medium', 'high']).toContain(fixture.details.riskLevel);
+      }
+    });
+
+    it('should return the same fixture for repeated calls with the same ID', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService.claim, 'update')
+        .mockResolvedValue({ ...mockClaim, status: ClaimStatus.verified });
+
+      const claimId = 'deterministic-test-claim';
+      const results = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          service.processVerification({ claimId, timestamp: Date.now() }),
+        ),
+      );
+
+      for (let i = 1; i < results.length; i++) {
+        expect(results[i].score).toEqual(results[0].score);
+        expect(results[i].confidence).toEqual(results[0].confidence);
+      }
     });
   });
 

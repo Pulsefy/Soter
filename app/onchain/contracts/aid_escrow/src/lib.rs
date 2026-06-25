@@ -254,6 +254,11 @@ impl AidEscrow {
         env.storage().instance().get(&KEY_VERSION).unwrap_or(0)
     }
 
+    /// Returns the semantic version of the contract package.
+    pub fn contract_version(env: Env) -> String {
+        String::from_str(&env, env!("CARGO_PKG_VERSION"))
+    }
+
     /// Admin-only. Bumps the contract version and runs any required migration logic.
     ///
     /// # Arguments

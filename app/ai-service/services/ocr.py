@@ -1,12 +1,15 @@
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Dict
 
 import pytesseract
 from PIL import Image
 
 import metrics
+from config import settings
 from services.preprocessing import ImagePreprocessor
+from services.test_provider import TestProvider
 
 
 @dataclass
@@ -25,8 +28,8 @@ class OCRResult:
 class FieldDetector:
     PATTERNS = {
         "name": [
-            r"(?:Full\s+)?[Nn]ame[:\s]+\n?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)",
-            r"(?:Full\s+)?[Nn]ame[:\s]+([A-Z]+(?:\s+[A-Z]+)+)",
+            r"(?:Full\s+)?[Nn]ame[:\s]+\n?([A-Z][a-z]+(?:[ \t]+(?!(?i:Date|DOB|Birth|ID|Passport|Sex))\b[A-Z][a-z]+)*)",
+            r"(?:Full\s+)?[Nn]ame[:\s]+\n?([A-Z]+(?:[ \t]+(?!(?i:DATE|DOB|BIRTH|ID|PASSPORT|SEX))\b[A-Z]+)*)",
         ],
         "date_of_birth": [
             r"[Dd]ate\s+(?:of\s+)?[Bb]irth[:\s]*(\d{2}[-./]\d{2}[-./]\d{4})",
@@ -78,8 +81,20 @@ class OCRService:
     def __init__(self):
         self.preprocessor = ImagePreprocessor()
         self.field_detector = FieldDetector()
+        self.test_provider = TestProvider()
 
     def process_image(self, image: Image.Image) -> OCRResult:
+        if settings.test_provider_mode:
+            response = self.test_provider.get_response("ocr", {"image_size": str(image.size)})
+            fields: Dict[str, FieldMatch] = {}
+            for name, fdata in response.get("fields", {}).items():
+                fields[name] = FieldMatch(value=fdata["value"], confidence=fdata["confidence"])
+            return OCRResult(
+                fields=fields,
+                raw_text=response.get("raw_text", ""),
+                processing_time_ms=response.get("processing_time_ms", 0),
+            )
+
         start_time = time.time()
 
         preprocessed = self.preprocessor.preprocess(

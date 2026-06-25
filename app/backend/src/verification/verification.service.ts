@@ -12,6 +12,7 @@ import {
 import { AuditService } from '../audit/audit.service';
 import { firstValueFrom } from 'rxjs';
 import OpenAI from 'openai';
+import * as crypto from 'crypto';
 
 // ---------------------------------------------------------------------------
 // OCR service types
@@ -177,7 +178,9 @@ export class VerificationService {
 
     let result: VerificationResult;
 
-    if (this.verificationMode === 'mock') {
+    if (this.verificationMode === 'test') {
+      result = this.generateTestVerification(claim);
+    } else if (this.verificationMode === 'mock') {
       result = this.generateMockVerification(claim);
     } else {
       result = await this.performAIVerification(claim);
@@ -589,6 +592,111 @@ the JSON verdict.
             : undefined,
       },
       processedAt: new Date(),
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Test (deterministic fixture-driven)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Deterministic verification for staging/testnet.
+   *
+   * Uses a SHA-256 hash of the claim ID to select from a set of fixture
+   * responses, so identical inputs always produce the same output.
+   */
+  private _fixtures: VerificationResult[] = [
+    {
+      score: 0.88,
+      confidence: 0.92,
+      details: {
+        factors: [
+          'All verification criteria met',
+          'Document authenticity confirmed',
+        ],
+        riskLevel: 'low',
+      },
+      processedAt: new Date(),
+    },
+    {
+      score: 0.76,
+      confidence: 0.84,
+      details: {
+        factors: [
+          'Identity cross-reference passed',
+          'No fraud indicators detected',
+        ],
+        riskLevel: 'low',
+      },
+      processedAt: new Date(),
+    },
+    {
+      score: 0.62,
+      confidence: 0.71,
+      details: {
+        factors: [
+          'Partial evidence provided',
+          'Additional documentation may strengthen claim',
+        ],
+        riskLevel: 'medium',
+        recommendations: [
+          'Manual review recommended',
+          'Request supplementary evidence',
+        ],
+      },
+      processedAt: new Date(),
+    },
+    {
+      score: 0.45,
+      confidence: 0.65,
+      details: {
+        factors: [
+          'Inconsistent information detected',
+          'Claim requires further investigation',
+        ],
+        riskLevel: 'high',
+        recommendations: [
+          'Manual review required',
+          'Verify applicant identity independently',
+        ],
+      },
+      processedAt: new Date(),
+    },
+    {
+      score: 0.93,
+      confidence: 0.95,
+      details: {
+        factors: [
+          'Strong corroborating evidence from multiple sources',
+          'Aid amount proportionate to documented need',
+        ],
+        riskLevel: 'low',
+      },
+      processedAt: new Date(),
+    },
+    {
+      score: 0.55,
+      confidence: 0.68,
+      details: {
+        factors: [
+          'Insufficient evidence to reach full confidence',
+          'Standard review triggered',
+        ],
+        riskLevel: 'medium',
+        recommendations: ['Manual review recommended'],
+      },
+      processedAt: new Date(),
+    },
+  ];
+
+  private generateTestVerification(claim: Claim): VerificationResult {
+    const hash = crypto.createHash('sha256').update(claim.id).digest('hex');
+    const idx = parseInt(hash.slice(0, 8), 16) % this._fixtures.length;
+    const fixture = this._fixtures[idx];
+    return {
+      ...fixture,
+      processedAt: new Date(),
+      details: { ...fixture.details },
     };
   }
 

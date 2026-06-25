@@ -4,6 +4,9 @@ import { MockOnchainAdapter } from './onchain.adapter.mock';
 describe('MockOnchainAdapter', () => {
   let adapter: MockOnchainAdapter;
 
+  const MOCK_TOKEN_ADDRESS =
+    'GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [MockOnchainAdapter],
@@ -63,8 +66,7 @@ describe('MockOnchainAdapter', () => {
         recipientAddress:
           'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
         amount: '1000000000',
-        tokenAddress:
-          'GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
+        tokenAddress: MOCK_TOKEN_ADDRESS,
       };
 
       const result = await adapter.createClaim(params);
@@ -87,8 +89,7 @@ describe('MockOnchainAdapter', () => {
         recipientAddress:
           'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
         amount: '1000000000',
-        tokenAddress:
-          'GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
+        tokenAddress: MOCK_TOKEN_ADDRESS,
       };
 
       const result1 = await adapter.createClaim(params);
@@ -105,8 +106,7 @@ describe('MockOnchainAdapter', () => {
         recipientAddress:
           'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
         amount: '1000000000',
-        tokenAddress:
-          'GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
+        tokenAddress: MOCK_TOKEN_ADDRESS,
         expiresAt,
       };
 
@@ -124,6 +124,7 @@ describe('MockOnchainAdapter', () => {
         recipientAddress:
           'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
         amount: '1000000000',
+        tokenAddress: MOCK_TOKEN_ADDRESS,
       };
 
       const result = await adapter.disburse(params);
@@ -145,9 +146,10 @@ describe('MockOnchainAdapter', () => {
       const params = {
         claimId: 'claim-123',
         packageId: '456',
+        tokenAddress: MOCK_TOKEN_ADDRESS,
       };
 
-      const result = await adapter.disburse(params);
+      const result = await adapter.disburse(params as any);
 
       expect(result.amountDisbursed).toBe('1000000000');
     });
@@ -159,6 +161,7 @@ describe('MockOnchainAdapter', () => {
         claimId: 'claim-123',
         packageId: '456',
         recipientAddress,
+        tokenAddress: MOCK_TOKEN_ADDRESS,
       };
 
       const result = await adapter.disburse(params);

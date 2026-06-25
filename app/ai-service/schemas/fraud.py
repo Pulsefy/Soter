@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from schemas.common import AnchorMetadata
 
 from schemas.envelope import ResultEnvelope
 
@@ -15,6 +16,7 @@ class ClaimMetadata(BaseModel):
 
 class FraudDetectionRequest(BaseModel):
     claims: List[ClaimMetadata] = Field(min_length=1)
+    anchor_metadata: Optional[AnchorMetadata] = None
 
 
 class ClaimFraudResult(BaseModel):
@@ -29,3 +31,4 @@ class FraudDetectionResponse(ResultEnvelope):
 
     results: List[ClaimFraudResult]
     flagged_count: int
+    anchor_metadata: Optional[AnchorMetadata] = None

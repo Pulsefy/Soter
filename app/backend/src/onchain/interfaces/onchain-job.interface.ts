@@ -8,6 +8,7 @@ export interface OnchainJobData {
   type: OnchainOperationType;
   params: any;
   timestamp: number;
+  correlationId?: string;
 }
 
 export interface OnchainJobResult {

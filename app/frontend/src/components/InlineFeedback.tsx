@@ -1,18 +1,3 @@
-/**
- * Inline Feedback Component for Campaign Actions
- * 
- * Provides visual feedback directly on campaign cards during mutations.
- * Used alongside toast notifications for mutation-heavy screens.
- * 
- * @example
- * ```tsx
- * <InlineFeedback
- *   isPending={campaignAction.isPending}
- *   action="pausing"
- * />
- * ```
- */
-
 'use client';
 
 import { cn } from '@/lib/utils';
@@ -20,13 +5,9 @@ import { cn } from '@/lib/utils';
 type ActionType = 'pausing' | 'resuming' | 'archiving' | 'completing' | 'activating';
 
 interface InlineFeedbackProps {
-  /** Whether the mutation is currently pending */
   isPending: boolean;
-  /** The action being performed */
   action: ActionType;
-  /** Optional custom message */
   message?: string;
-  /** CSS className for custom styling */
   className?: string;
 }
 
@@ -38,10 +19,6 @@ const actionMessages: Record<ActionType, string> = {
   activating: 'Activating campaign...',
 };
 
-/**
- * Inline feedback spinner/indicator for campaign actions.
- * Displays a subtle loading state directly on the campaign card.
- */
 export function InlineFeedback({
   isPending,
   action,
@@ -68,16 +45,6 @@ export function InlineFeedback({
   );
 }
 
-/**
- * Compact inline feedback for button loading states.
- * 
- * @example
- * ```tsx
- * <Button disabled={isPending}>
- *   {isPending ? <InlineFeedbackButton action="pausing" /> : 'Pause'}
- * </Button>
- * ```
- */
 export function InlineFeedbackButton({ action }: { action: ActionType }) {
   return (
     <span className="inline-flex items-center gap-2">
@@ -87,17 +54,6 @@ export function InlineFeedbackButton({ action }: { action: ActionType }) {
   );
 }
 
-/**
- * Status badge that shows optimistic state with visual indicator.
- * 
- * @example
- * ```tsx
- * <OptimisticStatusBadge
- *   status={campaign.status}
- *   isOptimistic={isPending}
- * />
- * ```
- */
 export function OptimisticStatusBadge({
   status,
   isOptimistic,
@@ -131,5 +87,3 @@ export function OptimisticStatusBadge({
     </span>
   );
 }
-
-export { InlineFeedback, InlineFeedbackButton, OptimisticStatusBadge };

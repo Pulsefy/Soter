@@ -18,6 +18,9 @@ import numpy as np
 import time
 import metrics
 
+from config import settings
+from services.test_provider import TestProvider
+
 
 BBox = Tuple[int, int, int, int]
 
@@ -35,6 +38,7 @@ class ProofOfLifeAnalyzer:
 
     def __init__(self, config: Optional[ProofOfLifeConfig] = None) -> None:
         self.config = config or ProofOfLifeConfig()
+        self.test_provider = TestProvider()
 
         start_load = time.time()
         self.face_cascade = cv2.CascadeClassifier(
@@ -63,6 +67,10 @@ class ProofOfLifeAnalyzer:
         Returns:
             Dict with is_real_person, confidence score, threshold and checks.
         """
+        if settings.test_provider_mode:
+            return self.test_provider.get_response("proof_of_life", {
+                "has_burst": burst_images_base64 is not None,
+            })
         start_inference = time.time()
         selfie = self._decode_image(selfie_image_base64)
         selfie_gray = cv2.cvtColor(selfie, cv2.COLOR_BGR2GRAY)

@@ -1,5 +1,19 @@
 export const ONCHAIN_ADAPTER_TOKEN = 'ONCHAIN_ADAPTER';
 
+export type TxStatus = 'pending' | 'succeeded' | 'failed' | 'unknown';
+
+export interface GetTransactionStatusParams {
+  hash: string;
+}
+
+export interface GetTransactionStatusResult {
+  hash: string;
+  status: TxStatus;
+  timestamp: Date;
+  ledger?: number;
+  errorMessage?: string;
+}
+
 /**
  * On-chain adapter interface for Soroban AidEscrow contract interactions
  */
@@ -17,12 +31,13 @@ export interface InitEscrowResult {
 }
 
 export interface CreateAidPackageParams {
-  operatorAddress: string; // Admin or authorized distributor
+  operatorAddress: string;
   packageId: string;
   recipientAddress: string;
-  amount: string; // Amount as string to preserve precision (i128)
+  amount: string;
   tokenAddress: string;
-  expiresAt: number; // Unix timestamp
+  expiresAt: number;
+  metadata?: Record<string, string>;
 }
 
 export interface CreateAidPackageResult {
@@ -130,6 +145,31 @@ export interface GetTokenBalanceResult {
   timestamp: Date;
 }
 
+export interface ContractMetadata {
+  version: string;
+  name: string;
+  timestamp: Date;
+}
+
+export interface PauseState {
+  isPaused: boolean;
+  timestamp: Date;
+}
+
+export interface FeeConfig {
+  feePercentage: string;
+  maxFee: string;
+  timestamp: Date;
+}
+
+export interface PackageSummary {
+  packageId: string;
+  totalAmount: string;
+  claimedAmount: string;
+  status: string;
+  timestamp: Date;
+}
+
 // Legacy interfaces kept for backward compatibility
 export interface CreateClaimParams {
   claimId: string;
@@ -218,6 +258,18 @@ export interface OnchainAdapter {
   getTokenBalance(
     params: GetTokenBalanceParams,
   ): Promise<GetTokenBalanceResult>;
+
+  getContractMetadata(): Promise<ContractMetadata>;
+  getPauseState(): Promise<PauseState>;
+  getFeeConfig(): Promise<FeeConfig>;
+  getPackageSummary(packageId: string): Promise<PackageSummary>;
+
+  /**
+   * Get the status of a transaction by hash
+   */
+  getTransactionStatus(
+    params: GetTransactionStatusParams,
+  ): Promise<GetTransactionStatusResult>;
 
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;

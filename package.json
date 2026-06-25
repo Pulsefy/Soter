@@ -9,12 +9,40 @@
   },
   "devDependencies": {
     "@prisma/client": "^7.4.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.9.1",
+    "@types/pg": "^8.20.0",
+    "@types/redis": "^4.0.10",
+    "@types/supertest": "^7.2.0",
     "i": "^0.3.7",
+    "jest": "^30.4.2",
     "npm": "^11.10.1",
-    "prisma": "^7.4.1"
+    "prisma": "^7.4.1",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.11",
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "@nestjs/swagger": "^11.2.6",
-    "express": "^5.2.1"
-  }
+    "body-parser": "^2.2.2",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "pg": "^8.21.0",
+    "redis": "^5.12.1"
+  },
+  "version": "1.0.0",
+  "description": "<img width=\"1080\" height=\"1080\" alt=\"Gemini_Generated_Image_efez0kefez0kefez (1)\" src=\"https://github.com/user-attachments/assets/72250381-5090-45e4-9941-5096c190a000\" />",
+  "main": ".eslintrc.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Truphile/Soter.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Truphile/Soter/issues"
+  },
+  "homepage": "https://github.com/Truphile/Soter#readme"
 }

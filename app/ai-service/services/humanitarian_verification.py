@@ -11,6 +11,7 @@ import httpx
 from config import settings
 from services.humanitarian_prompt import HumanitarianPromptEngine
 from services.circuit_breaker import CircuitBreaker
+from services.test_provider import TestProvider
 from exceptions import AIServiceError
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ class HumanitarianVerificationService:
 
     def __init__(self):
         self.prompt_engine = HumanitarianPromptEngine()
+        self.test_provider = TestProvider()
         self.breakers = {
             "openai": CircuitBreaker(
                 name="openai",
@@ -80,24 +82,13 @@ class HumanitarianVerificationService:
                             model,
                             prompt_variant,
                         )
-                        try:
-                            raw_content = self._call_provider(
-                                provider=provider,
-                                model=model,
-                                system_prompt=prompt["system"],
-                                user_prompt=prompt["user"],
-                                timeout=timeout,
-                            )
-                        except TypeError as exc:
-                            if "timeout" in str(exc):
-                                raw_content = self._call_provider(
-                                    provider=provider,
-                                    model=model,
-                                    system_prompt=prompt["system"],
-                                    user_prompt=prompt["user"],
-                                )
-                            else:
-                                raise exc
+                        raw_content = self._call_provider(
+                            provider=provider,
+                            model=model,
+                            system_prompt=prompt["system"],
+                            user_prompt=prompt["user"],
+                            timeout=timeout,
+                        )
                         parsed = self._parse_json_response(raw_content)
                         if breaker:
                             breaker.record_success()
@@ -122,17 +113,23 @@ class HumanitarianVerificationService:
 
     def _provider_attempt_order(self, provider_preference: str) -> List[str]:
         available: List[str] = []
+        if settings.test_provider_mode:
+            available.append("test")
         if settings.openai_api_key:
             available.append("openai")
         if settings.groq_api_key:
             available.append("groq")
 
         preference = (provider_preference or "auto").lower()
-        if preference in ("openai", "groq") and preference in available:
+        if preference == "test" and settings.test_provider_mode:
+            return [preference]
+        if preference in ("openai", "groq", "test") and preference in available:
             return [preference] + [provider for provider in available if provider != preference]
         return available
 
     def _get_model_for_provider(self, provider: str) -> str:
+        if provider == "test":
+            return "test-provider/fixture"
         if provider == "openai":
             return settings.openai_model
         if provider == "groq":
@@ -147,6 +144,8 @@ class HumanitarianVerificationService:
         user_prompt: str,
         timeout: Optional[float] = None,
     ) -> str:
+        if provider == "test":
+            return self._call_test(model, system_prompt, user_prompt)
         if provider == "openai":
             return self._call_openai(model, system_prompt, user_prompt, timeout)
         if provider == "groq":
@@ -162,7 +161,6 @@ class HumanitarianVerificationService:
     ) -> str:
         if not settings.openai_api_key:
             raise RuntimeError("OpenAI API key is not configured")
-
         return self._call_chat_completion_api(
             base_url="https://api.openai.com/v1/chat/completions",
             api_key=settings.openai_api_key,
@@ -181,7 +179,6 @@ class HumanitarianVerificationService:
     ) -> str:
         if not settings.groq_api_key:
             raise RuntimeError("Groq API key is not configured")
-
         return self._call_chat_completion_api(
             base_url="https://api.groq.com/openai/v1/chat/completions",
             api_key=settings.groq_api_key,
@@ -212,7 +209,6 @@ class HumanitarianVerificationService:
                 {"role": "user", "content": user_prompt},
             ],
         }
-
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -258,6 +254,16 @@ class HumanitarianVerificationService:
 
         return str(content)
 
+    def _call_test(self, model: str, system_prompt: str, user_prompt: str) -> str:
+        response = self.test_provider.get_response(
+            endpoint="humanitarian",
+            request_data={
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            },
+        )
+        return json.dumps(response, separators=(",", ":"), sort_keys=True)
+
     def _get_deterministic_response(self, model: str, system_prompt: str, user_prompt: str) -> str:
         stable_response = {
             "verdict": "credible",
@@ -268,12 +274,10 @@ class HumanitarianVerificationService:
 
     def _parse_json_response(self, content: str) -> Dict[str, Any]:
         normalized = content.strip()
-
         if normalized.startswith("```"):
             normalized = normalized.strip("`")
             if normalized.startswith("json"):
                 normalized = normalized[4:].strip()
-
         parsed = json.loads(normalized)
         if not isinstance(parsed, dict):
             raise RuntimeError("LLM response must be a JSON object")

@@ -27,7 +27,9 @@ describe('SorobanErrorMapper', () => {
 
   it('maps token errors from contract error messages', () => {
     expect(
-      mapper.mapError(new Error('HostError: Error(Contract, #17) InvalidToken')),
+      mapper.mapError(
+        new Error('HostError: Error(Contract, #17) InvalidToken'),
+      ),
     ).toMatchObject({
       statusCode: 400,
       message: 'Invalid token contract address',

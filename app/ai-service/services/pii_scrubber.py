@@ -9,6 +9,9 @@ import metrics
 import spacy
 from spacy.language import Language
 
+from config import settings
+from services.test_provider import TestProvider
+
 
 @dataclass
 class PIISpan:
@@ -69,9 +72,13 @@ class PIIScrubberService:
 
     def __init__(self):
         self.nlp = self._build_nlp()
+        self.test_provider = TestProvider()
 
     def anonymize(self, text: str) -> Dict[str, object]:
         """Return privacy-preserving anonymized text and summary metadata."""
+        if settings.test_provider_mode:
+            return self.test_provider.get_response("anonymize", {"text": text})
+
         start_time = time.time()
         try:
             if not text:

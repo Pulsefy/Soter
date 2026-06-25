@@ -2,6 +2,14 @@
 
 This runbook documents a repeatable procedure for building, deploying, initializing, and verifying the `aid_escrow` Soroban contract on Stellar Testnet.
 
+## Recorded Deployments
+
+Each successful deployment produces a canonical record under `deployments/`.
+
+| Date       | Network | Contract ID                                                  | Record |
+| :--------- | :------ | :----------------------------------------------------------- | :----- |
+| 2026-06-03 | Testnet | `CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG`  | [deployments/testnet-2026-06-03.md](deployments/testnet-2026-06-03.md) |
+
 ## 1. Purpose
 
 Use this runbook to deploy the contract consistently, verify success, and perform a minimal post-deploy health check.
@@ -18,9 +26,11 @@ Use this runbook to deploy the contract consistently, verify success, and perfor
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-rustup target add wasm32-unknown-unknown
-cargo install --locked soroban-cli
+rustup target add wasm32v1-none
+cargo install --locked stellar-cli
 ```
+
+> **Note:** Stellar CLI 26+ uses the `wasm32v1-none` target (replaces the older `wasm32-unknown-unknown` target). The build output lands in `target/wasm32v1-none/release/`.
 
 ## 3. Environment setup
 
@@ -47,20 +57,28 @@ TESTNET_RPC_URL=https://soroban-testnet.stellar.org:443
 
 Build the contract to WebAssembly from the `app/onchain` directory.
 
+Using the Stellar CLI (recommended — handles target and optimizer automatically):
+
 ```bash
 cd /workspaces/Soter/app/onchain
-cargo build --release --target wasm32-unknown-unknown -p aid_escrow
+stellar contract build
+```
+
+Or directly with cargo (Stellar CLI 26+, `wasm32v1-none` target):
+
+```bash
+cargo build --release --target wasm32v1-none -p aid_escrow
 ```
 
 Confirm the build output exists:
 
 ```bash
-ls target/wasm32-unknown-unknown/release/aid_escrow.wasm
+ls target/wasm32v1-none/release/aid_escrow.wasm
 ```
 
 Expected output:
 
-- `target/wasm32-unknown-unknown/release/aid_escrow.wasm`
+- `target/wasm32v1-none/release/aid_escrow.wasm`
 
 ## 5. Deploy steps
 
@@ -84,15 +102,16 @@ If the script updates `.env`, it will also write `CONTRACT_ID=<id>` there.
 
 ### Manual deploy alternative
 
-If you want to deploy directly without the wrapper script:
+If you want to deploy directly without the wrapper script (Stellar CLI 26+):
 
 ```bash
-soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/aid_escrow.wasm \
+stellar contract deploy \
+  --wasm target/wasm32v1-none/release/aid_escrow.wasm \
   --source "$SECRET_KEY" \
-  --network testnet \
-  --rpc-url "$TESTNET_RPC_URL"
+  --network testnet
 ```
+
+After a successful deploy, copy the printed Contract ID and record it as a new entry in `deployments/` following the format of [deployments/testnet-2026-06-03.md](deployments/testnet-2026-06-03.md).
 
 ## 6. Initialization steps
 
@@ -230,8 +249,8 @@ Common causes:
 Fix:
 - Fund the account with Testnet friendbot if needed.
 - Confirm `SECRET_KEY` is valid and corresponds to a funded account.
-- Rebuild the contract and verify `target/wasm32-unknown-unknown/release/aid_escrow.wasm` exists.
-- Re-run deploy with `./scripts/deploy.sh --network testnet`.
+- Rebuild the contract and verify `target/wasm32v1-none/release/aid_escrow.wasm` exists.
+- Re-run deploy with `stellar contract deploy --wasm target/wasm32v1-none/release/aid_escrow.wasm --source "$SECRET_KEY" --network testnet`.
 
 ### 9.5 Public RPC rate limiting or service disruption
 
@@ -265,3 +284,44 @@ Fix:
 ---
 
 If the public Soroban Testnet RPC is failing repeatedly, use a secondary provider or local standalone node for consistent deployment.
+
+## 11. Handling Testnet Contract Upgrades & State Migration
+
+When iterating on the `aid_escrow` contract on Testnet, changes fall into two categories: non-breaking and breaking.
+
+### Non-Breaking Changes
+*Examples: Adding a new read-only function, fixing a bug that doesn't change storage formats.*
+1. **Redeploy**: Soroban doesn't support true in-place upgrades of Wasm code for the same Contract ID yet. You must deploy a **new Contract ID**.
+2. **Version Bump**: Ensure you bump the semantic `version` in `Cargo.toml`.
+3. **No Migration Needed**: Since it's a new instance, old state is lost. If this is purely a logic update and you don't care about old testnet packages, just use the new Contract ID.
+
+### Breaking Changes (State/Storage Layout)
+*Examples: Changing the `Package` struct fields, changing `DataKey` symbols.*
+1. **Redeploy**: Deploy the new Wasm, which generates a new Contract ID.
+2. **State Migration Strategy**: 
+   - **Reset**: Since it's Testnet, the preferred approach is often to reset the environment (wipe the database, deploy a fresh contract).
+   - **Migrate**: If state must be preserved, you must write an off-chain script to read packages from the old contract and re-create them in the new contract using the admin or a dedicated migration function.
+
+**Note on Queryable Versions:** 
+The contract semantic version is queryable on-chain via the `contract_version()` function. Additionally, `deploy.sh` automatically parses the `Cargo.toml` version and exports it as `CONTRACT_VERSION` in your `.env` artifact.
+
+## 12. Redeployment Checklist (Preventing Orphaned Integrations)
+
+When a new contract is deployed, its **Contract ID changes**. If downstream components are not updated, they will interact with the orphaned contract, causing out-of-sync state or failures.
+
+**Whenever you run `./scripts/deploy.sh` and get a new Contract ID, complete this checklist:**
+
+- [ ] **1. Backend Update:** 
+  - Update `CONTRACT_ID` and `CONTRACT_VERSION` in `app/backend/.env`.
+  - Restart the backend server (`pnpm --filter backend start:dev` or trigger a production redeploy).
+- [ ] **2. Database Sync:** 
+  - If the upgrade involved breaking storage changes, truncate the local/testnet database tables related to packages to avoid mismatched on-chain vs. off-chain state.
+- [ ] **3. Frontend Update:** 
+  - Ensure the frontend receives the new `CONTRACT_ID` (usually fetched via a config endpoint from the backend).
+  - Clear local storage or cached states if they reference old package IDs.
+- [ ] **4. Mobile App Update:** 
+  - Ensure the React Native app restarts or fetches the updated config from the backend.
+- [ ] **5. Indexer / Event Listeners:** 
+  - If you run an off-chain indexer, point it to the new `CONTRACT_ID` and restart it so it begins streaming events from the new deployment ledger.
+- [ ] **6. Announce Change:** 
+  - Notify the team in Discord/Slack that Testnet has migrated to `<NEW_CONTRACT_ID>` (v`<VERSION>`) so other developers pull the latest `.env` config.

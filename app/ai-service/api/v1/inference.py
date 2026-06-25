@@ -75,6 +75,22 @@ async def get_task_status(task_id: str):
     Poll this endpoint after creating a task.  Possible status values:
     ``pending``, ``processing``, ``completed``, ``failed``.
     """
+    return await _get_task_status(task_id)
+
+
+@router.get("/ai/jobs/{task_id}", response_model=TaskStatusResponse)
+async def get_job_status(task_id: str):
+    """
+    Get the current status of a queued AI job.
+
+    This is the canonical poll endpoint for backend clients.  Possible
+    status values: ``pending``, ``processing``, ``retrying``, ``completed``,
+    ``failed``, ``cancelled``.
+    """
+    return await _get_task_status(task_id)
+
+
+async def _get_task_status(task_id: str):
     logger.info(f"Checking status for task: {task_id}")
 
     try:

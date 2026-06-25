@@ -54,6 +54,10 @@ async def anonymize_text(request: AnonymizeRequest):
                 "pii_total": total_redacted,
             },
             trace_id=trace_id,
+        return AnonymizeResponse(
+            success=True,
+            anchor_metadata=request.anchor_metadata,
+            **result
         )
     except Exception as e:
         logger.error(f"Anonymization failed: {str(e)}", exc_info=True)

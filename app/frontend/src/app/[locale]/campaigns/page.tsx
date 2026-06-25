@@ -23,7 +23,6 @@ const statusStyles: Record<CampaignStatus, string> = {
   archived: 'bg-red-100 text-red-800',
 };
 
-/** Map AidPackageFilters status values to CampaignStatus (best-effort). */
 function toCampaignStatus(value: string): CampaignStatus | '' {
   const map: Record<string, CampaignStatus> = {
     Active: 'active',
@@ -54,8 +53,6 @@ export default function CampaignsPage() {
   const [expiry, setExpiry] = useState('');
   const [formMessage, setFormMessage] = useState<string | null>(null);
 
-  // ── Filter helpers ─────────────────────────────────────────────────────────
-
   function updateParam(key: string, value: string) {
     const params = new URLSearchParams(searchParams.toString());
     if (value) params.set(key, value);
@@ -72,7 +69,6 @@ export default function CampaignsPage() {
     [router],
   );
 
-  // Convert URL status param → CampaignStatus for filtering
   const activeCampaignStatus = toCampaignStatus(urlStatus);
 
   const activeCampaigns = useMemo(
@@ -92,7 +88,6 @@ export default function CampaignsPage() {
     setExpiry('2026-12-31');
     setFormMessage('Sample campaign values loaded. Review and create when ready.');
   };
-
 
   if (!canManageCampaigns(userRole)) {
     return (
@@ -137,24 +132,24 @@ export default function CampaignsPage() {
     }
   };
 
-  const onPauseResume = async (id: string, name: string, currentStatus: CampaignStatus) => {
+  const onPauseResume = async (id: string, campaignName: string, currentStatus: CampaignStatus) => {
     const action = currentStatus === 'active' 
       ? { type: 'pause' as const, targetStatus: 'paused' as const }
       : { type: 'resume' as const, targetStatus: 'active' as const };
     
-    campaignAction.mutate({ id, name, action });
+    campaignAction.mutate({ id, campaignName, action });
   };
 
-  const onArchive = async (id: string, name: string) => {
+  const onArchive = async (id: string, campaignName: string) => {
     campaignAction.mutate({ 
       id, 
-      name, 
+      campaignName, 
       action: { type: 'archive' as const, targetStatus: 'archived' as const } 
     });
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background to-gray-50 p-6 dark:to-gray-950">
+    <div className="min-h-screen bg-linear-to-b from-background to-gray-50 p-6 dark:to-gray-950">
       <main className="container mx-auto space-y-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-4xl font-bold">NGO Campaigns</h1>

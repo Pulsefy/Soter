@@ -9,7 +9,11 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Platform,
+  Clipboard,
+  Alert,
 } from 'react-native';
+import Constants from 'expo-constants';
+import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 import { fetchHealthStatus, HealthStatus } from '../services/api';
 import { getMockHealthData } from '../services/mockData';
 import { useTheme } from '../theme/ThemeContext';
@@ -38,6 +42,9 @@ export const HealthScreen = () => {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [isMockData, setIsMockData] = useState(false);
+  const [netInfo, setNetInfo] = useState<NetInfoState | null>(null);
+  const [apiReachable, setApiReachable] = useState<boolean | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -62,14 +69,17 @@ export const HealthScreen = () => {
         const data = await fetchHealthStatus();
         setHealthData(data);
         setIsMockData(false);
+        setApiReachable(true);
       } catch (err) {
         console.log('Using mock data fallback');
         setHealthData(getMockHealthData());
         setIsMockData(true);
         setError('Backend unreachable - showing mock data');
+        setApiReachable(false);
       }
     } catch (err) {
       setError('Failed to load health data');
+      setApiReachable(false);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -78,11 +88,69 @@ export const HealthScreen = () => {
 
   useEffect(() => {
     loadHealthData();
+
+    // Fetch initial network state
+    if (process.env.NODE_ENV === 'test') {
+      setNetInfo({
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'wifi',
+        details: { isConnectionExpensive: false },
+      } as any);
+    } else {
+      void NetInfo.fetch().then((state) => {
+        setNetInfo(state);
+      });
+    }
+
+    // Subscribe to network state changes
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      setNetInfo(state);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
     await loadHealthData(true);
+  };
+
+  const appVersion = Constants.expoConfig?.version || '1.0.0';
+
+  const handleCopyDiagnostics = async () => {
+    const formattedNetworkType = netInfo?.type ? netInfo.type.toUpperCase() : 'UNKNOWN';
+    const formattedInternetReachable = netInfo?.isInternetReachable === true 
+      ? 'Yes' 
+      : netInfo?.isInternetReachable === false 
+        ? 'No' 
+        : 'Unknown';
+    const formattedApiReachable = apiReachable === true 
+      ? 'Reachable' 
+      : apiReachable === false 
+        ? 'Unreachable' 
+        : 'Checking...';
+
+    const diagnosticsText = `Soter App Diagnostics
+---------------------
+App Version: ${appVersion}
+Platform: ${Platform.OS === 'android' ? 'Android' : 'iOS'}
+Environment: ${envLabel}
+API URL: ${apiUrl}
+API Reachability: ${formattedApiReachable}
+Network Connected: ${netInfo?.isConnected ? 'Yes' : 'No'}
+Network Type: ${formattedNetworkType}
+Internet Reachable: ${formattedInternetReachable}
+Contract ID: ${config.sorobanContractId || 'None'}
+Timestamp: ${new Date().toISOString()}`;
+
+    try {
+      await Clipboard.setString(diagnosticsText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to copy diagnostics');
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -314,6 +382,58 @@ export const HealthScreen = () => {
             </View>
           )}
 
+          {/* ── Safe Diagnostics Section ─────────────────────────────────── */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle} accessibilityRole="header">
+              Diagnostics
+            </Text>
+            <View style={styles.card}>
+              <View style={styles.infoRow} accessible accessibilityLabel={`App Version: ${appVersion}`}>
+                <Text style={styles.infoLabel}>App Version:</Text>
+                <Text style={styles.infoValue}>{appVersion}</Text>
+              </View>
+
+              <View style={styles.infoRow} accessible accessibilityLabel={`API Reachability: ${apiReachable === true ? 'Reachable' : apiReachable === false ? 'Unreachable' : 'Checking...'}`}>
+                <Text style={styles.infoLabel}>API Reachability:</Text>
+                <Text style={[styles.infoValue, { color: apiReachable === true ? colors.success : apiReachable === false ? colors.error : colors.textSecondary }]}>
+                  {apiReachable === true ? 'REACHABLE ✅' : apiReachable === false ? 'UNREACHABLE ❌' : 'CHECKING...'}
+                </Text>
+              </View>
+
+              <View style={styles.infoRow} accessible accessibilityLabel={`Network Connection: ${netInfo?.isConnected ? 'Connected' : 'Disconnected'}`}>
+                <Text style={styles.infoLabel}>Network Status:</Text>
+                <Text style={[styles.infoValue, { color: netInfo?.isConnected ? colors.success : colors.error }]}>
+                  {netInfo?.isConnected ? 'CONNECTED' : 'DISCONNECTED'}
+                </Text>
+              </View>
+
+              <View style={styles.infoRow} accessible accessibilityLabel={`Network Type: ${netInfo?.type ? netInfo.type.toUpperCase() : 'UNKNOWN'}`}>
+                <Text style={styles.infoLabel}>Network Type:</Text>
+                <Text style={styles.infoValue}>{netInfo?.type ? netInfo.type.toUpperCase() : 'UNKNOWN'}</Text>
+              </View>
+
+              <View style={styles.infoRow} accessible accessibilityLabel={`Internet Reachable: ${netInfo?.isInternetReachable === true ? 'Yes' : netInfo?.isInternetReachable === false ? 'No' : 'Unknown'}`}>
+                <Text style={styles.infoLabel}>Internet Reachable:</Text>
+                <Text style={[styles.infoValue, { color: netInfo?.isInternetReachable === true ? colors.success : netInfo?.isInternetReachable === false ? colors.error : colors.textSecondary }]}>
+                  {netInfo?.isInternetReachable === true ? 'YES' : netInfo?.isInternetReachable === false ? 'NO' : 'UNKNOWN'}
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.copyButton, copied && styles.copyButtonActive]}
+              accessibilityRole="button"
+              accessibilityLabel="Copy Diagnostics to Clipboard"
+              accessibilityHint="Copies non-sensitive diagnostics information to your clipboard for debugging"
+              onPress={handleCopyDiagnostics}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.copyButtonText, copied && { color: colors.success }]}>
+                {copied ? '✅ Diagnostics Copied!' : '📋 Copy Diagnostics'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           {/* ── Quick Stats ─────────────────────────────────────────────── */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle} accessibilityRole="header">
@@ -393,27 +513,24 @@ export const HealthScreen = () => {
             <View
               style={styles.footerEnvRow}
               testID="footer-env-row"
-              accessible
               accessibilityLabel={`Environment: ${envLabel} · ${shortApiUrl}`}
             >
-              <Text style={styles.footerEnvLabel} importantForAccessibility="no-hide-descendants">
+              <Text style={styles.footerEnvLabel}>
                 Environment:{' '}
               </Text>
               <Text
                 testID="footer-env-name"
                 style={[styles.footerEnvValue, { color: envBadgeColor }]}
-                importantForAccessibility="no-hide-descendants"
               >
                 {envLabel}
               </Text>
-              <Text style={styles.footerEnvSeparator} importantForAccessibility="no-hide-descendants">
+              <Text style={styles.footerEnvSeparator}>
                 {' '}·{' '}
               </Text>
               <Text
                 testID="footer-api-url"
                 style={styles.footerEnvUrl}
                 numberOfLines={1}
-                importantForAccessibility="no-hide-descendants"
               >
                 {shortApiUrl}
               </Text>
@@ -685,5 +802,25 @@ const makeStyles = (colors: AppColors) =>
       fontSize: 11,
       color: colors.textSecondary,
       flexShrink: 1,
+    },
+    copyButton: {
+      backgroundColor: colors.infoBg,
+      borderColor: colors.border,
+      borderWidth: 1,
+      padding: 14,
+      minHeight: 44,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginTop: 8,
+      marginBottom: 12,
+    },
+    copyButtonActive: {
+      backgroundColor: colors.background === '#0F172A' ? '#14532D' : '#DCFCE7',
+      borderColor: colors.success,
+    },
+    copyButtonText: {
+      color: colors.info,
+      fontSize: 16,
+      fontWeight: '600',
     },
   });

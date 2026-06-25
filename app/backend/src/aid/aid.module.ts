@@ -4,9 +4,10 @@ import { AidController } from './aid.controller';
 import { RedisService } from 'cache/redis.service';
 import { HmacModule } from '../common/hmac/hmac.module';
 import { WebhookHmacGuard } from '../common/guards/webhook-hmac.guard';
+import { MetricsModule } from '../observability/metrics/metrics.module';
 
 @Module({
-  imports: [HmacModule],
+  imports: [HmacModule, MetricsModule],
   providers: [AidService, RedisService, WebhookHmacGuard],
   controllers: [AidController],
   exports: [AidService],

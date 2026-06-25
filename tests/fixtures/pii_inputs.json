@@ -1,0 +1,18 @@
+[
+  {
+    "name": "email test",
+    "input": "Contact me at john@example.com"
+  },
+  {
+    "name": "phone test",
+    "input": "Call me on +234 801 234 5678"
+  },
+  {
+    "name": "id test",
+    "input": "My ID is 12345678"
+  },
+  {
+    "name": "safe text",
+    "input": "The sky is blue"
+  }
+]
