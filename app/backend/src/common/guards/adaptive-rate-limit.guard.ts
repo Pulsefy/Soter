@@ -8,6 +8,16 @@ import {
 import { RedisService } from '@liaoliaots/nestjs-redis';
 import { Request } from 'express';
 
+interface RateLimitedUser {
+  id?: string;
+  apiKeyId?: string;
+  authType?: 'apiKey' | 'envApiKey';
+}
+
+type RateLimitedRequest = Request & {
+  user?: RateLimitedUser;
+};
+
 @Injectable()
 export class AdaptiveRateLimitGuard implements CanActivate {
   private readonly limits = {
@@ -20,7 +30,7 @@ export class AdaptiveRateLimitGuard implements CanActivate {
   constructor(private readonly redisService: RedisService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest<any>();
+    const request = context.switchToHttp().getRequest<RateLimitedRequest>();
     const client = this.redisService.getOrThrow();
 
     const strategy = this.getStrategy(request);
@@ -49,7 +59,7 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     return true;
   }
 
-  private getStrategy(request: any): keyof typeof this.limits {
+  private getStrategy(request: RateLimitedRequest): keyof typeof this.limits {
     const path = request.path ?? request.url ?? '';
     if (path.includes('/search')) return 'search';
 
@@ -64,7 +74,7 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     return 'public';
   }
 
-  private getIdentifier(request: any): string {
+  private getIdentifier(request: RateLimitedRequest): string {
     const user = request.user;
     if (user?.id) return user.id;
     if (user?.apiKeyId) return user.apiKeyId;
