@@ -8,9 +8,8 @@ import {
   OnchainOperationType,
 } from './interfaces/onchain-job.interface';
 import { ONCHAIN_ADAPTER_TOKEN, OnchainAdapter } from './onchain.adapter';
-
-import { DlqService } from '../jobs/dlq.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import { DlqService } from '../jobs/dlq.service';
 
 @Processor('onchain', {
   concurrency: 1, // Usually sequential for blockchain transactions

@@ -224,4 +224,52 @@ export class MetricsService {
   incrementAnalyticsCacheInvalidation(reason: string): void {
     this.analyticsCacheInvalidationsCounter.inc({ reason });
   }
+
+  /**
+   * Record contract call latency
+   */
+  recordContractCallLatency(
+    operation: string,
+    status: 'success' | 'failed',
+    duration: number,
+  ): void {
+    this.onchainOperationDuration.observe(
+      {
+        operation,
+        status,
+      },
+      duration,
+    );
+  }
+
+  /**
+   * Increment transaction submission failure counter
+   */
+  incrementTxSubmissionFailure(operation: string, error: string): void {
+    this.onchainOperationsCounter.inc({
+      operation,
+      status: 'failed',
+      error_type: 'tx_submission',
+    });
+    this.errorRateCounter.inc({
+      operation,
+      error_type: 'tx_submission',
+      error_message: error,
+    });
+  }
+
+  /**
+   * Increment callback failure counter
+   */
+  incrementCallbackFailure(callbackType: string, error: string): void {
+    this.jobsFailedCounter.inc({
+      job_type: callbackType,
+      error_type: 'callback_failure',
+    });
+    this.errorRateCounter.inc({
+      job_type: callbackType,
+      error_type: 'callback_failure',
+      error_message: error,
+    });
+  }
 }

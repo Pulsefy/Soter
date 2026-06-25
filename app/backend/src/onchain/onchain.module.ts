@@ -11,9 +11,18 @@ import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { LedgerAdminController } from './ledger-admin.controller';
 import { JobsModule } from '../jobs/jobs.module';
+import { PrismaModule } from '../prisma/prisma.module';
 import { LoggerModule } from '../logger/logger.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
 
+@Module({
+  imports: [
+    PrismaModule,
+    LoggerModule,
+    MetricsModule,
+  ],
+})
+export class YourModule {}
 /**
  * Factory function to create the appropriate adapter based on configuration
  */
@@ -44,6 +53,7 @@ const onchainAdapterProvider: Provider = {
 @Module({
   imports: [
     ConfigModule,
+    PrismaModule,
     BullModule.registerQueueAsync({
       name: 'onchain',
       imports: [ConfigModule],
