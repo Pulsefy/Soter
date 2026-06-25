@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { RedisService } from '@liaoliaots/nestjs-redis';
 import { Request } from 'express';
+import type { Redis } from 'ioredis';
 
 interface RateLimitedUser {
   id?: string;
@@ -15,12 +16,22 @@ interface RateLimitedUser {
 }
 
 type RateLimitedRequest = Request & {
+  path?: string;
+  url?: string;
+  ip?: string;
+  ips?: string[];
   user?: RateLimitedUser;
 };
 
+type RateLimitStrategy = 'auth' | 'search' | 'public' | 'apiKey';
+type RateLimitConfig = Record<
+  RateLimitStrategy,
+  { limit: number; window: number }
+>;
+
 @Injectable()
 export class AdaptiveRateLimitGuard implements CanActivate {
-  private readonly limits = {
+  private readonly limits: RateLimitConfig = {
     auth: { limit: 5, window: 60 },
     search: { limit: 30, window: 60 },
     public: { limit: 10, window: 60 },
@@ -31,7 +42,7 @@ export class AdaptiveRateLimitGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RateLimitedRequest>();
-    const client = this.redisService.getOrThrow();
+    const client: Redis = this.redisService.getOrThrow();
 
     const strategy = this.getStrategy(request);
     const { limit, window } = this.limits[strategy];
@@ -59,7 +70,7 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     return true;
   }
 
-  private getStrategy(request: RateLimitedRequest): keyof typeof this.limits {
+  private getStrategy(request: RateLimitedRequest): RateLimitStrategy {
     const path = request.path ?? request.url ?? '';
     if (path.includes('/search')) return 'search';
 
