@@ -103,7 +103,10 @@ export class SeedService {
         skipped++;
         campaignIds.push(existing.id);
       } else {
-        const seedMetadata: Record<string, unknown> = seed.metadata as Record<string, unknown>;
+        const seedMetadata: Record<string, unknown> = seed.metadata as Record<
+          string,
+          unknown
+        >;
         const record = await this.prisma.campaign.create({
           data: {
             name: seed.name,

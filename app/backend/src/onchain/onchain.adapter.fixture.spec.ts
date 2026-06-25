@@ -68,7 +68,8 @@ describe('FixtureOnchainAdapter', () => {
     it('returns deterministic balance', async () => {
       const result = await adapter.getTokenBalance({
         tokenAddress: MOCK_TOKEN_ADDRESS,
-        accountAddress: 'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        accountAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
       });
       expect(result.balance).toBe('10000000000');
       expect(result.tokenAddress).toBe(MOCK_TOKEN_ADDRESS);
@@ -84,7 +85,7 @@ describe('FixtureOnchainAdapter', () => {
         recipientAddress: 'GREC...',
         amount: '1000',
         tokenAddress: MOCK_TOKEN_ADDRESS,
-        expiresAt: 1234567890
+        expiresAt: 1234567890,
       });
       expect(result.status).toBe('success');
       expect(result.packageId).toBe('pkg-1');
@@ -92,7 +93,7 @@ describe('FixtureOnchainAdapter', () => {
       expect(result.metadata?.expiresAt).toBe(1234567890);
     });
   });
-  
+
   describe('batchCreateAidPackages', () => {
     it('returns fixture merged with parameters', async () => {
       const result = await adapter.batchCreateAidPackages({
@@ -100,7 +101,7 @@ describe('FixtureOnchainAdapter', () => {
         recipientAddresses: ['R1', 'R2'],
         amounts: ['10', '20'],
         tokenAddress: 'TOK...',
-        expiresIn: 3600
+        expiresIn: 3600,
       });
       expect(result.status).toBe('success');
       expect(result.packageIds).toHaveLength(2);
