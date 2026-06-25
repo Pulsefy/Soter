@@ -13,6 +13,18 @@ import { AppRole } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { ApiKeyGuard } from '../common/guards/api-key.guard';
+import { Request as ExpressRequest } from 'express';
+
+interface InviteRequestUser {
+  id?: string;
+  email?: string;
+  apiKeyId?: string;
+  authType?: 'apiKey' | 'envApiKey';
+}
+
+type InviteRequest = ExpressRequest & {
+  user?: InviteRequestUser;
+};
 
 @Controller()
 @UseGuards(ApiKeyGuard, RolesGuard)
@@ -24,13 +36,13 @@ export class InvitesController {
   async createInvite(
     @Param('id') orgId: string,
     @Body() body: { email: string; role: AppRole },
-    @Request() req: any,
+    @Request() req: InviteRequest,
   ) {
     return this.invitesService.createInvite({
       orgId,
       email: body.email,
       role: body.role,
-      createdBy: req.user.id || req.user.apiKeyId || 'system',
+      createdBy: req.user?.id ?? req.user?.apiKeyId ?? 'system',
     });
   }
 
@@ -38,18 +50,21 @@ export class InvitesController {
   async acceptInvite(
     @Param('id') inviteId: string,
     @Body('email') email: string,
-    @Request() req: any,
+    @Request() req: InviteRequest,
   ) {
-    const userEmail = req.user?.email || email;
+    const userEmail = req.user?.email ?? email;
     return this.invitesService.acceptInvite(inviteId, userEmail);
   }
 
   @Delete('invites/:id')
   @Roles(AppRole.admin)
-  async revokeInvite(@Param('id') inviteId: string, @Request() req: any) {
+  async revokeInvite(
+    @Param('id') inviteId: string,
+    @Request() req: InviteRequest,
+  ) {
     return this.invitesService.revokeInvite(
       inviteId,
-      req.user.id || req.user.apiKeyId || 'system',
+      req.user?.id ?? req.user?.apiKeyId ?? 'system',
     );
   }
 

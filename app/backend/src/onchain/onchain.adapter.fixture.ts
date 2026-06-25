@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
 import { Injectable } from '@nestjs/common';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -29,7 +30,6 @@ import {
   PackageSummary,
   GetTransactionStatusParams,
   GetTransactionStatusResult,
-  TxStatus,
 } from './onchain.adapter';
 
 /**
@@ -46,11 +46,11 @@ export class FixtureOnchainAdapter implements OnchainAdapter {
     const fullPath = this.getFixturePath(filename);
     const content = fs.readFileSync(fullPath, 'utf-8');
     const parsed = JSON.parse(content);
-    
+
     if (!(key in parsed)) {
       throw new Error(`Fixture key '${key}' not found in ${filename}`);
     }
-    
+
     // Add real JS Date objects where they were encoded as ISO strings
     return this.parseDates(parsed[key]) as T;
   }
@@ -59,11 +59,11 @@ export class FixtureOnchainAdapter implements OnchainAdapter {
     if (obj === null || typeof obj !== 'object') {
       return obj;
     }
-    
+
     if (Array.isArray(obj)) {
       return obj.map(item => this.parseDates(item));
     }
-    
+
     const result: any = {};
     for (const [key, value] of Object.entries(obj)) {
       if (key === 'timestamp' && typeof value === 'string') {
@@ -72,23 +72,29 @@ export class FixtureOnchainAdapter implements OnchainAdapter {
         result[key] = this.parseDates(value);
       }
     }
-    
+
     return result;
   }
 
   async initEscrow(params: InitEscrowParams): Promise<InitEscrowResult> {
-    const fixture = this.loadFixture<InitEscrowResult>('initEscrow.fixture.json');
+    const fixture = this.loadFixture<InitEscrowResult>(
+      'initEscrow.fixture.json',
+    );
     return {
       ...fixture,
       metadata: {
         ...fixture.metadata,
-        adminAddress: params.adminAddress
-      }
+        adminAddress: params.adminAddress,
+      },
     };
   }
 
-  async createAidPackage(params: CreateAidPackageParams): Promise<CreateAidPackageResult> {
-    const fixture = this.loadFixture<CreateAidPackageResult>('createAidPackage.fixture.json');
+  async createAidPackage(
+    params: CreateAidPackageParams,
+  ): Promise<CreateAidPackageResult> {
+    const fixture = this.loadFixture<CreateAidPackageResult>(
+      'createAidPackage.fixture.json',
+    );
     return {
       ...fixture,
       packageId: params.packageId,
@@ -99,13 +105,17 @@ export class FixtureOnchainAdapter implements OnchainAdapter {
         recipientAddress: params.recipientAddress,
         amount: params.amount,
         tokenAddress: params.tokenAddress,
-        expiresAt: params.expiresAt
-      }
+        expiresAt: params.expiresAt,
+      },
     };
   }
 
-  async batchCreateAidPackages(params: BatchCreateAidPackagesParams): Promise<BatchCreateAidPackagesResult> {
-    const fixture = this.loadFixture<BatchCreateAidPackagesResult>('batchCreateAidPackages.fixture.json');
+  async batchCreateAidPackages(
+    params: BatchCreateAidPackagesParams,
+  ): Promise<BatchCreateAidPackagesResult> {
+    const fixture = this.loadFixture<BatchCreateAidPackagesResult>(
+      'batchCreateAidPackages.fixture.json',
+    );
     const packageIds = params.recipientAddresses.map((_, index) => `${index}`);
     return {
       ...fixture,
@@ -114,63 +124,85 @@ export class FixtureOnchainAdapter implements OnchainAdapter {
         ...fixture.metadata,
         operatorAddress: params.operatorAddress,
         count: params.recipientAddresses.length,
-        tokenAddress: params.tokenAddress
-      }
+        tokenAddress: params.tokenAddress,
+      },
     };
   }
 
-  async claimAidPackage(params: ClaimAidPackageParams): Promise<ClaimAidPackageResult> {
-    const fixture = this.loadFixture<ClaimAidPackageResult>('claimAidPackage.fixture.json');
+  async claimAidPackage(
+    params: ClaimAidPackageParams,
+  ): Promise<ClaimAidPackageResult> {
+    const fixture = this.loadFixture<ClaimAidPackageResult>(
+      'claimAidPackage.fixture.json',
+    );
     return {
       ...fixture,
       packageId: params.packageId,
       metadata: {
         ...fixture.metadata,
         packageId: params.packageId,
-        recipientAddress: params.recipientAddress
-      }
+        recipientAddress: params.recipientAddress,
+      },
     };
   }
 
-  async disburseAidPackage(params: DisburseAidPackageParams): Promise<DisburseAidPackageResult> {
-    const fixture = this.loadFixture<DisburseAidPackageResult>('disburseAidPackage.fixture.json');
+  async disburseAidPackage(
+    params: DisburseAidPackageParams,
+  ): Promise<DisburseAidPackageResult> {
+    const fixture = this.loadFixture<DisburseAidPackageResult>(
+      'disburseAidPackage.fixture.json',
+    );
     return {
       ...fixture,
       packageId: params.packageId,
       metadata: {
         ...fixture.metadata,
         packageId: params.packageId,
-        operatorAddress: params.operatorAddress
-      }
+        operatorAddress: params.operatorAddress,
+      },
     };
   }
 
-  async getAidPackage(params: GetAidPackageParams): Promise<GetAidPackageResult> {
-    const fixture = this.loadFixture<GetAidPackageResult>('getAidPackage.fixture.json');
+  async getAidPackage(
+    params: GetAidPackageParams,
+  ): Promise<GetAidPackageResult> {
+    const fixture = this.loadFixture<GetAidPackageResult>(
+      'getAidPackage.fixture.json',
+    );
     return {
       ...fixture,
       package: {
         ...fixture.package,
-        id: params.packageId
-      }
+        id: params.packageId,
+      },
     };
   }
 
-  async getAidPackageCount(_params: GetAidPackageCountParams): Promise<GetAidPackageCountResult> {
-    return this.loadFixture<GetAidPackageCountResult>('getAidPackageCount.fixture.json');
+  async getAidPackageCount(
+    _params: GetAidPackageCountParams,
+  ): Promise<GetAidPackageCountResult> {
+    return this.loadFixture<GetAidPackageCountResult>(
+      'getAidPackageCount.fixture.json',
+    );
   }
 
-  async getTokenBalance(params: GetTokenBalanceParams): Promise<GetTokenBalanceResult> {
-    const fixture = this.loadFixture<GetTokenBalanceResult>('getTokenBalance.fixture.json');
+  async getTokenBalance(
+    params: GetTokenBalanceParams,
+  ): Promise<GetTokenBalanceResult> {
+    const fixture = this.loadFixture<GetTokenBalanceResult>(
+      'getTokenBalance.fixture.json',
+    );
     return {
       ...fixture,
       tokenAddress: params.tokenAddress,
-      accountAddress: params.accountAddress
+      accountAddress: params.accountAddress,
     };
   }
 
   async getContractMetadata(): Promise<ContractMetadata> {
-    return this.loadFixture<ContractMetadata>('getContractMetadata.fixture.json');
+    return this.loadFixture<ContractMetadata>(
+      'getContractMetadata.fixture.json',
+    );
   }
 
   async getPauseState(): Promise<PauseState> {
@@ -182,17 +214,21 @@ export class FixtureOnchainAdapter implements OnchainAdapter {
   }
 
   async getPackageSummary(packageId: string): Promise<PackageSummary> {
-    const fixture = this.loadFixture<PackageSummary>('getPackageSummary.fixture.json');
+    const fixture = this.loadFixture<PackageSummary>(
+      'getPackageSummary.fixture.json',
+    );
     return {
       ...fixture,
-      packageId
+      packageId,
     };
   }
 
-  async getTransactionStatus(params: GetTransactionStatusParams): Promise<GetTransactionStatusResult> {
+  async getTransactionStatus(
+    params: GetTransactionStatusParams,
+  ): Promise<GetTransactionStatusResult> {
     const hash = params.hash.toUpperCase();
     const firstChar = hash.charAt(0);
-    
+
     let key = 'unknown';
     if (firstChar >= '0' && firstChar <= '7') {
       key = 'succeeded';
@@ -202,16 +238,21 @@ export class FixtureOnchainAdapter implements OnchainAdapter {
       key = 'failed';
     }
 
-    const fixture = this.loadFixture<GetTransactionStatusResult>('getTransactionStatus.fixture.json', key);
-    
+    const fixture = this.loadFixture<GetTransactionStatusResult>(
+      'getTransactionStatus.fixture.json',
+      key,
+    );
+
     return {
       ...fixture,
-      hash
+      hash,
     };
   }
 
   async createClaim(params: CreateClaimParams): Promise<CreateClaimResult> {
-    const fixture = this.loadFixture<CreateClaimResult>('createClaim.fixture.json');
+    const fixture = this.loadFixture<CreateClaimResult>(
+      'createClaim.fixture.json',
+    );
     return {
       ...fixture,
       packageId: params.claimId, // In mocks we mirror it over to fake the logic
@@ -221,8 +262,8 @@ export class FixtureOnchainAdapter implements OnchainAdapter {
         recipientAddress: params.recipientAddress,
         amount: params.amount,
         tokenAddress: params.tokenAddress,
-        expiresAt: params.expiresAt
-      }
+        expiresAt: params.expiresAt,
+      },
     };
   }
 
@@ -235,8 +276,8 @@ export class FixtureOnchainAdapter implements OnchainAdapter {
         ...fixture.metadata,
         claimId: params.claimId,
         packageId: params.packageId,
-        recipientAddress: params.recipientAddress
-      }
+        recipientAddress: params.recipientAddress,
+      },
     };
   }
 }

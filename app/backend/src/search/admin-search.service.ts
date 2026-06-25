@@ -12,7 +12,11 @@ export interface SearchResult {
 export class AdminSearchService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async search(query: string, entity: string | undefined, orgId: string): Promise<SearchResult[]> {
+  async search(
+    query: string,
+    entity: string | undefined,
+    orgId: string,
+  ): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
     const q = query.toLowerCase();
 
