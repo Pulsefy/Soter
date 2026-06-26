@@ -110,7 +110,8 @@
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "moduleNameMapper": {
-      "^src/(.*)$": "<rootDir>/src/$1"
+      "^src/(.*)$": "<rootDir>/src/$1",
+      "^cache/(.*)$": "<rootDir>/cache/$1"
     }
   },
   "prisma": {

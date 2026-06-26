@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { ClaimStatus, Prisma } from '@prisma/client';
 import { of } from 'rxjs';
+import { WebhookService } from './webhook.service';
 
 describe('VerificationService', () => {
   let service: VerificationService;
@@ -86,6 +87,13 @@ describe('VerificationService', () => {
           provide: HttpService,
           useValue: {
             post: jest.fn().mockReturnValue(of({ data: {} })),
+          },
+        },
+        {
+          provide: WebhookService,
+          useValue: {
+            enqueueWebhook: jest.fn().mockResolvedValue(undefined),
+            replayWebhook: jest.fn().mockResolvedValue(undefined),
           },
         },
       ],
@@ -257,6 +265,13 @@ describe('VerificationService', () => {
             provide: HttpService,
             useValue: {
               post: jest.fn().mockReturnValue(of({ data: {} })),
+            },
+          },
+          {
+            provide: WebhookService,
+            useValue: {
+              enqueueWebhook: jest.fn().mockResolvedValue(undefined),
+              replayWebhook: jest.fn().mockResolvedValue(undefined),
             },
           },
         ],

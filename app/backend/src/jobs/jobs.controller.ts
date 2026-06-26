@@ -13,6 +13,7 @@ export class JobsController {
     @InjectQueue('onchain') private onchainQueue: Queue,
     @InjectQueue(RETENTION_PURGE_QUEUE) private retentionPurgeQueue: Queue,
     @InjectQueue('dead-letter') private deadLetterQueue: Queue,
+    @InjectQueue('webhooks') private webhooksQueue: Queue,
   ) {}
 
   @ApiOperation({
@@ -59,6 +60,7 @@ export class JobsController {
       onchain: await this.getQueueStatus(this.onchainQueue),
       'retention-purge': await this.getQueueStatus(this.retentionPurgeQueue),
       'dead-letter': await this.getQueueStatus(this.deadLetterQueue),
+      webhooks: await this.getQueueStatus(this.webhooksQueue),
     };
   }
 
@@ -73,6 +75,7 @@ export class JobsController {
       await this.getQueueStatus(this.verificationQueue),
       await this.getQueueStatus(this.notificationsQueue),
       await this.getQueueStatus(this.onchainQueue),
+      await this.getQueueStatus(this.webhooksQueue),
     ];
 
     const isDegraded = statuses.some(s => s.waiting > 100 || s.failed > 50);
