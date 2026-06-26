@@ -4,6 +4,7 @@ import {
   Body,
   Get,
   Param,
+  Query,
   Version,
   HttpStatus,
   HttpCode,
@@ -29,6 +30,7 @@ import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { StartVerificationDto } from './dto/start-verification.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompleteVerificationDto } from './dto/complete-verification.dto';
+import { ReviewQueueQueryDto } from './dto/review-queue-query.dto';
 
 @ApiTags('Verification')
 @ApiSecurity('x-api-key')
@@ -127,7 +129,8 @@ export class VerificationController {
               sessionId: 'ses_email_123',
               channel: 'email',
               expiresAt: '2025-02-19T12:10:00.000Z',
-              message: 'Verification code sent to email. Code expires in 10 minutes.',
+              message:
+                'Verification code sent to email. Code expires in 10 minutes.',
             },
           },
           phone: {
@@ -136,7 +139,8 @@ export class VerificationController {
               sessionId: 'ses_phone_456',
               channel: 'phone',
               expiresAt: '2025-02-19T12:10:00.000Z',
-              message: 'Verification code sent to phone. Code expires in 10 minutes.',
+              message:
+                'Verification code sent to phone. Code expires in 10 minutes.',
             },
           },
         },
@@ -144,7 +148,8 @@ export class VerificationController {
     },
   })
   @ApiBadRequestResponse({
-    description: 'Invalid input parameters or rate limit exceeded for this identifier.',
+    description:
+      'Invalid input parameters or rate limit exceeded for this identifier.',
   })
   async startVerification(@Body() dto: StartVerificationDto) {
     return this.verificationFlowService.start(dto);
@@ -169,7 +174,8 @@ export class VerificationController {
     },
   })
   @ApiBadRequestResponse({
-    description: 'Session is inactive, expired, or resend limit has been reached.',
+    description:
+      'Session is inactive, expired, or resend limit has been reached.',
   })
   @ApiNotFoundResponse({
     description: 'The specified verification session was not found.',
@@ -235,6 +241,57 @@ export class VerificationController {
   })
   create(@Body() createVerificationDto: CreateVerificationDto) {
     return this.verificationService.create(createVerificationDto);
+  }
+
+  @Get('review-queue')
+  @Version('1')
+  @ApiOperation({
+    summary: 'Get verification review queue',
+    description:
+      'Retrieve claims pending verification review with optional filtering by status, campaign, date range, and pagination using either page/limit or cursor/limit.',
+  })
+  @ApiOkResponse({
+    description: 'Verification review queue retrieved successfully.',
+    schema: {
+      example: {
+        items: [
+          {
+            id: 'clm_review_001',
+            createdAt: '2026-01-23T10:30:00.000Z',
+            updatedAt: '2026-01-23T10:30:00.000Z',
+            status: 'requested',
+            campaignId: 'cmp_review_001',
+            amount: '250.00',
+            recipientRef: 'recipient-001',
+            evidenceRef: 'evidence-001',
+            campaign: {
+              id: 'cmp_review_001',
+              name: 'Emergency Relief',
+              status: 'active',
+              archivedAt: null,
+            },
+          },
+        ],
+        pagination: {
+          mode: 'page',
+          page: 1,
+          limit: 20,
+          totalItems: 1,
+          totalPages: 1,
+          hasNextPage: false,
+        },
+        filters: {
+          status: ['requested'],
+          campaignId: 'cmp_review_001',
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid filter values or pagination parameters.',
+  })
+  async getReviewQueue(@Query() query: ReviewQueueQueryDto) {
+    return this.verificationService.getReviewQueue(query);
   }
 
   @Get('claims/:id')
