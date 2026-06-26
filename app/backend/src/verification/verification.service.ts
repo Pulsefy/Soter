@@ -13,6 +13,7 @@ import { AuditService } from '../audit/audit.service';
 import { firstValueFrom } from 'rxjs';
 import OpenAI from 'openai';
 import * as crypto from 'crypto';
+import { CircuitBreaker } from '../common/utils/circuit-breaker.util';
 
 // ---------------------------------------------------------------------------
 // OCR service types
@@ -73,6 +74,8 @@ export class VerificationService {
   private readonly aiServiceTimeout: number;
   private readonly openaiModel: string;
   private readonly openai: OpenAI | null;
+  private readonly ocrCircuitBreaker: CircuitBreaker;
+  private readonly llmCircuitBreaker: CircuitBreaker;
 
   constructor(
     @InjectQueue('verification') private verificationQueue: Queue,
@@ -109,6 +112,29 @@ export class VerificationService {
         'OPENAI_API_KEY not set – AI verification will fall back to mock scoring',
       );
     }
+
+    this.ocrCircuitBreaker = new CircuitBreaker({
+      failureThreshold: parseInt(
+        this.configService.get<string>('OCR_CIRCUIT_BREAKER_THRESHOLD') || '3',
+        10,
+      ),
+      resetTimeout: parseInt(
+        this.configService.get<string>('OCR_CIRCUIT_BREAKER_RESET_TIMEOUT') ||
+          '30000',
+        10,
+      ),
+    });
+    this.llmCircuitBreaker = new CircuitBreaker({
+      failureThreshold: parseInt(
+        this.configService.get<string>('LLM_CIRCUIT_BREAKER_THRESHOLD') || '3',
+        10,
+      ),
+      resetTimeout: parseInt(
+        this.configService.get<string>('LLM_CIRCUIT_BREAKER_RESET_TIMEOUT') ||
+          '30000',
+        10,
+      ),
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -354,16 +380,21 @@ the JSON verdict.
       `Calling OpenAI (${this.openaiModel}) for claim ${claim.id}`,
     );
 
-    const response = await this.openai!.chat.completions.create({
-      model: this.openaiModel,
-      temperature: 0, // deterministic scoring
-      max_tokens: 512,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-    });
+    const response = await this.llmCircuitBreaker.fire(() =>
+      this.openai!.chat.completions.create(
+        {
+          model: this.openaiModel,
+          temperature: 0, // deterministic scoring
+          max_tokens: 512,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+        },
+        { timeout: this.aiServiceTimeout },
+      ),
+    );
 
     const rawContent = response.choices[0]?.message?.content ?? '';
 
@@ -479,14 +510,16 @@ the JSON verdict.
 
   private async callOCRService(documentUrl: string): Promise<OCRResponse> {
     try {
-      const response = await firstValueFrom(
-        this.httpService.post(
-          `${this.aiServiceUrl}/ai/ocr`,
-          { document_url: documentUrl },
-          {
-            timeout: this.aiServiceTimeout,
-            headers: { 'Content-Type': 'application/json' },
-          },
+      const response = await this.ocrCircuitBreaker.fire(() =>
+        firstValueFrom(
+          this.httpService.post(
+            `${this.aiServiceUrl}/ai/ocr`,
+            { document_url: documentUrl },
+            {
+              timeout: this.aiServiceTimeout,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
         ),
       );
       return response.data as OCRResponse;

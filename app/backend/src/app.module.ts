@@ -44,6 +44,8 @@ import { RedisModule } from '@liaoliaots/nestjs-redis';
 import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guard';
 import { DeprecationInterceptor } from './common/interceptors/deprecation.interceptor';
 import { SandboxModule } from './sandbox/sandbox.module';
+import { CacheModule } from './common/cache/cache.module';
+import { CacheResponseInterceptor } from './common/interceptors/cache-response.interceptor';
 
 @Module({
   imports: [
@@ -90,6 +92,7 @@ import { SandboxModule } from './sandbox/sandbox.module';
 
     LoggerModule,
     PrismaModule,
+    CacheModule,
     HealthModule,
     AidModule,
     VerificationModule,
@@ -157,6 +160,10 @@ import { SandboxModule } from './sandbox/sandbox.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: DeprecationInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: CacheResponseInterceptor,
     },
   ],
 })

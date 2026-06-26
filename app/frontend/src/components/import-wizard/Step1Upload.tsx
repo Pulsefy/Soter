@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent } from 'react';
+import { ChangeEvent, RefObject } from 'react';
 import { FileText, LoaderCircle, UploadCloud } from 'lucide-react';
 
 interface Step1UploadProps {
@@ -8,6 +8,7 @@ interface Step1UploadProps {
   fileError: string | null;
   isParsing: boolean;
   canProceed: boolean;
+  headingRef?: RefObject<HTMLHeadingElement | null>;
   onFileSelected: (file: File | null) => void | Promise<void>;
   onNext: () => void;
 }
@@ -18,7 +19,7 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function Step1Upload({ file, fileError, isParsing, canProceed, onFileSelected, onNext }: Step1UploadProps) {
+export function Step1Upload({ file, fileError, isParsing, canProceed, headingRef, onFileSelected, onNext }: Step1UploadProps) {
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
     const nextFile = event.target.files?.[0] ?? null;
     void onFileSelected(nextFile);
@@ -27,7 +28,7 @@ export function Step1Upload({ file, fileError, isParsing, canProceed, onFileSele
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">Step 1: Upload recipient file</h2>
+        <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-slate-900 dark:text-slate-50 focus:outline-none">Step 1: Upload recipient file</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300">
           Choose a CSV export from your recipient system. We&apos;ll parse the file locally first so you can inspect the shape before anything is submitted.
         </p>

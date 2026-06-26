@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from schemas.common import AnchorMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class ProofOfLifeRequest(BaseModel):
     selfie_image_base64: str
     burst_images_base64: Optional[List[str]] = None
     confidence_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    anchor_metadata: Optional[AnchorMetadata] = None
 
 
 class ProofOfLifeResponse(BaseModel):
@@ -29,6 +31,7 @@ class ProofOfLifeResponse(BaseModel):
     threshold: float
     checks: Dict[str, Any]
     reason: str
+    anchor_metadata: Optional[AnchorMetadata] = None
 
 
 @router.post("/ai/proof-of-life", response_model=ProofOfLifeResponse)
@@ -51,7 +54,19 @@ async def analyze_proof_of_life(request: ProofOfLifeRequest):
             burst_images_base64=request.burst_images_base64,
             confidence_threshold=request.confidence_threshold,
         )
-        return result
+        # Ensure we return a ProofOfLifeResponse object with anchor_metadata
+        if isinstance(result, dict):
+            return ProofOfLifeResponse(
+                **result,
+                anchor_metadata=request.anchor_metadata
+            )
+        else:
+            # If result is already a BaseModel instance
+            result_dict = result.model_dump() if hasattr(result, "model_dump") else result.dict()
+            return ProofOfLifeResponse(
+                **result_dict,
+                anchor_metadata=request.anchor_metadata
+            )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:

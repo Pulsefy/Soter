@@ -1,6 +1,7 @@
 'use client';
 
 import { ChevronLeft, ChevronRight, LoaderCircle } from 'lucide-react';
+import type { RefObject } from 'react';
 import type { CsvPreviewRow } from '@/lib/csv-validation';
 
 interface Step2PreviewProps {
@@ -10,6 +11,7 @@ interface Step2PreviewProps {
   totalRows: number;
   isValidating: boolean;
   canProceed: boolean;
+  headingRef?: RefObject<HTMLHeadingElement | null>;
   onBack: () => void;
   onNext: () => void | Promise<void>;
 }
@@ -21,13 +23,14 @@ export function Step2Preview({
   totalRows,
   isValidating,
   canProceed,
+  headingRef,
   onBack,
   onNext,
 }: Step2PreviewProps) {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">Step 2: Preview recipient data</h2>
+        <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-slate-900 dark:text-slate-50 focus:outline-none">Step 2: Preview recipient data</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300">
           Double-check the detected headers and the first rows from <span className="font-medium text-slate-900 dark:text-slate-100">{file?.name ?? 'your file'}</span> before validation runs.
         </p>

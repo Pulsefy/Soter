@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     circuit_breaker_failure_threshold: int = 3
     circuit_breaker_recovery_timeout_seconds: float = 30.0
 
+    # Cache TTL settings (in seconds)
+    cache_ttl_task_status: int = 30  # Short TTL for responsive polling
+    cache_ttl_artifact_access: int = 60  # 1 minute for artifact metadata
+
     # Application settings
     app_env: Literal["development", "staging", "production", "test"] = "development"
     log_level: str = "INFO"
@@ -59,6 +63,8 @@ class Settings(BaseSettings):
 
     # Redis and Celery settings
     redis_url: str = "redis://localhost:6379/0"
+    task_max_retries: int = 3
+    task_retry_delay_seconds: int = 30
 
     # Backend webhook URL for notifications
     backend_webhook_url: Optional[str] = "http://localhost:3001/ai/webhook"

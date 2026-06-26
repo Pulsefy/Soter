@@ -20,6 +20,8 @@ import type {
     RedactionLevel,
     ViewingPermission,
 } from '@/types/evidence-artifact';
+import { useNetworkGuard } from '@/hooks/useNetworkGuard';
+import { NetworkMismatchBanner } from '@/components/NetworkMismatchBanner';
 
 /* ─── Accepted image MIME types ─────────────────────────────────────────── */
 
@@ -118,6 +120,7 @@ function createMockEvidenceArtifact(
 export const EnhancedVerificationFlow: React.FC = () => {
     const uid = useId();
     const role = getAppUserRole();
+    const { isMismatch } = useNetworkGuard();
     const [restoredDraft] = useState<EnhancedVerificationDraft | null>(() =>
         readEnhancedVerificationDraftFromStorage(),
     );
@@ -391,6 +394,10 @@ export const EnhancedVerificationFlow: React.FC = () => {
                 <div>
                     <h2 className="text-lg font-semibold mb-4">Submit Evidence for Verification</h2>
 
+                    <div className="mb-6">
+                        <NetworkMismatchBanner />
+                    </div>
+
                     {!flowState.imageFile && flowState.textInput.trim().length === 0 && (
                         <div className="mb-6">
                             <AppEmptyState
@@ -518,8 +525,8 @@ export const EnhancedVerificationFlow: React.FC = () => {
                         <div className="flex flex-wrap items-center gap-3">
                             <button
                                 type="submit"
-                                disabled={!flowState.imageFile && flowState.textInput.trim().length === 0}
-                                aria-disabled={!flowState.imageFile && flowState.textInput.trim().length === 0}
+                                disabled={(!flowState.imageFile && flowState.textInput.trim().length === 0) || isMismatch}
+                                aria-disabled={(!flowState.imageFile && flowState.textInput.trim().length === 0) || isMismatch}
                                 className="px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                             >
                                 Submit for Verification
