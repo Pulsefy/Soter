@@ -146,9 +146,25 @@ export class ClaimsService {
     if (!claim || claim.deletedAt) {
       throw new NotFoundException('Claim not found');
     }
+
+    // Fetch associated on-chain events
+    const onChainEvents = await this.prisma.onChainEvent.findMany({
+      where: { claimId: id },
+      select: {
+        txHash: true,
+        ledger: true,
+        topic: true,
+        correlatedAt: true,
+        contractId: true,
+        rawPayload: true,
+      },
+      orderBy: { ledger: 'asc' },
+    });
+
     return {
       ...claim,
       recipientRef: this.encryptionService.decrypt(claim.recipientRef),
+      onChainEvents,   // always present; empty array when none exist
     };
   }
 
