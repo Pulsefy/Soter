@@ -15,6 +15,7 @@ import metrics
 from config import settings
 from services.pii_scrubber import PIIScrubberService
 from services.humanitarian_verification import HumanitarianVerificationService
+from services.ocr_job import run_ocr_from_base64
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -48,6 +49,8 @@ def get_celery_app() -> Celery:
                 task_time_limit=3600,  # 1 hour max
                 task_soft_time_limit=1800,  # 30 minutes soft limit
                 result_expires=86400,  # Results expire after 24 hours
+                task_acks_late=True,
+                task_reject_on_worker_lost=True,
             )
         except Exception as e:
             logger.warning(f"Failed to initialize Celery: {e}. Task processing disabled.")
@@ -64,9 +67,33 @@ def get_process_heavy_inference_task():
     """
     app = get_celery_app()
     # Define and register the task with the app
-    @app.task(bind=True, name='process_heavy_inference')
+    @app.task(
+        bind=True,
+        name='process_heavy_inference',
+        max_retries=settings.task_max_retries,
+        default_retry_delay=settings.task_retry_delay_seconds,
+    )
     def process_heavy_inference_task(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return process_heavy_inference_impl(self, task_id, payload)
+        try:
+            return process_heavy_inference_impl(self, task_id, payload)
+        except Exception as exc:
+            if self.request.retries < settings.task_max_retries:
+                retry_delay = settings.task_retry_delay_seconds * (2 ** self.request.retries)
+                logger.warning(
+                    "Retrying task %s after failure %s/%s in %ss: %s",
+                    task_id,
+                    self.request.retries + 1,
+                    settings.task_max_retries,
+                    retry_delay,
+                    exc,
+                )
+                update_task_status(task_id, 'retrying', error=str(exc))
+                raise self.retry(exc=exc, countdown=retry_delay)
+
+            error_msg = str(exc)
+            update_task_status(task_id, 'failed', error=error_msg)
+            send_webhook_notification(task_id, 'failed', error=error_msg)
+            raise
     
     return process_heavy_inference_task
 
@@ -174,7 +201,9 @@ def process_heavy_inference_impl(self, task_id: str, payload: Dict[str, Any]) ->
         # - Complex model inference
         # - Batch processing
         
-        if task_type == 'image_analysis':
+        if task_type == 'ocr':
+            result = _process_ocr(payload)
+        elif task_type == 'image_analysis':
             result = _process_image_analysis(payload)
         elif task_type == 'model_inference':
             result = _process_model_inference(payload)
@@ -199,15 +228,23 @@ def process_heavy_inference_impl(self, task_id: str, payload: Dict[str, Any]) ->
         
     except Exception as e:
         logger.error(f"Task {task_id} failed: {str(e)}", exc_info=True)
-        error_msg = str(e)
-        
-        # Update status to failed
-        update_task_status(task_id, 'failed', error=error_msg)
-        
-        # Send webhook notification to backend
-        send_webhook_notification(task_id, 'failed', error=error_msg)
-        
         raise
+
+
+def _process_ocr(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Process an OCR task from base64-encoded image bytes."""
+    image_base64 = payload.get('image_base64')
+    if not image_base64:
+        raise ValueError("'image_base64' is required for ocr tasks")
+
+    return {
+        'type': 'ocr',
+        'status': 'success',
+        'result': run_ocr_from_base64(
+            image_base64,
+            payload.get('anchor_metadata'),
+        ),
+    }
 
 
 def _process_image_analysis(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -358,6 +395,13 @@ def get_task_status(task_id: str) -> Dict[str, Any]:
     Returns:
         dict: Task status information
     """
+    local_status = task_results.get(task_id)
+    if local_status and local_status.get('status') in {'completed', 'failed', 'retrying', 'cancelled'}:
+        return {
+            'task_id': task_id,
+            **local_status,
+        }
+
     # Try to get from Celery result backend first
     try:
         celery_result = AsyncResult(task_id, app=get_celery_app())
@@ -382,10 +426,10 @@ def get_task_status(task_id: str) -> Dict[str, Any]:
         pass
     
     # Fall back to local storage
-    if task_id in task_results:
+    if local_status:
         return {
             'task_id': task_id,
-            **task_results[task_id]
+            **local_status
         }
     
     return {

@@ -28,6 +28,7 @@ async def detect_fraud_endpoint(request: FraudDetectionRequest) -> FraudDetectio
         return FraudDetectionResponse(
             results=results,
             flagged_count=sum(r.is_flagged for r in results),
+            anchor_metadata=request.anchor_metadata
         )
     except Exception as exc:
         logger.error("Fraud detection failed: %s", exc)

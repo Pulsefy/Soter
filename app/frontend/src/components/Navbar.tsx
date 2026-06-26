@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
@@ -19,7 +19,7 @@ import {
 } from '@/lib/user-role';
 
 const linkBaseClassName =
-  'rounded-full px-3 py-2 text-sm font-medium transition-colors';
+  'rounded-full px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2';
 
 function isActiveRoute(href: string, pathname: string): boolean {
   if (href === '/') {
@@ -34,6 +34,8 @@ export function Navbar() {
   const t = useTranslations();
   const { publicKey } = useWalletStore();
   const [isOpen, setIsOpen] = useState(false);
+  const menuToggleRef = useRef<HTMLButtonElement>(null);
+  const didMountRef = useRef(false);
   const userRole = getUserRole();
   const userRoleLabel = t(getUserRoleLabel(userRole));
   const navigationItems = getNavigationItems(userRole);
@@ -44,6 +46,17 @@ export function Navbar() {
   useEffect(() => {
     setIsOpen(false);
   }, [pathname]);
+
+  /** Return focus to the toggle button when the mobile menu closes. */
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    if (!isOpen) {
+      menuToggleRef.current?.focus();
+    }
+  }, [isOpen]);
 
   return (
     <nav className="border-b border-slate-200 bg-white p-4 text-blue-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-50">
@@ -77,14 +90,15 @@ export function Navbar() {
 
         {/* Mobile menu toggle button */}
         <button
+          ref={menuToggleRef}
           type="button"
-          className="inline-flex items-center justify-center rounded-full border border-slate-200 p-2 text-slate-700 md:hidden dark:border-slate-700 dark:text-slate-200"
+          className="inline-flex items-center justify-center rounded-full border border-slate-200 p-2 text-slate-700 md:hidden dark:border-slate-700 dark:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
           aria-label="Toggle navigation menu"
           aria-expanded={isOpen}
           aria-controls="mobile-menu"
           onClick={() => setIsOpen(currentValue => !currentValue)}
         >
-          {isOpen ? <X size={20} /> : <Menu size={20} />}
+          {isOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
         </button>
 
         <div className="hidden md:flex items-center justify-end gap-3 flex-wrap">
@@ -123,7 +137,7 @@ export function Navbar() {
                     key={item.href}
                     href={item.href}
                     aria-current={isActive ? 'page' : undefined}
-                    className={`rounded-2xl border px-4 py-3 ${
+                    className={`rounded-2xl border px-4 py-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
                       isActive
                         ? 'border-blue-200 bg-blue-50 text-blue-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-50'
                         : 'border-slate-200 text-slate-700 dark:border-slate-700 dark:text-slate-200'

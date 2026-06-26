@@ -65,7 +65,7 @@
     ],
     "moduleNameMapper": {
       "^react$": "<rootDir>/node_modules/react",
-      "^react-test-renderer$": "<rootDir>/node_modules/react-test-renderer"
+      "^react-test-renderer$": "<rootDir>/../../node_modules/react-test-renderer"
     },
     "transformIgnorePatterns": [
       "node_modules/(?!(?:.pnpm/)?((jest-)?react-native|@react-native(?:/.*)?|react-clone-referenced-element|@react-navigation(?:/.*)?|expo(?:nent)?(?:/.*)?|@expo(?:nent)?(?:/.*)?|expo-.*|@expo-google-fonts/.*|react-navigation|@walletconnect(?:/.*)?))"

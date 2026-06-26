@@ -37,6 +37,8 @@ import { AppRole } from 'src/auth/app-role.enum';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
 import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
+import { CacheResponse } from 'src/common/decorators/cache-response.decorator';
+import { getCacheTTL } from 'src/common/config/cache.config';
 
 @ApiTags('Verification')
 @ApiSecurity('x-api-key')
@@ -93,6 +95,7 @@ export class VerificationController {
 
   @Get('metrics')
   @Version('1')
+  @CacheResponse({ ttl: getCacheTTL().VERIFICATION_METRICS })
   @ApiOperation({
     summary: 'Get verification queue metrics',
     description:
@@ -252,6 +255,7 @@ export class VerificationController {
 
   @Get('claims/:id')
   @Version('1')
+  @CacheResponse({ ttl: getCacheTTL().VERIFICATION_STATUS })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get claim verification status',
@@ -298,6 +302,7 @@ export class VerificationController {
 
   @Get(':id')
   @Version(API_VERSIONS.V1)
+  @CacheResponse({ ttl: getCacheTTL().VERIFICATION_STATUS })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get verification status (v1)',
@@ -336,6 +341,7 @@ export class VerificationController {
 
   @Get('user/:userId')
   @Version(API_VERSIONS.V1)
+  @CacheResponse({ ttl: getCacheTTL().USER_VERIFICATION_HISTORY })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get user verification history (v1)',
@@ -418,6 +424,7 @@ export class VerificationController {
 
   @Get(':id/notes')
   @Roles(AppRole.operator, AppRole.admin)
+  @CacheResponse({ ttl: getCacheTTL().INTERNAL_NOTES })
   @ApiOperation({
     summary: 'List internal notes for a verification record',
     description: 'Retrieves all internal notes for a specific verification.',
