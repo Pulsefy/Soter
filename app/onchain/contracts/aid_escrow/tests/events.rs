@@ -301,3 +301,44 @@ fn test_extended_event_records_old_and_new_expiry() {
     assert_eq!(data_u64(&env, &data, "old_expires_at"), old_expires_at);
     assert_eq!(data_u64(&env, &data, "new_expires_at"), new_expires_at);
 }
+
+#[test]
+fn test_token_added_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (token_client, _) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    client.add_token(&token_client.address);
+
+    let data = last_event_data(&env, &contract_id, "token_added");
+    assert_eq!(data_address(&env, &data, "token"), token_client.address);
+    assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_field_exists(&env, &data, "timestamp");
+}
+
+#[test]
+fn test_token_removed_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (token_client, _) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    client.add_token(&token_client.address);
+    client.remove_token(&token_client.address);
+
+    let data = last_event_data(&env, &contract_id, "token_removed");
+    assert_eq!(data_address(&env, &data, "token"), token_client.address);
+    assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_field_exists(&env, &data, "timestamp");
+}

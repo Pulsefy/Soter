@@ -208,6 +208,20 @@ pub struct ActionUnpausedEvent {
     pub action: Symbol,
 }
 
+#[contractevent]
+pub struct TokenAdded {
+    pub token: Address,
+    pub actor: Address,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+pub struct TokenRemoved {
+    pub token: Address,
+    pub actor: Address,
+    pub timestamp: u64,
+}
+
 #[contract]
 pub struct AidEscrow;
 
@@ -351,6 +365,85 @@ impl AidEscrow {
         }
 
         env.storage().instance().set(&KEY_CONFIG, &config);
+        Ok(())
+    }
+
+    /// Admin-only. Adds a token to the allowed tokens allowlist.
+    /// Validates the token contract and prevents duplicates.
+    /// Emits a `TokenAdded` event.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::InvalidToken` if the address does not implement the token interface.
+    /// Returns `Error::InvalidState` if the token is already in the allowlist.
+    pub fn add_token(env: Env, token: Address) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        Self::validate_token(&env, &token)?;
+
+        let mut config = Self::get_config(env.clone());
+
+        // Check for duplicates
+        for i in 0..config.allowed_tokens.len() {
+            if config.allowed_tokens.get(i).ok_or(Error::InvalidToken)? == token {
+                return Err(Error::InvalidState);
+            }
+        }
+
+        config.allowed_tokens.push_back(token.clone());
+        env.storage().instance().set(&KEY_CONFIG, &config);
+
+        let timestamp = env.ledger().timestamp();
+        TokenAdded {
+            token,
+            actor: admin,
+            timestamp,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Admin-only. Removes a token from the allowed tokens allowlist.
+    /// Emits a `TokenRemoved` event.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::InvalidToken` if the token is not in the allowlist.
+    pub fn remove_token(env: Env, token: Address) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let mut config = Self::get_config(env.clone());
+
+        let mut new_tokens: Vec<Address> = Vec::new(&env);
+        let mut found = false;
+
+        for i in 0..config.allowed_tokens.len() {
+            let t = config.allowed_tokens.get(i).ok_or(Error::InvalidToken)?;
+            if t == token {
+                found = true;
+            } else {
+                new_tokens.push_back(t);
+            }
+        }
+
+        if !found {
+            return Err(Error::InvalidToken);
+        }
+
+        config.allowed_tokens = new_tokens;
+        env.storage().instance().set(&KEY_CONFIG, &config);
+
+        let timestamp = env.ledger().timestamp();
+        TokenRemoved {
+            token,
+            actor: admin,
+            timestamp,
+        }
+        .publish(&env);
+
         Ok(())
     }
 

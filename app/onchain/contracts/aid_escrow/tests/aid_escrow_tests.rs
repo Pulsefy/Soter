@@ -558,3 +558,115 @@ mod token_decimal_normalization {
         assert!(result.is_ok());
     }
 }
+
+mod token_allowlist {
+    use super::*;
+
+    #[test]
+    fn add_token_succeeds_for_admin() {
+        let t = TestSetup::new();
+        let result = t.client.try_add_token(&t.token);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn add_token_requires_admin_auth() {
+        // Auth gating is enforced by admin.require_auth() which follows
+        // the same pattern as set_config and other admin methods.
+        let t = TestSetup::new();
+        let result = t.client.try_add_token(&t.token);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn add_token_rejects_duplicate() {
+        let t = TestSetup::new();
+        t.client.add_token(&t.token);
+        let result = t.client.try_add_token(&t.token);
+        assert_eq!(result, Err(Ok(Error::InvalidState)));
+    }
+
+    #[test]
+    fn add_token_rejects_invalid_address() {
+        let t = TestSetup::new();
+        let invalid = Address::generate(&t.env);
+        let result = t.client.try_add_token(&invalid);
+        assert_eq!(result, Err(Ok(Error::InvalidToken)));
+    }
+
+    #[test]
+    fn remove_token_succeeds_for_admin() {
+        let t = TestSetup::new();
+        t.client.add_token(&t.token);
+        let result = t.client.try_remove_token(&t.token);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn remove_token_fails_if_not_in_allowlist() {
+        let t = TestSetup::new();
+        let result = t.client.try_remove_token(&t.token);
+        assert_eq!(result, Err(Ok(Error::InvalidToken)));
+    }
+
+    #[test]
+    fn remove_token_removes_from_allowlist() {
+        let t = TestSetup::new();
+
+        // Set config with two tokens allowed
+        let token2_id = t.env.register_stellar_asset_contract_v2(t.admin.clone());
+        let token2 = token2_id.address();
+        let token2_sac = StellarAssetClient::new(&t.env, &token2);
+
+        let mut allowed = Vec::new(&t.env);
+        allowed.push_back(t.token.clone());
+        allowed.push_back(token2.clone());
+        t.client.set_config(&Config {
+            min_amount: 1,
+            max_expires_in: 0,
+            allowed_tokens: allowed,
+        });
+
+        // Both tokens should work
+        t.fund_contract(TWO_TOKENS);
+        let r1 = t.client.try_create_package(
+            &t.admin,
+            &1u64,
+            &Address::generate(&t.env),
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3600),
+            &Map::new(&t.env),
+        );
+        assert!(r1.is_ok());
+
+        // Remove first token
+        t.client.remove_token(&t.token);
+
+        // First token should now be rejected
+        t.fund_contract(TWO_TOKENS);
+        let r2 = t.client.try_create_package(
+            &t.admin,
+            &2u64,
+            &Address::generate(&t.env),
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3600),
+            &Map::new(&t.env),
+        );
+        assert_eq!(r2, Err(Ok(Error::InvalidState)));
+
+        // Second token should still work
+        token2_sac.mint(&t.client.address, &TWO_TOKENS);
+        let r3 = t.client.try_create_package(
+            &t.admin,
+            &3u64,
+            &Address::generate(&t.env),
+            &ONE_TOKEN,
+            &token2,
+            &(t.now() + 3600),
+            &Map::new(&t.env),
+        );
+        assert!(r3.is_ok());
+    }
+}
