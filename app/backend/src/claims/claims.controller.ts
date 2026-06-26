@@ -23,6 +23,8 @@ import {
   ApiUnauthorizedResponse,
   ApiBearerAuth,
   ApiQuery,
+  ApiBody,
+  ApiResponse,
 } from '@nestjs/swagger';
 import { ClaimsService } from './claims.service';
 import { CancelAndReissueService } from './cancel-and-reissue.service';
@@ -40,6 +42,7 @@ import { AppRole } from 'src/auth/app-role.enum';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
 import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
+import { ApiValidationErrorResponseDto } from 'src/common/dto/api-error-response.dto';
 
 @ApiTags('Onchain Proxy')
 @ApiBearerAuth('JWT-auth')
@@ -56,9 +59,81 @@ export class ClaimsController {
     summary: 'Create a claim',
     description: 'Initializes a new claim for a specific campaign.',
   })
+  @ApiBody({
+    type: CreateClaimDto,
+    description: 'Claim creation payload',
+    examples: {
+      standard: {
+        summary: 'Standard claim creation',
+        value: {
+          campaignId: 'campaign-uuid-001',
+          amount: 100.5,
+          recipientRef: 'recipient-123',
+          tokenAddress: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+          evidenceRef: 'evidence-456',
+          expiresAt: '2026-05-31T23:59:59.000Z',
+        },
+      },
+      minimal: {
+        summary: 'Minimal claim (no evidence or expiry)',
+        value: {
+          campaignId: 'campaign-uuid-002',
+          amount: 50.0,
+          recipientRef: 'recipient-789',
+          tokenAddress: 'CDQVUULRWANDRUMSPLSJQLVTLOE7XVJQDIVFJ4S5HOXMYG5UPB5HAAA',
+        },
+      },
+    },
+  })
   @ApiCreatedResponse({
     description: 'Claim created successfully.',
-    type: CreateClaimDto,
+    examples: {
+      success: {
+        summary: 'Successful claim creation',
+        value: {
+          id: 'claim-uuid-001',
+          campaignId: 'campaign-uuid-001',
+          amount: 100.5,
+          recipientRef: 'recipient-123',
+          tokenAddress: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+          evidenceRef: 'evidence-456',
+          status: 'pending',
+          expiresAt: '2026-05-31T23:59:59.000Z',
+          createdAt: '2026-06-26T10:00:00Z',
+          updatedAt: '2026-06-26T10:00:00Z',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 422,
+    description: 'Unprocessable Entity - Validation error.',
+    type: ApiValidationErrorResponseDto,
+    examples: {
+      validationError: {
+        summary: 'Validation error example',
+        value: {
+          success: false,
+          message: 'Validation failed',
+          error: {
+            errors: [
+              {
+                field: 'amount',
+                message: 'amount must be a number conforming to the specified constraints',
+                constraint: 'isNumber',
+              },
+              {
+                field: 'tokenAddress',
+                message:
+                  'tokenAddress must be a valid Stellar address (G... or C... format)',
+                constraint: 'matches',
+              },
+            ],
+          },
+          data: null,
+        },
+      },
+    },
   })
   @ApiBadRequestResponse({
     description: 'Invalid input parameters.',

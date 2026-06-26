@@ -26,6 +26,7 @@ import {
   ApiTags,
   ApiBearerAuth,
   ApiQuery,
+  ApiResponse,
 } from '@nestjs/swagger';
 import { Request } from 'express';
 import { CampaignsService } from './campaigns.service';
@@ -33,6 +34,7 @@ import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { ExportCampaignsQueryDto } from './dto/export-campaigns.dto';
 import { ApiResponseDto } from '../common/dto/api-response.dto';
+import { ApiValidationErrorResponseDto } from '../common/dto/api-error-response.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
 import { Throttle } from '@nestjs/throttler';
@@ -53,9 +55,100 @@ export class CampaignsController {
   @Post()
   @Roles(AppRole.admin, AppRole.ngo)
   @UseGuards(OrgOwnershipGuard)
-  @ApiOperation({ summary: 'Create a campaign' })
-  @ApiBody({ type: CreateCampaignDto })
-  @ApiCreatedResponse({ description: 'Campaign created successfully.' })
+  @ApiOperation({
+    summary: 'Create a campaign',
+    description: 'Creates a new campaign with the provided details including optional anchor metadata.',
+  })
+  @ApiBody({
+    type: CreateCampaignDto,
+    description: 'Campaign creation payload',
+    examples: {
+      success: {
+        summary: 'Valid campaign creation',
+        value: {
+          name: 'Winter Relief 2026',
+          budget: 25000.5,
+          metadata: {
+            region: 'Lagos',
+            partner: 'NGO-A',
+            notes: 'Phase 1',
+            anchor: {
+              type: 'emergency_relief',
+              ref: 'anchor-001',
+              timestamp: '2026-06-26T10:00:00Z',
+            },
+          },
+          status: 'draft',
+        },
+      },
+      minimal: {
+        summary: 'Minimal campaign creation',
+        value: {
+          name: 'Quick Relief',
+          budget: 5000,
+        },
+      },
+    },
+  })
+  @ApiCreatedResponse({
+    description: 'Campaign created successfully.',
+    examples: {
+      success: {
+        summary: 'Successful response',
+        value: {
+          success: true,
+          message: 'Campaigns created successfully',
+          data: {
+            id: 'camp-uuid-001',
+            name: 'Winter Relief 2026',
+            budget: 25000.5,
+            metadata: {
+              region: 'Lagos',
+              partner: 'NGO-A',
+              notes: 'Phase 1',
+              anchor: {
+                type: 'emergency_relief',
+                ref: 'anchor-001',
+                timestamp: '2026-06-26T10:00:00Z',
+              },
+            },
+            status: 'draft',
+            createdAt: '2026-06-26T10:00:00Z',
+            updatedAt: '2026-06-26T10:00:00Z',
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 422,
+    description: 'Unprocessable Entity - Validation error.',
+    type: ApiValidationErrorResponseDto,
+    examples: {
+      validationError: {
+        summary: 'Validation error example',
+        value: {
+          success: false,
+          message: 'Validation failed',
+          error: {
+            errors: [
+              {
+                field: 'name',
+                message: 'name must be a string',
+                constraint: 'isString',
+              },
+              {
+                field: 'budget',
+                message: 'budget must not be less than 0',
+                constraint: 'min',
+              },
+            ],
+          },
+          data: null,
+        },
+      },
+    },
+  })
   @ApiBadRequestResponse({
     description: 'Invalid input parameters or malformed request body.',
   })
@@ -112,9 +205,88 @@ export class CampaignsController {
   @ApiOperation({
     summary: 'Update a campaign',
     description:
-      'Modifies existing campaign properties. Only provided fields are updated.',
+      'Modifies existing campaign properties. Only provided fields are updated. Supports anchor metadata updates.',
   })
-  @ApiOkResponse({ description: 'Campaign updated successfully.' })
+  @ApiBody({
+    type: UpdateCampaignDto,
+    description: 'Campaign update payload (all fields optional)',
+    examples: {
+      nameUpdate: {
+        summary: 'Update campaign name only',
+        value: {
+          name: 'Winter Relief 2026 - Extended',
+        },
+      },
+      budgetUpdate: {
+        summary: 'Update budget with anchor metadata',
+        value: {
+          budget: 30000.0,
+          metadata: {
+            region: 'Lagos',
+            partner: 'NGO-B',
+            anchor: {
+              type: 'emergency_relief',
+              ref: 'anchor-002',
+              timestamp: '2026-06-26T11:30:00Z',
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Campaign updated successfully.',
+    examples: {
+      success: {
+        summary: 'Successful update response',
+        value: {
+          success: true,
+          message: 'Campaign updated successfully',
+          data: {
+            id: 'camp-uuid-001',
+            name: 'Winter Relief 2026 - Extended',
+            budget: 30000.0,
+            metadata: {
+              region: 'Lagos',
+              partner: 'NGO-B',
+              anchor: {
+                type: 'emergency_relief',
+                ref: 'anchor-002',
+                timestamp: '2026-06-26T11:30:00Z',
+              },
+            },
+            status: 'active',
+            createdAt: '2026-06-26T10:00:00Z',
+            updatedAt: '2026-06-26T11:30:00Z',
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 422,
+    description: 'Unprocessable Entity - Validation error.',
+    type: ApiValidationErrorResponseDto,
+    examples: {
+      validationError: {
+        summary: 'Validation error example',
+        value: {
+          success: false,
+          message: 'Validation failed',
+          error: {
+            errors: [
+              {
+                field: 'budget',
+                message: 'budget must be a number',
+                constraint: 'isNumber',
+              },
+            ],
+          },
+          data: null,
+        },
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'The specified campaign was not found.' })
   @ApiBadRequestResponse({
     description: 'Invalid update data or malformed request body.',

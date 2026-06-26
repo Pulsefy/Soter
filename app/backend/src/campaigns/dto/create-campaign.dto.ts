@@ -32,8 +32,17 @@ export class CreateCampaignDto {
 
   @ApiPropertyOptional({
     description:
-      'Arbitrary campaign metadata (e.g., region, location, target audience).',
-    example: { region: 'Lagos', partner: 'NGO-A', notes: 'Phase 1' },
+      'Arbitrary campaign metadata (e.g., region, location, target audience, anchor data).',
+    example: {
+      region: 'Lagos',
+      partner: 'NGO-A',
+      notes: 'Phase 1',
+      anchor: {
+        type: 'emergency_relief',
+        ref: 'anchor-001',
+        timestamp: '2026-06-26T10:00:00Z',
+      },
+    },
   })
   @IsOptional()
   @IsObject()
