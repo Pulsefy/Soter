@@ -111,11 +111,15 @@ export class ClaimsService {
 
     claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
-    // Stub audit hook
-    void this.auditLog('claim', claim.id, 'created', {
+    // Record audit event including optional receipt hash metadata
+    const auditMetadata: Record<string, unknown> = {
       status: claim.status,
       tokenAddress: createClaimDto.tokenAddress,
-    });
+    };
+    if (createClaimDto.receiptHash) {
+      auditMetadata.receiptHash = createClaimDto.receiptHash;
+    }
+    void this.auditLog('claim', claim.id, 'created', auditMetadata);
 
     return claim;
   }
@@ -168,7 +172,7 @@ export class ClaimsService {
     );
   }
 
-  async disburse(id: string) {
+  async disburse(id: string, receiptHash?: string) {
     const claim = await this.prisma.claim.findUnique({
       where: { id },
       include: { campaign: true },
@@ -242,6 +246,8 @@ export class ClaimsService {
       id,
       ClaimStatus.approved,
       ClaimStatus.disbursed,
+      undefined,
+      receiptHash ? { receiptHash } : undefined,
     );
 
     this.logger.log(
@@ -418,6 +424,7 @@ export class ClaimsService {
     fromStatus: ClaimStatus,
     toStatus: ClaimStatus,
     onchainResult?: DisburseResult | null,
+    extraMetadata?: Record<string, unknown>,
   ) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
@@ -445,6 +452,7 @@ export class ClaimsService {
               status: onchainResult.status,
             }
           : undefined,
+        ...extraMetadata,
       });
 
       return updated;
@@ -459,7 +467,20 @@ export class ClaimsService {
     action: string,
     metadata?: Record<string, unknown>,
   ) {
-    console.log(`Audit: ${entity} ${entityId} ${action}`, metadata);
+    this.auditService
+      .record({
+        actorId: 'system',
+        entity,
+        entityId,
+        action,
+        metadata,
+      })
+      .catch(error =>
+        this.logger.error(
+          `Failed to record audit log for ${entity} ${entityId} ${action}`,
+          error instanceof Error ? error.stack : undefined,
+        ),
+      );
   }
 
   /**

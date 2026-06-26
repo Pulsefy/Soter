@@ -178,6 +178,105 @@ describe('ClaimsService', () => {
     jest.clearAllMocks();
   });
 
+  describe('create', () => {
+    it('should record optional receiptHash in claim create audit metadata', async () => {
+      const campaign = {
+        id: 'campaign-1',
+        name: 'Test Campaign',
+        status: 'active',
+        budget: new Prisma.Decimal('1000.00'),
+        metadata: null,
+        archivedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any;
+
+      jest
+        .spyOn(prismaService.campaign, 'findUnique')
+        .mockResolvedValue(campaign);
+      jest
+        .spyOn(prismaService.claim, 'create')
+        .mockResolvedValue({
+          id: 'claim-123',
+          campaignId: 'campaign-1',
+          amount: 100.5,
+          recipientRef: 'recipient-123',
+          evidenceRef: 'evidence-456',
+          expiresAt: new Date(),
+          status: ClaimStatus.requested,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          campaign,
+        } as any);
+
+      await service.create({
+        campaignId: 'campaign-1',
+        amount: 100.5,
+        recipientRef: 'recipient-123',
+        tokenAddress: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+        receiptHash: 'abc123',
+      } as any);
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entity: 'claim',
+          action: 'created',
+          metadata: expect.objectContaining({
+            receiptHash: 'abc123',
+          }),
+        }),
+      );
+    });
+
+    it('should not include receiptHash in claim create audit metadata when not provided', async () => {
+      const campaign = {
+        id: 'campaign-1',
+        name: 'Test Campaign',
+        status: 'active',
+        budget: new Prisma.Decimal('1000.00'),
+        metadata: null,
+        archivedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any;
+
+      jest
+        .spyOn(prismaService.campaign, 'findUnique')
+        .mockResolvedValue(campaign);
+      jest
+        .spyOn(prismaService.claim, 'create')
+        .mockResolvedValue({
+          id: 'claim-123',
+          campaignId: 'campaign-1',
+          amount: 100.5,
+          recipientRef: 'recipient-123',
+          evidenceRef: 'evidence-456',
+          expiresAt: new Date(),
+          status: ClaimStatus.requested,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          campaign,
+        } as any);
+
+      await service.create({
+        campaignId: 'campaign-1',
+        amount: 100.5,
+        recipientRef: 'recipient-123',
+        tokenAddress: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+      } as any);
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entity: 'claim',
+          action: 'created',
+          metadata: expect.not.objectContaining({
+            receiptHash: expect.anything(),
+          }),
+        }),
+      );
+    });
+  });
+
   describe('disburse', () => {
     it('should create and schedule a Soroban transaction when onchain is enabled', async () => {
       jest
@@ -203,6 +302,37 @@ describe('ClaimsService', () => {
         mockSorobanTxLifecycleService.createTransaction,
       ).toHaveBeenCalled();
       expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalled();
+    });
+
+    it('should include receiptHash in disbursement audit metadata when provided', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+          await Promise.resolve();
+          return callback({
+            claim: {
+              update: jest.fn().mockResolvedValue({
+                ...mockClaim,
+                status: ClaimStatus.disbursed,
+              }),
+            },
+          });
+        });
+
+      await service.disburse('claim-123', 'receipt-hash-123');
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entity: 'claim',
+          action: 'status_changed_to_disbursed',
+          metadata: expect.objectContaining({
+            receiptHash: 'receipt-hash-123',
+          }),
+        }),
+      );
     });
 
     it('should record metrics when Soroban transaction is scheduled', async () => {

@@ -23,6 +23,7 @@ import {
   ApiUnauthorizedResponse,
   ApiBearerAuth,
   ApiQuery,
+  ApiBody,
 } from '@nestjs/swagger';
 import { ClaimsService } from './claims.service';
 import { CancelAndReissueService } from './cancel-and-reissue.service';
@@ -32,6 +33,7 @@ import {
   ClaimShareResponseDto,
   SendReceiptShareDto,
 } from './dto/claim-receipt.dto';
+import { DisburseClaimDto } from './dto/disburse-claim.dto';
 import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
@@ -144,6 +146,7 @@ export class ClaimsController {
 
   @Post(':id/disburse')
   @Roles(AppRole.admin)
+  @ApiBody({ type: DisburseClaimDto, required: false })
   @ApiOperation({
     summary: 'Disburse funds for a claim',
     description:
@@ -184,8 +187,11 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  disburse(@Param('id') id: string) {
-    return this.claimsService.disburse(id);
+  disburse(
+    @Param('id') id: string,
+    @Body() body: DisburseClaimDto,
+  ) {
+    return this.claimsService.disburse(id, body?.receiptHash);
   }
 
   @Patch(':id/archive')
