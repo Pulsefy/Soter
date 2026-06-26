@@ -35,6 +35,74 @@ export interface EvidenceUploadPayload {
   method?: 'POST' | 'PUT' | 'PATCH';
   headers?: Record<string, string>;
   body?: string;
+  sessionId?: string;
+  uploadedChunks?: number[];
+  totalChunks?: number;
+  progress?: number;
+}
+
+const getSubtleCrypto = () => {
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    return crypto.subtle;
+  }
+  try {
+    return require('crypto').webcrypto.subtle;
+  } catch {
+    return null;
+  }
+};
+
+const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const lookup = new Uint8Array(256);
+for (let i = 0; i < chars.length; i++) {
+  lookup[chars.charCodeAt(i)] = i;
+}
+
+export function base64ToUint8Array(base64: string): Uint8Array {
+  const commaIdx = base64.indexOf(',');
+  let cleanBase64 = commaIdx !== -1 ? base64.substring(commaIdx + 1) : base64;
+  cleanBase64 = cleanBase64.replace(/\s/g, '');
+
+  let bufferLength = cleanBase64.length * 0.75;
+  const len = cleanBase64.length;
+  let p = 0;
+
+  if (cleanBase64[cleanBase64.length - 1] === '=') {
+    bufferLength--;
+    if (cleanBase64[cleanBase64.length - 2] === '=') {
+      bufferLength--;
+    }
+  }
+
+  const bytes = new Uint8Array(bufferLength);
+
+  for (let i = 0; i < len; i += 4) {
+    const encoded1 = lookup[cleanBase64.charCodeAt(i)];
+    const encoded2 = lookup[cleanBase64.charCodeAt(i + 1)];
+    const encoded3 = lookup[cleanBase64.charCodeAt(i + 2)];
+    const encoded4 = lookup[cleanBase64.charCodeAt(i + 3)];
+
+    const bytesVal = (encoded1 << 18) | (encoded2 << 12) | (encoded3 << 6) | encoded4;
+
+    bytes[p++] = (bytesVal >> 16) & 255;
+    if (p < bufferLength) {
+      bytes[p++] = (bytesVal >> 8) & 255;
+      if (p < bufferLength) {
+        bytes[p++] = bytesVal & 255;
+      }
+    }
+  }
+  return bytes;
+}
+
+export async function sha256Hex(data: Uint8Array): Promise<string> {
+  const subtle = getSubtleCrypto();
+  if (!subtle) {
+    throw new Error('WebCrypto subtle is not available');
+  }
+  const hashBuffer = await subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export interface ClaimSubmissionPayload {
@@ -235,18 +303,135 @@ const runAction = async (action: QueuedSyncAction) => {
       return response.json();
     }
     case 'evidence-upload': {
-      const { url, method = 'POST', headers, body } = action.payload as EvidenceUploadPayload;
-      const response = await fetch(url, {
-        method,
-        headers,
-        body,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      const payload = action.payload as EvidenceUploadPayload;
+      if (!payload.body) {
+        throw new Error('No evidence upload payload body found');
       }
 
-      return response.json();
+      let requestData: {
+        filename: string;
+        contentType: string;
+        imageBase64: string;
+      };
+      try {
+        requestData = JSON.parse(payload.body);
+      } catch (err) {
+        throw new Error('Failed to parse upload request body');
+      }
+
+      const fileBytes = base64ToUint8Array(requestData.imageBase64);
+      const chunkSize = 512 * 1024; // 512 KB chunks
+
+      if (!payload.sessionId) {
+        const createSessionRes = await fetch(`${API_URL}/evidence/upload-sessions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            fileName: requestData.filename,
+            mimeType: requestData.contentType,
+            totalSize: fileBytes.length,
+            chunkSize,
+          }),
+        });
+
+        if (!createSessionRes.ok) {
+          let errorMsg = `HTTP error ${createSessionRes.status}`;
+          try {
+            const errData = await createSessionRes.json();
+            if (errData?.message) errorMsg = errData.message;
+          } catch {}
+          throw new Error(`Failed to create upload session: ${errorMsg}`);
+        }
+
+        const session = await createSessionRes.json();
+        payload.sessionId = session.id;
+        payload.totalChunks = session.totalChunks;
+        payload.uploadedChunks = [];
+        payload.progress = 0;
+        await persistQueue();
+        emitQueueState();
+      } else {
+        const statusRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/status`);
+        if (statusRes.status === 404) {
+          payload.sessionId = undefined;
+          payload.uploadedChunks = undefined;
+          payload.totalChunks = undefined;
+          payload.progress = 0;
+          await persistQueue();
+          emitQueueState();
+          return runAction(action);
+        }
+        if (!statusRes.ok) {
+          throw new Error(`Failed to query session status: ${statusRes.status}`);
+        }
+        const statusData = await statusRes.json();
+        payload.uploadedChunks = statusData.receivedChunks || [];
+        payload.totalChunks = statusData.totalChunks;
+        payload.progress = payload.totalChunks ? payload.uploadedChunks.length / payload.totalChunks : 0;
+        await persistQueue();
+        emitQueueState();
+      }
+
+      const totalChunks = payload.totalChunks || 0;
+      const uploadedChunks = payload.uploadedChunks || [];
+
+      for (let index = 0; index < totalChunks; index++) {
+        if (uploadedChunks.includes(index)) {
+          continue;
+        }
+
+        const start = index * chunkSize;
+        const end = Math.min(start + chunkSize, fileBytes.length);
+        const chunkBytes = fileBytes.subarray(start, end);
+
+        const checksum = await sha256Hex(chunkBytes);
+        const chunkBlob = new Blob([chunkBytes], { type: 'application/octet-stream' });
+
+        const formData = new FormData();
+        formData.append('chunk', chunkBlob, requestData.filename);
+        formData.append('index', index.toString());
+        formData.append('checksum', checksum);
+
+        const uploadChunkRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/chunks`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!uploadChunkRes.ok) {
+          let errorMsg = `HTTP error ${uploadChunkRes.status}`;
+          try {
+            const errData = await uploadChunkRes.json();
+            if (errData?.message) errorMsg = errData.message;
+          } catch {}
+          throw new Error(`Chunk ${index} upload failed: ${errorMsg}`);
+        }
+
+        uploadedChunks.push(index);
+        payload.uploadedChunks = uploadedChunks;
+        payload.progress = uploadedChunks.length / totalChunks;
+        await persistQueue();
+        emitQueueState();
+      }
+
+      const finalizeRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/finalize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!finalizeRes.ok) {
+        let errorMsg = `HTTP error ${finalizeRes.status}`;
+        try {
+          const errData = await finalizeRes.json();
+          if (errData?.message) errorMsg = errData.message;
+        } catch {}
+        throw new Error(`Failed to finalize upload: ${errorMsg}`);
+      }
+
+      return finalizeRes.json();
     }
     case 'claim-submission': {
       const { claimId, idempotencyKey } = action.payload as ClaimSubmissionPayload;
