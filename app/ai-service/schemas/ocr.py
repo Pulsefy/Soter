@@ -2,6 +2,8 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from schemas.common import AnchorMetadata
 
+from schemas.envelope import ResultEnvelope
+
 
 class OCRFieldResult(BaseModel):
     value: str
@@ -14,7 +16,9 @@ class OCRData(BaseModel):
     processing_time_ms: int
 
 
-class OCRResponse(BaseModel):
+class OCRResponse(ResultEnvelope):
+    """OCR endpoint response – includes the standardised result envelope (Issue #609)."""
+
     success: bool
     data: OCRData | None = None
     error: dict[str, str] | None = None
