@@ -6,7 +6,13 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiOkResponse, ApiUnauthorizedResponse, ApiHeader } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiOkResponse,
+  ApiUnauthorizedResponse,
+  ApiHeader,
+} from '@nestjs/swagger';
 import { SessionService } from '../session/session.service';
 import { HmacGuard } from './hmac.guard';
 import { AiVerificationPayloadDto } from './dto/ai-verification.dto';
@@ -29,8 +35,12 @@ export class WebhookController {
     description: 'HMAC-SHA256 signature of the raw request body.',
     required: true,
   })
-  @ApiOkResponse({ description: 'Webhook received and processed successfully.' })
-  @ApiUnauthorizedResponse({ description: 'Invalid or missing HMAC signature.' })
+  @ApiOkResponse({
+    description: 'Webhook received and processed successfully.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Invalid or missing HMAC signature.',
+  })
   async handleAiVerification(@Body() payload: AiVerificationPayloadDto) {
     const result = await this.sessionService.submitToStep(
       payload.sessionId,

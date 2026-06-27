@@ -93,7 +93,10 @@ export class AuditService {
       end();
       return result;
     } catch (error) {
-      this.metrics.dbErrorsTotal.inc({ operation: 'create', entity: 'AuditLog' });
+      this.metrics.dbErrorsTotal.inc({
+        operation: 'create',
+        entity: 'AuditLog',
+      });
       end();
       throw error;
     }
@@ -134,12 +137,13 @@ export class AuditService {
       end();
       return { data: rows, total, page, limit };
     } catch (error) {
-      this.metrics.dbErrorsTotal.inc({ operation: 'findMany', entity: 'AuditLog' });
+      this.metrics.dbErrorsTotal.inc({
+        operation: 'findMany',
+        entity: 'AuditLog',
+      });
       end();
       throw error;
     }
-
-    return { data: rows, total, page, limit };
   }
 
   async exportLogs(query: ExportAuditQuery): Promise<ExportAuditResult> {
@@ -180,23 +184,26 @@ export class AuditService {
         this.prisma.auditLog.count({ where }),
       ]);
       end();
+
+      const data: AnonymizedAuditLog[] = rows.map(row => ({
+        id: row.id,
+        actorHash: this.anonymize(row.actorId),
+        entity: row.entity,
+        entityHash: this.anonymize(row.entityId),
+        action: row.action,
+        timestamp: row.timestamp,
+        metadata: row.metadata,
+      }));
+
+      return { data, total, page, limit };
     } catch (error) {
-      this.metrics.dbErrorsTotal.inc({ operation: 'export', entity: 'AuditLog' });
+      this.metrics.dbErrorsTotal.inc({
+        operation: 'export',
+        entity: 'AuditLog',
+      });
       end();
       throw error;
     }
-
-    const data: AnonymizedAuditLog[] = rows.map(row => ({
-      id: row.id,
-      actorHash: this.anonymize(row.actorId),
-      entity: row.entity,
-      entityHash: this.anonymize(row.entityId),
-      action: row.action,
-      timestamp: row.timestamp,
-      metadata: row.metadata,
-    }));
-
-    return { data, total, page, limit };
   }
 
   buildCsv(rows: AnonymizedAuditLog[]): string {

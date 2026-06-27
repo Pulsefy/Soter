@@ -30,7 +30,11 @@ export class MetricsInterceptor implements NestInterceptor {
           duration,
         );
 
-        this.metricsService.httpRequestsTotal.inc({ method: request.method, route, status_code: statusCode });
+        this.metricsService.httpRequestsTotal.inc({
+          method: request.method,
+          route,
+          status_code: statusCode,
+        });
       }),
     );
   }

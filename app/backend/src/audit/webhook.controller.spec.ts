@@ -2,7 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { WebhookController } from './webhook.controller';
 import { SessionService } from '../session/session.service';
 import { HmacGuard } from './hmac.guard';
-import { AiVerificationPayloadDto, VerificationStatus } from './dto/ai-verification.dto';
+import {
+  AiVerificationPayloadDto,
+  VerificationStatus,
+} from './dto/ai-verification.dto';
 
 describe('WebhookController', () => {
   let controller: WebhookController;
@@ -44,7 +47,9 @@ describe('WebhookController', () => {
         output: { verificationScore: 0.95 },
       };
 
-      mockSessionService.submitToStep.mockResolvedValue({ isIdempotent: false });
+      mockSessionService.submitToStep.mockResolvedValue({
+        isIdempotent: false,
+      });
 
       const result = await controller.handleAiVerification(payload);
 

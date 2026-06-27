@@ -33,7 +33,7 @@ describe('HmacGuard', () => {
           rawBody,
         }),
       }),
-    } as unknown as ExecutionContext);
+    }) as unknown as ExecutionContext;
 
   it('should be defined', () => {
     expect(guard).toBeDefined();

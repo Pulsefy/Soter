@@ -2,7 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { WebhooksController } from './webhooks.controller';
 import { WebhooksService } from './webhooks.service';
 import { HmacAuthGuard } from './guards/hmac-auth.guard';
-import { AiVerificationPayloadDto, VerificationStatus } from './dto/ai-verification.dto';
+import {
+  AiVerificationPayloadDto,
+  VerificationStatus,
+} from './dto/ai-verification.dto';
 import { ConfigService } from '@nestjs/config';
 
 describe('WebhooksController', () => {

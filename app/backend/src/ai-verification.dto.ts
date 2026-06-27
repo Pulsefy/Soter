@@ -4,9 +4,7 @@ import {
   IsUUID,
   IsEnum,
   IsObject,
-  ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
 export enum VerificationStatus {
   VERIFIED = 'verified',

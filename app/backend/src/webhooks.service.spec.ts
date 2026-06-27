@@ -2,7 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { WebhooksService } from './webhooks.service';
 import { SessionService } from '../session/session.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiVerificationPayloadDto, VerificationStatus } from './dto/ai-verification.dto';
+import {
+  AiVerificationPayloadDto,
+  VerificationStatus,
+} from './dto/ai-verification.dto';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { SessionStatus, StepStatus } from '@prisma/client';
 
@@ -16,7 +19,9 @@ describe('WebhooksService', () => {
       findUnique: jest.fn(),
       create: jest.fn(),
     },
-    $transaction: jest.fn().mockImplementation(callback => callback(mockPrisma)),
+    $transaction: jest
+      .fn()
+      .mockImplementation(callback => callback(mockPrisma)),
   };
 
   const mockSessionService = {

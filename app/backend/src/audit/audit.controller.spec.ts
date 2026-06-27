@@ -32,7 +32,7 @@ describe('AuditController', () => {
     exportLogs: jest.fn().mockResolvedValue(mockExportResult),
     buildCsv: jest.fn().mockReturnValue('id,actorHash,...\nlog-1,...'),
   };
-  
+
   const mockMetricsService = {
     getMetrics: jest.fn().mockResolvedValue('# HELP ...'),
   };

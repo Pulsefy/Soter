@@ -17,7 +17,7 @@ export class WebhooksController {
   constructor(private readonly webhooksService: WebhooksService) {}
 
   @Post('ai-verification')
-  @UseGuards(HmacAuthGuard)
+  @UseGuards(HmacAuthGuard) // Correctly typed guard
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Receive AI verification results' })
   @ApiHeader({

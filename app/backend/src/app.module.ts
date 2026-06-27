@@ -5,7 +5,7 @@ import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
- 
+
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AidModule } from './aid/aid.module';

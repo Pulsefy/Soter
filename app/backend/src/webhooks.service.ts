@@ -7,7 +7,7 @@ import {
 import { SessionService } from '../session/session.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiVerificationPayloadDto } from './dto/ai-verification.dto';
-import { SessionStatus, StepStatus } from '@prisma/client';
+import { Prisma, SessionStatus, StepStatus } from '@prisma/client';
 
 @Injectable()
 export class WebhooksService {
@@ -54,7 +54,7 @@ export class WebhooksService {
       await tx.webhookEvent.create({
         data: {
           eventId,
-          payload: payload as any,
+          payload: payload as unknown as Prisma.InputJsonValue,
           source: 'ai_service',
         },
       });
@@ -67,7 +67,9 @@ export class WebhooksService {
       });
     });
 
-    this.logger.log(`Successfully processed AI verification for event ${eventId}`);
+    this.logger.log(
+      `Successfully processed AI verification for event ${eventId}`,
+    );
     return { status: 'success', eventId };
   }
 }
