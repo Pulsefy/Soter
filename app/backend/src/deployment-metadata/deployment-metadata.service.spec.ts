@@ -1,12 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { DeploymentMetadataService } from './deployment-metadata.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ContractConfigCacheService } from './contract-config-cache.service';
 
 describe('DeploymentMetadataService', () => {
   let service: DeploymentMetadataService;
-  let prisma: PrismaService;
+  let prisma: jest.Mocked<PrismaService>;
+  let cache: jest.Mocked<ContractConfigCacheService>;
 
-  const mockDeploymentMetadata = {
+  const mockRecord = {
     id: 'test-id-1',
     contractName: 'AidEscrow',
     network: 'testnet',
@@ -23,7 +25,7 @@ describe('DeploymentMetadataService', () => {
     updatedAt: new Date('2026-06-03T12:00:00Z'),
   };
 
-  const mockPrismaService = {
+  const mockPrisma = {
     deploymentMetadata: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -34,29 +36,43 @@ describe('DeploymentMetadataService', () => {
     },
   };
 
+  const mockCache = {
+    getAll: jest.fn(),
+    getByNetwork: jest.fn(),
+    getByNetworkAndContractName: jest.fn(),
+    getByContractId: jest.fn(),
+    invalidateAll: jest.fn(),
+    refreshAll: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DeploymentMetadataService,
-        {
-          provide: PrismaService,
-          useValue: mockPrismaService,
-        },
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: ContractConfigCacheService, useValue: mockCache },
       ],
     }).compile();
 
     service = module.get<DeploymentMetadataService>(DeploymentMetadataService);
-    prisma = module.get<PrismaService>(PrismaService);
+    prisma = module.get(PrismaService);
+    cache = module.get(ContractConfigCacheService);
 
-    // Reset all mocks before each test
     jest.clearAllMocks();
+    // Default: invalidateAll and refreshAll resolve cleanly
+    mockCache.invalidateAll.mockResolvedValue(0);
+    mockCache.refreshAll.mockResolvedValue({
+      refreshedAt: new Date(),
+      contractCount: 1,
+      networkCount: 1,
+    });
   });
 
+  // ─── create ────────────────────────────────────────────────────────────────
+
   describe('create', () => {
-    it('should create a new deployment metadata', async () => {
-      mockPrismaService.deploymentMetadata.create.mockResolvedValue(
-        mockDeploymentMetadata,
-      );
+    it('creates a record and invalidates the cache', async () => {
+      mockPrisma.deploymentMetadata.create.mockResolvedValue(mockRecord);
 
       const dto = {
         contractName: 'AidEscrow',
@@ -73,33 +89,53 @@ describe('DeploymentMetadataService', () => {
 
       const result = await service.create(dto);
 
-      expect(result).toEqual(mockDeploymentMetadata);
-      expect(prisma.deploymentMetadata.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          contractName: dto.contractName,
-          network: dto.network,
-          contractId: dto.contractId,
+      expect(mockPrisma.deploymentMetadata.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            contractName: dto.contractName,
+            network: dto.network,
+            contractId: dto.contractId,
+          }),
         }),
+      );
+      expect(mockCache.invalidateAll).toHaveBeenCalledTimes(1);
+      expect(result.id).toBe(mockRecord.id);
+    });
+
+    it('propagates Prisma unique-constraint errors without swallowing them', async () => {
+      const err = Object.assign(new Error('Unique constraint failed'), {
+        code: 'P2002',
       });
+      mockPrisma.deploymentMetadata.create.mockRejectedValue(err);
+
+      await expect(
+        service.create({
+          contractName: 'AidEscrow',
+          network: 'testnet',
+          contractId: 'C123',
+          wasmHash: 'abc',
+          deployedAt: '2026-06-03T12:00:00Z',
+        }),
+      ).rejects.toThrow();
     });
   });
 
+  // ─── read helpers (all delegated to cache) ─────────────────────────────────
+
   describe('findAll', () => {
-    it('should return all deployment metadata', async () => {
-      mockPrismaService.deploymentMetadata.findMany.mockResolvedValue([
-        mockDeploymentMetadata,
-      ]);
+    it('delegates to ContractConfigCacheService.getAll()', async () => {
+      mockCache.getAll.mockResolvedValue([mockRecord]);
 
       const result = await service.findAll();
 
-      expect(result).toEqual([mockDeploymentMetadata]);
-      expect(prisma.deploymentMetadata.findMany).toHaveBeenCalledWith({
-        orderBy: { deployedAt: 'desc' },
-      });
+      expect(mockCache.getAll).toHaveBeenCalledTimes(1);
+      expect(result).toEqual([mockRecord]);
+      // Prisma should NOT be called directly
+      expect(mockPrisma.deploymentMetadata.findMany).not.toHaveBeenCalled();
     });
 
-    it('should return empty array when no metadata exists', async () => {
-      mockPrismaService.deploymentMetadata.findMany.mockResolvedValue([]);
+    it('returns empty array when cache/DB has no records', async () => {
+      mockCache.getAll.mockResolvedValue([]);
 
       const result = await service.findAll();
 
@@ -108,53 +144,44 @@ describe('DeploymentMetadataService', () => {
   });
 
   describe('findByNetwork', () => {
-    it('should return metadata for a specific network', async () => {
-      mockPrismaService.deploymentMetadata.findMany.mockResolvedValue([
-        mockDeploymentMetadata,
-      ]);
+    it('delegates to ContractConfigCacheService.getByNetwork()', async () => {
+      mockCache.getByNetwork.mockResolvedValue([mockRecord]);
 
       const result = await service.findByNetwork('testnet');
 
-      expect(result).toEqual([mockDeploymentMetadata]);
-      expect(prisma.deploymentMetadata.findMany).toHaveBeenCalledWith({
-        where: { network: 'testnet' },
-        orderBy: { deployedAt: 'desc' },
-      });
+      expect(mockCache.getByNetwork).toHaveBeenCalledWith('testnet');
+      expect(result).toEqual([mockRecord]);
+      expect(mockPrisma.deploymentMetadata.findMany).not.toHaveBeenCalled();
     });
 
-    it('should return empty array for network with no deployments', async () => {
-      mockPrismaService.deploymentMetadata.findMany.mockResolvedValue([]);
+    it('returns empty array for unknown network', async () => {
+      mockCache.getByNetwork.mockResolvedValue([]);
 
-      const result = await service.findByNetwork('nonexistent');
+      const result = await service.findByNetwork('unknown');
 
       expect(result).toEqual([]);
     });
   });
 
   describe('findByNetworkAndContractName', () => {
-    it('should return metadata for a specific network and contract name', async () => {
-      mockPrismaService.deploymentMetadata.findUnique.mockResolvedValue(
-        mockDeploymentMetadata,
-      );
+    it('delegates to ContractConfigCacheService.getByNetworkAndContractName()', async () => {
+      mockCache.getByNetworkAndContractName.mockResolvedValue(mockRecord);
 
       const result = await service.findByNetworkAndContractName(
         'testnet',
         'AidEscrow',
       );
 
-      expect(result).toEqual(mockDeploymentMetadata);
-      expect(prisma.deploymentMetadata.findUnique).toHaveBeenCalledWith({
-        where: {
-          network_contractName: {
-            network: 'testnet',
-            contractName: 'AidEscrow',
-          },
-        },
-      });
+      expect(mockCache.getByNetworkAndContractName).toHaveBeenCalledWith(
+        'testnet',
+        'AidEscrow',
+      );
+      expect(result).toEqual(mockRecord);
+      expect(mockPrisma.deploymentMetadata.findUnique).not.toHaveBeenCalled();
     });
 
-    it('should return null if metadata not found', async () => {
-      mockPrismaService.deploymentMetadata.findUnique.mockResolvedValue(null);
+    it('returns null when contract is not found', async () => {
+      mockCache.getByNetworkAndContractName.mockResolvedValue(null);
 
       const result = await service.findByNetworkAndContractName(
         'testnet',
@@ -166,26 +193,22 @@ describe('DeploymentMetadataService', () => {
   });
 
   describe('findByContractId', () => {
-    it('should return metadata for a specific contract ID', async () => {
-      mockPrismaService.deploymentMetadata.findFirst.mockResolvedValue(
-        mockDeploymentMetadata,
-      );
+    it('delegates to ContractConfigCacheService.getByContractId()', async () => {
+      mockCache.getByContractId.mockResolvedValue(mockRecord);
 
       const result = await service.findByContractId(
         'CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG',
       );
 
-      expect(result).toEqual(mockDeploymentMetadata);
-      expect(prisma.deploymentMetadata.findFirst).toHaveBeenCalledWith({
-        where: {
-          contractId:
-            'CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG',
-        },
-      });
+      expect(mockCache.getByContractId).toHaveBeenCalledWith(
+        'CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG',
+      );
+      expect(result).toEqual(mockRecord);
+      expect(mockPrisma.deploymentMetadata.findFirst).not.toHaveBeenCalled();
     });
 
-    it('should return null if contract ID not found', async () => {
-      mockPrismaService.deploymentMetadata.findFirst.mockResolvedValue(null);
+    it('returns null when contract ID is not found', async () => {
+      mockCache.getByContractId.mockResolvedValue(null);
 
       const result = await service.findByContractId('NONEXISTENT');
 
@@ -193,68 +216,79 @@ describe('DeploymentMetadataService', () => {
     });
   });
 
+  // ─── update ────────────────────────────────────────────────────────────────
+
   describe('update', () => {
-    it('should update deployment metadata', async () => {
-      const updated = { ...mockDeploymentMetadata, commitSha: 'new-sha-123' };
-      mockPrismaService.deploymentMetadata.update.mockResolvedValue(updated);
+    it('updates the record and invalidates the cache', async () => {
+      const updated = { ...mockRecord, commitSha: 'new-sha-123' };
+      mockPrisma.deploymentMetadata.update.mockResolvedValue(updated);
 
-      const dto = { commitSha: 'new-sha-123' };
-      const result = await service.update('test-id-1', dto);
-
-      expect(result).toEqual(updated);
-      expect(prisma.deploymentMetadata.update).toHaveBeenCalledWith({
-        where: { id: 'test-id-1' },
-        data: expect.objectContaining(dto),
+      const result = await service.update('test-id-1', {
+        commitSha: 'new-sha-123',
       });
+
+      expect(mockPrisma.deploymentMetadata.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'test-id-1' } }),
+      );
+      expect(mockCache.invalidateAll).toHaveBeenCalledTimes(1);
+      expect(result.commitSha).toBe('new-sha-123');
     });
   });
 
+  // ─── delete ────────────────────────────────────────────────────────────────
+
   describe('delete', () => {
-    it('should delete deployment metadata', async () => {
-      mockPrismaService.deploymentMetadata.delete.mockResolvedValue(
-        mockDeploymentMetadata,
-      );
+    it('deletes the record and invalidates the cache', async () => {
+      mockPrisma.deploymentMetadata.delete.mockResolvedValue(mockRecord);
 
       await service.delete('test-id-1');
 
-      expect(prisma.deploymentMetadata.delete).toHaveBeenCalledWith({
+      expect(mockPrisma.deploymentMetadata.delete).toHaveBeenCalledWith({
         where: { id: 'test-id-1' },
       });
+      expect(mockCache.invalidateAll).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe('tenant safety', () => {
-    it('should isolate deployment metadata per network', async () => {
-      const testnetMetadata = { ...mockDeploymentMetadata, network: 'testnet' };
-      const mainnetMetadata = { ...mockDeploymentMetadata, network: 'mainnet' };
+  // ─── refreshCache ──────────────────────────────────────────────────────────
 
-      mockPrismaService.deploymentMetadata.findMany
-        .mockResolvedValueOnce([testnetMetadata])
-        .mockResolvedValueOnce([mainnetMetadata]);
+  describe('refreshCache', () => {
+    it('delegates to ContractConfigCacheService.refreshAll() and returns stats', async () => {
+      const stats = {
+        refreshedAt: new Date('2026-06-03T12:00:00Z'),
+        contractCount: 3,
+        networkCount: 2,
+      };
+      mockCache.refreshAll.mockResolvedValue(stats);
 
-      const testnetResult = await service.findByNetwork('testnet');
-      const mainnetResult = await service.findByNetwork('mainnet');
+      const result = await service.refreshCache();
 
-      expect(testnetResult).toEqual([testnetMetadata]);
-      expect(mainnetResult).toEqual([mainnetMetadata]);
-      expect(prisma.deploymentMetadata.findMany).toHaveBeenCalledTimes(2);
+      expect(mockCache.refreshAll).toHaveBeenCalledTimes(1);
+      expect(result).toEqual(stats);
+    });
+  });
+
+  // ─── network isolation ─────────────────────────────────────────────────────
+
+  describe('network isolation', () => {
+    it('returns only testnet records when querying testnet', async () => {
+      const testnetRecord = { ...mockRecord, network: 'testnet' };
+      mockCache.getByNetwork.mockResolvedValue([testnetRecord]);
+
+      const result = await service.findByNetwork('testnet');
+
+      expect(result).toEqual([testnetRecord]);
+      expect(result.every(r => r.network === 'testnet')).toBe(true);
     });
 
-    it('should enforce unique constraint on network and contractName', async () => {
-      const error = new Error('Unique constraint failed');
-      (error as any).code = 'P2002';
-      mockPrismaService.deploymentMetadata.create.mockRejectedValueOnce(error);
+    it('returns only mainnet records when querying mainnet', async () => {
+      const mainnetRecord = { ...mockRecord, network: 'mainnet' };
+      mockCache.getByNetwork.mockResolvedValue([mainnetRecord]);
 
-      const dto = {
-        contractName: 'AidEscrow',
-        network: 'testnet',
-        contractId: 'CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG',
-        wasmHash:
-          '24328e15b7c11c7ff07caeaf0328da591b3b63e84af57fa03623c10126eabc8d',
-        deployedAt: '2026-06-03T12:00:00Z',
-      };
+      const result = await service.findByNetwork('mainnet');
 
-      await expect(service.create(dto)).rejects.toThrow();
+      expect(result).toEqual([mainnetRecord]);
+      expect(result.every(r => r.network === 'mainnet')).toBe(true);
     });
   });
 });
