@@ -41,6 +41,15 @@ async function bootstrap() {
   // Enable shutdown hooks
   app.enableShutdownHooks();
 
+  // Add raw body parsing for webhook signature verification
+  app.use(json({
+    limit: '10mb',
+    verify: (req: any, res, buf) => {
+      req.rawBody = buf;
+    },
+  }));
+  app.use(urlencoded({ extended: true, limit: '10mb' }));
+
   const configService = app.get(ConfigService);
 
   // Security middleware (order matters)

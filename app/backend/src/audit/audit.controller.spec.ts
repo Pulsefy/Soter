@@ -1,10 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditController } from './audit.controller';
 import { AuditService } from './audit.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 describe('AuditController', () => {
   let controller: AuditController;
   let service: AuditService;
+  let metricsService: MetricsService;
 
   const mockExportResult = {
     data: [
@@ -30,11 +32,19 @@ describe('AuditController', () => {
     exportLogs: jest.fn().mockResolvedValue(mockExportResult),
     buildCsv: jest.fn().mockReturnValue('id,actorHash,...\nlog-1,...'),
   };
+  
+  const mockMetricsService = {
+    getMetrics: jest.fn().mockResolvedValue('# HELP ...'),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuditController],
       providers: [
+        {
+          provide: MetricsService,
+          useValue: mockMetricsService,
+        },
         {
           provide: AuditService,
           useValue: mockAuditService,
@@ -44,6 +54,7 @@ describe('AuditController', () => {
 
     controller = module.get<AuditController>(AuditController);
     service = module.get<AuditService>(AuditService);
+    metricsService = module.get<MetricsService>(MetricsService);
   });
 
   it('should be defined', () => {
@@ -115,6 +126,21 @@ describe('AuditController', () => {
         from: '2024-01-01',
         to: '2024-12-31',
       });
+    });
+  });
+
+  describe('getMetrics', () => {
+    it('should call metricsService.getMetrics and set headers', async () => {
+      const res = {
+        set: jest.fn(),
+        send: jest.fn(),
+      } as any;
+
+      await controller.getMetrics(res);
+
+      expect(metricsService.getMetrics).toHaveBeenCalled();
+      expect(res.set).toHaveBeenCalledWith('Content-Type', 'text/plain');
+      expect(res.send).toHaveBeenCalledWith('# HELP ...');
     });
   });
 });

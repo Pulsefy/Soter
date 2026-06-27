@@ -5,7 +5,7 @@ import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-
+ 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AidModule } from './aid/aid.module';
@@ -47,6 +47,7 @@ import { SandboxModule } from './sandbox/sandbox.module';
 import { CacheModule } from './common/cache/cache.module';
 import { CacheResponseInterceptor } from './common/interceptors/cache-response.interceptor';
 
+import { WebhooksModule } from './webhooks/webhooks.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -116,6 +117,7 @@ import { CacheResponseInterceptor } from './common/interceptors/cache-response.i
     EntityLinkingModule,
     DeploymentMetadataModule,
     SandboxModule,
+    WebhooksModule,
     RedisModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
