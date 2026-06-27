@@ -46,12 +46,12 @@ jobs:
 
       - name: Generate contract registry artifact
         run: |
-          python3 app/onchain/scripts/generate_contract_registry.py \
-            --registry-json app/onchain/deployments/registry.json \
-            --output app/onchain/deployments/contract-registry.json
+          python3 scripts/generate_contract_registry.py \
+            --registry-json deployments/registry.json \
+            --output deployments/contract-registry.json
 
       - name: Upload contract registry artifact
         uses: actions/upload-artifact@v4
         with:
           name: contract-registry
-          path: app/onchain/deployments/contract-registry.json
+          path: deployments/contract-registry.json
