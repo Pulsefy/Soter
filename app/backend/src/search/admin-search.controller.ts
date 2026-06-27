@@ -1,4 +1,5 @@
 import { Controller, Get, Query, UseGuards, Request } from '@nestjs/common';
+import { Request as ExpressRequest } from 'express';
 import { AdminSearchService } from './admin-search.service';
 import { ApiKeyGuard } from '../common/guards/api-key.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -16,9 +17,9 @@ export class AdminSearchController {
   async search(
     @Query('q') query: string,
     @Query('entity') entity: string,
-    @Request() req: any,
+    @Request() req: ExpressRequest,
   ) {
-    const orgId = req.user.orgId || req.user.ngoId;
+    const orgId = req.user?.orgId || req.user?.ngoId;
     return this.searchService.search(query, entity, orgId);
   }
 }

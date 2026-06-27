@@ -60,7 +60,7 @@ export class VerificationInboxService {
   ): Promise<InboxResponse> {
     const skip = (page - 1) * limit;
 
-    const where: any = {
+    const where: { deletedAt: null; status?: VerificationStatus } = {
       deletedAt: null,
     };
 
@@ -145,7 +145,13 @@ export class VerificationInboxService {
       throw new BadRequestException('Verification already processed');
     }
 
-    const updateData: any = {
+    const updateData: {
+      status: VerificationStatus;
+      reviewedAt: Date;
+      reviewedBy: string;
+      nextStepMessage?: string;
+      rejectionReason?: string;
+    } = {
       status,
       reviewedAt: new Date(),
       reviewedBy: reviewerId,
