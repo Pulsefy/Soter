@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
+import { Prisma, DeploymentMetadata } from '@prisma/client';
 import {
   CreateDeploymentMetadataDto,
   UpdateDeploymentMetadataDto,
@@ -34,7 +34,7 @@ export class DeploymentMetadataService {
         deployer: dto.deployer ?? null,
         transactionHash: dto.transactionHash ?? null,
         // Use Prisma.DbNull instead of standard null variables for Json fields
-        metadata: dto.metadata ?? Prisma.DbNull,
+        metadata: (dto.metadata as Prisma.InputJsonValue) ?? Prisma.DbNull,
       },
     });
 
@@ -115,7 +115,7 @@ export class DeploymentMetadataService {
         deployer: dto.deployer,
         transactionHash: dto.transactionHash,
         // Ensure explicit fallback behavior for Json type check compliance
-        metadata: dto.metadata === null ? Prisma.DbNull : dto.metadata,
+        metadata: dto.metadata === null ? Prisma.DbNull : (dto.metadata as Prisma.InputJsonValue | undefined),
       },
     });
 
@@ -135,7 +135,9 @@ export class DeploymentMetadataService {
   /**
    * Map Prisma model to response DTO
    */
-  private mapToResponse(metadata: any): DeploymentMetadataResponseDto {
+  private mapToResponse(
+    metadata: DeploymentMetadata,
+  ): DeploymentMetadataResponseDto {
     return {
       id: metadata.id,
       contractName: metadata.contractName,
@@ -146,7 +148,8 @@ export class DeploymentMetadataService {
       commitSha: metadata.commitSha ?? undefined,
       deployer: metadata.deployer ?? undefined,
       transactionHash: metadata.transactionHash ?? undefined,
-      metadata: metadata.metadata ?? undefined,
+      metadata:
+        (metadata.metadata as Record<string, unknown> | null) ?? undefined,
       createdAt: metadata.createdAt,
       updatedAt: metadata.updatedAt,
     };
