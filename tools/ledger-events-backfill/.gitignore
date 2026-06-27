@@ -1,0 +1,6 @@
+node_modules/
+metrics.prom
+checkpoints/
+*.tmp
+*.swp
+.DS_Store
