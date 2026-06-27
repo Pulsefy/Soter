@@ -36,6 +36,8 @@ jobs:
 
       - name: Test
         run: pnpm --filter backend run test
+        env:
+          ONCHAIN_ADAPTER: fixture
 
       - name: Build
         run: pnpm --filter backend run build

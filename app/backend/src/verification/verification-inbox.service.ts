@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { VerificationStatus } from '@prisma/client';
+import { Prisma, VerificationStatus } from '@prisma/client';
 
 export interface InboxItem {
   id: string;
@@ -60,13 +60,10 @@ export class VerificationInboxService {
   ): Promise<InboxResponse> {
     const skip = (page - 1) * limit;
 
-    const where: any = {
+    const where: Prisma.VerificationRequestWhereInput = {
       deletedAt: null,
+      ...(status ? { status: status as VerificationStatus } : {}),
     };
-
-    if (status) {
-      where.status = status as VerificationStatus;
-    }
 
     const [items, total] = await Promise.all([
       this.prisma.verificationRequest.findMany({
@@ -145,23 +142,15 @@ export class VerificationInboxService {
       throw new BadRequestException('Verification already processed');
     }
 
-    const updateData: any = {
-      status,
-      reviewedAt: new Date(),
-      reviewedBy: reviewerId,
-    };
-
-    if (nextStepMessage) {
-      updateData.nextStepMessage = nextStepMessage;
-    }
-
-    if (rejectionReason) {
-      updateData.rejectionReason = rejectionReason;
-    }
-
     const updated = await this.prisma.verificationRequest.update({
       where: { id },
-      data: updateData,
+      data: {
+        status,
+        reviewedAt: new Date(),
+        reviewedBy: reviewerId,
+        ...(nextStepMessage ? { nextStepMessage } : {}),
+        ...(rejectionReason ? { rejectionReason } : {}),
+      },
     });
 
     // Record audit trail

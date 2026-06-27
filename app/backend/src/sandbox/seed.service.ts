@@ -66,19 +66,19 @@ export class SeedService {
       return { ngoId: DEMO_TENANT_SEED.ngoId, created: false };
     }
 
+    const tenantMetadata: Record<string, unknown> = {
+      description: DEMO_TENANT_SEED.description,
+      region: DEMO_TENANT_SEED.region,
+      isTenantMarker: true,
+    };
+
     await this.prisma.campaign.create({
       data: {
         name: TENANT_MARKER_NAME,
         status: 'draft',
         budget: 0,
         ngoId: DEMO_TENANT_SEED.ngoId,
-        metadata: JSON.parse(
-          JSON.stringify({
-            description: DEMO_TENANT_SEED.description,
-            region: DEMO_TENANT_SEED.region,
-            isTenantMarker: true,
-          }),
-        ),
+        metadata: tenantMetadata,
       },
     });
 
@@ -103,13 +103,17 @@ export class SeedService {
         skipped++;
         campaignIds.push(existing.id);
       } else {
+        const seedMetadata: Record<string, unknown> = seed.metadata as Record<
+          string,
+          unknown
+        >;
         const record = await this.prisma.campaign.create({
           data: {
             name: seed.name,
             status: seed.status,
             budget: seed.budget,
             ngoId: DEMO_TENANT_SEED.ngoId,
-            metadata: JSON.parse(JSON.stringify(seed.metadata)),
+            metadata: seedMetadata,
           },
         });
         created++;
