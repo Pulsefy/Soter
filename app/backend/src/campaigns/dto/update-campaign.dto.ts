@@ -34,7 +34,15 @@ export class UpdateCampaignDto {
 
   @ApiPropertyOptional({
     description: 'Updated campaign metadata.',
-    example: { region: 'Lagos', partner: 'NGO-B' },
+    example: {
+      region: 'Lagos',
+      partner: 'NGO-B',
+      anchor: {
+        type: 'emergency_relief',
+        ref: 'anchor-002',
+        timestamp: '2026-06-26T11:30:00Z',
+      },
+    },
   })
   @IsOptional()
   @IsObject()

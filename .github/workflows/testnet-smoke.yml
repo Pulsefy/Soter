@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         working-directory: tools/testnet-smoke
         run: |
-          npm ci
+          npm install
 
       - name: Run integration harness
         working-directory: tools/testnet-smoke
