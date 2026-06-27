@@ -1,6 +1,7 @@
 import { Module, Provider } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { SchedulerRegistry } from '@nestjs/schedule';
 import { OnchainAdapter, ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
 export { ONCHAIN_ADAPTER_TOKEN };
 import { MockOnchainAdapter } from './onchain.adapter.mock';
@@ -17,6 +18,9 @@ import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecy
 import { SorobanTransactionScheduler } from './soroban-transaction.scheduler';
 import { SorobanTransactionProcessor } from './soroban-transaction.processor';
 import { PrismaModule } from '../prisma/prisma.module';
+import { EventCorrelationService } from './event-correlation/event-correlation.service';
+import { EventCorrelationController } from './event-correlation/event-correlation.controller';
+import { EventMapper } from './event-correlation/event-mapper';
 
 /**
  * Factory function to create the appropriate adapter based on configuration
@@ -75,7 +79,7 @@ const onchainAdapterProvider: Provider = {
     LoggerModule,
     MetricsModule,
   ],
-  controllers: [LedgerAdminController],
+  controllers: [LedgerAdminController, EventCorrelationController],
   providers: [
     MockOnchainAdapter,
     SorobanAdapter,
@@ -87,6 +91,9 @@ const onchainAdapterProvider: Provider = {
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
     SorobanTransactionProcessor,
+    EventCorrelationService,
+    EventMapper,
+    SchedulerRegistry,
   ],
   exports: [
     ONCHAIN_ADAPTER_TOKEN,
@@ -95,6 +102,7 @@ const onchainAdapterProvider: Provider = {
     LedgerReconciliationService,
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
+    EventCorrelationService,
   ],
 })
 export class OnchainModule {}

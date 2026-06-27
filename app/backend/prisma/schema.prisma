@@ -782,3 +782,33 @@ model DeploymentMetadata {
   @@index([contractId])
   @@index([deployedAt])
 }
+
+// ============================================================================
+// ON-CHAIN EVENT CORRELATION
+// ============================================================================
+
+/// Stores each correlated on-chain event from the AidEscrow Soroban contract
+model OnChainEvent {
+  id            String   @id @default(cuid())
+  txHash        String
+  ledger        Int
+  topic         String
+  contractId    String
+  packageId     String?
+  claimId       String?
+  rawPayload    Json
+  correlatedAt  DateTime @default(now())
+
+  @@unique([txHash, topic])
+  @@index([packageId])
+  @@index([claimId])
+  @@index([ledger])
+  @@index([correlatedAt])
+}
+
+/// Persists the last processed ledger number for cursor-based polling
+model CorrelationCursor {
+  key         String   @id   // Always "default" for the single global cursor
+  lastLedger  Int
+  updatedAt   DateTime @updatedAt
+}
