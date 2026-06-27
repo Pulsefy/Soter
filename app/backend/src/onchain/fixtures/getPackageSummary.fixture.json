@@ -1,0 +1,8 @@
+{
+  "default": {
+    "totalAmount": "1000000000",
+    "claimedAmount": "500000000",
+    "status": "Active",
+    "timestamp": "2024-01-15T12:00:00.000Z"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "default": {
+    "aggregates": {
+      "totalCommitted": "5000000000",
+      "totalClaimed": "2000000000",
+      "totalExpiredCancelled": "500000000"
+    },
+    "timestamp": "2024-01-15T12:00:00.000Z"
+  }
+}

@@ -7,6 +7,7 @@ import {
 } from './onchain.module';
 import { OnchainAdapter } from './onchain.adapter';
 import { MockOnchainAdapter } from './onchain.adapter.mock';
+import { FixtureOnchainAdapter } from './onchain.adapter.fixture';
 import { SorobanAdapter } from './soroban.adapter';
 import { PrismaModule } from '../prisma/prisma.module';
 import { getQueueToken } from '@nestjs/bullmq';
@@ -92,11 +93,19 @@ describe('createOnchainAdapter', () => {
     expect(adapter).toBeInstanceOf(SorobanAdapter);
   });
 
+  it('should create FixtureOnchainAdapter when ONCHAIN_ADAPTER is fixture', () => {
+    jest.spyOn(configService, 'get').mockReturnValue('fixture');
+
+    const adapter = createOnchainAdapter(configService);
+
+    expect(adapter).toBeInstanceOf(FixtureOnchainAdapter);
+  });
+
   it('should throw error when ONCHAIN_ADAPTER is unknown', () => {
     jest.spyOn(configService, 'get').mockReturnValue('unknown');
 
     expect(() => createOnchainAdapter(configService)).toThrow(
-      'Unknown ONCHAIN_ADAPTER: unknown. Supported values: mock, soroban',
+      'Unknown ONCHAIN_ADAPTER: unknown. Supported values: mock, soroban, fixture',
     );
   });
 });
