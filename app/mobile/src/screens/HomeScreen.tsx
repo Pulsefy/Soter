@@ -261,6 +261,19 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           <TouchableOpacity
             style={styles.secondaryButton}
             accessibilityRole="button"
+            accessibilityLabel="View Submission Queue"
+            accessibilityHint="Navigates to the Submission Queue screen"
+            onPress={() => navigation.navigate('SubmissionQueue')}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.secondaryButtonText}>
+              Submission Queue
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            accessibilityRole="button"
             accessibilityLabel="View Aid Details"
             accessibilityHint="Navigates to the Aid Details screen"
             onPress={() => navigation.navigate('AidDetails', { aidId: '1' })}

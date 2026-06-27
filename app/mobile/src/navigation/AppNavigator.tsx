@@ -11,6 +11,7 @@ import { SettingsScreen } from '../screens/SettingsScreen';
 import { ScannerScreen } from '../screens/ScannerScreen';
 import { BulkScannerScreen } from '../screens/BulkScannerScreen';
 import { TaskListScreen } from '../screens/TaskListScreen';
+import { SubmissionQueueScreen } from '../screens/SubmissionQueueScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -70,6 +71,11 @@ export const AppNavigator = () => {
         name="TaskList"
         component={TaskListScreen}
         options={{ title: 'My Tasks' }}
+      />
+      <Stack.Screen
+        name="SubmissionQueue"
+        component={SubmissionQueueScreen}
+        options={{ title: 'Submission Queue' }}
       />
     </Stack.Navigator>
   );

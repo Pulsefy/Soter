@@ -43,10 +43,6 @@ export function Navbar() {
     ? `${publicKey.substring(0, 6)}...${publicKey.substring(publicKey.length - 6)}`
     : null;
 
-  useEffect(() => {
-    setIsOpen(false);
-  }, [pathname]);
-
   /** Return focus to the toggle button when the mobile menu closes. */
   useEffect(() => {
     if (!didMountRef.current) {
@@ -59,7 +55,7 @@ export function Navbar() {
   }, [isOpen]);
 
   return (
-    <nav className="border-b border-slate-200 bg-white p-4 text-blue-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-50">
+    <nav className="border-b border-slate-200 bg-white p-4 text-slate-950 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-50">
       <div className="container mx-auto flex items-center justify-between gap-4">
         <div className="flex items-center gap-6">
           <Link href="/" className="text-xl font-bold">
@@ -77,8 +73,8 @@ export function Navbar() {
                   aria-current={isActive ? 'page' : undefined}
                   className={`${linkBaseClassName} ${
                     isActive
-                      ? 'bg-blue-100 text-blue-900 dark:bg-slate-800 dark:text-slate-50'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-blue-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50'
+                      ? 'bg-blue-100 text-slate-950 dark:bg-slate-800 dark:text-slate-50'
+                      : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50'
                   }`}
                 >
                   {t(item.label)}
@@ -137,9 +133,10 @@ export function Navbar() {
                     key={item.href}
                     href={item.href}
                     aria-current={isActive ? 'page' : undefined}
+                    onClick={() => setIsOpen(false)}
                     className={`rounded-2xl border px-4 py-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
                       isActive
-                        ? 'border-blue-200 bg-blue-50 text-blue-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-50'
+                        ? 'border-blue-200 bg-blue-50 text-slate-950 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-50'
                         : 'border-slate-200 text-slate-700 dark:border-slate-700 dark:text-slate-200'
                     }`}
                   >

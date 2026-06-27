@@ -461,6 +461,9 @@ class TestResourceThrottle:
                 json={"text": "Some text with Jane Smith in Lagos."},
             )
         assert response.status_code == 503
+        body = response.json()
+        assert body["error"]["code"] == "SERVICE_OVERLOADED"
+        assert body["error"]["details"]["reason"] == "memory"
 
     def test_health_never_throttled(self, client):
         """Health endpoint must respond even under resource pressure."""

@@ -11,6 +11,7 @@ export type RootStackParamList = {
   Scanner: undefined;
   BulkScanner: undefined;
   TaskList: undefined;
+  SubmissionQueue: undefined;
 };
 
 /** Mapping from deep-link screen names to React Navigation route names */

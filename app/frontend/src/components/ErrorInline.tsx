@@ -10,7 +10,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { ERROR_METADATA, ErrorCategory } from '@/types/error';
-import { categorizeError } from '@/lib/error-utils';
+import { categorizeError, normalizeError } from '@/lib/error-utils';
 
 interface ErrorInlineProps {
   error?: Error | string | null;
@@ -29,10 +29,12 @@ export function ErrorInline({
 }: ErrorInlineProps) {
   if (!error) return null;
 
-  const category = manualCategory || categorizeError(error);
+  const normalized = normalizeError(error);
+  const category = manualCategory || normalized.category;
   const metadata = ERROR_METADATA[category];
   
-  const errorMessage = typeof error === 'string' ? error : error.message;
+  const errorMessage = normalized.message;
+  const correlationId = normalized.correlationId;
 
   const getCategoryIcon = () => {
     switch (category) {
@@ -73,6 +75,9 @@ export function ErrorInline({
           <div className="space-y-1">
             <p className="text-sm font-semibold leading-none">{metadata.title}</p>
             <p className="text-xs opacity-70 leading-relaxed">{errorMessage}</p>
+            {correlationId && (
+              <p className="text-[10px] font-mono opacity-50 mt-1">Correlation ID: {correlationId}</p>
+            )}
           </div>
         </div>
         
@@ -131,7 +136,13 @@ export function ErrorInline({
         <p className="mt-1 text-sm text-slate-400 leading-relaxed">
           {errorMessage || metadata.description}
         </p>
+        {correlationId && (
+          <p className="mt-2 text-[10px] font-mono text-slate-500">
+            Correlation ID: {correlationId}
+          </p>
+        )}
       </div>
+
 
       <div className="mt-5 space-y-4">
         <div className="rounded-lg bg-white/5 p-3">

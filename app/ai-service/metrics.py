@@ -11,6 +11,12 @@ VRAM_USAGE_PERCENT = Gauge('system_vram_usage_percent', 'System VRAM usage perce
 # API metrics
 REQUEST_COUNT = Counter('api_request_count', 'Total API request count', ['method', 'endpoint', 'http_status'])
 REQUEST_LATENCY = Histogram('api_request_latency_seconds', 'API request latency', ['method', 'endpoint'])
+REQUESTS_SHED_TOTAL = Counter(
+    'requests_shed_total',
+    'Requests rejected due to overload (load shedding)',
+    ['reason', 'method', 'endpoint'],
+)
+CELERY_QUEUE_DEPTH = Gauge('celery_queue_depth', 'Pending tasks in the Celery default queue')
 
 # AI Model metrics
 MODEL_LOAD_TIME = Histogram('model_load_time_seconds', 'Model load time in seconds', ['model_name'])

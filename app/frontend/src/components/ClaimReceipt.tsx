@@ -24,6 +24,30 @@ interface ClaimReceiptProps {
   compact?: boolean;
 }
 
+/** Inline copy button with transient ✓ feedback for a single field value. */
+function FieldCopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = React.useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable
+    }
+  };
+  return (
+    <button
+      onClick={copy}
+      aria-label={`Copy ${label}`}
+      title={`Copy ${label}`}
+      className="ml-1 inline-flex items-center opacity-60 hover:opacity-100 transition-opacity"
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+    </button>
+  );
+}
+
 export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
   claim,
   onShare,
@@ -167,43 +191,52 @@ ${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}`.tr
         {claim.tokenAddress && (
           <div className="col-span-2">
             <p className="text-xs font-semibold opacity-75 mb-1">TOKEN ADDRESS</p>
-            <a
-              href={buildExplorerUrl('address', claim.tokenAddress)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1 inline-flex"
-            >
-              {claim.tokenAddress}
-              <ExternalLink size={12} className="shrink-0" />
-            </a>
+            <div className="flex items-center gap-1">
+              <a
+                href={buildExplorerUrl('address', claim.tokenAddress)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1"
+              >
+                {claim.tokenAddress}
+                <ExternalLink size={12} className="shrink-0" />
+              </a>
+              <FieldCopyButton value={claim.tokenAddress} label="token address" />
+            </div>
           </div>
         )}
         {claim.contractAddress && (
           <div className="col-span-2">
             <p className="text-xs font-semibold opacity-75 mb-1">CONTRACT ADDRESS</p>
-            <a
-              href={buildExplorerUrl('contract', claim.contractAddress)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1 inline-flex"
-            >
-              {claim.contractAddress}
-              <ExternalLink size={12} className="shrink-0" />
-            </a>
+            <div className="flex items-center gap-1">
+              <a
+                href={buildExplorerUrl('contract', claim.contractAddress)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1"
+              >
+                {claim.contractAddress}
+                <ExternalLink size={12} className="shrink-0" />
+              </a>
+              <FieldCopyButton value={claim.contractAddress} label="contract address" />
+            </div>
           </div>
         )}
         {claim.transactionHash && (
           <div className="col-span-2">
             <p className="text-xs font-semibold opacity-75 mb-1">TRANSACTION HASH</p>
-            <a
-              href={buildExplorerUrl('tx', claim.transactionHash)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1 inline-flex"
-            >
-              {claim.transactionHash}
-              <ExternalLink size={12} className="shrink-0" />
-            </a>
+            <div className="flex items-center gap-1">
+              <a
+                href={buildExplorerUrl('tx', claim.transactionHash)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1"
+              >
+                {claim.transactionHash}
+                <ExternalLink size={12} className="shrink-0" />
+              </a>
+              <FieldCopyButton value={claim.transactionHash} label="transaction hash" />
+            </div>
           </div>
         )}
       </div>

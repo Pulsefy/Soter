@@ -7,6 +7,7 @@ Every error response must conform to:
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+import main
 from main import app
 from exceptions import AIServiceError
 
@@ -93,8 +94,27 @@ class TestAIServiceError:
 
 
 # ---------------------------------------------------------------------------
-# 5. Generic 500 Internal Server Error
+# 6. 503 Service Overloaded (load shedding)
 # ---------------------------------------------------------------------------
+class TestServiceOverloaded:
+    def test_503_shape(self):
+        @main.app.get("/_test/503")
+        async def _raise_503():
+            from exceptions import LoadShedError
+
+            raise LoadShedError(
+                "memory",
+                "Service temporarily unavailable due to high memory pressure",
+                details={"threshold_percent": 90.0},
+            )
+
+        r = client.get("/_test/503")
+        assert r.status_code == 503
+        assert_envelope(r.json(), "SERVICE_OVERLOADED")
+        assert r.json()["error"]["details"]["reason"] == "memory"
+        assert r.headers.get("retry-after") == "30"
+
+
 class TestInternalServerError:
     def test_500_shape(self):
         @app.get("/_test/500")

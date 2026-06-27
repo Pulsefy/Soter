@@ -127,6 +127,24 @@ class HumanitarianVerificationService:
             return [preference] + [provider for provider in available if provider != preference]
         return available
 
+    def all_providers_unavailable(self) -> bool:
+        """Return True when every configured LLM provider circuit is open."""
+        if settings.test_provider_mode:
+            return False
+
+        providers = []
+        if settings.openai_api_key:
+            providers.append("openai")
+        if settings.groq_api_key:
+            providers.append("groq")
+        if not providers:
+            return False
+
+        return all(
+            provider in self.breakers and not self.breakers[provider].allow_request()
+            for provider in providers
+        )
+
     def _get_model_for_provider(self, provider: str) -> str:
         if provider == "test":
             return "test-provider/fixture"

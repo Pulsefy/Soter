@@ -124,7 +124,10 @@
     "balance": "Solde",
     "send": "Envoyer",
     "receive": "Recevoir",
-    "transactionHistory": "Historique des Transactions"
+    "transactionHistory": "Historique des Transactions",
+    "networkMismatch": "Incompatibilité de réseau — votre portefeuille est sur {walletNetwork} mais cette application nécessite {expectedNetwork}. Ouvrez Freighter et passez au réseau correct pour continuer.",
+    "networkMismatchShort": "Mauvais réseau — passez à {expectedNetwork} dans Freighter.",
+    "submitBlocked": "Impossible de soumettre : le portefeuille est sur le mauvais réseau."
   },
   "errors": {
     "generic": "Une erreur inattendue s'est produite. Veuillez réessayer.",

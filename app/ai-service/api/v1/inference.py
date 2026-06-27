@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 import tasks
+from exceptions import LoadShedError
 from services.cache import cached_response
 from config import settings
 
@@ -64,6 +65,8 @@ async def create_inference_task(
             "status_url": f"/v1/ai/status/{task_id}",
         }
 
+    except LoadShedError:
+        raise
     except Exception as e:
         logger.error(f"Failed to create inference task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")

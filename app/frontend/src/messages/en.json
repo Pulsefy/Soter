@@ -124,7 +124,10 @@
     "balance": "Balance",
     "send": "Send",
     "receive": "Receive",
-    "transactionHistory": "Transaction History"
+    "transactionHistory": "Transaction History",
+    "networkMismatch": "Network mismatch — your wallet is on {walletNetwork} but this app requires {expectedNetwork}. Open Freighter and switch to the correct network to continue.",
+    "networkMismatchShort": "Wrong network — switch to {expectedNetwork} in Freighter.",
+    "submitBlocked": "Cannot submit: wallet is on the wrong network."
   },
   "errors": {
     "generic": "An unexpected error occurred. Please try again.",

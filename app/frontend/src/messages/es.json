@@ -124,7 +124,10 @@
     "balance": "Saldo",
     "send": "Enviar",
     "receive": "Recibir",
-    "transactionHistory": "Historial de Transacciones"
+    "transactionHistory": "Historial de Transacciones",
+    "networkMismatch": "Discrepancia de red — su billetera está en {walletNetwork} pero esta aplicación requiere {expectedNetwork}. Abra Freighter y cambie a la red correcta para continuar.",
+    "networkMismatchShort": "Red incorrecta — cambie a {expectedNetwork} en Freighter.",
+    "submitBlocked": "No se puede enviar: la billetera está en la red incorrecta."
   },
   "errors": {
     "generic": "Ocurrió un error inesperado. Por favor inténtelo de nuevo.",
