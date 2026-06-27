@@ -24,7 +24,6 @@
   },
   "dependencies": {
     "@nestjs/swagger": "^11.2.6",
-<<<<<<< Updated upstream
     "body-parser": "^2.2.2",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -45,10 +44,7 @@
   "bugs": {
     "url": "https://github.com/Truphile/Soter/issues"
   },
-  "homepage": "https://github.com/Truphile/Soter#readme"
-=======
-    "express": "^5.2.1"
-  },
+  "homepage": "https://github.com/Truphile/Soter#readme",
   "pnpm": {
     "overrides": {
       "typescript": "5.7.3",
@@ -57,5 +53,4 @@
       "ts-jest": "29.2.5"
     }
   }
->>>>>>> Stashed changes
 }
