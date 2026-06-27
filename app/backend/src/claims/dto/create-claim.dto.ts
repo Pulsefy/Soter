@@ -68,4 +68,13 @@ export class CreateClaimDto {
   @Type(() => Date)
   @IsDate()
   expiresAt?: Date;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional receipt hash for anchoring off-chain claim or disbursement receipts.',
+    example: '3a7bd3e2360a9e1f7c4d7e8f6a1234567890abcdef1234567890abcdef123456',
+  })
+  @IsOptional()
+  @IsString()
+  receiptHash?: string;
 }
