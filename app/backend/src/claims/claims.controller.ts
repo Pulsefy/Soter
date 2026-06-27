@@ -9,6 +9,7 @@ import {
   Request,
   Res,
   Version,
+  Req,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Request as ExpressRequest } from 'express';
@@ -116,8 +117,9 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  verify(@Param('id') id: string) {
-    return this.claimsService.verify(id);
+  verify(@Param('id') id: string, @Req() req: ExpressRequest) {
+    const actorId = req.user?.id || req.user?.apiKeyId || 'system';
+    return this.claimsService.verify(id, actorId);
   }
 
   @Post(':id/approve')
@@ -138,8 +140,9 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  approve(@Param('id') id: string) {
-    return this.claimsService.approve(id);
+  approve(@Param('id') id: string, @Req() req: ExpressRequest) {
+    const actorId = req.user?.id || req.user?.apiKeyId || 'system';
+    return this.claimsService.approve(id, actorId);
   }
 
   @Post(':id/disburse')

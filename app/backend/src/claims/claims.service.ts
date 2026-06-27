@@ -105,10 +105,17 @@ export class ClaimsService {
 
     claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
-    // Stub audit hook
-    void this.auditLog('claim', claim.id, 'created', {
-      status: claim.status,
-      tokenAddress: createClaimDto.tokenAddress,
+    await this.auditService.record({
+      actorId: 'system',
+      entity: 'Claim',
+      entityId: claim.id,
+      action: 'claim_created',
+      metadata: {
+        status: claim.status,
+        campaignId: claim.campaignId,
+        amount: claim.amount,
+        tokenAddress: createClaimDto.tokenAddress,
+      },
     });
 
     return claim;
@@ -147,19 +154,23 @@ export class ClaimsService {
     };
   }
 
-  async verify(id: string) {
+  async verify(id: string, actorId?: string) {
     return this.transitionStatus(
       id,
       ClaimStatus.requested,
       ClaimStatus.verified,
+      undefined,
+      actorId,
     );
   }
 
-  async approve(id: string) {
+  async approve(id: string, actorId?: string) {
     return this.transitionStatus(
       id,
       ClaimStatus.verified,
       ClaimStatus.approved,
+      undefined,
+      actorId,
     );
   }
 
@@ -290,6 +301,7 @@ export class ClaimsService {
       ClaimStatus.approved,
       ClaimStatus.disbursed,
       onchainResult,
+      'system',
     );
   }
 
@@ -463,6 +475,7 @@ export class ClaimsService {
     fromStatus: ClaimStatus,
     toStatus: ClaimStatus,
     onchainResult?: DisburseResult | null,
+    actorId?: string,
   ) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
@@ -484,31 +497,28 @@ export class ClaimsService {
       });
 
       // Audit log for status change
-      void this.auditLog('claim', id, `status_changed_to_${toStatus}`, {
-        from: fromStatus,
-        to: toStatus,
-        onchainResult: onchainResult
-          ? {
-              transactionHash: onchainResult.transactionHash,
-              status: onchainResult.status,
-            }
-          : undefined,
+      await this.auditService.record({
+        actorId: actorId || 'system',
+        entity: 'Claim',
+        entityId: id,
+        action: `claim_status_changed_to_${toStatus}`,
+        metadata: {
+          from: fromStatus,
+          to: toStatus,
+          campaignId: claim.campaignId,
+          onchainResult: onchainResult
+            ? {
+                transactionHash: onchainResult.transactionHash,
+                status: onchainResult.status,
+              }
+            : undefined,
+        },
       });
 
       return updated;
     });
 
     return updatedClaim;
-  }
-
-  private auditLog(
-    entity: string,
-    entityId: string,
-    action: string,
-    metadata?: Record<string, unknown>,
-  ) {
-    // Stub: In production, this would log to audit table or external system
-    console.log(`Audit: ${entity} ${entityId} ${action}`, metadata);
   }
 
   /**
@@ -574,10 +584,16 @@ export class ClaimsService {
       );
     }
     // Audit log the share action
-    void this.auditLog('claim', id, 'receipt_shared', {
-      channel: shareDto.channel,
-      emailCount: shareDto.emailAddresses?.length || 0,
-      smsCount: shareDto.phoneNumbers?.length || 0,
+    await this.auditService.record({
+      actorId: 'system',
+      entity: 'Claim',
+      entityId: id,
+      action: 'claim_receipt_shared',
+      metadata: {
+        channel: shareDto.channel,
+        emailCount: shareDto.emailAddresses?.length || 0,
+        smsCount: shareDto.phoneNumbers?.length || 0,
+      },
     });
 
     return {
