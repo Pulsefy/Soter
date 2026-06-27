@@ -27,6 +27,8 @@ import {
   BatchCreateAidPackagesDto,
 } from './dto/aid-escrow.dto';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
+import { CacheResponse } from '../common/decorators/cache-response.decorator';
+import { getCacheTTL } from '../common/config/cache.config';
 
 /**
  * AidEscrowController
@@ -250,6 +252,7 @@ export class AidEscrowController {
    */
   @Get('packages/:id')
   @HttpCode(HttpStatus.OK)
+  @CacheResponse({ ttl: getCacheTTL().AID_PACKAGE_DETAILS })
   @ApiOperation({
     summary: 'Get aid package details',
     description:
@@ -294,6 +297,7 @@ export class AidEscrowController {
    */
   @Get('stats')
   @HttpCode(HttpStatus.OK)
+  @CacheResponse({ ttl: getCacheTTL().AID_PACKAGE_STATS })
   @ApiOperation({
     summary: 'Get aid package statistics',
     description:
@@ -327,6 +331,46 @@ export class AidEscrowController {
       });
     } catch (error) {
       this.logger.error('Failed to get aid package stats:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Get transaction status by hash
+   * GET /onchain/aid-escrow/transactions/:hash/status
+   */
+  @Get('transactions/:hash/status')
+  @HttpCode(HttpStatus.OK)
+  @CacheResponse({ ttl: getCacheTTL().TRANSACTION_STATUS })
+  @ApiOperation({
+    summary: 'Get transaction status',
+    description:
+      'Polls Soroban RPC for the status of a transaction by its hash. Returns a normalized status: pending, succeeded, failed, or unknown.',
+  })
+  @ApiOkResponse({
+    description: 'Transaction status retrieved successfully.',
+    schema: {
+      example: {
+        hash: 'ABC123DEF456ABC123DEF456ABC123DEF456ABC123DEF456ABC123DEF456ABCD',
+        status: 'succeeded',
+        timestamp: '2026-03-30T12:30:00.000Z',
+        ledger: 12345,
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid transaction hash.' })
+  @ApiNotFoundResponse({ description: 'Transaction not found.' })
+  @ApiInternalServerErrorResponse({
+    description: 'Failed to retrieve transaction status.',
+  })
+  async getTransactionStatus(@Param('hash') hash: string): Promise<any> {
+    if (!hash || hash.length < 10) {
+      throw new BadRequestException('Invalid transaction hash');
+    }
+    try {
+      return await this.aidEscrowService.getTransactionStatus(hash);
+    } catch (error) {
+      this.logger.error('Failed to get transaction status:', error);
       this.errorMapper.throwMappedError(error);
     }
   }

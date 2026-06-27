@@ -2,11 +2,14 @@
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
+import { ErrorInline } from './ErrorInline';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { EvidenceArtifactViewer } from './EvidenceArtifactViewer';
 import { RedactionControls } from './RedactionControls';
 import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
 import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
+import { useToast } from '@/components/ToastProvider';
+import { normalizeError } from '@/lib/error-utils';
 import type {
     PiiDetectionResult,
     ValidationErrors,
@@ -20,6 +23,8 @@ import type {
     RedactionLevel,
     ViewingPermission,
 } from '@/types/evidence-artifact';
+import { useNetworkGuard } from '@/hooks/useNetworkGuard';
+import { NetworkMismatchBanner } from '@/components/NetworkMismatchBanner';
 
 /* ─── Accepted image MIME types ─────────────────────────────────────────── */
 
@@ -62,7 +67,7 @@ interface EnhancedFlowState {
     imageFile: File | null;
     textInput: string;
     errors: ValidationErrors;
-    apiError: string | null;
+    apiError: Error | string | null;
     result: VerificationResult | null;
     evidenceArtifact: EvidenceArtifact | null;
     showArtifactViewer: boolean;
@@ -118,6 +123,8 @@ function createMockEvidenceArtifact(
 export const EnhancedVerificationFlow: React.FC = () => {
     const uid = useId();
     const role = getAppUserRole();
+    const { isMismatch } = useNetworkGuard();
+    const { toast } = useToast();
     const [restoredDraft] = useState<EnhancedVerificationDraft | null>(() =>
         readEnhancedVerificationDraftFromStorage(),
     );
@@ -292,15 +299,21 @@ export const EnhancedVerificationFlow: React.FC = () => {
             })
             .catch((err: unknown) => {
                 if (cancelled) return;
-                if (err instanceof VerificationApiError) {
-                    setFlowState(prev => ({ ...prev, apiError: err.message, step: 'upload' }));
-                } else {
-                    setFlowState(prev => ({
-                        ...prev,
-                        apiError: 'An unexpected error occurred. Please try again.',
-                        step: 'upload',
-                    }));
-                }
+                const normalized = normalizeError(err);
+                
+                toast(
+                    'Verification Failed',
+                    normalized.correlationId
+                        ? `${normalized.message} (Correlation ID: ${normalized.correlationId})`
+                        : normalized.message,
+                    'error'
+                );
+
+                setFlowState(prev => ({
+                    ...prev,
+                    apiError: err as any,
+                    step: 'upload',
+                }));
                 pendingPayload.current = null;
             });
 
@@ -391,6 +404,10 @@ export const EnhancedVerificationFlow: React.FC = () => {
                 <div>
                     <h2 className="text-lg font-semibold mb-4">Submit Evidence for Verification</h2>
 
+                    <div className="mb-6">
+                        <NetworkMismatchBanner />
+                    </div>
+
                     {!flowState.imageFile && flowState.textInput.trim().length === 0 && (
                         <div className="mb-6">
                             <AppEmptyState
@@ -419,11 +436,13 @@ export const EnhancedVerificationFlow: React.FC = () => {
                     )}
                     
                     {flowState.apiError && (
-                        <div
-                            role="alert"
-                            className="mb-4 p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 text-sm"
-                        >
-                            {flowState.apiError}
+                        <div className="mb-6">
+                            <ErrorInline
+                                error={flowState.apiError}
+                                onRetry={() => setFlowState(prev => ({ ...prev, apiError: null }))}
+                                onClose={() => setFlowState(prev => ({ ...prev, apiError: null }))}
+                                variant="card"
+                            />
                         </div>
                     )}
 
@@ -518,8 +537,8 @@ export const EnhancedVerificationFlow: React.FC = () => {
                         <div className="flex flex-wrap items-center gap-3">
                             <button
                                 type="submit"
-                                disabled={!flowState.imageFile && flowState.textInput.trim().length === 0}
-                                aria-disabled={!flowState.imageFile && flowState.textInput.trim().length === 0}
+                                disabled={(!flowState.imageFile && flowState.textInput.trim().length === 0) || isMismatch}
+                                aria-disabled={(!flowState.imageFile && flowState.textInput.trim().length === 0) || isMismatch}
                                 className="px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                             >
                                 Submit for Verification

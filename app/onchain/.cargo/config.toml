@@ -1,3 +1,8 @@
+# wasm32v1-none is the canonical target for Stellar CLI 26+ / soroban-sdk 22+
+[target.wasm32v1-none]
+runner = "echo"
+
+# Kept for backward compatibility with older toolchains
 [target.wasm32-unknown-unknown]
 runner = "echo"
 
@@ -5,4 +10,7 @@ runner = "echo"
 RUSTFLAGS = "-C link-arg=-zstack-size=65536"
 
 [alias]
-wasm = "build --release --target wasm32-unknown-unknown"
+# Primary: Stellar CLI 26+ target
+wasm = "build --release --target wasm32v1-none"
+# Legacy alias retained for older toolchain compatibility
+wasm-legacy = "build --release --target wasm32-unknown-unknown"

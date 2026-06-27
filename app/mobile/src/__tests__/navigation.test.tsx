@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Integration tests: navigation flow Home -> AidOverview -> AidDetails
  */
 import React from 'react';
@@ -10,6 +10,7 @@ import { AidOverviewScreen } from '../screens/AidOverviewScreen';
 import { AidDetailsScreen } from '../screens/AidDetailsScreen';
 import { ClaimReceiptScreen } from '../screens/ClaimReceiptScreen';
 import type { RootStackParamList } from '../navigation/types';
+import { ThemeProvider } from '../theme/ThemeContext';
 
 const mockQueueClaimConfirmation = jest.fn().mockResolvedValue({ status: 'completed', result: {} });
 
@@ -101,17 +102,19 @@ function TestNavigator({
   initialParams?: any;
 }) {
   return (
-    <NavigationContainer>
-      <Stack.Navigator initialRouteName={initialRoute as any}>
-        <Stack.Screen name="Home" component={HomeScreen} />
-        <Stack.Screen name="AidOverview" component={AidOverviewScreen} />
-        <Stack.Screen name="AidDetails" component={AidDetailsScreen} initialParams={initialParams} />
-        <Stack.Screen name="ClaimReceipt" component={ClaimReceiptScreen} />
-        <Stack.Screen name="Settings" component={() => null} />
-        <Stack.Screen name="Health" component={() => null} />
-        <Stack.Screen name="Scanner" component={() => null} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <ThemeProvider>
+      <NavigationContainer>
+        <Stack.Navigator initialRouteName={initialRoute as any}>
+          <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen name="AidOverview" component={AidOverviewScreen} />
+          <Stack.Screen name="AidDetails" component={AidDetailsScreen} initialParams={initialParams} />
+          <Stack.Screen name="ClaimReceipt" component={ClaimReceiptScreen} />
+          <Stack.Screen name="Settings" component={() => null} />
+          <Stack.Screen name="Health" component={() => null} />
+          <Stack.Screen name="Scanner" component={() => null} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </ThemeProvider>
   );
 }
 
@@ -148,7 +151,7 @@ describe('Navigation: Home -> AidOverview -> AidDetails', () => {
     fireEvent.press(getByText(/Confirm Claim/i));
 
     await waitFor(() => {
-      expect(getByText(/Claim Receipt/i)).toBeTruthy();
+      expect(getByText(/Your proof of claim completion/i)).toBeTruthy();
     });
   });
 });

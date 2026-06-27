@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AidDetails, fetchAidDetails } from './aidApi';
+import { AidDetails, fetchAidDetails, submitClaim } from './aidApi';
 
 import { config } from '../config';
 
@@ -17,8 +17,8 @@ const SAVER_BACKOFF_MULTIPLIER = 3;
 /** In saver mode, limit concurrent flush actions to this many per cycle. */
 const SAVER_MAX_ACTIONS_PER_FLUSH = 2;
 
-export type SyncActionType = 'status-refresh' | 'claim-confirmation' | 'evidence-upload';
-export type SyncActionState = 'pending' | 'retrying' | 'failed';
+export type SyncActionType = 'status-refresh' | 'claim-confirmation' | 'evidence-upload' | 'claim-submission';
+export type SyncActionState = 'pending' | 'retrying' | 'failed' | 'submitted';
 
 export interface StatusRefreshPayload {
   aidId: string;
@@ -35,12 +35,87 @@ export interface EvidenceUploadPayload {
   method?: 'POST' | 'PUT' | 'PATCH';
   headers?: Record<string, string>;
   body?: string;
+  sessionId?: string;
+  uploadedChunks?: number[];
+  totalChunks?: number;
+  progress?: number;
+}
+
+const getSubtleCrypto = () => {
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    return crypto.subtle;
+  }
+  try {
+    return require('crypto').webcrypto.subtle;
+  } catch {
+    return null;
+  }
+};
+
+const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const lookup = new Uint8Array(256);
+for (let i = 0; i < chars.length; i++) {
+  lookup[chars.charCodeAt(i)] = i;
+}
+
+export function base64ToUint8Array(base64: string): Uint8Array {
+  const commaIdx = base64.indexOf(',');
+  let cleanBase64 = commaIdx !== -1 ? base64.substring(commaIdx + 1) : base64;
+  cleanBase64 = cleanBase64.replace(/\s/g, '');
+
+  let bufferLength = cleanBase64.length * 0.75;
+  const len = cleanBase64.length;
+  let p = 0;
+
+  if (cleanBase64[cleanBase64.length - 1] === '=') {
+    bufferLength--;
+    if (cleanBase64[cleanBase64.length - 2] === '=') {
+      bufferLength--;
+    }
+  }
+
+  const bytes = new Uint8Array(bufferLength);
+
+  for (let i = 0; i < len; i += 4) {
+    const encoded1 = lookup[cleanBase64.charCodeAt(i)];
+    const encoded2 = lookup[cleanBase64.charCodeAt(i + 1)];
+    const encoded3 = lookup[cleanBase64.charCodeAt(i + 2)];
+    const encoded4 = lookup[cleanBase64.charCodeAt(i + 3)];
+
+    const bytesVal = (encoded1 << 18) | (encoded2 << 12) | (encoded3 << 6) | encoded4;
+
+    bytes[p++] = (bytesVal >> 16) & 255;
+    if (p < bufferLength) {
+      bytes[p++] = (bytesVal >> 8) & 255;
+      if (p < bufferLength) {
+        bytes[p++] = bytesVal & 255;
+      }
+    }
+  }
+  return bytes;
+}
+
+export async function sha256Hex(data: Uint8Array): Promise<string> {
+  const subtle = getSubtleCrypto();
+  if (!subtle) {
+    throw new Error('WebCrypto subtle is not available');
+  }
+  const hashBuffer = await subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export interface ClaimSubmissionPayload {
+  aidId: string;
+  claimId: string;
+  idempotencyKey: string;
 }
 
 export type SyncActionPayload =
   | StatusRefreshPayload
   | ClaimConfirmationPayload
-  | EvidenceUploadPayload;
+  | EvidenceUploadPayload
+  | ClaimSubmissionPayload;
 
 export interface QueuedSyncAction<TPayload = SyncActionPayload> {
   id: string;
@@ -74,12 +149,14 @@ type SuccessSubscriber = (event: SyncActionSuccessEvent) => void;
 type SyncActionRequest =
   | { type: 'status-refresh'; payload: StatusRefreshPayload; maxRetries?: number }
   | { type: 'claim-confirmation'; payload: ClaimConfirmationPayload; maxRetries?: number }
-  | { type: 'evidence-upload'; payload: EvidenceUploadPayload; maxRetries?: number };
+  | { type: 'evidence-upload'; payload: EvidenceUploadPayload; maxRetries?: number }
+  | { type: 'claim-submission'; payload: ClaimSubmissionPayload; maxRetries?: number };
 
 type SyncExecutionResultMap = {
   'status-refresh': AidDetails;
   'claim-confirmation': unknown;
   'evidence-upload': unknown;
+  'claim-submission': unknown;
 };
 
 type SyncDispatchResult<T extends SyncActionType = SyncActionType> =
@@ -136,16 +213,35 @@ const toErrorMessage = (error: unknown) => {
 const isRetryableError = (error: unknown) => {
   const message = toErrorMessage(error).toLowerCase();
 
-  return (
-    message.includes('network') ||
-    message.includes('timeout') ||
-    message.includes('failed to fetch') ||
-    message.includes('request failed') ||
-    message.includes('503') ||
-    message.includes('502') ||
-    message.includes('500') ||
-    message.includes('429')
-  );
+  const permanentFailurePatterns = [
+    '400',
+    '401',
+    '403',
+    '404',
+    'bad request',
+    'unauthorized',
+    'forbidden',
+    'not found',
+    'already claimed',
+    'validation',
+  ];
+
+  if (permanentFailurePatterns.some((pattern) => message.includes(pattern))) {
+    return false;
+  }
+
+  const retryableFailurePatterns = [
+    'network',
+    'timeout',
+    'failed to fetch',
+    'request failed',
+    '429',
+    '500',
+    '502',
+    '503',
+  ];
+
+  return retryableFailurePatterns.some((pattern) => message.includes(pattern));
 };
 
 const hydrateQueue = async () => {
@@ -176,6 +272,20 @@ const replaceQueueItems = async (items: QueuedSyncAction[]) => {
 
 const enqueue = async (request: SyncActionRequest) => {
   await hydrateQueue();
+
+  // Idempotency: if a claim-submission with the same key is already queued
+  // (pending or retrying), return the existing action instead of duplicating.
+  if (request.type === 'claim-submission') {
+    const key = (request.payload as ClaimSubmissionPayload).idempotencyKey;
+    const existing = queueState.items.find(
+      (item) =>
+        item.type === 'claim-submission' &&
+        (item.payload as ClaimSubmissionPayload).idempotencyKey === key &&
+        item.state !== 'failed' &&
+        item.state !== 'submitted',
+    );
+    if (existing) return existing;
+  }
 
   const now = new Date().toISOString();
   const action: QueuedSyncAction = {
@@ -212,18 +322,139 @@ const runAction = async (action: QueuedSyncAction) => {
       return response.json();
     }
     case 'evidence-upload': {
-      const { url, method = 'POST', headers, body } = action.payload as EvidenceUploadPayload;
-      const response = await fetch(url, {
-        method,
-        headers,
-        body,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      const payload = action.payload as EvidenceUploadPayload;
+      if (!payload.body) {
+        throw new Error('No evidence upload payload body found');
       }
 
-      return response.json();
+      let requestData: {
+        filename: string;
+        contentType: string;
+        imageBase64: string;
+      };
+      try {
+        requestData = JSON.parse(payload.body);
+      } catch (err) {
+        throw new Error('Failed to parse upload request body');
+      }
+
+      const fileBytes = base64ToUint8Array(requestData.imageBase64);
+      const chunkSize = 512 * 1024; // 512 KB chunks
+
+      if (!payload.sessionId) {
+        const createSessionRes = await fetch(`${API_URL}/evidence/upload-sessions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            fileName: requestData.filename,
+            mimeType: requestData.contentType,
+            totalSize: fileBytes.length,
+            chunkSize,
+          }),
+        });
+
+        if (!createSessionRes.ok) {
+          let errorMsg = `HTTP error ${createSessionRes.status}`;
+          try {
+            const errData = await createSessionRes.json();
+            if (errData?.message) errorMsg = errData.message;
+          } catch {}
+          throw new Error(`Failed to create upload session: ${errorMsg}`);
+        }
+
+        const session = await createSessionRes.json();
+        payload.sessionId = session.id;
+        payload.totalChunks = session.totalChunks;
+        payload.uploadedChunks = [];
+        payload.progress = 0;
+        await persistQueue();
+        emitQueueState();
+      } else {
+        const statusRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/status`);
+        if (statusRes.status === 404) {
+          payload.sessionId = undefined;
+          payload.uploadedChunks = undefined;
+          payload.totalChunks = undefined;
+          payload.progress = 0;
+          await persistQueue();
+          emitQueueState();
+          return runAction(action);
+        }
+        if (!statusRes.ok) {
+          throw new Error(`Failed to query session status: ${statusRes.status}`);
+        }
+        const statusData = await statusRes.json();
+        payload.uploadedChunks = statusData.receivedChunks || [];
+        payload.totalChunks = statusData.totalChunks;
+        payload.progress = payload.totalChunks ? payload.uploadedChunks.length / payload.totalChunks : 0;
+        await persistQueue();
+        emitQueueState();
+      }
+
+      const totalChunks = payload.totalChunks || 0;
+      const uploadedChunks = payload.uploadedChunks || [];
+
+      for (let index = 0; index < totalChunks; index++) {
+        if (uploadedChunks.includes(index)) {
+          continue;
+        }
+
+        const start = index * chunkSize;
+        const end = Math.min(start + chunkSize, fileBytes.length);
+        const chunkBytes = fileBytes.subarray(start, end);
+
+        const checksum = await sha256Hex(chunkBytes);
+        const chunkBlob = new Blob([chunkBytes], { type: 'application/octet-stream' });
+
+        const formData = new FormData();
+        formData.append('chunk', chunkBlob, requestData.filename);
+        formData.append('index', index.toString());
+        formData.append('checksum', checksum);
+
+        const uploadChunkRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/chunks`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!uploadChunkRes.ok) {
+          let errorMsg = `HTTP error ${uploadChunkRes.status}`;
+          try {
+            const errData = await uploadChunkRes.json();
+            if (errData?.message) errorMsg = errData.message;
+          } catch {}
+          throw new Error(`Chunk ${index} upload failed: ${errorMsg}`);
+        }
+
+        uploadedChunks.push(index);
+        payload.uploadedChunks = uploadedChunks;
+        payload.progress = uploadedChunks.length / totalChunks;
+        await persistQueue();
+        emitQueueState();
+      }
+
+      const finalizeRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/finalize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!finalizeRes.ok) {
+        let errorMsg = `HTTP error ${finalizeRes.status}`;
+        try {
+          const errData = await finalizeRes.json();
+          if (errData?.message) errorMsg = errData.message;
+        } catch {}
+        throw new Error(`Failed to finalize upload: ${errorMsg}`);
+      }
+
+      return finalizeRes.json();
+    }
+    case 'claim-submission': {
+      const { claimId, idempotencyKey } = action.payload as ClaimSubmissionPayload;
+      return submitClaim(claimId, idempotencyKey);
     }
     default:
       throw new Error(`Unsupported sync action type: ${String(action.type)}`);
@@ -334,7 +565,16 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
 
       try {
         const result = await runAction(action);
-        items = items.filter((item) => item.id !== action.id);
+        if (action.type === 'claim-submission') {
+          // Keep the item in the queue as 'submitted' for status display
+          items = items.map((item) =>
+            item.id === action.id
+              ? { ...item, state: 'submitted' as SyncActionState, updatedAt: new Date().toISOString() }
+              : item,
+          );
+        } else {
+          items = items.filter((item) => item.id !== action.id);
+        }
         queueState = {
           ...queueState,
           items,
@@ -392,6 +632,17 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
   });
 
   return syncingPromise;
+};
+
+export const retryFailedAction = async (actionId: string) => {
+  await hydrateQueue();
+  const now = new Date().toISOString();
+  const items = queueState.items.map((item) =>
+    item.id === actionId && item.state === 'failed'
+      ? { ...item, state: 'pending' as SyncActionState, retryCount: 0, nextRetryAt: now, lastError: null, updatedAt: now }
+      : item,
+  );
+  await replaceQueueItems(items);
 };
 
 export const clearSyncQueue = async () => {

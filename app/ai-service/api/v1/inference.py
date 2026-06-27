@@ -9,6 +9,9 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 import tasks
+from exceptions import LoadShedError
+from services.cache import cached_response
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,8 @@ async def create_inference_task(
             "status_url": f"/v1/ai/status/{task_id}",
         }
 
+    except LoadShedError:
+        raise
     except Exception as e:
         logger.error(f"Failed to create inference task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")
@@ -75,6 +80,23 @@ async def get_task_status(task_id: str):
     Poll this endpoint after creating a task.  Possible status values:
     ``pending``, ``processing``, ``completed``, ``failed``.
     """
+    return await _get_task_status(task_id)
+
+
+@router.get("/ai/jobs/{task_id}", response_model=TaskStatusResponse)
+async def get_job_status(task_id: str):
+    """
+    Get the current status of a queued AI job.
+
+    This is the canonical poll endpoint for backend clients.  Possible
+    status values: ``pending``, ``processing``, ``retrying``, ``completed``,
+    ``failed``, ``cancelled``.
+    """
+    return await _get_task_status(task_id)
+
+
+@cached_response(prefix="task_status", ttl_seconds=settings.cache_ttl_task_status)
+async def _get_task_status(task_id: str):
     logger.info(f"Checking status for task: {task_id}")
 
     try:

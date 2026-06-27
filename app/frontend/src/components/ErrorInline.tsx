@@ -1,6 +1,5 @@
 'use client';
 
-import React from 'react';
 import { 
   AlertTriangle, 
   WifiOff, 
@@ -11,7 +10,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { ERROR_METADATA, ErrorCategory } from '@/types/error';
-import { categorizeError } from '@/lib/error-utils';
+import { categorizeError, normalizeError } from '@/lib/error-utils';
 
 interface ErrorInlineProps {
   error?: Error | string | null;
@@ -30,17 +29,38 @@ export function ErrorInline({
 }: ErrorInlineProps) {
   if (!error) return null;
 
-  const category = manualCategory || categorizeError(error);
+  const normalized = normalizeError(error);
+  const category = manualCategory || normalized.category;
   const metadata = ERROR_METADATA[category];
   
-  const errorMessage = typeof error === 'string' ? error : error.message;
+  const errorMessage = normalized.message;
+  const correlationId = normalized.correlationId;
 
-  const CategoryIcon = {
-    wallet: Wallet,
-    network: WifiOff,
-    server: ServerCrash,
-    unknown: AlertTriangle,
-  }[category];
+  const getCategoryIcon = () => {
+    switch (category) {
+      case 'wallet':
+        return <Wallet size={18} className="shrink-0 opacity-80" />;
+      case 'network':
+        return <WifiOff size={18} className="shrink-0 opacity-80" />;
+      case 'server':
+        return <ServerCrash size={18} className="shrink-0 opacity-80" />;
+      default:
+        return <AlertTriangle size={18} className="shrink-0 opacity-80" />;
+    }
+  };
+
+  const getCardIcon = () => {
+    switch (category) {
+      case 'wallet':
+        return <Wallet size={20} />;
+      case 'network':
+        return <WifiOff size={20} />;
+      case 'server':
+        return <ServerCrash size={20} />;
+      default:
+        return <AlertTriangle size={20} />;
+    }
+  };
 
   if (variant === 'banner') {
     return (
@@ -51,10 +71,13 @@ export function ErrorInline({
         'border-slate-400/20 bg-slate-400/5 text-slate-200'
       }`}>
         <div className="flex items-start gap-3 sm:items-center">
-          <CategoryIcon size={18} className="shrink-0 opacity-80" />
+          {getCategoryIcon()}
           <div className="space-y-1">
             <p className="text-sm font-semibold leading-none">{metadata.title}</p>
             <p className="text-xs opacity-70 leading-relaxed">{errorMessage}</p>
+            {correlationId && (
+              <p className="text-[10px] font-mono opacity-50 mt-1">Correlation ID: {correlationId}</p>
+            )}
           </div>
         </div>
         
@@ -89,13 +112,13 @@ export function ErrorInline({
       'border-slate-400/20'
     }`}>
       <div className="flex items-start justify-between gap-4">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border bg-gradient-to-br ${
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border bg-linear-to-br ${
           category === 'wallet' ? 'border-amber-400/30 from-amber-400/20 to-amber-400/5 text-amber-400' :
           category === 'network' ? 'border-cyan-400/30 from-cyan-400/20 to-cyan-400/5 text-cyan-400' :
           category === 'server' ? 'border-rose-400/30 from-rose-400/20 to-rose-400/5 text-rose-400' :
           'border-slate-400/30 from-slate-400/20 to-slate-400/5 text-slate-400'
         }`}>
-          <CategoryIcon size={20} />
+          {getCardIcon()}
         </div>
         
         {onClose && (
@@ -113,7 +136,13 @@ export function ErrorInline({
         <p className="mt-1 text-sm text-slate-400 leading-relaxed">
           {errorMessage || metadata.description}
         </p>
+        {correlationId && (
+          <p className="mt-2 text-[10px] font-mono text-slate-500">
+            Correlation ID: {correlationId}
+          </p>
+        )}
       </div>
+
 
       <div className="mt-5 space-y-4">
         <div className="rounded-lg bg-white/5 p-3">

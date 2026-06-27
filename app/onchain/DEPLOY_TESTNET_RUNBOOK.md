@@ -2,6 +2,30 @@
 
 This runbook documents a repeatable procedure for building, deploying, initializing, and verifying the `aid_escrow` Soroban contract on Stellar Testnet.
 
+## Recorded Deployments
+
+Each successful deployment produces a canonical record under `deployments/` and an entry in the machine-readable [deployments/registry.json](deployments/registry.json).
+
+| Date       | Network | Version | Contract ID                                                  | Tag              | Record |
+| :--------- | :------ | :------ | :----------------------------------------------------------- | :--------------- | :----- |
+| 2026-06-03 | Testnet | 0.1.0   | `CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG`  | `v0.1.0-testnet` | [deployments/testnet-2026-06-03.md](deployments/testnet-2026-06-03.md) |
+
+### Reproducible one-shot deploy
+
+From `app/onchain` with a funded `.env`:
+
+```bash
+./scripts/deploy-testnet.sh
+```
+
+This builds WASM, deploys via `deploy.sh`, writes `deployments/registry.json`, and prints the semver/git tag (`v<crate-version>-testnet`).
+
+To create the local git tag automatically:
+
+```bash
+./scripts/deploy-testnet.sh --tag-git
+```
+
 ## 1. Purpose
 
 Use this runbook to deploy the contract consistently, verify success, and perform a minimal post-deploy health check.
@@ -18,9 +42,11 @@ Use this runbook to deploy the contract consistently, verify success, and perfor
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-rustup target add wasm32-unknown-unknown
-cargo install --locked soroban-cli
+rustup target add wasm32v1-none
+cargo install --locked stellar-cli
 ```
+
+> **Note:** Stellar CLI 26+ uses the `wasm32v1-none` target (replaces the older `wasm32-unknown-unknown` target). The build output lands in `target/wasm32v1-none/release/`.
 
 ## 3. Environment setup
 
@@ -47,20 +73,28 @@ TESTNET_RPC_URL=https://soroban-testnet.stellar.org:443
 
 Build the contract to WebAssembly from the `app/onchain` directory.
 
+Using the Stellar CLI (recommended — handles target and optimizer automatically):
+
 ```bash
 cd /workspaces/Soter/app/onchain
-cargo build --release --target wasm32-unknown-unknown -p aid_escrow
+stellar contract build
+```
+
+Or directly with cargo (Stellar CLI 26+, `wasm32v1-none` target):
+
+```bash
+cargo build --release --target wasm32v1-none -p aid_escrow
 ```
 
 Confirm the build output exists:
 
 ```bash
-ls target/wasm32-unknown-unknown/release/aid_escrow.wasm
+ls target/wasm32v1-none/release/aid_escrow.wasm
 ```
 
 Expected output:
 
-- `target/wasm32-unknown-unknown/release/aid_escrow.wasm`
+- `target/wasm32v1-none/release/aid_escrow.wasm`
 
 ## 5. Deploy steps
 
@@ -68,10 +102,16 @@ Use the existing deploy script to publish the contract to Testnet.
 
 ```bash
 cd /workspaces/Soter/app/onchain
+./scripts/deploy-testnet.sh
+```
+
+Or deploy only (registry update still runs on success):
+
+```bash
 ./scripts/deploy.sh --network testnet
 ```
 
-If the deploy succeeds, note the returned contract ID.
+If the deploy succeeds, note the returned contract ID and version tag (`v<semver>-testnet`). The script updates `deployments/registry.json` and writes `deployments/testnet-YYYY-MM-DD.md` automatically when `python3` is available.
 
 Example expected output:
 
@@ -84,15 +124,16 @@ If the script updates `.env`, it will also write `CONTRACT_ID=<id>` there.
 
 ### Manual deploy alternative
 
-If you want to deploy directly without the wrapper script:
+If you want to deploy directly without the wrapper script (Stellar CLI 26+):
 
 ```bash
-soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/aid_escrow.wasm \
+stellar contract deploy \
+  --wasm target/wasm32v1-none/release/aid_escrow.wasm \
   --source "$SECRET_KEY" \
-  --network testnet \
-  --rpc-url "$TESTNET_RPC_URL"
+  --network testnet
 ```
+
+After a successful deploy, copy the printed Contract ID and record it as a new entry in `deployments/` following the format of [deployments/testnet-2026-06-03.md](deployments/testnet-2026-06-03.md).
 
 ## 6. Initialization steps
 
@@ -230,8 +271,8 @@ Common causes:
 Fix:
 - Fund the account with Testnet friendbot if needed.
 - Confirm `SECRET_KEY` is valid and corresponds to a funded account.
-- Rebuild the contract and verify `target/wasm32-unknown-unknown/release/aid_escrow.wasm` exists.
-- Re-run deploy with `./scripts/deploy.sh --network testnet`.
+- Rebuild the contract and verify `target/wasm32v1-none/release/aid_escrow.wasm` exists.
+- Re-run deploy with `stellar contract deploy --wasm target/wasm32v1-none/release/aid_escrow.wasm --source "$SECRET_KEY" --network testnet`.
 
 ### 9.5 Public RPC rate limiting or service disruption
 

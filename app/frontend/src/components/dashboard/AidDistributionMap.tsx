@@ -9,7 +9,7 @@ import { getAppUserRole, isOperationsRole } from '@/lib/app-role';
 
 const DEFAULT_CENTER: [number, number] = [20, 0];
 const DEFAULT_ZOOM = 2;
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 const STATUS_STYLES: Record<string, string> = {
   delivered: 'aid-marker--delivered',

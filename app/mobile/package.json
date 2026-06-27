@@ -64,7 +64,7 @@
       "<rootDir>/jest.setup.ts"
     ],
     "moduleNameMapper": {
-      "^react$": "<rootDir>/../../node_modules/react",
+      "^react$": "<rootDir>/node_modules/react",
       "^react-test-renderer$": "<rootDir>/../../node_modules/react-test-renderer"
     },
     "transformIgnorePatterns": [

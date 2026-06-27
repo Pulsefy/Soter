@@ -1,15 +1,19 @@
 'use client';
 
-import { ChevronLeft, ChevronRight, LoaderCircle } from 'lucide-react';
-import type { CsvPreviewRow } from '@/lib/csv-validation';
+import type { RefObject } from 'react';
+import { AlertCircle, ChevronLeft, ChevronRight, LoaderCircle, ShieldAlert } from 'lucide-react';
+import type { CsvPreviewRow, HeaderValidationResult, ValidateProgress } from '@/lib/csv-validation';
 
 interface Step2PreviewProps {
   file: File | null;
   headers: string[];
   previewRows: CsvPreviewRow[];
   totalRows: number;
+  headerValidation: HeaderValidationResult | null;
   isValidating: boolean;
+  validateProgress: ValidateProgress | null;
   canProceed: boolean;
+  headingRef?: RefObject<HTMLHeadingElement | null>;
   onBack: () => void;
   onNext: () => void | Promise<void>;
 }
@@ -19,19 +23,44 @@ export function Step2Preview({
   headers,
   previewRows,
   totalRows,
+  headerValidation,
   isValidating,
+  validateProgress,
   canProceed,
+  headingRef,
   onBack,
   onNext,
 }: Step2PreviewProps) {
+  const hasColumnErrors = headerValidation && !headerValidation.valid;
+
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">Step 2: Preview recipient data</h2>
+        <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-slate-900 dark:text-slate-50 focus:outline-none">Step 2: Preview recipient data</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300">
           Double-check the detected headers and the first rows from <span className="font-medium text-slate-900 dark:text-slate-100">{file?.name ?? 'your file'}</span> before validation runs.
         </p>
       </div>
+
+      {hasColumnErrors && (
+        <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/30">
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-800 dark:text-amber-200">
+            <ShieldAlert className="h-4 w-4" />
+            Column validation
+          </div>
+          <ul className="space-y-2">
+            {headerValidation!.errors.map((err, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{err.message}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm text-amber-600 dark:text-amber-400">
+            Fix these columns in your CSV and re-upload, or proceed with validation (missing columns will produce row-level errors).
+          </p>
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
@@ -87,7 +116,8 @@ export function Step2Preview({
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex min-w-28 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          disabled={isValidating}
+          className="inline-flex min-w-28 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
         >
           <ChevronLeft className="h-4 w-4" />
           Back
@@ -102,7 +132,9 @@ export function Step2Preview({
           {isValidating ? (
             <>
               <LoaderCircle className="h-4 w-4 animate-spin" />
-              Validating...
+              {validateProgress
+                ? `Validating: ${validateProgress.rowsValidated} / ${validateProgress.totalRows}`
+                : 'Validating...'}
             </>
           ) : (
             <>

@@ -26,6 +26,9 @@ import {
   PauseState,
   FeeConfig,
   PackageSummary,
+  GetTransactionStatusParams,
+  GetTransactionStatusResult,
+  TxStatus,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 
@@ -267,6 +270,35 @@ export class MockOnchainAdapter implements OnchainAdapter {
       claimedAmount: '0',
       status: 'Active',
       timestamp: new Date(),
+    };
+  }
+
+  async getTransactionStatus(
+    params: GetTransactionStatusParams,
+  ): Promise<GetTransactionStatusResult> {
+    await Promise.resolve();
+    const hash = params.hash.toUpperCase();
+
+    // Deterministically map hash prefix to a status for predictable tests
+    const firstChar = hash.charAt(0);
+    let status: TxStatus;
+    if (firstChar >= '0' && firstChar <= '7') {
+      status = 'succeeded';
+    } else if (firstChar >= '8' && firstChar <= 'B') {
+      status = 'pending';
+    } else if (firstChar >= 'C' && firstChar <= 'D') {
+      status = 'failed';
+    } else {
+      status = 'unknown';
+    }
+
+    return {
+      hash,
+      status,
+      timestamp: new Date(),
+      ledger: status === 'succeeded' ? 12345 : undefined,
+      errorMessage:
+        status === 'failed' ? 'Mock contract transaction failed' : undefined,
     };
   }
 

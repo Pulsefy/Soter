@@ -10,6 +10,7 @@ import {
   GetAidPackageStatsDto,
 } from './dto/aid-escrow.dto';
 import { BudgetService } from '../common/budget/budget.service';
+import { GetTransactionStatusResult } from './onchain.adapter';
 
 /**
  * AidEscrowService
@@ -254,6 +255,24 @@ export class AidEscrowService {
     this.logger.debug('Aid package statistics retrieved:', {
       totalCommitted: result.aggregates.totalCommitted,
       totalClaimed: result.aggregates.totalClaimed,
+    });
+
+    return result;
+  }
+
+  /**
+   * Get the status of a transaction by hash from Soroban RPC
+   */
+  async getTransactionStatus(
+    hash: string,
+  ): Promise<GetTransactionStatusResult> {
+    this.logger.debug('Getting transaction status:', { hash });
+
+    const result = await this.onchainAdapter.getTransactionStatus({ hash });
+
+    this.logger.debug('Transaction status retrieved:', {
+      hash: result.hash,
+      status: result.status,
     });
 
     return result;

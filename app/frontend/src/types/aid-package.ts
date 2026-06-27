@@ -1,6 +1,6 @@
 export type AidPackageStatus = 'Active' | 'Claimed' | 'Expired';
 export type TokenType = 'USDC' | 'XLM' | 'EURC';
-export type FilterScope = 'dashboard' | 'campaigns';
+export type FilterScope = 'dashboard' | 'campaigns' | 'verification-review';
 
 export interface AidPackage {
   id: string;

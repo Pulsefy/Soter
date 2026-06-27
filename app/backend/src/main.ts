@@ -71,6 +71,7 @@ async function bootstrap() {
       transformOptions: {
         enableImplicitConversion: true,
       },
+      errorHttpStatusCode: 422,
     }),
   );
 

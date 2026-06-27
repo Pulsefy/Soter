@@ -1,0 +1,20 @@
+{
+  "samples": [
+    {
+      "id": "sample_001",
+      "image_path": "documents/sample_001.png",
+      "expected_fields": {
+        "name": "John Doe",
+        "date_of_birth": "15 Jan 1990",
+        "id_number": "AB123456"
+      },
+      "expected_bboxes": {
+        "name": {"x": 100, "y": 200, "width": 300, "height": 50}
+      },
+      "metadata": {
+        "document_type": "id_card",
+        "language": "en"
+      }
+    }
+  ]
+}

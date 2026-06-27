@@ -132,6 +132,49 @@ async function main() {
     console.log(`Seeded 2 demo claims for campaign: ${campaign.name}`);
   }
 
+  // Seed deployment metadata for the Aid Escrow contract
+  const deploymentMetadata = [
+    {
+      contractName: 'AidEscrow',
+      network: 'testnet',
+      contractId: 'CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG',
+      wasmHash: '24328e15b7c11c7ff07caeaf0328da591b3b63e84af57fa03623c10126eabc8d',
+      deployedAt: new Date('2026-06-03T12:00:00Z'),
+      commitSha: 'abc123def456',
+      deployer: 'GA5TBSBGERHVMEFBJGEM3KYMRLWO73Y2QRAV6P66GPEBOJ5ZMJUT7LLY',
+      transactionHash: '292bf42f063310028456890e88861cd1650149ef0d4e66ba2a22ea5769964e64',
+      metadata: {
+        uploadTxHash: 'f61ca00143125d29f9932b5b50e499d9ab5dde8f2a849637a64d84cd1dcb9103',
+        stellarExplorerUrl: 'https://stellar.expert/explorer/testnet/tx/292bf42f063310028456890e88861cd1650149ef0d4e66ba2a22ea5769964e64',
+        contractUrl: 'https://lab.stellar.org/r/testnet/contract/CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG',
+        version: '1.0.0',
+      },
+    },
+  ];
+
+  for (const metadata of deploymentMetadata) {
+    await prisma.deploymentMetadata.upsert({
+      where: {
+        network_contractName: {
+          network: metadata.network,
+          contractName: metadata.contractName,
+        },
+      },
+      update: {
+        contractId: metadata.contractId,
+        wasmHash: metadata.wasmHash,
+        deployedAt: metadata.deployedAt,
+        commitSha: metadata.commitSha,
+        deployer: metadata.deployer,
+        transactionHash: metadata.transactionHash,
+        metadata: metadata.metadata,
+      },
+      create: metadata,
+    });
+  }
+
+  console.log(`Seeded ${deploymentMetadata.length} deployment metadata records`);
+
   console.log('Demo data seeding completed successfully');
 }
 

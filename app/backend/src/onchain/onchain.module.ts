@@ -11,6 +11,12 @@ import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { LedgerAdminController } from './ledger-admin.controller';
 import { JobsModule } from '../jobs/jobs.module';
+import { LoggerModule } from '../logger/logger.module';
+import { MetricsModule } from '../observability/metrics/metrics.module';
+import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
+import { SorobanTransactionScheduler } from './soroban-transaction.scheduler';
+import { SorobanTransactionProcessor } from './soroban-transaction.processor';
+import { PrismaModule } from '../prisma/prisma.module';
 
 /**
  * Factory function to create the appropriate adapter based on configuration
@@ -42,6 +48,7 @@ const onchainAdapterProvider: Provider = {
 @Module({
   imports: [
     ConfigModule,
+    PrismaModule,
     BullModule.registerQueueAsync({
       name: 'onchain',
       imports: [ConfigModule],
@@ -53,7 +60,20 @@ const onchainAdapterProvider: Provider = {
       }),
       inject: [ConfigService],
     }),
+    BullModule.registerQueueAsync({
+      name: 'soroban-transactions',
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get<string>('REDIS_HOST') || 'localhost',
+          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+        },
+      }),
+      inject: [ConfigService],
+    }),
     JobsModule,
+    LoggerModule,
+    MetricsModule,
   ],
   controllers: [LedgerAdminController],
   providers: [
@@ -64,12 +84,17 @@ const onchainAdapterProvider: Provider = {
     OnchainService,
     LedgerBackfillService,
     LedgerReconciliationService,
+    SorobanTransactionLifecycleService,
+    SorobanTransactionScheduler,
+    SorobanTransactionProcessor,
   ],
   exports: [
     ONCHAIN_ADAPTER_TOKEN,
     OnchainService,
     LedgerBackfillService,
     LedgerReconciliationService,
+    SorobanTransactionLifecycleService,
+    SorobanTransactionScheduler,
   ],
 })
 export class OnchainModule {}

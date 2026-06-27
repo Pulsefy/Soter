@@ -78,7 +78,9 @@ describe('Evidence Queue (e2e)', () => {
       .set('x-org-id', orgId)
       .expect(400);
 
-    expect(res.body.message).toContain('already exists in queue for this organization');
+    expect(res.body.message).toContain(
+      'already exists in queue for this organization',
+    );
   });
 
   it('POST /evidence/upload allows same file in different organizations (tenant isolation)', async () => {
@@ -344,7 +346,10 @@ describe('Evidence Queue (e2e)', () => {
     });
 
     expect(duplicateItem?.metadata).toBeDefined();
-    expect(duplicateItem?.metadata?.isNearDuplicate).toBe(true);
-    expect(duplicateItem?.metadata?.originalId).toBe(originalRes.body.id);
+
+    // Cast generic Prisma JSON type to any to bypass unmapped key checks
+    const metadata = duplicateItem?.metadata as any;
+    expect(metadata?.isNearDuplicate).toBe(true);
+    expect(metadata?.originalId).toBe(originalRes.body.id);
   });
 });

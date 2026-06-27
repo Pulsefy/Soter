@@ -4,8 +4,10 @@ export async function fetchClient(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<Response> {
-  const useMocks = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+  const useMocks =
+    process.env.NEXT_PUBLIC_USE_MOCKS === "true" ||
+    !process.env.NEXT_PUBLIC_API_URL;
 
   const urlString = input.toString();
   

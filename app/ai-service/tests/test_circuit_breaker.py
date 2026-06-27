@@ -129,3 +129,21 @@ class TestHumanitarianVerificationServiceCircuitBreaker:
         
         # The breaker for openai should have recorded the failure
         assert self.service.breakers["openai"].failure_count == 2  # Primary & fallback attempts both failed
+
+    def test_all_providers_unavailable_false_without_configured_providers(self, monkeypatch):
+        monkeypatch.setattr(settings, "openai_api_key", None)
+        monkeypatch.setattr(settings, "groq_api_key", None)
+        monkeypatch.setattr(settings, "test_provider_mode", False)
+
+        assert self.service.all_providers_unavailable() is False
+
+    def test_all_providers_unavailable_true_when_all_breakers_open(self, monkeypatch):
+        monkeypatch.setattr(settings, "openai_api_key", "test-key")
+        monkeypatch.setattr(settings, "groq_api_key", "test-key")
+        monkeypatch.setattr(settings, "test_provider_mode", False)
+
+        for breaker in self.service.breakers.values():
+            breaker.state = "OPEN"
+            breaker.last_state_change = time.time()
+
+        assert self.service.all_providers_unavailable() is True

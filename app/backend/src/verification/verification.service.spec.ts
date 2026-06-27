@@ -20,7 +20,8 @@ describe('VerificationService', () => {
     getFailedCount: jest.Mock;
   };
 
-  const mockClaim = {
+  // Explicitly cast instance to any to account for structural additions to the Claim scheme context
+  const mockClaim: any = {
     id: 'test-claim-id',
     status: ClaimStatus.requested,
     description: 'Test claim',
@@ -305,14 +306,11 @@ describe('VerificationService', () => {
         timestamp: Date.now(),
       });
 
-      // Different claim IDs should map to potentially different fixtures
       const riskLevels = [first.details.riskLevel, second.details.riskLevel];
       expect(riskLevels).toBeDefined();
     });
 
     it('should have valid fixture scores in test mode', () => {
-
-      // Verify all fixtures produce valid scores
       const fixtures = (service as any)._fixtures as any[];
       for (const fixture of fixtures) {
         expect(fixture.score).toBeGreaterThanOrEqual(0);
@@ -339,8 +337,8 @@ describe('VerificationService', () => {
       );
 
       for (let i = 1; i < results.length; i++) {
-        expect(results[i]!.score).toEqual(results[0]!.score);
-        expect(results[i]!.confidence).toEqual(results[0]!.confidence);
+        expect(results[i].score).toEqual(results[0].score);
+        expect(results[i].confidence).toEqual(results[0].confidence);
       }
     });
   });

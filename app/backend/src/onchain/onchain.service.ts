@@ -5,6 +5,7 @@ import {
   OnchainJobData,
   OnchainOperationType,
 } from './interfaces/onchain-job.interface';
+import { LoggerService } from '../logger/logger.service';
 
 export interface CreateClaimJobParams {
   claimId: string;
@@ -32,7 +33,10 @@ export interface InitEscrowJobParams {
 export class OnchainService {
   private readonly logger = new Logger(OnchainService.name);
 
-  constructor(@InjectQueue('onchain') private readonly onchainQueue: Queue) {}
+  constructor(
+    @InjectQueue('onchain') private readonly onchainQueue: Queue,
+    private readonly loggerService: LoggerService,
+  ) {}
 
   async enqueueInitEscrow(params: InitEscrowJobParams) {
     return this.enqueue(OnchainOperationType.INIT_ESCROW, params);
@@ -59,6 +63,7 @@ export class OnchainService {
       type,
       params,
       timestamp: Date.now(),
+      correlationId: this.loggerService.getCorrelationId(),
     };
 
     const job = await this.onchainQueue.add(type, data, {
@@ -70,7 +75,12 @@ export class OnchainService {
       removeOnComplete: true,
     });
 
-    this.logger.log(`Enqueued onchain job: ${job.id} for ${type}`);
+    const correlationSuffix = data.correlationId
+      ? ` [correlationId=${data.correlationId}]`
+      : '';
+    this.logger.log(
+      `Enqueued onchain job: ${job.id} for ${type}${correlationSuffix}`,
+    );
     return job;
   }
 }

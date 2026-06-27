@@ -237,7 +237,8 @@ model Claim {
   reissuedFrom   Claim?    @relation("ReissueChain", fields: [reissuedFromId], references: [id])
   reissuedTo     Claim[]   @relation("ReissueChain")
 
-  balanceLedger  BalanceLedger[]
+  balanceLedger     BalanceLedger[]
+  sorobanTransactions SorobanTransaction[]
 
   @@index([status])
   @@index([campaignId])
@@ -245,6 +246,81 @@ model Claim {
   @@index([deletedAt])
   @@index([reissuedFromId])
   @@index([expiresAt])
+}
+
+enum SorobanTransactionStatus {
+  pending
+  submitted  
+  confirmed
+  failed
+  expired
+}
+
+enum SorobanOperationType {
+  create_claim
+  disburse_claim
+  init_escrow
+}
+
+enum RetryableErrorType {
+  network_timeout
+  rate_limit
+  congestion
+  temporary_failure
+  tx_too_late
+  insufficient_fee
+}
+
+model SorobanTransaction {
+  id                String                 @id @default(cuid())
+  claimId           String?
+  claim             Claim?                 @relation(fields: [claimId], references: [id])
+  
+  /// Transaction details
+  operation         SorobanOperationType
+  packageId         String?               /// Soroban package ID if applicable
+  txHash            String?               /// Actual transaction hash when submitted
+  status            SorobanTransactionStatus @default(pending)
+  
+  /// Retry mechanism tracking
+  attemptCount      Int                   @default(0)
+  maxAttempts       Int                   @default(5)
+  lastRetryAt       DateTime?
+  nextRetryAt       DateTime?
+  
+  /// Error tracking
+  lastError         String?
+  errorType         RetryableErrorType?
+  isRetryable       Boolean               @default(true)
+  
+  /// Transaction parameters for retry
+  operatorAddress   String?
+  recipientAddress  String?
+  amount            String?
+  tokenAddress      String?
+  
+  /// Lifecycle timestamps
+  initiatedAt       DateTime              @default(now())
+  submittedAt       DateTime?
+  confirmedAt       DateTime?
+  failedAt          DateTime?
+  expiredAt         DateTime?
+  
+  /// Correlation and metadata  
+  correlationId     String?
+  metadata          Json?
+  
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  
+  @@index([claimId])
+  @@index([status])
+  @@index([operation])
+  @@index([txHash])
+  @@index([nextRetryAt])
+  @@index([correlationId])
+  @@index([attemptCount])
+  @@index([isRetryable, nextRetryAt])
 }
 
 enum PurgeStrategy {
@@ -458,6 +534,49 @@ model EvidenceQueueItem {
   @@index([nearDuplicateOf])
 }
 
+enum UploadSessionStatus {
+  active
+  completed
+  expired
+  aborted
+}
+
+model UploadSession {
+  id          String              @id @default(cuid())
+  ownerId     String
+  orgId       String?
+  fileName    String
+  mimeType    String
+  totalSize   Int
+  chunkSize   Int
+  totalChunks Int
+  status      UploadSessionStatus @default(active)
+  expiresAt   DateTime
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  chunks      UploadChunk[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model UploadChunk {
+  id        String   @id @default(cuid())
+  sessionId String
+  index     Int
+  size      Int
+  checksum  String
+  filePath  String
+  createdAt DateTime @default(now())
+
+  session   UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, index])
+  @@index([sessionId])
+}
+
 enum NotificationOutboxStatus {
   pending
   enqueued
@@ -499,4 +618,167 @@ model IdempotencyKey {
 
   @@index([key])
   @@index([expiresAt])
+}
+
+// ============================================================================
+// ENTITY REGISTRY & LINKING
+// ============================================================================
+
+enum RegistryEntityType {
+  organization
+  location
+  asset
+  project
+}
+
+/// Canonical registry for organizations with stable IDs
+model RegistryOrganization {
+  id          String   @id @default(cuid())
+  registryId  String   @unique // Stable canonical ID (e.g., "ORG-001")
+  name        String
+  aliases     String?  // JSON array of alternative names
+  externalId  String?  // External system identifier
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entityLinks EntityLink[]
+
+  @@index([registryId])
+  @@index([name])
+}
+
+/// Canonical registry for locations with stable IDs
+model RegistryLocation {
+  id          String   @id @default(cuid())
+  registryId  String   @unique // Stable canonical ID (e.g., "LOC-001")
+  name        String
+  type        String?  // e.g., "city", "camp", "region", "country"
+  country     String?
+  region      String?
+  coordinates Json?    // { lat: number, lng: number }
+  aliases     String?  // JSON array of alternative names
+  externalId  String?  // External system identifier
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entityLinks EntityLink[]
+
+  @@index([registryId])
+  @@index([name])
+  @@index([country, region])
+}
+
+/// Canonical registry for assets with stable IDs
+model RegistryAsset {
+  id          String   @id @default(cuid())
+  registryId  String   @unique // Stable canonical ID (e.g., "AST-001")
+  name        String
+  type        String?  // e.g., "vehicle", "warehouse", "equipment"
+  category    String?
+  externalId  String?  // External system identifier
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entityLinks EntityLink[]
+
+  @@index([registryId])
+  @@index([name])
+  @@index([type])
+}
+
+/// Canonical registry for projects with stable IDs
+model RegistryProject {
+  id          String   @id @default(cuid())
+  registryId  String   @unique // Stable canonical ID (e.g., "PRJ-001")
+  name        String
+  description String?
+  status      String   @default("active")
+  startDate   DateTime?
+  endDate     DateTime?
+  externalId  String?  // External system identifier
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entityLinks EntityLink[]
+
+  @@index([registryId])
+  @@index([name])
+  @@index([status])
+}
+
+enum EntityLinkSourceType {
+  campaign
+  claim
+  verification
+}
+
+/// Links extracted entities to canonical registry records
+model EntityLink {
+  id              String             @id @default(cuid())
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  // Source entity reference
+  sourceType      EntityLinkSourceType
+  sourceId        String             // ID of campaign/claim/verification
+  extractedName   String             // Original extracted entity name
+  extractedType   String?            // Type hint from extraction (e.g., "organization", "location")
+
+  // Link to canonical registry
+  entityType      RegistryEntityType
+  organizationId  String?
+  organization    RegistryOrganization? @relation(fields: [organizationId], references: [id])
+  locationId      String?
+  location        RegistryLocation?     @relation(fields: [locationId], references: [id])
+  assetId         String?
+  asset           RegistryAsset?        @relation(fields: [assetId], references: [id])
+  projectId       String?
+  project         RegistryProject?      @relation(fields: [projectId], references: [id])
+
+  // Confidence & auditability
+  confidenceScore Float              // 0.0 to 1.0
+  matchMethod     String?            // e.g., "exact", "fuzzy", "manual"
+  reviewedBy      String?            // User ID if manually reviewed
+  reviewedAt      DateTime?
+  reviewNotes     String?
+  isActive        Boolean            @default(true)
+  metadata        Json?
+
+  @@index([sourceType, sourceId])
+  @@index([entityType])
+  @@index([organizationId])
+  @@index([locationId])
+  @@index([assetId])
+  @@index([projectId])
+  @@index([confidenceScore])
+  @@index([isActive])
+}
+
+// ============================================================================
+// DEPLOYMENT METADATA
+// ============================================================================
+
+/// Stores contract deployment metadata for reporting configured contracts and provenance
+model DeploymentMetadata {
+  id           String   @id @default(cuid())
+  contractName String   // e.g., "AidEscrow", "TokenContract"
+  network      String   // e.g., "testnet", "mainnet"
+  contractId   String   // The deployed contract address/ID
+  wasmHash     String   // Hash of the deployed WASM binary
+  deployedAt   DateTime // When the contract was deployed
+  commitSha    String?  // Git commit SHA of the code when deployed
+  deployer     String?  // Address or ID of the deployer
+  transactionHash String? // Hash of the deployment transaction
+  metadata     Json?    // Additional deployment metadata (environment variables, flags, etc.)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([network, contractName])
+  @@index([network])
+  @@index([contractId])
+  @@index([deployedAt])
 }

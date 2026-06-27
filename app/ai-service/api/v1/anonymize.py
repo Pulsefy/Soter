@@ -22,7 +22,11 @@ async def anonymize_text(request: AnonymizeRequest):
 
     try:
         result = _main.pii_scrubber_service.anonymize(request.text)
-        return AnonymizeResponse(success=True, **result)
+        return AnonymizeResponse(
+            success=True,
+            anchor_metadata=request.anchor_metadata,
+            **result
+        )
     except Exception as e:
         logger.error(f"Anonymization failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to anonymize text")

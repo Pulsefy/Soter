@@ -1,7 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
+import {
+  OnchainAdapter,
+  ONCHAIN_ADAPTER_TOKEN,
+} from '../onchain/onchain.adapter';
 
 type CheckStatus = 'up' | 'down' | 'skipped';
 
@@ -38,6 +42,8 @@ export class HealthService {
     private readonly configService: ConfigService,
     private readonly logger: LoggerService,
     private readonly prisma: PrismaService,
+    @Inject(ONCHAIN_ADAPTER_TOKEN)
+    private readonly onchainAdapter: OnchainAdapter,
   ) {}
 
   check() {
@@ -215,5 +221,40 @@ export class HealthService {
     }
 
     return value.trim().toLowerCase() === 'true';
+  }
+
+  async checkOnchainContract(): Promise<{
+    status: 'up' | 'down';
+    latencyMs: number;
+    metadata?: { version: string; name: string };
+    error?: string;
+  }> {
+    const startTime = Date.now();
+    try {
+      const contractMetadata = await this.onchainAdapter.getContractMetadata();
+      const latency = Date.now() - startTime;
+      return {
+        status: 'up',
+        latencyMs: latency,
+        metadata: {
+          version: contractMetadata.version,
+          name: contractMetadata.name,
+        },
+      };
+    } catch (error) {
+      const latency = Date.now() - startTime;
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(
+        'On-chain contract health check failed',
+        undefined,
+        'HealthService',
+        { error: errorMsg },
+      );
+      return {
+        status: 'down',
+        latencyMs: latency,
+        error: errorMsg,
+      };
+    }
   }
 }

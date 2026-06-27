@@ -242,7 +242,8 @@ describe('AidEscrow Integration Tests', () => {
           address: 'GOPER8TORADDRESS00000000000000000000000000000000000000',
         },
       };
-      const result = await controller.createAidPackage(dto, req);
+      // Cast literal payload context as any to satisfy express engine requirements
+      const result = await controller.createAidPackage(dto, req as any);
 
       expect(result).toBeDefined();
       expect(result.packageId).toBe(dto.packageId);
@@ -266,7 +267,8 @@ describe('AidEscrow Integration Tests', () => {
           address: 'GOPER8TORADDRESS00000000000000000000000000000000000000',
         },
       };
-      const result = await controller.batchCreateAidPackages(dto, req);
+      // Cast literal payload context as any to satisfy express engine requirements
+      const result = await controller.batchCreateAidPackages(dto, req as any);
 
       expect(result).toBeDefined();
       expect(result.packageIds).toHaveLength(2);
@@ -279,7 +281,8 @@ describe('AidEscrow Integration Tests', () => {
           address: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
         },
       };
-      const result = await controller.claimAidPackage('pkg-001', req);
+      // Cast literal payload context as any to satisfy express engine requirements
+      const result = await controller.claimAidPackage('pkg-001', req as any);
 
       expect(result).toBeDefined();
       expect(result.packageId).toBe('pkg-001');
@@ -305,9 +308,10 @@ describe('AidEscrow Integration Tests', () => {
     it('should throw error when claiming without recipient address', async () => {
       const req = { user: undefined };
 
-      await expect(controller.claimAidPackage('pkg-001', req)).rejects.toThrow(
-        BadRequestException,
-      );
+      // Cast literal payload context as any to satisfy express engine requirements
+      await expect(
+        controller.claimAidPackage('pkg-001', req as any),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -329,8 +333,9 @@ describe('AidEscrow Integration Tests', () => {
         },
       };
 
+      // Cast literal payload context as any to satisfy express engine requirements
       await expect(
-        controller.batchCreateAidPackages(dto, req),
+        controller.batchCreateAidPackages(dto, req as any),
       ).rejects.toThrow();
     });
   });

@@ -8,12 +8,15 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 import logging
+import uuid
+from contextvars import ContextVar
+from pythonjsonlogger import jsonlogger
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.responses import JSONResponse, RedirectResponse, Response
-from exceptions import AIServiceError
+from fastapi.responses import JSONResponse, RedirectResponse
+from exceptions import AIServiceError, LoadShedError
 from schemas.errors import ErrorDetail, ErrorEnvelope
 import time
 import metrics
@@ -39,11 +42,42 @@ from schemas.humanitarian import (
 )
 from services.humanitarian_verification import HumanitarianVerificationService
 
+# Context variable for correlation ID
+correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
+
+
+class CorrelationIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.correlationId = correlation_id_var.get()
+        return True
+
+
 limiter = Limiter(key_func=get_remote_address)
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# Set up structured logging with correlation ID
+log_level_name = settings.log_level.upper() if hasattr(settings, "log_level") else "INFO"
+log_level = getattr(logging, log_level_name, logging.INFO)
+
+# Configure root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(log_level)
+
+# Remove default handlers
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+
+# Create JSON formatter
+json_formatter = jsonlogger.JsonFormatter(
+    "%(asctime)s %(levelname)s %(name)s %(message)s %(correlationId)s"
 )
+
+# Create stream handler with JSON formatter
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(json_formatter)
+stream_handler.addFilter(CorrelationIdFilter())
+root_logger.addHandler(stream_handler)
+
+# Get logger for this module
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +97,7 @@ _LEGACY_TO_V1: dict = {
 # Prefix-based redirects for parameterised routes (matched in order).
 _LEGACY_PREFIX_MAP: list = [
     ("/ai/status/", "/v1/ai/status/"),
+    ("/ai/jobs/", "/v1/ai/jobs/"),
     ("/ai/task/", "/v1/ai/task/"),
 ]
 
@@ -78,6 +113,14 @@ async def lifespan(app: FastAPI):
 
     logger.info(f"Redis configured: {settings.redis_url}")
     logger.info(f"Backend webhook URL: {settings.backend_webhook_url}")
+
+    # Initialize cache service
+    from services.cache import CacheService
+    app.state.cache = CacheService(settings)
+    if app.state.cache.enabled:
+        logger.info("Response caching enabled with Redis")
+    else:
+        logger.warning("Response caching disabled (Redis unavailable)")
 
     yield
     logger.info("Shutting down Soter AI Service...")
@@ -178,6 +221,29 @@ async def legacy_redirect_middleware(request: Request, call_next):
 
 
 @app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    correlation_id = request.headers.get("x-correlation-id") or request.headers.get("x-request-id") or str(uuid.uuid4())
+    
+    # Attach correlation ID to request state
+    request.state.correlation_id = correlation_id
+    
+    # Set context variable for logging
+    correlation_id_token = correlation_id_var.set(correlation_id)
+    
+    try:
+        response = await call_next(request)
+    finally:
+        correlation_id_var.reset(correlation_id_token)
+    
+    # Set correlation ID headers in response
+    response.headers["x-correlation-id"] = correlation_id
+    response.headers["x-request-id"] = correlation_id
+    response.headers["trace_id"] = correlation_id
+    
+    return response
+
+
+@app.middleware("http")
 async def monitor_requests(request: Request, call_next):
     path = request.url.path
 
@@ -205,22 +271,11 @@ async def monitor_requests(request: Request, call_next):
     if path in _NEVER_THROTTLE or is_redirect_path:
         return await call_next(request)
 
-    # Gracefully throttle if memory pressure is critical.
-    if not metrics.check_system_resources(memory_threshold_percent=90.0):
-        metrics.REQUEST_COUNT.labels(
-            method=request.method,
-            endpoint=path,
-            http_status=503,
-        ).inc()
-        return JSONResponse(
-            status_code=503,
-            content={
-                "detail": (
-                    "Service unavailable: System resources (RAM/VRAM) exhausted, "
-                    "gracefully throttling."
-                )
-            },
-        )
+    from services.load_shedder import evaluate_load_shed
+
+    shed_response = evaluate_load_shed(request)
+    if shed_response is not None:
+        return shed_response
 
     start_time = time.time()
     try:
@@ -351,6 +406,8 @@ async def _legacy_create_inference_task(
             "message": "Task queued for processing",
             "status_url": f"/v1/ai/status/{task_id}",
         }
+    except LoadShedError:
+        raise
     except Exception as e:
         logger.error(f"Failed to create inference task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")
@@ -520,6 +577,20 @@ async def validation_exception_handler(request, exc: RequestValidationError):
                 details=exc.errors(),
             )
         ).model_dump(),
+    )
+
+
+@app.exception_handler(LoadShedError)
+async def load_shed_exception_handler(request, exc: LoadShedError):
+    from services.load_shedder import build_shed_response
+
+    path = request.url.path
+    logger.warning("Load shedding request to %s due to %s", path, exc.reason)
+    return build_shed_response(
+        exc.reason,
+        request.method,
+        path,
+        details=exc.details,
     )
 
 

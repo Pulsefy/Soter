@@ -111,7 +111,7 @@ describe('Internal Notes (e2e)', () => {
         data: {
           identifier: 'test@example.com',
           channel: 'email',
-          otpHash: 'hash',
+          code: 'hash', // Fixed property from otpHash -> code
           expiresAt: new Date(Date.now() + 3600000),
           status: 'pending',
         },

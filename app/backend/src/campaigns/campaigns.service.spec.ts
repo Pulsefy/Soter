@@ -15,9 +15,10 @@ describe('CampaignsService', () => {
     id: 'c1',
     name: 'Winter Relief 2026',
     status: CampaignStatus.draft,
-    budget: new Prisma.Decimal('1000.00'),
+    budget: new Prisma.Decimal('1000.00') as unknown as number,
     metadata: { region: 'Lagos' } as Prisma.JsonValue,
     ngoId: null,
+    orgId: null,
     archivedAt: null,
     deletedAt: null,
     createdAt: now,
@@ -49,15 +50,17 @@ describe('CampaignsService', () => {
     });
 
     const createArgs = prismaMock.campaign.create.mock.calls[0]?.[0];
-    expect(createArgs).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          name: 'Winter Relief 2026',
-          status: CampaignStatus.draft,
-          budget: expect.any(Number),
-        }),
-      }),
-    );
+
+    // Clean match validation instead of strict object equivalence structures
+    expect(createArgs).toMatchObject({
+      data: {
+        name: 'Winter Relief 2026',
+        status: CampaignStatus.draft,
+        budget: 1000,
+        metadata: { region: 'Lagos' },
+        ngoId: null,
+      },
+    });
 
     expect(created).toEqual(baseCampaign);
   });
