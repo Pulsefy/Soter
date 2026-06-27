@@ -10,6 +10,18 @@ This module contains Soroban smart contracts for Soter's on-chain escrow and cla
 
 [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG) · [View on Stellar Lab](https://lab.stellar.org/r/testnet/contract/CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG)
 
+### Machine-readable registry artifact
+
+The deployment registry is available at [deployments/contract-registry.json](deployments/contract-registry.json). It is generated deterministically from [deployments/registry.json](deployments/registry.json) and includes the contract name, network, version, contract ID, deployed timestamp, and optional deployment metadata for backend/frontend consumers.
+
+Generate it locally or in CI with:
+
+```bash
+python3 scripts/generate_contract_registry.py \
+  --registry-json deployments/registry.json \
+  --output deployments/contract-registry.json
+```
+
 ## 🧠 AidEscrow Contract
 
 The **AidEscrow** contract facilitates secure, transparent aid disbursement. Packages are created for specific recipients with locked funds, and can be disbursed by administrators.
