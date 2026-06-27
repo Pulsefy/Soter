@@ -1,13 +1,9 @@
 {
   "name": "merkle-allowlist",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
-    "start": "node index.js"
-  },
-  "dependencies": {
-    "ethers": "^5.7.2",
-    "merkletreejs": "^0.2.31",
-    "keccak256": "^1.0.6"
+    "start": "node index.js",
+    "test": "node test.js"
   }
 }
