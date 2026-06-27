@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { ExportCampaignsQueryDto } from './dto/export-campaigns.dto';
+import { AuditService } from '../audit/audit.service';
 
 export interface CampaignExportRow {
   id: string;
@@ -32,7 +33,10 @@ export interface CampaignExportResult {
 
 @Injectable()
 export class CampaignsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   private sanitizeMetadata(
     metadata?: Record<string, unknown>,
@@ -41,8 +45,8 @@ export class CampaignsService {
     return metadata as Prisma.InputJsonValue;
   }
 
-  async create(dto: CreateCampaignDto, ngoId?: string | null) {
-    return this.prisma.campaign.create({
+  async create(dto: CreateCampaignDto, ngoId?: string | null, actorId?: string) {
+    const campaign = await this.prisma.campaign.create({
       data: {
         name: dto.name,
         status: dto.status ?? CampaignStatus.draft,
@@ -51,6 +55,16 @@ export class CampaignsService {
         ngoId: ngoId ?? null,
       },
     });
+
+    await this.auditService.record({
+      actorId: actorId || 'system',
+      entity: 'Campaign',
+      entityId: campaign.id,
+      action: 'campaign_created',
+      metadata: { name: campaign.name, budget: campaign.budget, status: campaign.status, ngoId },
+    });
+
+    return campaign;
   }
 
   async findAll(includeArchived = false, ngoId?: string | null) {
@@ -76,10 +90,10 @@ export class CampaignsService {
     return campaign;
   }
 
-  async update(id: string, dto: UpdateCampaignDto) {
+  async update(id: string, dto: UpdateCampaignDto, actorId?: string) {
     await this.findOne(id);
 
-    return this.prisma.campaign.update({
+    const updated = await this.prisma.campaign.update({
       where: { id },
       data: {
         name: dto.name,
@@ -91,9 +105,19 @@ export class CampaignsService {
             : this.sanitizeMetadata(dto.metadata),
       },
     });
+
+    await this.auditService.record({
+      actorId: actorId || 'system',
+      entity: 'Campaign',
+      entityId: id,
+      action: 'campaign_updated',
+      metadata: { changes: dto },
+    });
+
+    return updated;
   }
 
-  async archive(id: string) {
+  async archive(id: string, actorId?: string) {
     const existing = await this.findOne(id);
 
     if (existing.archivedAt) {
@@ -103,6 +127,14 @@ export class CampaignsService {
     const updated = await this.prisma.campaign.update({
       where: { id },
       data: { archivedAt: new Date(), status: CampaignStatus.archived },
+    });
+
+    await this.auditService.record({
+      actorId: actorId || 'system',
+      entity: 'Campaign',
+      entityId: id,
+      action: 'campaign_archived',
+      metadata: { name: existing.name, previousStatus: existing.status },
     });
 
     return { campaign: updated, alreadyArchived: false };

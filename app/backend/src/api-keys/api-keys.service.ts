@@ -7,6 +7,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppRole } from '../auth/app-role.enum';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
+import { AuditService } from '../audit/audit.service';
 
 type Actor = { apiKeyId?: string; authType?: string; role?: AppRole };
 
@@ -21,7 +22,10 @@ const sha256Hex = (value: string): string =>
 
 @Injectable()
 export class ApiKeysService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   private newRawKey(): string {
     return `s2s_${randomBytes(32).toString('base64url')}`;
@@ -66,6 +70,14 @@ export class ApiKeysService {
         replacedById: true,
         keyPreview: true,
       },
+    });
+
+    await this.auditService.record({
+      actorId: this.actorId(actor),
+      entity: 'ApiKey',
+      entityId: row.id,
+      action: 'api_key_created',
+      metadata: { role: row.role, ngoId: row.ngoId, description: row.description },
     });
 
     return { ...row, apiKey: rawKey };
@@ -122,7 +134,7 @@ export class ApiKeysService {
       });
     }
 
-    return this.prisma.apiKey.update({
+    const updated = await this.prisma.apiKey.update({
       where: { id },
       data: {
         revokedAt: new Date(),
@@ -144,6 +156,16 @@ export class ApiKeysService {
         keyPreview: true,
       },
     });
+
+    await this.auditService.record({
+      actorId: this.actorId(actor),
+      entity: 'ApiKey',
+      entityId: id,
+      action: 'api_key_revoked',
+      metadata: { reason: reason ?? 'revoked' },
+    });
+
+    return updated;
   }
 
   async rotate(id: string, actor?: Actor) {
@@ -202,6 +224,14 @@ export class ApiKeysService {
           revokedReason: 'rotated',
           replacedById: replacement.id,
         },
+      });
+
+      await this.auditService.record({
+        actorId: this.actorId(actor),
+        entity: 'ApiKey',
+        entityId: existing.id,
+        action: 'api_key_rotated',
+        metadata: { oldKeyId: existing.id, newKeyId: replacement.id },
       });
 
       return { replacement, apiKey: rawKey };

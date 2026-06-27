@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { AuditService } from '../audit/audit.service';
 
 export interface BackfillJobData {
   startLedger: number;
@@ -26,6 +27,7 @@ export class LedgerBackfillService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue('onchain') private readonly onchainQueue: Queue,
+    private readonly auditService: AuditService,
   ) {}
 
   async triggerBackfill(
@@ -64,6 +66,14 @@ export class LedgerBackfillService {
         },
       },
     );
+
+    await this.auditService.record({
+      actorId: 'system:admin',
+      entity: 'LedgerBackfill',
+      entityId: job.id || 'unknown',
+      action: 'ledger_backfill_triggered',
+      metadata: { startLedger, endLedger, campaignId, batchSize, totalCount },
+    });
 
     return {
       jobId: job.id || 'unknown',
