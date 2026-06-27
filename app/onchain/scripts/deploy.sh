@@ -167,6 +167,11 @@ if [ -n "$CONTRACT_ID" ]; then
                 esac
             done
         fi
+
+        python3 "$SCRIPT_DIR/generate_contract_registry.py" \
+            --registry-json "$PROJECT_DIR/deployments/registry.json" \
+            --output "$PROJECT_DIR/deployments/contract-registry.json"
+        echo "✅ Wrote deployments/contract-registry.json"
     else
         echo "⚠️  python3 not found; skipped registry update (run scripts/register-deployment.py manually)"
     fi

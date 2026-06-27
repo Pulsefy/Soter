@@ -64,9 +64,14 @@ REGISTER_OUT=$(python3 "$SCRIPT_DIR/register-deployment.py" \
 
 echo "$REGISTER_OUT"
 
+python3 "$SCRIPT_DIR/generate_contract_registry.py" \
+    --registry-json "$PROJECT_DIR/deployments/registry.json" \
+    --output "$PROJECT_DIR/deployments/contract-registry.json"
+
 VERSION_TAG=$(echo "$REGISTER_OUT" | awk -F= '/^VERSION_TAG=/{print $2}')
 echo ""
 echo "✅ Registered deployment in deployments/registry.json"
+echo "✅ Wrote deployments/contract-registry.json"
 echo "🏷️  Suggested git tag: $VERSION_TAG"
 echo "   git tag -a '$VERSION_TAG' -m 'aid_escrow $CONTRACT_VERSION testnet deploy ($CONTRACT_ID)'"
 

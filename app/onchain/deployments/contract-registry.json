@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "contracts": [
+    {
+      "name": "aid_escrow",
+      "network": "testnet",
+      "version": "0.1.0",
+      "contract_id": "CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG",
+      "deployed_at": "2026-06-03",
+      "wasm_hash": "24328e15b7c11c7ff07caeaf0328da591b3b63e84af57fa03623c10126eabc8d",
+      "record": "deployments/testnet-2026-06-03.md",
+      "version_tag": "v0.1.0-testnet"
+    }
+  ]
+}
