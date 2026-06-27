@@ -195,5 +195,23 @@
     "dashboardPage": "Dashboard",
     "verificationReviewPage": "Verification Review",
     "resetChecklist": "Reset checklist progress"
+  },
+  "faucet": {
+    "title": "Testnet Faucet Helper",
+    "subtitle": "Stellar / Soroban Development Tool",
+    "connectWallet": "Please connect your wallet in the navbar to view balance and request funds.",
+    "unfundedAccount": "Account not created yet (needs activation/funding)",
+    "lastUpdated": "Last updated: {time}",
+    "refresh": "Refresh Balance",
+    "requestFunds": "Request 10,000 XLM",
+    "requesting": "Requesting...",
+    "success": "Account successfully funded!",
+    "error": "Failed to fund account. Please try again.",
+    "instructionsTitle": "Step-by-Step Instructions",
+    "step1": "Connect your Freighter wallet configured to Stellar Testnet.",
+    "step2": "Click 'Request 10,000 XLM' or use the official Stellar faucet links.",
+    "step3": "Verify your balance is updated to perform onchain actions.",
+    "linksTitle": "Official Stellar Faucets",
+    "faucetNote": "Visible only in testnet environments."
   }
 }

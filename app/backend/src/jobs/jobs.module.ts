@@ -11,6 +11,7 @@ import { DlqService } from './dlq.service';
     BullModule.registerQueue({ name: 'onchain' }),
     BullModule.registerQueue({ name: RETENTION_PURGE_QUEUE }),
     BullModule.registerQueue({ name: 'dead-letter' }),
+    BullModule.registerQueue({ name: 'webhooks' }),
   ],
   controllers: [JobsController],
   providers: [DlqService],

@@ -6,6 +6,7 @@ import './globals.css';
 import { QueryProvider } from '@/lib/query-provider';
 import { Navbar } from '@/components/Navbar';
 import { ToastProvider } from '@/components/ToastProvider';
+import TestnetFaucetHelper from '@/components/systems/TestnetFaucetHelper';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MisconfiguredPage } from '@/components/MisconfiguredPage';
@@ -67,6 +68,7 @@ export default async function RootLayout({
                   <Navbar />
                   <NetworkMismatchBanner />
                   {children}
+                  <TestnetFaucetHelper />
                 </ToastProvider>
               </QueryProvider>
             </ErrorBoundary>
