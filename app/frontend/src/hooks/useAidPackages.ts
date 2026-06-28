@@ -6,9 +6,12 @@ import type { AidPackage, AidPackageFilters } from '@/types/aid-package';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
-async function fetchAidPackages(filters?: AidPackageFilters): Promise<AidPackage[]> {
+async function fetchAidPackages(
+  filters?: AidPackageFilters,
+): Promise<AidPackage[]> {
   const perfEnabled =
-    typeof window !== 'undefined' && process.env.NEXT_PUBLIC_DASHBOARD_PERF === '1';
+    typeof window !== 'undefined' &&
+    process.env.NEXT_PUBLIC_DASHBOARD_PERF === '1';
   const start = perfEnabled ? performance.now() : 0;
 
   const params = new URLSearchParams();
@@ -45,6 +48,10 @@ export function useAidPackages(filters?: AidPackageFilters) {
 
   return useQuery({
     queryKey: ['aid-packages', search, status, token],
-    queryFn: () => fetchAidPackages(filters),
+    queryFn: () => fetchAidPackages({ search, status, token }),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    placeholderData: previous => previous,
   });
 }
