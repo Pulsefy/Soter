@@ -21,6 +21,12 @@ export enum ReviewQueuePaginationMode {
   CURSOR = 'cursor',
 }
 
+export interface AnchorMetadata {
+  campaign_ref?: string;
+  claim_id?: string;
+  package_id?: string;
+}
+
 const normalizeStatusFilter = ({
   value,
 }: {

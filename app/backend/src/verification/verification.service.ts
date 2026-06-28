@@ -74,7 +74,7 @@ interface AIVerificationResponse {
   factors: string[]; // positive verification signals
   riskFactors: string[]; // identified concerns / red-flags
   recommendations: string[]; // next steps if human review needed
-  anchor_metadata?: AnchorMetadata | null; // optional on-chain correlation identifiers
+  anchor_metadata?: AnchorMetadata; // optional on-chain correlation identifiers
 }
 
 // ---------------------------------------------------------------------------
@@ -275,9 +275,9 @@ export class VerificationService {
 
     const shouldVerify = result.score >= this.verificationThreshold;
 
-    const claimUpdateData: { status: string; anchorMetadata?: AnchorMetadata | null } = {
+    const claimUpdateData: { status: string; anchorMetadata?: AnchorMetadata } = {
       status: shouldVerify ? 'verified' : 'requested',
-      anchorMetadata: result.anchor_metadata ?? undefined,
+      anchorMetadata: result.anchor_metadata,
     };
 
     await this.prisma.claim.update({
@@ -637,7 +637,7 @@ the JSON verdict.
   }
 
   private normalizeAnchorMetadata(
-    metadata: AnchorMetadata | null | undefined,
+    metadata: AnchorMetadata | undefined,
   ): AnchorMetadata | null {
     if (!metadata || typeof metadata !== 'object') {
       return null;
