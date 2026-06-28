@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
 import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
+import { useToast } from '@/components/ToastProvider';
+import { normalizeError } from '@/lib/error-utils';
 import type {
     PiiDetectionResult,
     ValidationErrors,
@@ -15,6 +17,7 @@ import type {
 import { useActivity } from '@/hooks/useActivity';
 import { useNetworkGuard } from '@/hooks/useNetworkGuard';
 import { NetworkMismatchBanner } from '@/components/NetworkMismatchBanner';
+
 
 /* ─── Accepted image MIME types ─────────────────────────────────────────── */
 
@@ -293,6 +296,7 @@ export const VerificationFlow: React.FC = () => {
     const uid = useId();
     const { trackJob } = useActivity();
     const { isMismatch } = useNetworkGuard();
+    const { toast } = useToast();
     const [restoredDraft] = useState<VerificationDraft | null>(() =>
         readVerificationDraftFromStorage(),
     );
@@ -309,7 +313,8 @@ export const VerificationFlow: React.FC = () => {
         restoredDraft?.locationData ?? null,
     );
     const [errors, setErrors] = useState<ValidationErrors>({});
-    const [apiError, setApiError] = useState<string | null>(null);
+    const [apiError, setApiError] = useState<Error | string | null>(null);
+
     const [result, setResult] = useState<VerificationResult | null>(null);
     const [draftRestored, setDraftRestored] = useState(restoredDraft !== null);
 
@@ -498,13 +503,18 @@ export const VerificationFlow: React.FC = () => {
             setStep('result');
           } catch (err) {
             if (cancelled) return;
-            if (err instanceof VerificationApiError) {
-              setApiError(err.message);
-            } else {
-              setApiError(
-                'An unexpected error occurred. Please try again.',
-              );
-            }
+            
+            const normalized = normalizeError(err);
+            setApiError(err as any);
+            
+            toast(
+              'Verification Failed',
+              normalized.correlationId
+                ? `${normalized.message} (Correlation ID: ${normalized.correlationId})`
+                : normalized.message,
+              'error'
+            );
+
             pendingPayload.current = null;
             setStep('upload');
           }
@@ -573,7 +583,7 @@ interface StepUploadProps {
     imageFile: File | null;
     textInput: string;
     errors: ValidationErrors;
-    apiError: string | null;
+    apiError: Error | string | null;
     canSubmit: boolean;
     imageInputId: string;
     imageErrorId: string;

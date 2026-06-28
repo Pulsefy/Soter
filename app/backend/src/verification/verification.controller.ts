@@ -4,6 +4,7 @@ import {
   Body,
   Get,
   Param,
+  Query,
   Version,
   HttpStatus,
   HttpCode,
@@ -32,11 +33,14 @@ import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { StartVerificationDto } from './dto/start-verification.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompleteVerificationDto } from './dto/complete-verification.dto';
+import { ReviewQueueQueryDto } from './dto/review-queue-query.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
 import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
+import { CacheResponse } from 'src/common/decorators/cache-response.decorator';
+import { getCacheTTL } from 'src/common/config/cache.config';
 
 @ApiTags('Verification')
 @ApiSecurity('x-api-key')
@@ -93,6 +97,7 @@ export class VerificationController {
 
   @Get('metrics')
   @Version('1')
+  @CacheResponse({ ttl: getCacheTTL().VERIFICATION_METRICS })
   @ApiOperation({
     summary: 'Get verification queue metrics',
     description:
@@ -250,8 +255,60 @@ export class VerificationController {
     return this.verificationService.create(createVerificationDto);
   }
 
+  @Get('review-queue')
+  @Version('1')
+  @ApiOperation({
+    summary: 'Get verification review queue',
+    description:
+      'Retrieve claims pending verification review with optional filtering by status, campaign, date range, and pagination using either page/limit or cursor/limit.',
+  })
+  @ApiOkResponse({
+    description: 'Verification review queue retrieved successfully.',
+    schema: {
+      example: {
+        items: [
+          {
+            id: 'clm_review_001',
+            createdAt: '2026-01-23T10:30:00.000Z',
+            updatedAt: '2026-01-23T10:30:00.000Z',
+            status: 'requested',
+            campaignId: 'cmp_review_001',
+            amount: '250.00',
+            recipientRef: 'recipient-001',
+            evidenceRef: 'evidence-001',
+            campaign: {
+              id: 'cmp_review_001',
+              name: 'Emergency Relief',
+              status: 'active',
+              archivedAt: null,
+            },
+          },
+        ],
+        pagination: {
+          mode: 'page',
+          page: 1,
+          limit: 20,
+          totalItems: 1,
+          totalPages: 1,
+          hasNextPage: false,
+        },
+        filters: {
+          status: ['requested'],
+          campaignId: 'cmp_review_001',
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid filter values or pagination parameters.',
+  })
+  async getReviewQueue(@Query() query: ReviewQueueQueryDto) {
+    return this.verificationService.getReviewQueue(query);
+  }
+
   @Get('claims/:id')
   @Version('1')
+  @CacheResponse({ ttl: getCacheTTL().VERIFICATION_STATUS })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get claim verification status',
@@ -298,6 +355,7 @@ export class VerificationController {
 
   @Get(':id')
   @Version(API_VERSIONS.V1)
+  @CacheResponse({ ttl: getCacheTTL().VERIFICATION_STATUS })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get verification status (v1)',
@@ -336,6 +394,7 @@ export class VerificationController {
 
   @Get('user/:userId')
   @Version(API_VERSIONS.V1)
+  @CacheResponse({ ttl: getCacheTTL().USER_VERIFICATION_HISTORY })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get user verification history (v1)',
@@ -418,6 +477,7 @@ export class VerificationController {
 
   @Get(':id/notes')
   @Roles(AppRole.operator, AppRole.admin)
+  @CacheResponse({ ttl: getCacheTTL().INTERNAL_NOTES })
   @ApiOperation({
     summary: 'List internal notes for a verification record',
     description: 'Retrieves all internal notes for a specific verification.',

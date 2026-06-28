@@ -27,6 +27,8 @@ import {
   BatchCreateAidPackagesDto,
 } from './dto/aid-escrow.dto';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
+import { CacheResponse } from '../common/decorators/cache-response.decorator';
+import { getCacheTTL } from '../common/config/cache.config';
 
 /**
  * AidEscrowController
@@ -250,6 +252,7 @@ export class AidEscrowController {
    */
   @Get('packages/:id')
   @HttpCode(HttpStatus.OK)
+  @CacheResponse({ ttl: getCacheTTL().AID_PACKAGE_DETAILS })
   @ApiOperation({
     summary: 'Get aid package details',
     description:
@@ -294,6 +297,7 @@ export class AidEscrowController {
    */
   @Get('stats')
   @HttpCode(HttpStatus.OK)
+  @CacheResponse({ ttl: getCacheTTL().AID_PACKAGE_STATS })
   @ApiOperation({
     summary: 'Get aid package statistics',
     description:
@@ -337,6 +341,7 @@ export class AidEscrowController {
    */
   @Get('transactions/:hash/status')
   @HttpCode(HttpStatus.OK)
+  @CacheResponse({ ttl: getCacheTTL().TRANSACTION_STATUS })
   @ApiOperation({
     summary: 'Get transaction status',
     description:

@@ -1,12 +1,15 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Download, FileWarning, ShieldAlert } from 'lucide-react';
 import type { RefObject } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Download, FileWarning, ShieldAlert } from 'lucide-react';
 import type { ValidationResult } from '@/lib/csv-validation';
 
 interface Step3ValidationProps {
   result: ValidationResult;
+  originalResult: ValidationResult;
   headers: string[];
+  remainingErrors: number;
+  remainingWarnings: number;
   isValidating: boolean;
   canProceed: boolean;
   headingRef?: RefObject<HTMLHeadingElement | null>;
@@ -23,7 +26,10 @@ const statusStyles = {
 
 export function Step3Validation({
   result,
+  originalResult,
   headers,
+  remainingErrors,
+  remainingWarnings,
   isValidating,
   canProceed,
   headingRef,
@@ -31,7 +37,9 @@ export function Step3Validation({
   onNext,
   onDownloadReport,
 }: Step3ValidationProps) {
-  const hasBlockingErrors = result.summary.errorRows > 0;
+  const hasBlockingErrors = originalResult.summary.errorRows > 0;
+  const cappedCount = remainingErrors + remainingWarnings;
+  const hasCapped = cappedCount > 0;
 
   return (
     <div className="space-y-6">
@@ -56,19 +64,19 @@ export function Step3Validation({
       <div className="grid gap-4 sm:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Total rows</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">{result.summary.totalRows}</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">{originalResult.summary.totalRows}</p>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/30">
           <p className="text-xs uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">Valid</p>
-          <p className="mt-2 text-2xl font-semibold text-emerald-800 dark:text-emerald-200">{result.summary.validRows}</p>
+          <p className="mt-2 text-2xl font-semibold text-emerald-800 dark:text-emerald-200">{originalResult.summary.validRows}</p>
         </div>
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/30">
           <p className="text-xs uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">Warnings</p>
-          <p className="mt-2 text-2xl font-semibold text-amber-800 dark:text-amber-200">{result.summary.warningRows}</p>
+          <p className="mt-2 text-2xl font-semibold text-amber-800 dark:text-amber-200">{originalResult.summary.warningRows}</p>
         </div>
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 dark:border-rose-900/50 dark:bg-rose-950/30">
           <p className="text-xs uppercase tracking-[0.18em] text-rose-700 dark:text-rose-300">Errors</p>
-          <p className="mt-2 text-2xl font-semibold text-rose-800 dark:text-rose-200">{result.summary.errorRows}</p>
+          <p className="mt-2 text-2xl font-semibold text-rose-800 dark:text-rose-200">{originalResult.summary.errorRows}</p>
         </div>
       </div>
 
@@ -83,6 +91,15 @@ export function Step3Validation({
           ? 'Some rows still have blocking errors. Download the report, correct the CSV, then upload the revised file to continue.'
           : 'No blocking errors remain. You can continue to final confirmation.'}
       </div>
+
+      {hasCapped && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+          Showing the first {result.rows.length} rows with issues.{' '}
+          {remainingErrors > 0 && `${remainingErrors} more error row(s) not displayed. `}
+          {remainingWarnings > 0 && `${remainingWarnings} more warning row(s) not displayed. `}
+          Download the full report to see all results.
+        </div>
+      )}
 
       <div className="space-y-3">
         {result.rows.map(row => (

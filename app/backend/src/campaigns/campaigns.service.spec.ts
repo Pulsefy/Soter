@@ -50,7 +50,7 @@ describe('CampaignsService', () => {
     });
 
     const createArgs = prismaMock.campaign.create.mock.calls[0]?.[0];
-    
+
     // Clean match validation instead of strict object equivalence structures
     expect(createArgs).toMatchObject({
       data: {

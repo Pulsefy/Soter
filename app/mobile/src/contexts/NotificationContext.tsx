@@ -8,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   DeepLinkTarget,
   requestNotificationPermission,
@@ -40,6 +41,28 @@ const NotificationContext = createContext<NotificationContextValue>({
   consumeDeepLink: () => {},
   requestPermission: async () => false,
 });
+
+const PROCESSED_IDS_KEY = 'SOTER_PROCESSED_NOTIFICATION_IDS';
+const MAX_PROCESSED_IDS_LIMIT = 50;
+
+async function markNotificationAsProcessed(id: string): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(PROCESSED_IDS_KEY);
+    const processedIds: string[] = raw ? JSON.parse(raw) : [];
+    if (processedIds.includes(id)) {
+      return false; // Already processed
+    }
+    processedIds.push(id);
+    if (processedIds.length > MAX_PROCESSED_IDS_LIMIT) {
+      processedIds.shift();
+    }
+    await AsyncStorage.setItem(PROCESSED_IDS_KEY, JSON.stringify(processedIds));
+    return true; // Successfully marked
+  } catch (error) {
+    console.error('[Notifications] Error persisting processed notification ID:', error);
+    return true; // Fallback: allow to prevent blocking user routing
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -84,13 +107,16 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
     const checkInitialNotification = async () => {
       const lastResponse = await Notifications.getLastNotificationResponseAsync();
       if (lastResponse) {
+        const id = lastResponse.notification.request.identifier;
         const data = lastResponse.notification.request.content.data as
           | Record<string, unknown>
           | undefined;
         const target = resolveDeepLink(data);
-        if (target) {
-          // Small delay so the navigation container is ready
-          setTimeout(() => setPendingDeepLink(target), 500);
+        if (target && id) {
+          const isNew = await markNotificationAsProcessed(id);
+          if (isNew) {
+            setPendingDeepLink(target);
+          }
         }
       }
     };
@@ -107,13 +133,17 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
     //  - The app is in the background and the user taps the notification
     //    (bringing it to the foreground)
     const subscription = Notifications.addNotificationResponseReceivedListener(
-      (response) => {
+      async (response) => {
+        const id = response.notification.request.identifier;
         const data = response.notification.request.content.data as
           | Record<string, unknown>
           | undefined;
         const target = resolveDeepLink(data);
-        if (target) {
-          setPendingDeepLink(target);
+        if (target && id) {
+          const isNew = await markNotificationAsProcessed(id);
+          if (isNew) {
+            setPendingDeepLink(target);
+          }
         }
       },
     );
