@@ -110,7 +110,12 @@
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "moduleNameMapper": {
-      "^src/(.*)$": "<rootDir>/src/$1"
+      "^src/(.*)$": "<rootDir>/src/$1",
+      ".*metrics/metrics\\.service$": "<rootDir>/src/observability/metrics/metrics.service",
+      ".*/session/session\\.service$": "<rootDir>/src/session/session.service",
+      ".*/prisma/prisma\\.service$": "<rootDir>/src/prisma/prisma.service",
+      ".*config/config$": "<rootDir>/src/config/config",
+      ".*guards/hmac-auth\\.guard$": "<rootDir>/src/common/guards/hmac.guard"
     }
   },
   "prisma": {

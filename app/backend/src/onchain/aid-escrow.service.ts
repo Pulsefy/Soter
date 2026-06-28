@@ -45,9 +45,10 @@ export class AidEscrowService {
     };
   }
 
-  private parsePositiveIntegerAmount(
-    amount: string,
-  ): { value?: bigint; error?: string } {
+  private parsePositiveIntegerAmount(amount: string): {
+    value?: bigint;
+    error?: string;
+  } {
     if (typeof amount !== 'string' || !/^\d+$/.test(amount)) {
       return { error: 'Amount must be a positive integer string' };
     }

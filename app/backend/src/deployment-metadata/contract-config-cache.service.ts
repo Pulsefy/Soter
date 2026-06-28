@@ -17,8 +17,7 @@ const KEYS = {
   byNetwork: (network: string) => `contract-config:network:${network}`,
   byNetworkAndName: (network: string, contractName: string) =>
     `contract-config:contract:${network}:${contractName}`,
-  byContractId: (contractId: string) =>
-    `contract-config:id:${contractId}`,
+  byContractId: (contractId: string) => `contract-config:id:${contractId}`,
   pattern: () => 'contract-config:*',
 };
 
@@ -77,8 +76,7 @@ export class ContractConfigCacheService {
     network: string,
   ): Promise<DeploymentMetadataResponseDto[]> {
     const key = KEYS.byNetwork(network);
-    const cached =
-      await this.redis.get<DeploymentMetadataResponseDto[]>(key);
+    const cached = await this.redis.get<DeploymentMetadataResponseDto[]>(key);
     if (cached !== null) {
       this.logger.debug(`cache hit: getByNetwork(${network})`);
       return cached;
@@ -103,8 +101,9 @@ export class ContractConfigCacheService {
     contractName: string,
   ): Promise<DeploymentMetadataResponseDto | null> {
     const key = KEYS.byNetworkAndName(network, contractName);
-    const cached =
-      await this.redis.get<DeploymentMetadataResponseDto | null>(key);
+    const cached = await this.redis.get<DeploymentMetadataResponseDto | null>(
+      key,
+    );
     if (cached !== undefined && cached !== null) {
       this.logger.debug(
         `cache hit: getByNetworkAndContractName(${network}, ${contractName})`,
@@ -132,8 +131,9 @@ export class ContractConfigCacheService {
     contractId: string,
   ): Promise<DeploymentMetadataResponseDto | null> {
     const key = KEYS.byContractId(contractId);
-    const cached =
-      await this.redis.get<DeploymentMetadataResponseDto | null>(key);
+    const cached = await this.redis.get<DeploymentMetadataResponseDto | null>(
+      key,
+    );
     if (cached !== undefined && cached !== null) {
       this.logger.debug(`cache hit: getByContractId(${contractId})`);
       return cached;
@@ -207,11 +207,7 @@ export class ContractConfigCacheService {
         item,
         this.ttl,
       );
-      await this.redis.set(
-        KEYS.byContractId(item.contractId),
-        item,
-        this.ttl,
-      );
+      await this.redis.set(KEYS.byContractId(item.contractId), item, this.ttl);
     }
 
     this.logger.log(
