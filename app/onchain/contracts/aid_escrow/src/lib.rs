@@ -271,11 +271,17 @@ impl AidEscrow {
         admin.require_auth();
 
         let current_version = Self::get_version(env.clone());
+        if new_version <= current_version {
+            return Err(Error::InvalidState);
+        }
 
         // Perform version-specific migrations
         match (current_version, new_version) {
             (1, 2) => {
                 // Future: Add migration logic for v1 -> v2
+            }
+            (2, 3) => {
+                // Future: Add migration logic for v2 -> v3
             }
             _ => {
                 // No-op for now, but structured for future use
