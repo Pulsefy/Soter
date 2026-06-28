@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { AidEscrowService } from '../src/onchain/aid-escrow.service';
 import { BudgetService } from '../src/common/budget/budget.service';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -32,6 +33,10 @@ describe('AidEscrow Integration Tests', () => {
         {
           provide: ONCHAIN_ADAPTER_TOKEN,
           useValue: mockAdapter,
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('testnet') },
         },
       ],
     }).compile();

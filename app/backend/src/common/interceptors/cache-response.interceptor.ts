@@ -41,7 +41,7 @@ export class CacheResponseInterceptor implements NestInterceptor {
 
     // Try to retrieve from cache
     return from(this.redisService.get<any>(cacheKey)).pipe(
-      switchMap((cachedResponse) => {
+      switchMap(cachedResponse => {
         if (cachedResponse !== null) {
           this.logger.debug(`Cache HIT: ${cacheKey}`);
           return of(cachedResponse);
@@ -51,7 +51,7 @@ export class CacheResponseInterceptor implements NestInterceptor {
 
         // Cache miss: execute handler and cache the result
         return next.handle().pipe(
-          tap((response) => {
+          tap(response => {
             // Fire-and-forget cache set (don't await in tap)
             void this.redisService
               .set(cacheKey, response, options.ttl)
@@ -60,7 +60,7 @@ export class CacheResponseInterceptor implements NestInterceptor {
                   `Cached response for key: ${cacheKey} (TTL: ${options.ttl}s)`,
                 );
               })
-              .catch((err) => {
+              .catch(err => {
                 this.logger.warn(
                   `Failed to cache response for key ${cacheKey}: ${String(err)}`,
                 );
@@ -119,13 +119,13 @@ export class CacheResponseInterceptor implements NestInterceptor {
     }
 
     if (Array.isArray(obj)) {
-      return obj.map((item) => this.sortObject(item));
+      return obj.map(item => this.sortObject(item));
     }
 
     const sorted: any = {};
     Object.keys(obj)
       .sort()
-      .forEach((key) => {
+      .forEach(key => {
         sorted[key] = this.sortObject(obj[key]);
       });
 

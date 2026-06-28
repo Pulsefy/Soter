@@ -64,19 +64,19 @@ describe('CacheResponseInterceptor', () => {
       };
     });
 
-    it('should skip caching when no metadata is present', (done) => {
+    it('should skip caching when no metadata is present', done => {
       jest.spyOn(reflector, 'get').mockReturnValue(undefined);
 
       interceptor
         .intercept(mockExecutionContext, mockCallHandler)
-        .subscribe((result) => {
+        .subscribe(result => {
           expect(result).toEqual({ data: 'test' });
           expect(redisService.get).not.toHaveBeenCalled();
           done();
         });
     });
 
-    it('should return cached response on cache hit', (done) => {
+    it('should return cached response on cache hit', done => {
       const cacheOptions = { ttl: 300 };
       const cachedData = { data: 'cached' };
 
@@ -85,7 +85,7 @@ describe('CacheResponseInterceptor', () => {
 
       interceptor
         .intercept(mockExecutionContext, mockCallHandler)
-        .subscribe((result) => {
+        .subscribe(result => {
           expect(result).toEqual(cachedData);
           expect(redisService.get).toHaveBeenCalled();
           expect(mockCallHandler.handle).not.toHaveBeenCalled();
@@ -93,7 +93,7 @@ describe('CacheResponseInterceptor', () => {
         });
     });
 
-    it('should execute handler and cache result on cache miss', (done) => {
+    it('should execute handler and cache result on cache miss', done => {
       const cacheOptions = { ttl: 300 };
       const handlerData = { data: 'fresh' };
 
@@ -104,11 +104,11 @@ describe('CacheResponseInterceptor', () => {
 
       interceptor
         .intercept(mockExecutionContext, mockCallHandler)
-        .subscribe((result) => {
+        .subscribe(result => {
           expect(result).toEqual(handlerData);
           expect(redisService.get).toHaveBeenCalled();
           expect(mockCallHandler.handle).toHaveBeenCalled();
-          
+
           // Set is called asynchronously, give it a moment
           setTimeout(() => {
             expect(redisService.set).toHaveBeenCalledWith(
@@ -121,7 +121,7 @@ describe('CacheResponseInterceptor', () => {
         });
     });
 
-    it('should use custom key generator when provided', (done) => {
+    it('should use custom key generator when provided', done => {
       const customKey = 'custom:key:123';
       const cacheOptions = {
         ttl: 300,
@@ -132,21 +132,19 @@ describe('CacheResponseInterceptor', () => {
       jest.spyOn(redisService, 'get').mockResolvedValue(null);
       jest.spyOn(redisService, 'set').mockResolvedValue(undefined);
 
-      interceptor
-        .intercept(mockExecutionContext, mockCallHandler)
-        .subscribe({
-          next: () => {
-            expect(cacheOptions.keyGenerator).toHaveBeenCalled();
-            expect(redisService.get).toHaveBeenCalledWith(
-              expect.stringContaining(customKey),
-            );
-            done();
-          },
-          error: (err) => done(err),
-        });
+      interceptor.intercept(mockExecutionContext, mockCallHandler).subscribe({
+        next: () => {
+          expect(cacheOptions.keyGenerator).toHaveBeenCalled();
+          expect(redisService.get).toHaveBeenCalledWith(
+            expect.stringContaining(customKey),
+          );
+          done();
+        },
+        error: err => done(err),
+      });
     });
 
-    it('should include query params in cache key', (done) => {
+    it('should include query params in cache key', done => {
       const cacheOptions = { ttl: 300 };
       mockExecutionContext.switchToHttp = jest.fn().mockReturnValue({
         getRequest: jest.fn().mockReturnValue({
@@ -162,18 +160,16 @@ describe('CacheResponseInterceptor', () => {
       jest.spyOn(redisService, 'get').mockResolvedValue(null);
       jest.spyOn(redisService, 'set').mockResolvedValue(undefined);
 
-      interceptor
-        .intercept(mockExecutionContext, mockCallHandler)
-        .subscribe({
-          next: () => {
-            expect(redisService.get).toHaveBeenCalled();
-            // Key should be different due to query params
-            const cacheKey = (redisService.get as jest.Mock).mock.calls[0][0];
-            expect(cacheKey).toBeTruthy();
-            done();
-          },
-          error: (err) => done(err),
-        });
+      interceptor.intercept(mockExecutionContext, mockCallHandler).subscribe({
+        next: () => {
+          expect(redisService.get).toHaveBeenCalled();
+          // Key should be different due to query params
+          const cacheKey = (redisService.get as jest.Mock).mock.calls[0][0];
+          expect(cacheKey).toBeTruthy();
+          done();
+        },
+        error: err => done(err),
+      });
     });
   });
 });

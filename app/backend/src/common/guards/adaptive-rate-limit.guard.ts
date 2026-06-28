@@ -8,6 +8,12 @@ import {
 import { RedisService } from '@liaoliaots/nestjs-redis';
 import { Request } from 'express';
 
+interface RateLimitUser {
+  id?: string;
+  apiKeyId?: string;
+  authType?: 'apiKey' | 'envApiKey';
+}
+
 @Injectable()
 export class AdaptiveRateLimitGuard implements CanActivate {
   private readonly limits = {
@@ -20,7 +26,7 @@ export class AdaptiveRateLimitGuard implements CanActivate {
   constructor(private readonly redisService: RedisService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest<any>();
+    const request: Request = context.switchToHttp().getRequest<Request>();
     const client = this.redisService.getOrThrow();
 
     const strategy = this.getStrategy(request);
@@ -49,11 +55,14 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     return true;
   }
 
-  private getStrategy(request: any): keyof typeof this.limits {
-    const path = request.path ?? request.url ?? '';
+  private getStrategy(request: Request): keyof typeof this.limits {
+    const path: string =
+      (request.path as string | undefined) ??
+      (request.url as string | undefined) ??
+      '';
     if (path.includes('/search')) return 'search';
 
-    const user = request.user;
+    const user = request.user as RateLimitUser | undefined;
     if (user) {
       if (user.authType === 'apiKey' || user.authType === 'envApiKey') {
         return 'apiKey';
@@ -64,15 +73,14 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     return 'public';
   }
 
-  private getIdentifier(request: any): string {
-    const user = request.user;
+  private getIdentifier(request: Request): string {
+    const user = request.user as RateLimitUser | undefined;
     if (user?.id) return user.id;
     if (user?.apiKeyId) return user.apiKeyId;
 
-    const forwardedIp =
-      Array.isArray(request.ips) && request.ips.length > 0
-        ? request.ips[0]
-        : undefined;
+    const ips: string[] = request.ips;
+    const forwardedIp: string | undefined =
+      Array.isArray(ips) && ips.length > 0 ? ips[0] : undefined;
     return forwardedIp ?? request.ip ?? 'anonymous';
   }
 }

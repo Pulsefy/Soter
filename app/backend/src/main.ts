@@ -8,6 +8,7 @@ import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { config as loadEnv } from 'dotenv';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { json, urlencoded } from 'express';
 
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor';
 import {
@@ -40,6 +41,17 @@ async function bootstrap() {
 
   // Enable shutdown hooks
   app.enableShutdownHooks();
+
+  // Add raw body parsing for webhook signature verification
+  app.use(
+    json({
+      limit: '10mb',
+      verify: (req: any, res, buf) => {
+        req.rawBody = buf;
+      },
+    }),
+  );
+  app.use(urlencoded({ extended: true, limit: '10mb' }));
 
   const configService = app.get(ConfigService);
 
