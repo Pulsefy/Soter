@@ -11,10 +11,9 @@ import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClaimStatus, Prisma } from '@prisma/client';
 import { CreateVerificationDto } from './dto/create-verification.dto';
+import type { AnchorMetadata } from './dto/review-queue-query.dto';
+
 import {
-
-  AnchorMetadata,
-
   ReviewQueuePaginationMode,
   ReviewQueueQueryDto,
 } from './dto/review-queue-query.dto';
@@ -57,7 +56,7 @@ interface Claim {
   id: string;
   status: string;
   campaignId: string;
-  amount: unknown;
+  anchorMetadata?: AnchorMetadata | null;
   recipientRef: string;
   evidenceRef?: string | null;
   anchorMetadata?: AnchorMetadata | null;
@@ -70,7 +69,7 @@ interface Claim {
 interface AIVerificationResponse {
   score: number; // 0–1 normalised legitimacy score
   confidence: number; // 0–1 model confidence
-  riskLevel: 'low' | 'medium' | 'high';
+  anchor_metadata?: AnchorMetadata | null;
   factors: string[]; // positive verification signals
   riskFactors: string[]; // identified concerns / red-flags
   recommendations: string[]; // next steps if human review needed
@@ -273,12 +272,13 @@ export class VerificationService {
       result = await this.performAIVerification(claim);
     }
 
-    const shouldVerify = result.score >= this.verificationThreshold;
-
-    const claimUpdateData: { status: string; anchorMetadata?: AnchorMetadata | null } = {
-      status: shouldVerify ? 'verified' : 'requested',
-      anchorMetadata: result.anchor_metadata ?? undefined,
-    };
+    const claimUpdateData: {
+  status: string;
+  anchorMetadata?: Record<string, string | null> | null;
+} = {
+  status: shouldVerify ? 'verified' : 'requested',
+  anchorMetadata: result.anchor_metadata ?? undefined,
+};
 
     await this.prisma.claim.update({
       where: { id: claimId },
@@ -636,13 +636,12 @@ the JSON verdict.
     };
   }
 
-  private normalizeAnchorMetadata(
-    metadata: AnchorMetadata | null | undefined,
-  ): AnchorMetadata | null {
+ private normalizeAnchorMetadata(
+  metadata: Record<string, string | null> | null | undefined,
+): Record<string, string | null> | null {
     if (!metadata || typeof metadata !== 'object') {
       return null;
     }
-
     const normalized: AnchorMetadata = {};
     for (const key of ['campaign_ref', 'claim_id', 'package_id'] as const) {
       const value = metadata[key];
