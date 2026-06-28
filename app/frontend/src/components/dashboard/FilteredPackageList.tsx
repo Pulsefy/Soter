@@ -1,10 +1,14 @@
 'use client';
 
-import React from 'react';
+import React, { memo } from 'react';
 import { useAidPackages } from '@/hooks/useAidPackages';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { getAppUserRole, isOperationsRole } from '@/lib/app-role';
-import type { AidPackage, AidPackageFilters, AidPackageStatus } from '@/types/aid-package';
+import type {
+  AidPackage,
+  AidPackageFilters,
+  AidPackageStatus,
+} from '@/types/aid-package';
 
 const STATUS_STYLES: Record<AidPackageStatus, string> = {
   Active:
@@ -15,17 +19,31 @@ const STATUS_STYLES: Record<AidPackageStatus, string> = {
     'bg-gray-100 text-gray-500 border border-gray-200 dark:bg-gray-800/40 dark:text-gray-400 dark:border-gray-700',
 };
 
-const TABLE_HEADERS = ['ID', 'Title', 'Region', 'Amount', 'Recipients', 'Status', 'Token'];
+const TABLE_HEADERS = [
+  'ID',
+  'Title',
+  'Region',
+  'Amount',
+  'Recipients',
+  'Status',
+  'Token',
+];
 
-function StatusBadge({ status }: { status: AidPackageStatus }) {
+const StatusBadge = memo(function StatusBadge({
+  status,
+}: {
+  status: AidPackageStatus;
+}) {
   return (
-    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[status]}`}>
+    <span
+      className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[status]}`}
+    >
       {status}
     </span>
   );
-}
+});
 
-function SkeletonRow() {
+const SkeletonRow = memo(function SkeletonRow() {
   return (
     <tr>
       {TABLE_HEADERS.map(h => (
@@ -35,9 +53,9 @@ function SkeletonRow() {
       ))}
     </tr>
   );
-}
+});
 
-function PackageCard({ pkg }: { pkg: AidPackage }) {
+const PackageCard = memo(function PackageCard({ pkg }: { pkg: AidPackage }) {
   return (
     <div className="p-4 rounded-lg border border-gray-100 dark:border-gray-800 space-y-1.5">
       <div className="flex items-start justify-between gap-2">
@@ -55,13 +73,15 @@ function PackageCard({ pkg }: { pkg: AidPackage }) {
       <p className="text-xs font-mono text-gray-400">{pkg.id}</p>
     </div>
   );
-}
+});
 
 interface FilteredPackageListProps {
   filters: AidPackageFilters;
 }
 
-export function FilteredPackageList({ filters }: FilteredPackageListProps) {
+export const FilteredPackageList = memo(function FilteredPackageList({
+  filters,
+}: FilteredPackageListProps) {
   const { data: packages, isLoading, error } = useAidPackages(filters);
   const role = getAppUserRole();
   const hasFilters = Boolean(filters.search || filters.status || filters.token);
@@ -104,11 +124,17 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
                   key={pkg.id}
                   className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
                 >
-                  <td className="py-4 pr-6 font-mono text-xs text-gray-400">{pkg.id}</td>
+                  <td className="py-4 pr-6 font-mono text-xs text-gray-400">
+                    {pkg.id}
+                  </td>
                   <td className="py-4 pr-6 font-medium">{pkg.title}</td>
-                  <td className="py-4 pr-6 text-gray-600 dark:text-gray-400">{pkg.region}</td>
+                  <td className="py-4 pr-6 text-gray-600 dark:text-gray-400">
+                    {pkg.region}
+                  </td>
                   <td className="py-4 pr-6 font-semibold">{pkg.amount}</td>
-                  <td className="py-4 pr-6 text-gray-600 dark:text-gray-400">{pkg.recipients}</td>
+                  <td className="py-4 pr-6 text-gray-600 dark:text-gray-400">
+                    {pkg.recipients}
+                  </td>
                   <td className="py-4 pr-6">
                     <StatusBadge status={pkg.status} />
                   </td>
@@ -121,7 +147,10 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
               ))
             ) : (
               <tr>
-                <td colSpan={TABLE_HEADERS.length} className="py-12 text-center">
+                <td
+                  colSpan={TABLE_HEADERS.length}
+                  className="py-12 text-center"
+                >
                   <div className="mx-auto max-w-3xl text-left">
                     <AppEmptyState
                       compact
@@ -143,17 +172,44 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
                       actions={
                         hasFilters
                           ? [
-                              { href: '/dashboard', label: 'Reset dashboard filters', icon: 'next' },
-                              { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                              {
+                                href: '/dashboard',
+                                label: 'Reset dashboard filters',
+                                icon: 'next',
+                              },
+                              {
+                                href: '/help',
+                                label: 'View help',
+                                icon: 'docs',
+                                variant: 'secondary',
+                              },
                             ]
                           : isOperationsRole(role)
                             ? [
-                                { href: '/campaigns', label: 'Create sample campaign', icon: 'sample' },
-                                { href: '/help', label: 'Open contributor help', icon: 'docs', variant: 'secondary' },
+                                {
+                                  href: '/campaigns',
+                                  label: 'Create sample campaign',
+                                  icon: 'sample',
+                                },
+                                {
+                                  href: '/help',
+                                  label: 'Open contributor help',
+                                  icon: 'docs',
+                                  variant: 'secondary',
+                                },
                               ]
                             : [
-                                { href: '/', label: 'Try verification flow', icon: 'next' },
-                                { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                                {
+                                  href: '/',
+                                  label: 'Try verification flow',
+                                  icon: 'next',
+                                },
+                                {
+                                  href: '/help',
+                                  label: 'View help',
+                                  icon: 'docs',
+                                  variant: 'secondary',
+                                },
                               ]
                       }
                     />
@@ -203,12 +259,26 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
             actions={
               isOperationsRole(role)
                 ? [
-                    { href: '/campaigns', label: 'Create sample campaign', icon: 'sample' },
-                    { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                    {
+                      href: '/campaigns',
+                      label: 'Create sample campaign',
+                      icon: 'sample',
+                    },
+                    {
+                      href: '/help',
+                      label: 'View help',
+                      icon: 'docs',
+                      variant: 'secondary',
+                    },
                   ]
                 : [
                     { href: '/', label: 'Try verification flow', icon: 'next' },
-                    { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                    {
+                      href: '/help',
+                      label: 'View help',
+                      icon: 'docs',
+                      variant: 'secondary',
+                    },
                   ]
             }
           />
@@ -216,4 +286,4 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
       </div>
     </>
   );
-}
+});

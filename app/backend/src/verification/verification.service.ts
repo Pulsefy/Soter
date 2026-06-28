@@ -11,11 +11,14 @@ import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClaimStatus, Prisma } from '@prisma/client';
 import { CreateVerificationDto } from './dto/create-verification.dto';
+import type { AnchorMetadata } from './dto/review-queue-query.dto';
+
 import {
   ReviewQueuePaginationMode,
   ReviewQueueQueryDto,
 } from './dto/review-queue-query.dto';
 import {
+
   VerificationJobData,
   VerificationResult,
 } from './interfaces/verification-job.interface';
@@ -53,9 +56,10 @@ interface Claim {
   id: string;
   status: string;
   campaignId: string;
-  amount: unknown;
+  anchorMetadata?: AnchorMetadata | null;
   recipientRef: string;
   evidenceRef?: string | null;
+  anchorMetadata?: AnchorMetadata | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,10 +69,11 @@ interface Claim {
 interface AIVerificationResponse {
   score: number; // 0–1 normalised legitimacy score
   confidence: number; // 0–1 model confidence
-  riskLevel: 'low' | 'medium' | 'high';
+  anchor_metadata?: AnchorMetadata | null;
   factors: string[]; // positive verification signals
   riskFactors: string[]; // identified concerns / red-flags
   recommendations: string[]; // next steps if human review needed
+  anchor_metadata?: AnchorMetadata | null; // optional on-chain correlation identifiers
 }
 
 // ---------------------------------------------------------------------------
@@ -267,13 +272,17 @@ export class VerificationService {
       result = await this.performAIVerification(claim);
     }
 
-    const shouldVerify = result.score >= this.verificationThreshold;
+    const claimUpdateData: {
+  status: string;
+  anchorMetadata?: Record<string, string | null> | null;
+} = {
+  status: shouldVerify ? 'verified' : 'requested',
+  anchorMetadata: result.anchor_metadata ?? undefined,
+};
 
     await this.prisma.claim.update({
       where: { id: claimId },
-      data: {
-        status: shouldVerify ? 'verified' : 'requested',
-      },
+      data: claimUpdateData as Parameters<typeof this.prisma.claim.update>[0]['data'],
     });
 
     this.logger.log(
@@ -289,6 +298,7 @@ export class VerificationService {
       metadata: {
         score: result.score,
         status: shouldVerify ? 'verified' : 'requested',
+        anchor_metadata: result.anchor_metadata ?? null,
       },
     });
 
@@ -413,7 +423,12 @@ The JSON object must have exactly these keys:
   "riskLevel": <"low"|"medium"|"high">,
   "factors": [<string>, ...],
   "riskFactors": [<string>, ...],
-  "recommendations": [<string>, ...]
+  "recommendations": [<string>, ...],
+  "anchor_metadata": {
+    "campaign_ref": "${claim.campaignId}",
+    "claim_id": "${claim.id}",
+    "package_id": <string or null when unavailable>
+  }
 }
 `.trim();
 
@@ -617,7 +632,27 @@ the JSON verdict.
           ai.recommendations.length > 0 ? ai.recommendations : undefined,
       },
       processedAt: new Date(),
+      anchor_metadata: this.normalizeAnchorMetadata(ai.anchor_metadata),
     };
+  }
+
+ private normalizeAnchorMetadata(
+  metadata: Record<string, string | null> | null | undefined,
+): Record<string, string | null> | null {
+    if (!metadata || typeof metadata !== 'object') {
+      return null;
+    }
+    const normalized: AnchorMetadata = {};
+    for (const key of ['campaign_ref', 'claim_id', 'package_id'] as const) {
+      const value = metadata[key];
+      if (typeof value === 'string' && value.trim().length > 0) {
+        normalized[key] = value.trim();
+      } else if (value === null) {
+        normalized[key] = null;
+      }
+    }
+
+    return Object.keys(normalized).length > 0 ? normalized : null;
   }
 
   /**
@@ -805,7 +840,10 @@ the JSON verdict.
     if (!claim) {
       throw new NotFoundException(`Claim with ID ${id} not found`);
     }
-    return claim;
+    return {
+      ...claim,
+      anchor_metadata: (claim as Claim).anchorMetadata ?? null,
+    };
   }
 
   async findByUser(_userId: string) {

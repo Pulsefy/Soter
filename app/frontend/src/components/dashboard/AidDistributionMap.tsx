@@ -1,9 +1,16 @@
-"use client";
+'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { MapContainer, Marker, Popup, TileLayer, useMapEvents } from 'react-leaflet';
+import {
+  MapContainer,
+  Marker,
+  Popup,
+  TileLayer,
+  useMapEvents,
+} from 'react-leaflet';
 import L from 'leaflet';
+import { useQuery } from '@tanstack/react-query';
 import { fetchClient } from '@/lib/mock-api/client';
 import { getAppUserRole, isOperationsRole } from '@/lib/app-role';
 
@@ -97,7 +104,13 @@ function formatStatus(status: string) {
     .replace(/\b\w/g, value => value.toUpperCase());
 }
 
-function createMarkerIcon({ count, status }: { count?: number; status?: string }) {
+function createMarkerIcon({
+  count,
+  status,
+}: {
+  count?: number;
+  status?: string;
+}) {
   if (count && count > 1) {
     return L.divIcon({
       className: 'aid-marker aid-marker--cluster',
@@ -108,7 +121,9 @@ function createMarkerIcon({ count, status }: { count?: number; status?: string }
     });
   }
 
-  const normalizedStatus = String(status ?? '').toLowerCase().replace(/\s/g, '_');
+  const normalizedStatus = String(status ?? '')
+    .toLowerCase()
+    .replace(/\s/g, '_');
   const statusClass = STATUS_STYLES[normalizedStatus] ?? 'aid-marker--default';
 
   return L.divIcon({
@@ -130,53 +145,111 @@ function ZoomWatcher({ onZoom }: { onZoom: (zoom: number) => void }) {
   return null;
 }
 
+async function fetchMapPoints(): Promise<AidPackagePoint[]> {
+  const response = await fetchClient(`${API_URL}/analytics/map-data`);
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+
+  const payload: unknown = await response.json();
+  const rawPoints = Array.isArray(payload)
+    ? payload
+    : payload &&
+        typeof payload === 'object' &&
+        Array.isArray((payload as { data?: unknown }).data)
+      ? (payload as { data: unknown[] }).data
+      : [];
+
+  return rawPoints
+    .map(normalizePoint)
+    .filter((item): item is AidPackagePoint => Boolean(item));
+}
+
+const MarkerLayer = memo(function MarkerLayer({
+  clusters,
+}: {
+  clusters: Cluster[];
+}) {
+  return (
+    <>
+      {clusters.map(cluster => {
+        const icon = createMarkerIcon({
+          count: cluster.points.length,
+          status: cluster.points[0]?.status,
+        });
+
+        return (
+          <Marker
+            key={cluster.id}
+            position={[cluster.lat, cluster.lng]}
+            icon={icon}
+          >
+            <Popup className="aid-popup">
+              {cluster.points.length > 1 ? (
+                <div className="space-y-3">
+                  <p className="text-sm font-semibold">
+                    {cluster.points.length} packages
+                  </p>
+                  <div className="space-y-2">
+                    {cluster.points.slice(0, 5).map(point => (
+                      <div key={point.id} className="text-xs">
+                        <p className="font-medium">
+                          {point.amount} {point.token}
+                        </p>
+                        <p className="text-gray-600">
+                          {formatStatus(point.status)}
+                        </p>
+                      </div>
+                    ))}
+                    {cluster.points.length > 5 && (
+                      <p className="text-xs text-gray-500">
+                        +{cluster.points.length - 5} more packages
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold">Package Details</p>
+                  <div className="text-xs space-y-1">
+                    <p>
+                      <span className="font-medium">Amount:</span>{' '}
+                      {cluster.points[0].amount}
+                    </p>
+                    <p>
+                      <span className="font-medium">Token:</span>{' '}
+                      {cluster.points[0].token}
+                    </p>
+                    <p>
+                      <span className="font-medium">Status:</span>{' '}
+                      {formatStatus(cluster.points[0].status)}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </Popup>
+          </Marker>
+        );
+      })}
+    </>
+  );
+});
+
 export default function AidDistributionMap() {
   const role = getAppUserRole();
-  const [points, setPoints] = useState<AidPackagePoint[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [isDark, setIsDark] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadData() {
-      try {
-        setLoading(true);
-        const response = await fetchClient(`${API_URL}/analytics/map-data`);
-        if (!response.ok) {
-          throw new Error(`Request failed: ${response.status}`);
-        }
-        const payload: unknown = await response.json();
-        const rawPoints = Array.isArray(payload)
-          ? payload
-          : payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)
-            ? (payload as { data: unknown[] }).data
-            : [];
-        const normalized = rawPoints
-          .map(normalizePoint)
-          .filter((item): item is AidPackagePoint => Boolean(item));
-
-        if (active) {
-          setPoints(normalized);
-          setError(null);
-        }
-      } catch {
-        if (active) {
-          setError('Unable to load live distribution data.');
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
-    loadData();
-
-    return () => {
-      active = false;
-    };
-  }, []);
+  const {
+    data: points = [],
+    isLoading: loading,
+    error,
+  } = useQuery({
+    queryKey: ['dashboard-map-data'],
+    queryFn: fetchMapPoints,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+  });
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -191,7 +264,10 @@ export default function AidDistributionMap() {
     media.addEventListener('change', updateTheme);
 
     const observer = new MutationObserver(updateTheme);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
 
     return () => {
       media.removeEventListener('change', updateTheme);
@@ -213,7 +289,7 @@ export default function AidDistributionMap() {
             attribution:
               '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
           },
-    [isDark]
+    [isDark],
   );
 
   return (
@@ -231,57 +307,12 @@ export default function AidDistributionMap() {
           scrollWheelZoom
           className="aid-map"
         >
-          <TileLayer url={tileConfig.url} attribution={tileConfig.attribution} />
+          <TileLayer
+            url={tileConfig.url}
+            attribution={tileConfig.attribution}
+          />
           <ZoomWatcher onZoom={setZoom} />
-          {clusters.map(cluster => {
-            const icon = createMarkerIcon({
-              count: cluster.points.length,
-              status: cluster.points[0]?.status,
-            });
-
-            return (
-              <Marker key={cluster.id} position={[cluster.lat, cluster.lng]} icon={icon}>
-                <Popup className="aid-popup">
-                  {cluster.points.length > 1 ? (
-                    <div className="space-y-3">
-                      <p className="text-sm font-semibold">{cluster.points.length} packages</p>
-                      <div className="space-y-2">
-                        {cluster.points.slice(0, 5).map(point => (
-                          <div key={point.id} className="text-xs">
-                            <p className="font-medium">
-                              {point.amount} {point.token}
-                            </p>
-                            <p className="text-gray-600">{formatStatus(point.status)}</p>
-                          </div>
-                        ))}
-                        {cluster.points.length > 5 && (
-                          <p className="text-xs text-gray-500">
-                            +{cluster.points.length - 5} more packages
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold">Package Details</p>
-                      <div className="text-xs space-y-1">
-                        <p>
-                          <span className="font-medium">Amount:</span> {cluster.points[0].amount}
-                        </p>
-                        <p>
-                          <span className="font-medium">Token:</span> {cluster.points[0].token}
-                        </p>
-                        <p>
-                          <span className="font-medium">Status:</span>{' '}
-                          {formatStatus(cluster.points[0].status)}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </Popup>
-              </Marker>
-            );
-          })}
+          <MarkerLayer clusters={clusters} />
         </MapContainer>
 
         {loading && (
@@ -291,7 +322,7 @@ export default function AidDistributionMap() {
         )}
         {error && !loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-white/70 dark:bg-gray-950/70 text-sm text-red-600">
-            {error}
+            Unable to load live distribution data.
           </div>
         )}
         {!loading && !error && points.length === 0 && (
@@ -301,7 +332,9 @@ export default function AidDistributionMap() {
                 Empty Map
               </p>
               <h3 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">
-                {isOperationsRole(role) ? 'No distribution points are available yet' : 'No live distribution activity is available yet'}
+                {isOperationsRole(role)
+                  ? 'No distribution points are available yet'
+                  : 'No live distribution activity is available yet'}
               </h3>
               <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
                 {isOperationsRole(role)
@@ -309,10 +342,18 @@ export default function AidDistributionMap() {
                   : 'This map becomes active once aid package data is available. In the meantime, you can explore verification and dashboard flows with sample guidance.'}
               </p>
               <div className="flex flex-wrap justify-center gap-3">
-                <Link href={isOperationsRole(role) ? '/campaigns' : '/'} className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
-                  {isOperationsRole(role) ? 'Create sample campaign' : 'Open verification flow'}
+                <Link
+                  href={isOperationsRole(role) ? '/campaigns' : '/'}
+                  className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  {isOperationsRole(role)
+                    ? 'Create sample campaign'
+                    : 'Open verification flow'}
                 </Link>
-                <Link href="/help" className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
+                <Link
+                  href="/help"
+                  className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
                   View help
                 </Link>
               </div>
