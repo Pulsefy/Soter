@@ -7,6 +7,8 @@
 import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SubmissionStatusBadge } from '../components/SubmissionStatusBadge';
+import { SubmissionQueueScreen } from '../screens/SubmissionQueueScreen';
 
 jest.mock('@expo/vector-icons', () => ({
   MaterialCommunityIcons: ({ name, testID }: { name: string; testID?: string }) => {
@@ -22,6 +24,32 @@ const QUEUE_KEY = '@soter/sync-queue';
 const seedStorage = async (items: object[]) => {
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(items));
 };
+
+const mockFetchStatus = (status: number) => {
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: status >= 200 && status < 300,
+    status,
+    json: jest.fn().mockResolvedValue({ ok: true }),
+  }) as unknown as typeof fetch;
+};
+
+const makeQueuedClaimSubmission = (overrides: Partial<object> = {}) => ({
+  id: 'queued-claim-1',
+  type: 'claim-submission',
+  payload: {
+    aidId: 'aid-1',
+    claimId: 'claim-1',
+    idempotencyKey: 'idem-queued-1',
+  },
+  state: 'pending',
+  retryCount: 0,
+  maxRetries: 5,
+  nextRetryAt: new Date(Date.now() - 1000).toISOString(),
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  lastError: null,
+  ...overrides,
+});
 
 type SyncQueueModule = typeof import('../services/syncQueue');
 
@@ -100,6 +128,94 @@ describe('syncQueue – claim-submission idempotency', () => {
   });
 });
 
+describe('syncQueue retry classification', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    jest.clearAllMocks();
+  });
+
+  it('queues an online claim submission after a retryable server failure', async () => {
+    mockFetchStatus(500);
+
+    const { dispatchNetworkAction, getSyncQueueState } = loadFreshQueue();
+
+    const result = await dispatchNetworkAction(
+      {
+        type: 'claim-submission',
+        payload: {
+          aidId: 'aid-1',
+          claimId: 'claim-1',
+          idempotencyKey: 'idem-retryable-500',
+        },
+      },
+      { online: true },
+    );
+
+    expect(result.status).toBe('queued');
+
+    const state = await getSyncQueueState();
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0].state).toBe('pending');
+    expect(state.lastSyncError).toContain('500');
+  });
+
+  it('does not queue an online claim submission after a non-retryable client failure', async () => {
+    mockFetchStatus(400);
+
+    const { dispatchNetworkAction, getSyncQueueState } = loadFreshQueue();
+
+    await expect(
+      dispatchNetworkAction(
+        {
+          type: 'claim-submission',
+          payload: {
+            aidId: 'aid-1',
+            claimId: 'claim-1',
+            idempotencyKey: 'idem-nonretryable-400',
+          },
+        },
+        { online: true },
+      ),
+    ).rejects.toThrow('400');
+
+    const state = await getSyncQueueState();
+    expect(state.items).toHaveLength(0);
+  });
+
+  it('keeps a queued item retrying after a retryable flush failure', async () => {
+    mockFetchStatus(503);
+
+    await seedStorage([makeQueuedClaimSubmission()]);
+
+    const { flushPendingNetworkActions, getSyncQueueState } = loadFreshQueue();
+
+    await flushPendingNetworkActions({ online: true });
+
+    const state = await getSyncQueueState();
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0].state).toBe('retrying');
+    expect(state.items[0].retryCount).toBe(1);
+    expect(state.items[0].lastError).toContain('503');
+    expect(new Date(state.items[0].nextRetryAt).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('marks a queued item failed after a non-retryable flush failure', async () => {
+    mockFetchStatus(401);
+
+    await seedStorage([makeQueuedClaimSubmission()]);
+
+    const { flushPendingNetworkActions, getSyncQueueState } = loadFreshQueue();
+
+    await flushPendingNetworkActions({ online: true });
+
+    const state = await getSyncQueueState();
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0].state).toBe('failed');
+    expect(state.items[0].retryCount).toBe(1);
+    expect(state.items[0].lastError).toContain('401');
+  });
+});
+
 // ── syncQueue retryFailedAction ───────────────────────────────────────────────
 
 describe('syncQueue – retryFailedAction', () => {
@@ -162,7 +278,50 @@ describe('syncQueue – retryFailedAction', () => {
 
 // ── SubmissionStatusBadge ─────────────────────────────────────────────────────
 
-import { SubmissionStatusBadge } from '../components/SubmissionStatusBadge';
+jest.mock('../contexts/SyncContext', () => ({
+  useSync: () => ({
+    items: [
+      {
+        id: 'queued-claim-1',
+        type: 'claim-submission',
+        payload: {
+          aidId: 'aid-1',
+          claimId: 'claim-1',
+          idempotencyKey: 'idem-queued-1',
+        },
+        state: 'failed',
+        retryCount: 2,
+        maxRetries: 5,
+        nextRetryAt: new Date('2026-06-26T12:00:00.000Z').toISOString(),
+        createdAt: new Date('2026-06-26T10:00:00.000Z').toISOString(),
+        updatedAt: new Date('2026-06-26T11:00:00.000Z').toISOString(),
+        lastError: 'HTTP error! status: 503',
+      },
+    ],
+    isSyncing: false,
+    isConnected: true,
+    lastSyncAt: new Date('2026-06-26T11:30:00.000Z').toISOString(),
+    lastSyncError: 'HTTP error! status: 503',
+    pendingCount: 1,
+    failedCount: 1,
+    flushNow: jest.fn(),
+    retryAction: jest.fn(),
+  }),
+}));
+
+jest.mock('../theme/ThemeContext', () => ({
+  useTheme: () => ({
+    colors: {
+      background: '#FFFFFF',
+      surface: '#F9FAFB',
+      border: '#E5E7EB',
+      textPrimary: '#111827',
+      textSecondary: '#6B7280',
+      primary: '#2563EB',
+      error: '#DC2626',
+    },
+  }),
+}));
 
 describe('SubmissionStatusBadge', () => {
   it('shows "Queued" for pending state', () => {
@@ -207,5 +366,19 @@ describe('SubmissionStatusBadge', () => {
   it('does not show retry button when onRetry is not provided', () => {
     const { queryByTestId } = render(<SubmissionStatusBadge state="failed" />);
     expect(queryByTestId('badge-retry-button')).toBeNull();
+  });
+});
+
+describe('SubmissionQueueScreen', () => {
+  it('shows queued submission state on a dedicated screen', () => {
+    const { getByText } = render(<SubmissionQueueScreen />);
+
+    expect(getByText('Submission Queue')).toBeTruthy();
+    expect(getByText('Online · 1 pending · 1 failed')).toBeTruthy();
+    expect(getByText('Claim Submission')).toBeTruthy();
+    expect(getByText('Claim ID: claim-1')).toBeTruthy();
+    expect(getByText('Failed')).toBeTruthy();
+    expect(getByText('2 / 5')).toBeTruthy();
+    expect(getByText('HTTP error! status: 503')).toBeTruthy();
   });
 });

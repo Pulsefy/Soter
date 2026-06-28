@@ -6,6 +6,12 @@ export type CacheResult = 'hit' | 'miss';
 
 @Injectable()
 export class MetricsService {
+  // Dynamic metrics storage for Soroban transaction lifecycle tracking
+  private sorobanTransactionLatency?: Histogram<string>;
+  private readonly dynamicCounters = new Map<string, Counter<string>>();
+  private readonly dynamicGauges = new Map<string, Gauge<string>>();
+  private readonly dynamicHistograms = new Map<string, Histogram<string>>();
+
   constructor(
     @InjectMetric('http_requests_total')
     public httpRequestsCounter: Counter<string>,
@@ -223,5 +229,99 @@ export class MetricsService {
    */
   incrementAnalyticsCacheInvalidation(reason: string): void {
     this.analyticsCacheInvalidationsCounter.inc({ reason });
+  }
+
+  /**
+   * Record Soroban transaction latency with comprehensive status tracking
+   */
+  recordSorobanTransactionLatency(
+    operation: string,
+    status: 'success' | 'failed',
+    duration: number,
+  ): void {
+    // Create dynamic histogram if it doesn't exist
+    if (!this.sorobanTransactionLatency) {
+      this.sorobanTransactionLatency = new Histogram({
+        name: 'soroban_transaction_duration_seconds',
+        help: 'Duration of Soroban transaction operations with lifecycle tracking',
+        labelNames: ['operation', 'status'],
+        buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300],
+      });
+    }
+
+    this.sorobanTransactionLatency.observe(
+      {
+        operation,
+        status,
+      },
+      duration,
+    );
+  }
+
+  /**
+   * Increment counter with dynamic labels for flexible metrics
+   */
+  incrementCounter(name: string, labels?: Record<string, string>): void {
+    if (!this.dynamicCounters.has(name)) {
+      this.dynamicCounters.set(
+        name,
+        new Counter({
+          name,
+          help: `Counter for ${name}`,
+          labelNames: labels ? Object.keys(labels) : [],
+        }),
+      );
+    }
+
+    const counter = this.dynamicCounters.get(name)!;
+    counter.inc(labels || {});
+  }
+
+  /**
+   * Set gauge value with dynamic labels for monitoring
+   */
+  setGauge(name: string, value: number, labels?: Record<string, string>): void {
+    if (!this.dynamicGauges.has(name)) {
+      this.dynamicGauges.set(
+        name,
+        new Gauge({
+          name,
+          help: `Gauge for ${name}`,
+          labelNames: labels ? Object.keys(labels) : [],
+        }),
+      );
+    }
+
+    const gauge = this.dynamicGauges.get(name)!;
+    if (labels) {
+      gauge.set(labels, value);
+    } else {
+      gauge.set(value);
+    }
+  }
+
+  /**
+   * Record histogram metrics for duration tracking
+   */
+  recordHistogram(
+    name: string,
+    value: number,
+    labels?: Record<string, string>,
+  ): void {
+    const key = `${name}_histogram`;
+    if (!this.dynamicHistograms.has(key)) {
+      this.dynamicHistograms.set(
+        key,
+        new Histogram({
+          name,
+          help: `Histogram for ${name}`,
+          labelNames: labels ? Object.keys(labels) : [],
+          buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60],
+        }),
+      );
+    }
+
+    const histogram = this.dynamicHistograms.get(key)!;
+    histogram.observe(labels || {}, value);
   }
 }

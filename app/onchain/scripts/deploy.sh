@@ -138,6 +138,38 @@ if [ -n "$CONTRACT_ID" ]; then
         
         echo "📝 Updated .env with contract ID and version"
     fi
+
+    # Register in deployments/registry.json and write markdown record
+    if command -v python3 >/dev/null 2>&1; then
+        REGISTER_OUT=$(python3 "$SCRIPT_DIR/register-deployment.py" \
+            --project-dir "$PROJECT_DIR" \
+            --contract-name "$CONTRACT_NAME" \
+            --contract-id "$CONTRACT_ID" \
+            --version "$CONTRACT_VERSION" \
+            --network "$NETWORK" \
+            --wasm "$WASM_FILE" \
+            --deployer "${PUBLIC_KEY:-}" 2>&1) || {
+            echo "⚠️  Registry update failed:"
+            echo "$REGISTER_OUT"
+        }
+
+        if [ -n "$REGISTER_OUT" ]; then
+            echo "$REGISTER_OUT" | while IFS= read -r line; do
+                case "$line" in
+                    VERSION_TAG=*)
+                        TAG="${line#VERSION_TAG=}"
+                        echo "🏷️  Version tag: $TAG"
+                        echo "   git tag -a '$TAG' -m '$CONTRACT_NAME $CONTRACT_VERSION $NETWORK deploy ($CONTRACT_ID)'"
+                        ;;
+                    RECORD=*)
+                        echo "📄 Deployment record: ${line#RECORD=}"
+                        ;;
+                esac
+            done
+        fi
+    else
+        echo "⚠️  python3 not found; skipped registry update (run scripts/register-deployment.py manually)"
+    fi
 else
     echo "⚠️  Could not extract contract ID from output:"
     echo "$DEPLOY_OUTPUT"

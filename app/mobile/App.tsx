@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as ExpoLinking from 'expo-linking';
 import {
   NavigationContainer,
@@ -54,12 +54,13 @@ const AppInner = () => {
   const navigationRef =
     useRef<NavigationContainerRef<RootStackParamList>>(null);
   const { isForceUpgrade, isLoading } = useUpdate();
+  const [isNavReady, setIsNavReady] = useState(false);
 
   // -----------------------------------------------------------------------
   // Navigate when a deep link is pending (from notification tap)
   // -----------------------------------------------------------------------
   useEffect(() => {
-    if (!pendingDeepLink) return;
+    if (!pendingDeepLink || !isNavReady) return;
 
     const navParams = deepLinkToNavParams(pendingDeepLink);
     if (!navParams) {
@@ -67,32 +68,14 @@ const AppInner = () => {
       return;
     }
 
-    let active = true;
-    let retryTimer: NodeJS.Timeout | null = null;
-
-    const attemptNavigate = () => {
-      if (!active) return;
-      if (navigationRef.current?.isReady?.()) {
-        navigationRef.current.navigate(
-          navParams.screen as any,
-          navParams.params as any,
-        );
-        consumeDeepLink();
-        return;
-      }
-
-      retryTimer = setTimeout(attemptNavigate, 100);
-    };
-
-    attemptNavigate();
-
-    return () => {
-      active = false;
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-      }
-    };
-  }, [pendingDeepLink, consumeDeepLink]);
+    if (navigationRef.current?.isReady?.()) {
+      navigationRef.current.navigate(
+        navParams.screen as any,
+        navParams.params as any,
+      );
+      consumeDeepLink();
+    }
+  }, [pendingDeepLink, isNavReady, consumeDeepLink]);
 
   if (isLoading) {
     return null;
@@ -110,6 +93,7 @@ const AppInner = () => {
             linking={linking}
             theme={navTheme}
             ref={navigationRef}
+            onReady={() => setIsNavReady(true)}
           >
             <AppNavigator />
             <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />

@@ -27,7 +27,10 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
   const { aidId } = route.params;
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { isConnected, queueEvidenceUpload } = useSync();
+  const { isConnected, queueEvidenceUpload, getActionsForAid, retryAction } = useSync();
+
+  const uploadActions = useMemo(() => getActionsForAid(aidId), [getActionsForAid, aidId]);
+  const activeUpload = useMemo(() => uploadActions.find((a) => a.type === 'evidence-upload'), [uploadActions]);
 
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [compressedBase64, setCompressedBase64] = useState<string | null>(null);
@@ -207,10 +210,10 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
         <TouchableOpacity
           style={[styles.button, styles.primaryButton]}
           onPress={handleUpload}
-          disabled={!compressedBase64 || uploading}
+          disabled={!compressedBase64 || uploading || !!activeUpload}
           accessibilityRole="button"
           accessibilityLabel={uploading ? 'Uploading evidence' : 'Upload evidence now'}
-          accessibilityState={{ busy: uploading, disabled: !compressedBase64 || uploading }}
+          accessibilityState={{ busy: uploading, disabled: !compressedBase64 || uploading || !!activeUpload }}
           activeOpacity={0.8}
         >
           {uploading ? (
@@ -221,7 +224,61 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
         </TouchableOpacity>
         {statusMessage ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        {!isConnected ? (
+        {activeUpload ? (
+          <View style={styles.queueCard}>
+            <View style={styles.queueHeader}>
+              <Text style={styles.queueTitle}>
+                {activeUpload.state === 'failed'
+                  ? '⚠️ Upload Failed'
+                  : activeUpload.state === 'retrying'
+                  ? '🔄 Retrying Upload…'
+                  : '📤 Uploading…'}
+              </Text>
+              <Text style={styles.queueStatus}>
+                {activeUpload.state === 'failed'
+                  ? 'Unstable connection'
+                  : activeUpload.state === 'retrying'
+                  ? `Attempt ${activeUpload.retryCount} of ${activeUpload.maxRetries}`
+                  : 'Transferring chunks'}
+              </Text>
+            </View>
+            
+            <View style={styles.progressBarBg}>
+              <View 
+                style={[
+                  styles.progressBarFill, 
+                  { 
+                    width: `${Math.round((activeUpload.payload.progress || 0) * 100)}%`,
+                    backgroundColor: activeUpload.state === 'failed' ? colors.error : colors.brand.primary 
+                  }
+                ]} 
+              />
+            </View>
+            
+            <View style={styles.progressRow}>
+              <Text style={styles.progressText}>
+                {Math.round((activeUpload.payload.progress || 0) * 100)}% Completed
+              </Text>
+              {activeUpload.state === 'failed' && (
+                <TouchableOpacity 
+                  style={styles.retryButton} 
+                  onPress={() => retryAction(activeUpload.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry failed upload"
+                >
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            
+            {activeUpload.lastError ? (
+              <Text style={styles.errorDetails}>
+                Reason: {activeUpload.lastError}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+        {!isConnected && !activeUpload ? (
           <Text style={styles.offlineNotice}>
             Offline mode: evidence upload will queue and resend when the device reconnects.
           </Text>
@@ -326,5 +383,66 @@ const makeStyles = (colors: any) =>
       marginTop: 12,
       fontSize: 13,
       color: colors.textSecondary,
+    },
+    queueCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 14,
+      marginTop: 12,
+      gap: 10,
+    },
+    queueHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    queueTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    queueStatus: {
+      fontSize: 13,
+      color: colors.textSecondary,
+    },
+    progressBarBg: {
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.border,
+      overflow: 'hidden',
+      width: '100%',
+    },
+    progressBarFill: {
+      height: '100%',
+      borderRadius: 4,
+    },
+    progressRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    progressText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    retryButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+      backgroundColor: colors.brand.primary,
+    },
+    retryButtonText: {
+      color: '#FFFFFF',
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    errorDetails: {
+      fontSize: 12,
+      color: colors.error,
+      marginTop: 4,
+      lineHeight: 16,
     },
   });

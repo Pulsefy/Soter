@@ -2,11 +2,14 @@
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
+import { ErrorInline } from './ErrorInline';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { EvidenceArtifactViewer } from './EvidenceArtifactViewer';
 import { RedactionControls } from './RedactionControls';
 import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
 import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
+import { useToast } from '@/components/ToastProvider';
+import { normalizeError } from '@/lib/error-utils';
 import type {
     PiiDetectionResult,
     ValidationErrors,
@@ -64,7 +67,7 @@ interface EnhancedFlowState {
     imageFile: File | null;
     textInput: string;
     errors: ValidationErrors;
-    apiError: string | null;
+    apiError: Error | string | null;
     result: VerificationResult | null;
     evidenceArtifact: EvidenceArtifact | null;
     showArtifactViewer: boolean;
@@ -121,6 +124,7 @@ export const EnhancedVerificationFlow: React.FC = () => {
     const uid = useId();
     const role = getAppUserRole();
     const { isMismatch } = useNetworkGuard();
+    const { toast } = useToast();
     const [restoredDraft] = useState<EnhancedVerificationDraft | null>(() =>
         readEnhancedVerificationDraftFromStorage(),
     );
@@ -295,15 +299,21 @@ export const EnhancedVerificationFlow: React.FC = () => {
             })
             .catch((err: unknown) => {
                 if (cancelled) return;
-                if (err instanceof VerificationApiError) {
-                    setFlowState(prev => ({ ...prev, apiError: err.message, step: 'upload' }));
-                } else {
-                    setFlowState(prev => ({
-                        ...prev,
-                        apiError: 'An unexpected error occurred. Please try again.',
-                        step: 'upload',
-                    }));
-                }
+                const normalized = normalizeError(err);
+                
+                toast(
+                    'Verification Failed',
+                    normalized.correlationId
+                        ? `${normalized.message} (Correlation ID: ${normalized.correlationId})`
+                        : normalized.message,
+                    'error'
+                );
+
+                setFlowState(prev => ({
+                    ...prev,
+                    apiError: err as any,
+                    step: 'upload',
+                }));
                 pendingPayload.current = null;
             });
 
@@ -426,11 +436,13 @@ export const EnhancedVerificationFlow: React.FC = () => {
                     )}
                     
                     {flowState.apiError && (
-                        <div
-                            role="alert"
-                            className="mb-4 p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 text-sm"
-                        >
-                            {flowState.apiError}
+                        <div className="mb-6">
+                            <ErrorInline
+                                error={flowState.apiError}
+                                onRetry={() => setFlowState(prev => ({ ...prev, apiError: null }))}
+                                onClose={() => setFlowState(prev => ({ ...prev, apiError: null }))}
+                                variant="card"
+                            />
                         </div>
                     )}
 

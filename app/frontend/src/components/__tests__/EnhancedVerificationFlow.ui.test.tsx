@@ -5,6 +5,15 @@ import { render, screen } from '@testing-library/react';
 import { EnhancedVerificationFlow } from '../EnhancedVerificationFlow';
 import * as networkGuard from '@/hooks/useNetworkGuard';
 
+jest.mock('next-intl', () => ({
+  useTranslations: () => (key: string, params?: Record<string, string>) => {
+    if (key === 'wallet.networkMismatch') {
+      return `Network mismatch — your wallet is on ${params?.walletNetwork} but this app requires ${params?.expectedNetwork}. Open Freighter and switch to the correct network to continue.`;
+    }
+    return key;
+  },
+}));
+
 // Mocking the hooks that are used in EnhancedVerificationFlow to prevent errors
 jest.mock('@/hooks/useNetworkGuard');
 jest.mock('@/hooks/useActivity', () => ({

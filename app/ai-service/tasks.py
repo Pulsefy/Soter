@@ -13,6 +13,7 @@ import httpx
 
 import metrics
 from config import settings
+from services.load_shedder import ensure_queue_capacity
 from services.pii_scrubber import PIIScrubberService
 from services.humanitarian_verification import HumanitarianVerificationService
 from services.ocr_job import run_ocr_from_base64
@@ -453,6 +454,8 @@ def create_task(task_type: str, payload: Dict[str, Any]) -> str:
     
     # Initialize task status
     update_task_status(task_id, 'pending')
+    
+    ensure_queue_capacity()
     
     try:
         # Queue the task using the lazy-registered task

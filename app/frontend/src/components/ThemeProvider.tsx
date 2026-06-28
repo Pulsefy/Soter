@@ -11,6 +11,7 @@ export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
       defaultTheme="system"
       enableSystem
       enableColorScheme
+      storageKey="soter-theme"
       {...props}
     >
       {children}
