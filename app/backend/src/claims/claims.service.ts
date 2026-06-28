@@ -70,6 +70,9 @@ export class ClaimsService {
 
     claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
+    // Track funnel stage metric
+    this.metricsService.incrementFunnelStage('created', claim.campaignId);
+
     // Stub audit hook
     void this.auditLog('claim', claim.id, 'created', {
       status: claim.status,
@@ -109,19 +112,25 @@ export class ClaimsService {
   }
 
   async verify(id: string) {
-    return this.transitionStatus(
+    const claim = await this.transitionStatus(
       id,
       ClaimStatus.requested,
       ClaimStatus.verified,
     );
+    // Track funnel stage metric
+    this.metricsService.incrementFunnelStage('verified', claim.campaignId);
+    return claim;
   }
 
   async approve(id: string) {
-    return this.transitionStatus(
+    const claim = await this.transitionStatus(
       id,
       ClaimStatus.verified,
       ClaimStatus.approved,
     );
+    // Track funnel stage metric
+    this.metricsService.incrementFunnelStage('approved', claim.campaignId);
+    return claim;
   }
 
   async disburse(id: string) {
@@ -246,12 +255,15 @@ export class ClaimsService {
     }
 
     // Proceed with status transition
-    return this.transitionStatus(
+    const claim = await this.transitionStatus(
       id,
       ClaimStatus.approved,
       ClaimStatus.disbursed,
       onchainResult,
     );
+    // Track funnel stage metric
+    this.metricsService.incrementFunnelStage('disbursed', claim.campaignId);
+    return claim;
   }
 
   /**

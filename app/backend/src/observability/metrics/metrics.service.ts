@@ -21,6 +21,10 @@ export class MetricsService {
     public onchainOperationsCounter: Counter<string>,
     @InjectMetric('onchain_operation_duration_seconds')
     public onchainOperationDuration: Histogram<string>,
+    @InjectMetric('claims_funnel_stage_total')
+    public claimsFunnelStageTotalCounter: Counter<string>,
+    @InjectMetric('claims_funnel_stage_current')
+    public claimsFunnelStageCurrentGauge: Gauge<string>,
   ) {}
 
   /**
@@ -111,5 +115,65 @@ export class MetricsService {
       },
       duration,
     );
+  }
+
+  /**
+   * Increment funnel stage counter
+   */
+  incrementFunnelStage(stage: string, campaignId: string): void {
+    this.claimsFunnelStageTotalCounter.inc({
+      stage,
+      campaign_id: campaignId,
+    });
+  }
+
+  /**
+   * Set current funnel stage gauge
+   */
+  setFunnelStageCurrent(stage: string, campaignId: string, count: number): void {
+    this.claimsFunnelStageCurrentGauge.set(
+      {
+        stage,
+        campaign_id: campaignId,
+      },
+      count,
+    );
+  }
+
+  /**
+   * Refresh current funnel stage gauges from database
+   * This should be called periodically to keep gauges in sync with actual counts
+   */
+  async refreshFunnelStageGauges(prismaService: any): Promise<void> {
+    const stages = ['created', 'verified', 'approved', 'disbursed'];
+    
+    for (const stage of stages) {
+      // Map stage to database status
+      const statusMap: Record<string, string> = {
+        created: 'requested',
+        verified: 'verified',
+        approved: 'approved',
+        disbursed: 'disbursed',
+      };
+      
+      const dbStatus = statusMap[stage];
+      
+      // Get count for each campaign
+      const counts = await prismaService.claim.groupBy({
+        by: ['campaignId'],
+        where: {
+          status: dbStatus as any,
+          deletedAt: null,
+        },
+        _count: {
+          id: true,
+        },
+      });
+      
+      // Update gauges for each campaign
+      for (const count of counts) {
+        this.setFunnelStageCurrent(stage, count.campaignId, count._count.id);
+      }
+    }
   }
 }
