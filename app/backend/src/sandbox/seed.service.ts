@@ -4,6 +4,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import {
   DEMO_CAMPAIGN_SEEDS,
   DEMO_CLAIM_SEEDS,

@@ -52,6 +52,111 @@ export class CreateAidPackageDto {
   metadata?: Record<string, string>;
 }
 
+export class DryRunFeePreviewDto {
+  @ApiProperty({
+    description: 'Configured percentage used to estimate issuance fees',
+    example: '0',
+  })
+  feePercentage: string;
+
+  @ApiProperty({
+    description: 'Configured maximum fee cap',
+    example: '0',
+  })
+  maxFee: string;
+
+  @ApiProperty({
+    description: 'Estimated fee amount after applying the cap',
+    example: '0',
+  })
+  estimatedFee: string;
+
+  @ApiProperty({
+    description: 'Requested package amount plus the estimated fee',
+    example: '1000000000',
+  })
+  totalEstimatedDebit: string;
+}
+
+export class DryRunValidationErrorDto {
+  @ApiProperty({
+    description: 'Input field or validation domain that failed',
+    example: 'amount',
+  })
+  field: string;
+
+  @ApiProperty({
+    description: 'Human-readable validation error',
+    example: 'Amount must be a positive integer string',
+  })
+  message: string;
+}
+
+export class DryRunExpectedEventDto {
+  @ApiProperty({
+    description: 'Expected contract event topic',
+    example: 'package_created',
+  })
+  topic: string;
+
+  @ApiProperty({
+    description: 'Expected event payload',
+    example: {
+      package_id: 'pkg_123456789',
+      recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+      amount: '1000000000',
+      actor: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+      timestamp: '<ledger close time>',
+    },
+  })
+  payload: Record<string, string>;
+}
+
+export class DryRunAidPackageResultDto {
+  @ApiProperty({
+    description: 'Whether all dry-run validations passed',
+    example: true,
+  })
+  valid: boolean;
+
+  @ApiProperty({
+    description: 'Dry-run status. No transaction is submitted.',
+    example: 'dry_run',
+  })
+  status: 'dry_run';
+
+  @ApiProperty({
+    description: 'Package ID that would be issued',
+    example: 'pkg_123456789',
+  })
+  packageId: string;
+
+  @ApiProperty({ type: DryRunFeePreviewDto })
+  fees: DryRunFeePreviewDto;
+
+  @ApiProperty({ type: [DryRunExpectedEventDto] })
+  expectedEvents: DryRunExpectedEventDto[];
+
+  @ApiProperty({ type: [DryRunValidationErrorDto] })
+  validationErrors: DryRunValidationErrorDto[];
+
+  @ApiProperty({
+    description: 'Timestamp when the dry run was generated',
+    example: '2026-03-30T12:30:00.000Z',
+  })
+  timestamp: Date;
+
+  @ApiProperty({
+    description: 'Additional non-mutating simulation metadata',
+    example: {
+      operatorAddress: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+      tokenAddress: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+      stateChanges: false,
+    },
+  })
+  metadata: Record<string, any>;
+}
+
 /**
  * DTO for batch creating aid packages
  */

@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
-from exceptions import AIServiceError
+from exceptions import AIServiceError, LoadShedError
 from schemas.errors import ErrorDetail, ErrorEnvelope
 import time
 import metrics
@@ -271,22 +271,11 @@ async def monitor_requests(request: Request, call_next):
     if path in _NEVER_THROTTLE or is_redirect_path:
         return await call_next(request)
 
-    # Gracefully throttle if memory pressure is critical.
-    if not metrics.check_system_resources(memory_threshold_percent=90.0):
-        metrics.REQUEST_COUNT.labels(
-            method=request.method,
-            endpoint=path,
-            http_status=503,
-        ).inc()
-        return JSONResponse(
-            status_code=503,
-            content={
-                "detail": (
-                    "Service unavailable: System resources (RAM/VRAM) exhausted, "
-                    "gracefully throttling."
-                )
-            },
-        )
+    from services.load_shedder import evaluate_load_shed
+
+    shed_response = evaluate_load_shed(request)
+    if shed_response is not None:
+        return shed_response
 
     start_time = time.time()
     try:
@@ -417,6 +406,8 @@ async def _legacy_create_inference_task(
             "message": "Task queued for processing",
             "status_url": f"/v1/ai/status/{task_id}",
         }
+    except LoadShedError:
+        raise
     except Exception as e:
         logger.error(f"Failed to create inference task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")
@@ -586,6 +577,20 @@ async def validation_exception_handler(request, exc: RequestValidationError):
                 details=exc.errors(),
             )
         ).model_dump(),
+    )
+
+
+@app.exception_handler(LoadShedError)
+async def load_shed_exception_handler(request, exc: LoadShedError):
+    from services.load_shedder import build_shed_response
+
+    path = request.url.path
+    logger.warning("Load shedding request to %s due to %s", path, exc.reason)
+    return build_shed_response(
+        exc.reason,
+        request.method,
+        path,
+        details=exc.details,
     )
 
 

@@ -8,6 +8,7 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
+import { Request as ExpressRequest } from 'express';
 import { InvitesService } from './invites.service';
 import { AppRole } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';

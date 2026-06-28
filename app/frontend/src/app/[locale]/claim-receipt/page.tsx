@@ -11,13 +11,13 @@ export default function ClaimReceiptPage() {
   const claimId = searchParams.get('claimId');
 
   const [claim, setClaim] = useState<ClaimReceiptData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(Boolean(claimId));
+  const [error, setError] = useState<string | null>(
+    claimId ? null : 'Claim ID not provided',
+  );
 
   useEffect(() => {
     if (!claimId) {
-      setError('Claim ID not provided');
-      setLoading(false);
       return;
     }
 
@@ -61,13 +61,18 @@ export default function ClaimReceiptPage() {
   const handleShare = async () => {
     if (!claim) return;
 
+    const pageUrl = typeof window !== 'undefined' ? window.location.href : '';
+
     try {
-      // Try Web Share API first
       if (navigator.share) {
         await navigator.share({
           title: 'Claim Receipt',
           text: `Claim ${claim.claimId} - ${claim.status}`,
+          url: pageUrl,
         });
+      } else {
+        // Fallback: copy URL to clipboard
+        await navigator.clipboard.writeText(pageUrl);
       }
     } catch (err) {
       if (err instanceof Error && err.name !== 'AbortError') {
@@ -162,7 +167,7 @@ export default function ClaimReceiptPage() {
 
             {/* Support Information */}
             <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-6 border border-blue-200 dark:border-blue-800">
-              <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
+              <h3 className="font-semibold text-slate-950 dark:text-blue-100 mb-2">
                 Need help?
               </h3>
               <p className="text-blue-800 dark:text-blue-200 text-sm">

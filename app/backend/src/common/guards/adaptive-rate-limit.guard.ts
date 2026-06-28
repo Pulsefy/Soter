@@ -29,6 +29,12 @@ type RateLimitConfig = Record<
   { limit: number; window: number }
 >;
 
+interface RateLimitUser {
+  id?: string;
+  apiKeyId?: string;
+  authType?: 'apiKey' | 'envApiKey';
+}
+
 @Injectable()
 export class AdaptiveRateLimitGuard implements CanActivate {
   private readonly limits: RateLimitConfig = {
@@ -74,7 +80,7 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     const path = request.path ?? request.url ?? '';
     if (path.includes('/search')) return 'search';
 
-    const user = request.user;
+    const user = request.user as RateLimitUser | undefined;
     if (user) {
       if (user.authType === 'apiKey' || user.authType === 'envApiKey') {
         return 'apiKey';
@@ -90,10 +96,9 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     if (user?.id) return user.id;
     if (user?.apiKeyId) return user.apiKeyId;
 
-    const forwardedIp =
-      Array.isArray(request.ips) && request.ips.length > 0
-        ? request.ips[0]
-        : undefined;
+    const ips: string[] = request.ips;
+    const forwardedIp: string | undefined =
+      Array.isArray(ips) && ips.length > 0 ? ips[0] : undefined;
     return forwardedIp ?? request.ip ?? 'anonymous';
   }
 }

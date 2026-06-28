@@ -83,7 +83,7 @@ export class DeploymentMetadataController {
     );
     try {
       return await this.deploymentMetadataService.create(dto);
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to create deployment metadata:', error);
       if (hasPrismaErrorCode(error) && error.code === 'P2002') {
         throw new BadRequestException(
@@ -214,6 +214,44 @@ export class DeploymentMetadataController {
     }
 
     return metadata;
+  }
+
+  /**
+   * Refresh the contract-config cache (admin only)
+   * POST /deployment-metadata/cache/refresh
+   *
+   * Drops all cached contract ID / config snapshots and re-warms them from
+   * the database immediately. Useful after an out-of-band deployment or any
+   * time the cache needs to reflect the current DB state without waiting for
+   * the TTL to expire.
+   */
+  @Post('cache/refresh')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Refresh contract-config cache (admin only)',
+    description:
+      'Invalidates and re-warms all cached contract ID / deployment-config snapshots from the database.',
+  })
+  @ApiOkResponse({
+    description: 'Cache refreshed successfully.',
+    schema: {
+      type: 'object',
+      properties: {
+        refreshedAt: { type: 'string', format: 'date-time' },
+        contractCount: { type: 'integer' },
+        networkCount: { type: 'integer' },
+      },
+    },
+  })
+  @ApiInternalServerErrorResponse({ description: 'Cache refresh failed.' })
+  async refreshCache(): Promise<{
+    refreshedAt: Date;
+    contractCount: number;
+    networkCount: number;
+  }> {
+    this.logger.log('Admin-triggered contract-config cache refresh');
+    return this.deploymentMetadataService.refreshCache();
   }
 
   /**

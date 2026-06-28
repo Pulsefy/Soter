@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { BadRequestException } from '@nestjs/common';
 import { AidEscrowService } from '../src/onchain/aid-escrow.service';
 import { AidEscrowController } from '../src/onchain/aid-escrow.controller';
@@ -22,6 +23,7 @@ describe('Transaction Status Polling', () => {
         BudgetService,
         { provide: PrismaService, useValue: {} },
         { provide: ONCHAIN_ADAPTER_TOKEN, useValue: mockAdapter },
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('testnet') } },
       ],
     }).compile();
 
