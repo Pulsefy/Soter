@@ -7,6 +7,27 @@ import {
 } from '@nestjs/common';
 import { RedisService } from '@liaoliaots/nestjs-redis';
 import { Request } from 'express';
+import type { Redis } from 'ioredis';
+
+interface RateLimitedUser {
+  id?: string;
+  apiKeyId?: string;
+  authType?: 'apiKey' | 'envApiKey';
+}
+
+type RateLimitedRequest = Request & {
+  path?: string;
+  url?: string;
+  ip?: string;
+  ips?: string[];
+  user?: RateLimitedUser;
+};
+
+type RateLimitStrategy = 'auth' | 'search' | 'public' | 'apiKey';
+type RateLimitConfig = Record<
+  RateLimitStrategy,
+  { limit: number; window: number }
+>;
 
 interface RateLimitUser {
   id?: string;
@@ -16,7 +37,7 @@ interface RateLimitUser {
 
 @Injectable()
 export class AdaptiveRateLimitGuard implements CanActivate {
-  private readonly limits = {
+  private readonly limits: RateLimitConfig = {
     auth: { limit: 5, window: 60 },
     search: { limit: 30, window: 60 },
     public: { limit: 10, window: 60 },
@@ -26,8 +47,8 @@ export class AdaptiveRateLimitGuard implements CanActivate {
   constructor(private readonly redisService: RedisService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request: Request = context.switchToHttp().getRequest<Request>();
-    const client = this.redisService.getOrThrow();
+    const request = context.switchToHttp().getRequest<RateLimitedRequest>();
+    const client: Redis = this.redisService.getOrThrow();
 
     const strategy = this.getStrategy(request);
     const { limit, window } = this.limits[strategy];
@@ -55,11 +76,8 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     return true;
   }
 
-  private getStrategy(request: Request): keyof typeof this.limits {
-    const path: string =
-      (request.path as string | undefined) ??
-      (request.url as string | undefined) ??
-      '';
+  private getStrategy(request: RateLimitedRequest): RateLimitStrategy {
+    const path = request.path ?? request.url ?? '';
     if (path.includes('/search')) return 'search';
 
     const user = request.user as RateLimitUser | undefined;
@@ -73,8 +91,8 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     return 'public';
   }
 
-  private getIdentifier(request: Request): string {
-    const user = request.user as RateLimitUser | undefined;
+  private getIdentifier(request: RateLimitedRequest): string {
+    const user = request.user;
     if (user?.id) return user.id;
     if (user?.apiKeyId) return user.apiKeyId;
 
