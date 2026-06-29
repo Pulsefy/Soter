@@ -208,7 +208,7 @@ def test_humanitarian_verification_success(client, monkeypatch):
     assert data["result"]["verification"]["verdict"] == "credible"
 
 
-def test_humanitarian_verification_failure(client, monkeypatch):
+def test_humanitarian_verification_failure(monkeypatch):
     """Test humanitarian verification failure path returns an error envelope."""
 
     def fake_verify_claim(aid_claim, supporting_evidence=None, context_factors=None, provider_preference="auto"):
@@ -216,7 +216,9 @@ def test_humanitarian_verification_failure(client, monkeypatch):
 
     monkeypatch.setattr(main.humanitarian_verification_service, "verify_claim", fake_verify_claim)
 
-    response = client.post(
+    # Use raise_server_exceptions=False so RuntimeError returns a 500 response
+    safe_client = TestClient(app, raise_server_exceptions=False)
+    response = safe_client.post(
         "/ai/humanitarian/verify",
         json={
             "aid_claim": "Temporary clinics are fully operational in all camps.",
