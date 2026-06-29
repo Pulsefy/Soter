@@ -34,12 +34,12 @@ jobs:
           workspaces: "app/onchain"
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: cargo fmt --manifest-path Cargo.toml --all -- --check
 
       - name: Run clippy
         run: |
-          cargo clippy --target wasm32-unknown-unknown -- -D warnings
-          cargo clippy --tests --target x86_64-unknown-linux-gnu -- -D warnings
+          cargo clippy --manifest-path Cargo.toml --target wasm32-unknown-unknown -- -D warnings
+          cargo clippy --manifest-path Cargo.toml --tests --target x86_64-unknown-linux-gnu -- -D warnings
 
       - name: Run tests
-        run: cargo test --target x86_64-unknown-linux-gnu
+        run: cargo test --manifest-path Cargo.toml --target x86_64-unknown-linux-gnu
