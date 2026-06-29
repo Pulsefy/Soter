@@ -11,6 +11,7 @@ import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClaimStatus, Prisma } from '@prisma/client';
 import { CreateVerificationDto } from './dto/create-verification.dto';
+import { WebhookService } from './webhook.service';
 import {
   ReviewQueuePaginationMode,
   ReviewQueueQueryDto,
@@ -138,6 +139,7 @@ export class VerificationService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly httpService: HttpService,
+    private readonly webhookService: WebhookService,
   ) {
     this.verificationMode =
       this.configService.get<string>('VERIFICATION_MODE') || 'mock';
@@ -291,6 +293,18 @@ export class VerificationService {
         status: shouldVerify ? 'verified' : 'requested',
       },
     });
+
+    try {
+      await this.webhookService.enqueueWebhook(
+        claimId,
+        shouldVerify ? 'verified' : 'requested',
+        result,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Failed to enqueue webhook for claim ${claimId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     return result;
   }

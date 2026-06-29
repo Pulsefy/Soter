@@ -783,3 +783,29 @@ model DeploymentMetadata {
   @@index([contractId])
   @@index([deployedAt])
 }
+
+enum WebhookDeliveryStatus {
+  pending
+  sent
+  failed
+}
+
+model WebhookDelivery {
+  id            String                @id @default(cuid())
+  url           String
+  payload       String                // Stringified JSON payload
+  status        WebhookDeliveryStatus @default(pending)
+  retryCount    Int                   @default(0)
+  lastError     String?
+  lastAttemptAt DateTime?
+  sentAt        DateTime?
+  entityId      String?
+  entityType    String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([entityId, entityType])
+}
+

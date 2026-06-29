@@ -41,6 +41,7 @@ import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
 import { CacheResponse } from 'src/common/decorators/cache-response.decorator';
 import { getCacheTTL } from 'src/common/config/cache.config';
+import { WebhookService } from './webhook.service';
 
 @ApiTags('Verification')
 @ApiSecurity('x-api-key')
@@ -50,6 +51,7 @@ export class VerificationController {
     private readonly verificationService: VerificationService,
     private readonly verificationFlowService: VerificationFlowService,
     private readonly internalNotesService: InternalNotesService,
+    private readonly webhookService: WebhookService,
   ) {}
 
   @Post('claims/:id/enqueue')
@@ -491,5 +493,21 @@ export class VerificationController {
   })
   getNotes(@Param('id') id: string) {
     return this.internalNotesService.findNotesByEntity('verification', id);
+  }
+
+  @Post('webhooks/:id/replay')
+  @Version('1')
+  @ApiOperation({
+    summary: 'Replay a failed webhook delivery',
+    description: 'Resets the status of a failed webhook delivery and enqueues it for retry.',
+  })
+  @ApiOkResponse({
+    description: 'Webhook delivery queued for replay successfully.',
+  })
+  @ApiNotFoundResponse({
+    description: 'The specified webhook delivery was not found.',
+  })
+  async replayWebhook(@Param('id') id: string) {
+    return this.webhookService.replayWebhook(id);
   }
 }

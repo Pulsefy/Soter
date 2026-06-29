@@ -8,6 +8,7 @@
   },
   "moduleNameMapper": {
     "^src/(.*)$": "<rootDir>/src/$1",
+    "^cache/(.*)$": "<rootDir>/cache/$1",
     "^@stellar/stellar-sdk$": "<rootDir>/test/mocks/stellar-sdk.mock.ts",
     "^openai$": "<rootDir>/test/mocks/openai.mock.ts"
   }
