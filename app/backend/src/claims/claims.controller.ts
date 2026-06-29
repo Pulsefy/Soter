@@ -9,7 +9,8 @@ import {
   Request,
   Res,
   Version,
-  Req,
+import { ForbiddenException } from '@nestjs/common';
+
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Request as ExpressRequest } from 'express';
@@ -51,6 +52,23 @@ export class ClaimsController {
     private readonly cancelAndReissueService: CancelAndReissueService,
     private readonly internalNotesService: InternalNotesService,
   ) {}
+
+  private ensureOrgAccess(user: any, claim: any) {
+    if (!user) throw new ForbiddenException('Not authenticated');
+    // Admins bypass this check
+    if (user.role === AppRole.admin) return;
+    // Only NGO role is org-scoped for this guard
+    if (user.role !== AppRole.ngo) return;
+
+    const claimOrgId = claim?.campaign?.orgId ?? null;
+    if (!claimOrgId) return; // nothing to check
+
+    if (!user.ngoId || user.ngoId !== claimOrgId) {
+      throw new ForbiddenException(
+        'Access denied: resource belongs to a different organization',
+      );
+    }
+  }
 
   @Post()
   @ApiOperation({
@@ -95,8 +113,10 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  findOne(@Param('id') id: string) {
-    return this.claimsService.findOne(id);
+  async findOne(@Param('id') id: string, @Request() req: ExpressRequest) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
+    return claim;
   }
 
   @Post(':id/verify')
@@ -117,9 +137,12 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  verify(@Param('id') id: string, @Req() req: ExpressRequest) {
-    const actorId = req.user?.id || req.user?.apiKeyId || 'system';
-    return this.claimsService.verify(id, actorId);
+async verify(@Param('id') id: string, @Request() req: ExpressRequest) {
+  const claim = await this.claimsService.findOne(id);
+  this.ensureOrgAccess(req.user, claim);
+  return this.claimsService.verify(id);
+}
+
   }
 
   @Post(':id/approve')
@@ -140,9 +163,15 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  approve(@Param('id') id: string, @Req() req: ExpressRequest) {
-    const actorId = req.user?.id || req.user?.apiKeyId || 'system';
-    return this.claimsService.approve(id, actorId);
+@Patch(':id/approve')
+async approve(@Param('id') id: string, @Request() req: ExpressRequest) {
+  const claim = await this.claimsService.findOne(id);
+  this.ensureOrgAccess(req.user, claim);
+
+  const actorId = req.user?.id || req.user?.apiKeyId || 'system';
+  return this.claimsService.approve(id, actorId);
+}
+
   }
 
   @Post(':id/disburse')
@@ -187,7 +216,9 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  disburse(@Param('id') id: string) {
+  async disburse(@Param('id') id: string, @Request() req: ExpressRequest) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.claimsService.disburse(id);
   }
 
@@ -205,7 +236,9 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  archive(@Param('id') id: string) {
+  async archive(@Param('id') id: string, @Request() req: ExpressRequest) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.claimsService.archive(id);
   }
 
@@ -221,7 +254,12 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  getReceipt(@Param('id') id: string): Promise<ClaimReceiptDto> {
+  async getReceipt(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ): Promise<ClaimReceiptDto> {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.claimsService.getReceipt(id);
   }
 
@@ -241,10 +279,13 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  shareReceipt(
+  async shareReceipt(
     @Param('id') id: string,
     @Body() shareDto: SendReceiptShareDto,
+    @Request() req: ExpressRequest,
   ): Promise<ClaimShareResponseDto> {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.claimsService.shareReceipt(id, shareDto);
   }
 
@@ -261,11 +302,13 @@ export class ClaimsController {
   @ApiForbiddenResponse({
     description: 'Access denied - staff role required.',
   })
-  addNote(
+  async addNote(
     @Param('id') id: string,
     @Body() dto: CreateInternalNoteDto,
     @Request() req: ExpressRequest,
   ) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     const authorId = req.user?.apiKeyId || req.user?.authType || 'system';
     return this.internalNotesService.createNote('claim', id, authorId, dto);
   }
@@ -283,7 +326,9 @@ export class ClaimsController {
   @ApiForbiddenResponse({
     description: 'Access denied - staff role required.',
   })
-  getNotes(@Param('id') id: string) {
+  async getNotes(@Param('id') id: string, @Request() req: ExpressRequest) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.internalNotesService.findNotesByEntity('claim', id);
   }
 
@@ -308,7 +353,13 @@ export class ClaimsController {
     description: 'Access denied - operator role required.',
   })
   @ApiNotFoundResponse({ description: 'Claim not found.' })
-  cancel(@Param('id') id: string, @Body() dto: CancelClaimDto) {
+  async cancel(
+    @Param('id') id: string,
+    @Body() dto: CancelClaimDto,
+    @Request() req: ExpressRequest,
+  ) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.cancelAndReissueService.cancel(id, dto);
   }
 
@@ -345,7 +396,13 @@ export class ClaimsController {
     description: 'Access denied - operator role required.',
   })
   @ApiNotFoundResponse({ description: 'Original claim not found.' })
-  reissue(@Param('id') id: string, @Body() dto: ReissueClaimDto) {
+  async reissue(
+    @Param('id') id: string,
+    @Body() dto: ReissueClaimDto,
+    @Request() req: ExpressRequest,
+  ) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.cancelAndReissueService.reissue(id, dto);
   }
 
@@ -366,7 +423,9 @@ export class ClaimsController {
     description: 'Access denied - operator role required.',
   })
   @ApiNotFoundResponse({ description: 'Claim not found.' })
-  getReissueHistory(@Param('id') id: string) {
+  async getReissueHistory(@Param('id') id: string, @Request() req: ExpressRequest) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.cancelAndReissueService.getReissueHistory(id);
   }
 

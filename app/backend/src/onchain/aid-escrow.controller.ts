@@ -25,6 +25,7 @@ import { AidEscrowService } from './aid-escrow.service';
 import {
   CreateAidPackageDto,
   BatchCreateAidPackagesDto,
+  DryRunAidPackageResultDto,
 } from './dto/aid-escrow.dto';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { CacheResponse } from '../common/decorators/cache-response.decorator';
@@ -84,6 +85,42 @@ export class AidEscrowController {
     } catch (error) {
       this.logger.error('Failed to create aid package:', error);
       this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Dry-run aid package issuance
+   * POST /onchain/aid-escrow/packages/dry-run
+   */
+  @Post('packages/dry-run')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Dry-run aid package issuance',
+    description:
+      'Validates package issuance inputs and returns simulated fees/events without submitting an on-chain transaction or changing state.',
+  })
+  @ApiOkResponse({
+    description: 'Dry-run completed.',
+    type: DryRunAidPackageResultDto,
+  })
+  @ApiBadRequestResponse({ description: 'Malformed request body.' })
+  @ApiInternalServerErrorResponse({
+    description: 'Dry-run validation failed unexpectedly.',
+  })
+  async dryRunAidPackageIssuance(
+    @Body() dto: CreateAidPackageDto,
+    @Req() req: Request & { user?: { address?: string } },
+  ): Promise<DryRunAidPackageResultDto> {
+    try {
+      const operatorAddress = req.user?.address || 'admin';
+      return await this.aidEscrowService.dryRunAidPackageIssuance(
+        dto,
+        operatorAddress,
+      );
+    } catch (error) {
+      this.logger.error('Failed to dry-run aid package issuance:', error);
+      this.errorMapper.throwMappedError(error);
+      throw error;
     }
   }
 

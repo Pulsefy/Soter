@@ -8,8 +8,10 @@ import {
   ActivityIndicator,
   Clipboard,
   Alert,
+  Linking,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { config } from '../config';
 
 export interface ClaimReceiptData {
   claimId: string;
@@ -17,6 +19,7 @@ export interface ClaimReceiptData {
   status: 'requested' | 'verified' | 'approved' | 'disbursed' | 'archived';
   amount: number;
   tokenAddress?: string;
+  transactionHash?: string;
   timestamp: string;
   recipientRef?: string;
 }
@@ -34,6 +37,39 @@ interface ClaimReceiptProps {
     error: string;
   };
   compact?: boolean;
+}
+
+/** Helper to build explorer URL */
+const buildExplorerUrl = (type: 'address' | 'contract' | 'tx', identifier: string) => {
+  const network = config.network; // 'testnet' | 'mainnet'
+  return `https://stellar.expert/explorer/${network}/${type}/${identifier}`;
+};
+
+/** Inline copy button with transient ✓ feedback for a single field value. */
+function FieldCopyButton({ value, label, onCopy }: { value: string; label: string; onCopy: (val: string) => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      onCopy(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable
+    }
+  };
+  return (
+    <TouchableOpacity
+      onPress={copy}
+      accessibilityLabel={`Copy ${label}`}
+      style={{ marginLeft: 8 }}
+    >
+      <MaterialCommunityIcons
+        name={copied ? 'check' : 'content-copy'}
+        size={16}
+        color="#fff"
+      />
+    </TouchableOpacity>
+  );
 }
 
 const statusColors: Record<
@@ -80,7 +116,8 @@ Package ID: ${claim.packageId}
 Status: ${claim.status.toUpperCase()}
 Amount: ${claim.amount} tokens
 Date: ${formattedDate}
-${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}`;
+${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}
+${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}`;
   }, [claim, formattedDate]);
 
   const handleShare = async () => {
@@ -147,6 +184,10 @@ ${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}`;
         },
         detailRow: {
           marginBottom: 12,
+        },
+        rowWithActions: {
+          flexDirection: 'row',
+          alignItems: 'center',
         },
         detailLabel: {
           fontSize: 11,
@@ -259,58 +300,93 @@ ${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}`;
       </View>
 
       {/* Details */}
-      <View style={styles.detailsGrid}>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Claim ID</Text>
-          <Text
-            style={styles.detailValue}
-            numberOfLines={2}
-            ellipsizeMode="middle"
-          >
-            {claim.claimId}
-          </Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Package ID</Text>
-          <Text style={styles.detailValue}>{claim.packageId}</Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Status</Text>
-          <View style={styles.statusBadge}>
-            <MaterialCommunityIcons
-              name={statusColor.icon as any}
-              size={14}
-              color={statusColor.text}
-            />
-            <Text style={styles.statusBadgeText}>{claim.status}</Text>
-          </View>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Amount</Text>
-          <Text style={styles.amount}>{claim.amount} tokens</Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Timestamp</Text>
-          <Text style={styles.detailValue}>{formattedDate}</Text>
-        </View>
-
-        {claim.tokenAddress && (
+        <View style={styles.detailsGrid}>
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Token Address</Text>
+            <Text style={styles.detailLabel}>Claim ID</Text>
             <Text
               style={styles.detailValue}
               numberOfLines={2}
               ellipsizeMode="middle"
             >
-              {claim.tokenAddress}
+              {claim.claimId}
             </Text>
           </View>
-        )}
-      </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Package ID</Text>
+            <Text style={styles.detailValue}>{claim.packageId}</Text>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Status</Text>
+            <View style={styles.statusBadge}>
+              <MaterialCommunityIcons
+                name={statusColor.icon as any}
+                size={14}
+                color={statusColor.text}
+              />
+              <Text style={styles.statusBadgeText}>{claim.status}</Text>
+            </View>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Amount</Text>
+            <Text style={styles.amount}>{claim.amount} tokens</Text>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Timestamp</Text>
+            <Text style={styles.detailValue}>{formattedDate}</Text>
+          </View>
+
+          {claim.tokenAddress && (
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Token Address</Text>
+              <View style={styles.rowWithActions}>
+                <TouchableOpacity
+                  onPress={() => Linking.openURL(buildExplorerUrl('address', claim.tokenAddress!))}
+                >
+                  <Text
+                    style={styles.detailValue}
+                    numberOfLines={2}
+                    ellipsizeMode="middle"
+                  >
+                    {claim.tokenAddress}
+                  </Text>
+                </TouchableOpacity>
+                <FieldCopyButton
+                  value={claim.tokenAddress!}
+                  label="token address"
+                  onCopy={(val) => Clipboard.setString(val)}
+                />
+              </View>
+            </View>
+          )}
+
+          {claim.transactionHash && (
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Transaction Hash</Text>
+              <View style={styles.rowWithActions}>
+                <TouchableOpacity
+                  onPress={() => Linking.openURL(buildExplorerUrl('tx', claim.transactionHash!))}
+                >
+                  <Text
+                    style={styles.detailValue}
+                    numberOfLines={2}
+                    ellipsizeMode="middle"
+                  >
+                    {claim.transactionHash}
+                  </Text>
+                </TouchableOpacity>
+                <FieldCopyButton
+                  value={claim.transactionHash!}
+                  label="transaction hash"
+                  onCopy={(val) => Clipboard.setString(val)}
+                />
+              </View>
+            </View>
+          )}
+        </View>
 
       {/* Actions */}
       <View style={styles.actionsContainer}>

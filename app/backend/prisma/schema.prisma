@@ -465,6 +465,7 @@ model ApiKey {
   keyHash     String?  @unique
   keyPreview  String?
   role        AppRole
+  scopes      String   @default("[\"admin\"]") // JSON array of ApiKeyScope values
   ngoId       String?
   orgId       String?
   organization Organization? @relation(fields: [orgId], references: [id])
