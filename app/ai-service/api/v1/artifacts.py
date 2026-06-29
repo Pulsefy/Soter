@@ -33,15 +33,15 @@ class AccessModeRequest(BaseModel):
     mode: Literal["signed_url", "proxy"] = "signed_url"
 
 
-def _create_error_response(code: str, status_code: int, detail: str) -> tuple:
+def _create_error_response(code: str, status_code: int, detail: str, artifact_id: str = "") -> tuple:
     """Create standardized error response with logging."""
-    logger.warning(
-        "artifact_access_denied",
-        extra={
-            "event": "artifact_access_denied",
-            "code": code,
-        },
-    )
+    log_extra = {
+        "event": "artifact_access_denied",
+        "code": code,
+    }
+    if artifact_id:
+        log_extra["artifact_id"] = artifact_id
+    logger.warning("artifact_access_denied", extra=log_extra)
     return JSONResponse(
         status_code=status_code,
         content={"error": {"code": code, "message": detail}},
@@ -68,25 +68,19 @@ async def request_artifact_access(
     # Validate required headers for authorization
     if not x_user_role or not x_user_role.strip():
         response, status_code = _create_error_response(
-            "missing_user_role",
-            400,
-            "X-User-Role header is required",
+            "missing_user_role", 400, "X-User-Role header is required", artifact_id
         )
         return response
 
     if not x_org_id or not x_org_id.strip():
         response, status_code = _create_error_response(
-            "missing_org_id",
-            400,
-            "X-Org-Id header is required",
+            "missing_org_id", 400, "X-Org-Id header is required", artifact_id
         )
         return response
 
     if not x_user_id or not x_user_id.strip():
         response, status_code = _create_error_response(
-            "missing_user_id",
-            400,
-            "X-User-Id header is required",
+            "missing_user_id", 400, "X-User-Id header is required", artifact_id
         )
         return response
 
@@ -96,6 +90,7 @@ async def request_artifact_access(
             "forbidden_role",
             403,
             f"User role '{x_user_role}' is not authorized",
+            artifact_id,
         )
         return response
 
@@ -109,9 +104,7 @@ async def request_artifact_access(
         error_code = str(exc)
         if error_code == "artifact_not_found":
             response, _ = _create_error_response(
-                error_code,
-                404,
-                "Artifact not found",
+                error_code, 404, "Artifact not found", artifact_id
             )
         elif error_code == "forbidden_org":
             msg = (
@@ -119,29 +112,26 @@ async def request_artifact_access(
                 "a different organization"
             )
             response, _ = _create_error_response(
-                error_code,
-                403,
-                msg,
+                error_code, 403, msg, artifact_id
             )
         else:
             response, _ = _create_error_response(
-                error_code,
-                403,
-                "Access denied",
+                error_code, 403, "Access denied", artifact_id
             )
         return response
 
-    logger.info(
-        "artifact_access_granted",
-        extra={
-            "event": "artifact_access_granted",
-            "artifact_id": artifact_id,
-            "org_id": x_org_id,
-            "user_id": x_user_id,
-            "role": x_user_role,
-            "mode": request.mode,
-        },
-    )
+    claim_id = metadata.get("claim_id", "")
+    log_extra = {
+        "event": "artifact_access_granted",
+        "artifact_id": artifact_id,
+        "org_id": x_org_id,
+        "user_id": x_user_id,
+        "role": x_user_role,
+        "mode": request.mode,
+    }
+    if claim_id:
+        log_extra["claim_id"] = claim_id
+    logger.info("artifact_access_granted", extra=log_extra)
 
     if request.mode == "proxy":
         return FileResponse(
@@ -191,72 +181,45 @@ async def download_artifact_with_token(
     Returns 404 if artifact not found.
     """
     try:
-        # Verify token signature, expiration, and extract payload
         payload = artifact_access_service.verify_signed_token(token)
+    except ArtifactAccessError as exc:
+        return _create_error_response(str(exc), 403, "Token validation failed", "")
 
-        # Resolve artifact from payload
+    artifact_id = payload["aid"]
+    try:
         artifact_path, metadata = (
-            artifact_access_service.resolve_artifact(payload["aid"])
+            artifact_access_service.resolve_artifact(artifact_id)
         )
-
-        # Ensure organization ownership matches token organization
         artifact_access_service.enforce_org_ownership(
             metadata, payload["org"]
         )
     except ArtifactAccessError as exc:
         error_code = str(exc)
-
         if error_code == "artifact_not_found":
             response, _ = _create_error_response(
-                error_code,
-                404,
-                "Artifact not found",
-            )
-        elif error_code == "token_expired":
-            response, _ = _create_error_response(
-                error_code,
-                403,
-                "Signed URL has expired. Request a new one.",
-            )
-        elif error_code == "invalid_token_signature":
-            response, _ = _create_error_response(
-                error_code,
-                403,
-                "Token signature verification failed",
-            )
-        elif error_code == "invalid_token":
-            response, _ = _create_error_response(
-                error_code,
-                403,
-                "Token format is invalid",
+                error_code, 404, "Artifact not found", artifact_id
             )
         elif error_code == "forbidden_org":
-            msg = (
-                "Token organization does not match "
-                "artifact organization"
-            )
+            msg = "Token organization does not match artifact organization"
             response, _ = _create_error_response(
-                error_code,
-                403,
-                msg,
+                error_code, 403, msg, artifact_id
             )
         else:
             response, _ = _create_error_response(
-                error_code,
-                403,
-                "Access denied",
+                error_code, 403, "Access denied", artifact_id
             )
         return response
 
-    logger.info(
-        "artifact_downloaded_with_signed_url",
-        extra={
-            "event": "artifact_downloaded_with_signed_url",
-            "artifact_id": payload["aid"],
-            "org_id": payload["org"],
-            "user_id": payload.get("sub", "unknown"),
-        },
-    )
+    claim_id = metadata.get("claim_id", "")
+    log_extra = {
+        "event": "artifact_downloaded_with_signed_url",
+        "artifact_id": artifact_id,
+        "org_id": payload["org"],
+        "user_id": payload.get("sub", "unknown"),
+    }
+    if claim_id:
+        log_extra["claim_id"] = claim_id
+    logger.info("artifact_downloaded_with_signed_url", extra=log_extra)
 
     return FileResponse(
         path=artifact_path,
