@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use aid_escrow::{AidEscrow, AidEscrowClient, Config, Error};
-use soroban_sdk::{testutils::Address as _, Address, Env, Map, Vec};
+use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
 
 fn assert_state_after_migration(
     client: &AidEscrowClient,
