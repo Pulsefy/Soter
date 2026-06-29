@@ -130,6 +130,8 @@ export class ClaimsService {
     return claims.map(claim => ({
       ...claim,
       recipientRef: this.encryptionService.decrypt(claim.recipientRef),
+      anchor_metadata:
+        (claim as { anchorMetadata?: unknown }).anchorMetadata ?? null,
     }));
   }
 
@@ -149,6 +151,8 @@ export class ClaimsService {
     return {
       ...claim,
       recipientRef: this.encryptionService.decrypt(claim.recipientRef),
+      anchor_metadata:
+        (claim as { anchorMetadata?: unknown }).anchorMetadata ?? null,
     };
   }
 

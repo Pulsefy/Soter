@@ -4,6 +4,12 @@ export interface VerificationJobData {
   correlationId?: string;
 }
 
+export interface AnchorMetadata {
+  campaign_ref?: string | null;
+  claim_id?: string | null;
+  package_id?: string | null;
+}
+
 export interface VerificationResult {
   score: number;
   confidence: number;
@@ -13,4 +19,5 @@ export interface VerificationResult {
     recommendations?: string[];
   };
   processedAt: Date;
+  anchor_metadata?: AnchorMetadata | null;
 }

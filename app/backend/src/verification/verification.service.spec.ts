@@ -34,6 +34,7 @@ describe('VerificationService', () => {
     verificationResult: null,
     verifiedAt: null,
     metadata: null,
+    anchorMetadata: null,
   };
 
   beforeEach(async () => {
@@ -194,6 +195,11 @@ describe('VerificationService', () => {
           riskLevel: 'low',
         },
         processedAt: new Date(),
+        anchor_metadata: {
+          campaign_ref: 'test-campaign-id',
+          claim_id: 'test-claim-id',
+          package_id: 'pkg-123',
+        },
       });
 
       const updateSpy = jest
@@ -211,6 +217,11 @@ describe('VerificationService', () => {
       const updateCall = updateSpy.mock.calls[0]?.[0];
       expect(updateCall?.data).toHaveProperty('status');
       expect(updateCall?.data?.status).toBe('verified');
+      expect(updateCall?.data?.anchorMetadata).toEqual({
+        campaign_ref: 'test-campaign-id',
+        claim_id: 'test-claim-id',
+        package_id: 'pkg-123',
+      });
     });
   });
 
@@ -365,7 +376,7 @@ describe('VerificationService', () => {
 
       const result = await service.findOne('test-claim-id');
 
-      expect(result).toEqual(mockClaim);
+      expect(result).toEqual({ ...mockClaim, anchor_metadata: null });
     });
 
     it('should throw NotFoundException for non-existent claim', async () => {
