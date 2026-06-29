@@ -292,12 +292,10 @@ describe('Verification review queue (e2e)', () => {
     ).expect(400);
 
     await auth(
-      request(app.getHttpServer())
-        .get(base)
-        .query({
-          fromDate: '2026-02-03T00:00:00.000Z',
-          toDate: '2026-02-01T00:00:00.000Z',
-        }),
+      request(app.getHttpServer()).get(base).query({
+        fromDate: '2026-02-03T00:00:00.000Z',
+        toDate: '2026-02-01T00:00:00.000Z',
+      }),
     ).expect(400);
 
     await auth(

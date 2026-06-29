@@ -10,7 +10,8 @@ import TestnetFaucetHelper from '@/components/systems/TestnetFaucetHelper';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MisconfiguredPage } from '@/components/MisconfiguredPage';
-import { NetworkMismatchBanner } from '@/components/NetworkMismatchBanner';
+import { EnvWarningBanner } from '@/components/EnvWarningBanner';
+import { VersionProvider } from '@/components/VersionProvider';
 import { validateEnv } from '@/lib/env';
 
 const geistSans = Geist({
@@ -37,12 +38,9 @@ export default async function RootLayout({
   // Fail fast: validate required environment variables before rendering anything.
   // This runs server-side only; no secret values are forwarded to the client.
   const envResult = validateEnv();
-  const allowBootWithoutFullConfig =
-    process.env.NODE_ENV !== 'production' ||
-    process.env.NEXT_PUBLIC_USE_MOCKS === 'true' ||
-    !process.env.NEXT_PUBLIC_API_URL;
+  const isProduction = process.env.NODE_ENV === 'production';
 
-  if (!envResult.ok && !allowBootWithoutFullConfig) {
+  if (!envResult.ok && isProduction) {
     return (
       <MisconfiguredPage
         missing={envResult.missing}
@@ -63,14 +61,15 @@ export default async function RootLayout({
         <NextIntlClientProvider messages={messages}>
           <ThemeProvider>
             <ErrorBoundary>
-              <QueryProvider>
-                <ToastProvider>
-                  <Navbar />
-                  <NetworkMismatchBanner />
-                  {children}
-                  <TestnetFaucetHelper />
-                </ToastProvider>
-              </QueryProvider>
+              <VersionProvider>
+                <QueryProvider>
+                  <ToastProvider>
+                    {!envResult.ok && <EnvWarningBanner missing={envResult.missing} invalid={envResult.invalid} />}
+                    <Navbar />
+                    {children}
+                  </ToastProvider>
+                </QueryProvider>
+              </VersionProvider>
             </ErrorBoundary>
           </ThemeProvider>
         </NextIntlClientProvider>

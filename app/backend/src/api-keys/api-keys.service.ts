@@ -6,6 +6,7 @@ import {
 import { randomBytes, createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppRole } from '../auth/app-role.enum';
+import { ApiKeyScope } from './api-key-scope.enum';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 
 type Actor = { apiKeyId?: string; authType?: string; role?: AppRole };
@@ -18,6 +19,45 @@ const maskPreview = (rawKey: string): string => {
 
 const sha256Hex = (value: string): string =>
   createHash('sha256').update(value).digest('hex');
+
+const defaultScopes: ApiKeyScope[] = [ApiKeyScope.admin];
+
+const selectFields = {
+  id: true,
+  role: true,
+  scopes: true,
+  ngoId: true,
+  description: true,
+  createdAt: true,
+  lastUsedAt: true,
+  createdBy: true,
+  revokedAt: true,
+  revokedBy: true,
+  revokedReason: true,
+  replacedById: true,
+  keyPreview: true,
+} as const;
+
+function parseScopes(raw: string | null | undefined): ApiKeyScope[] {
+  if (!raw) return defaultScopes;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    return defaultScopes;
+  } catch {
+    return defaultScopes;
+  }
+}
+
+function serializeScopes(scopes: ApiKeyScope[]): string {
+  return JSON.stringify(scopes);
+}
+
+function deserializeRow<T extends { scopes?: string | null }>(
+  row: T,
+): T & { scopes: ApiKeyScope[] } {
+  return { ...row, scopes: parseScopes(row.scopes) };
+}
 
 @Injectable()
 export class ApiKeysService {
@@ -42,55 +82,31 @@ export class ApiKeysService {
     const rawKey = this.newRawKey();
     const keyHash = sha256Hex(rawKey);
     const keyPreview = maskPreview(rawKey);
+    const scopes = dto.scopes ?? defaultScopes;
 
     const row = await this.prisma.apiKey.create({
       data: {
         keyHash,
         keyPreview,
         role: dto.role,
+        scopes: serializeScopes(scopes),
         ngoId: dto.ngoId ?? null,
         description: dto.description ?? null,
         createdBy: this.actorId(actor),
       },
-      select: {
-        id: true,
-        role: true,
-        ngoId: true,
-        description: true,
-        createdAt: true,
-        lastUsedAt: true,
-        createdBy: true,
-        revokedAt: true,
-        revokedBy: true,
-        revokedReason: true,
-        replacedById: true,
-        keyPreview: true,
-      },
+      select: selectFields,
     });
 
-    return { ...row, apiKey: rawKey };
+    return { ...deserializeRow(row), apiKey: rawKey };
   }
 
   async list() {
     const rows = await this.prisma.apiKey.findMany({
       orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        role: true,
-        ngoId: true,
-        description: true,
-        createdAt: true,
-        lastUsedAt: true,
-        createdBy: true,
-        revokedAt: true,
-        revokedBy: true,
-        revokedReason: true,
-        replacedById: true,
-        keyPreview: true,
-      },
+      select: selectFields,
     });
 
-    return rows;
+    return rows.map(deserializeRow);
   }
 
   async revoke(id: string, reason: string | undefined, actor?: Actor) {
@@ -103,47 +119,24 @@ export class ApiKeysService {
     }
 
     if (existing.revokedAt) {
-      return this.prisma.apiKey.findUnique({
+      const row = await this.prisma.apiKey.findUnique({
         where: { id },
-        select: {
-          id: true,
-          role: true,
-          ngoId: true,
-          description: true,
-          createdAt: true,
-          lastUsedAt: true,
-          createdBy: true,
-          revokedAt: true,
-          revokedBy: true,
-          revokedReason: true,
-          replacedById: true,
-          keyPreview: true,
-        },
+        select: selectFields,
       });
+      return deserializeRow(row!);
     }
 
-    return this.prisma.apiKey.update({
+    const row = await this.prisma.apiKey.update({
       where: { id },
       data: {
         revokedAt: new Date(),
         revokedBy: this.actorId(actor),
         revokedReason: reason ?? 'revoked',
       },
-      select: {
-        id: true,
-        role: true,
-        ngoId: true,
-        description: true,
-        createdAt: true,
-        lastUsedAt: true,
-        createdBy: true,
-        revokedAt: true,
-        revokedBy: true,
-        revokedReason: true,
-        replacedById: true,
-        keyPreview: true,
-      },
+      select: selectFields,
     });
+
+    return deserializeRow(row);
   }
 
   async rotate(id: string, actor?: Actor) {
@@ -155,6 +148,7 @@ export class ApiKeysService {
           role: true,
           ngoId: true,
           description: true,
+          scopes: true,
           revokedAt: true,
         },
       });
@@ -174,24 +168,12 @@ export class ApiKeysService {
           keyHash,
           keyPreview,
           role: existing.role,
+          scopes: existing.scopes,
           ngoId: existing.ngoId,
           description: existing.description,
           createdBy: this.actorId(actor),
         },
-        select: {
-          id: true,
-          role: true,
-          ngoId: true,
-          description: true,
-          createdAt: true,
-          lastUsedAt: true,
-          createdBy: true,
-          revokedAt: true,
-          revokedBy: true,
-          revokedReason: true,
-          replacedById: true,
-          keyPreview: true,
-        },
+        select: selectFields,
       });
 
       await tx.apiKey.update({
@@ -204,7 +186,7 @@ export class ApiKeysService {
         },
       });
 
-      return { replacement, apiKey: rawKey };
+      return { replacement: deserializeRow(replacement), apiKey: rawKey };
     });
   }
 }
