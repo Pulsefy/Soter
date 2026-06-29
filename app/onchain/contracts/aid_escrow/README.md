@@ -136,17 +136,28 @@ pub struct Aggregates {
 }
 ```
 
-## Events
+## Events (Stable Schema)
 
-All state-changing operations emit events with stable topics for indexer consumption:
+All state-changing operations emit events with stable topics and payload shapes for indexer consumption.  
+**Topic** = struct name lowered to snake_case. Do not rename without versioning.
 
-- `EscrowFunded` — pool funded
-- `PackageCreated` — package created
-- `PackageClaimed` — recipient claimed
-- `PackageDisbursed` — admin disbursed
-- `PackageRevoked` — admin revoked
-- `PackageRefunded` — admin refunded
-- `BatchCreatedEvent` — batch creation
+| Event | Topic (snake_case) | Key Fields |
+|---|---|---|
+| `EscrowFunded` | `escrow_funded` | `from`, `token`, `amount`, `timestamp` |
+| `PackageCreated` | `package_created` | `package_id`, `recipient`, `amount`, `actor`, `timestamp` |
+| `PackageClaimed` | `package_claimed` | `package_id`, `recipient`, `amount`, `actor`, `timestamp` |
+| `PackageDisbursed` | `package_disbursed` | `package_id`, `recipient`, `amount`, `actor`, `timestamp` |
+| `PackageRevoked` | `package_revoked` | `package_id`, `recipient`, `amount`, `actor`, `timestamp` |
+| `PackageRefunded` | `package_refunded` | `package_id`, `recipient`, `amount`, `actor`, `timestamp` |
+| `BatchCreatedEvent` | `batch_created` | `ids` (Vec\<u64\>), `admin`, `total_amount` |
+| `ExtendedEvent` | `extended_event` | `package_id`, `admin`, `old_expires_at`, `new_expires_at` |
+| `SurplusWithdrawnEvent` | `surplus_withdrawn` | `to`, `token`, `amount` |
+| `ContractPausedEvent` | `contract_paused` | `admin` |
+| `ContractUnpausedEvent` | `contract_unpaused` | `admin` |
+| `ActionPausedEvent` | `action_paused` | `admin`, `action` |
+| `ActionUnpausedEvent` | `action_unpaused` | `admin`, `action` |
+
+All package-scoped events include `package_id` in both the topic and payload for reliable correlation.
 
 ## Testing
 

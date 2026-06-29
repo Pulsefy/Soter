@@ -99,6 +99,7 @@ def _to_session_response(session: UploadSession) -> UploadSessionResponse:
 async def create_upload_session(
     body: CreateUploadSessionRequest,
     x_user_id: str = Header(default="", alias="X-User-Id"),
+    x_claim_id: str = Header(default="", alias="X-Claim-Id"),
 ):
     """Create a resumable upload session after validating type and size."""
     if body.content_type not in ALLOWED_EVIDENCE_CONTENT_TYPES:
@@ -123,14 +124,14 @@ async def create_upload_session(
     except UploadSessionError as exc:
         raise _http_error(exc)
 
-    logger.info(
-        "evidence_upload_session_created",
-        extra={
-            "event": "evidence_upload_session_created",
-            "session_id": session.session_id,
-            "owner_id": x_user_id,
-        },
-    )
+    log_extra = {
+        "event": "evidence_upload_session_created",
+        "session_id": session.session_id,
+        "owner_id": x_user_id,
+    }
+    if x_claim_id:
+        log_extra["claim_id"] = x_claim_id
+    logger.info("evidence_upload_session_created", extra=log_extra)
     return _to_session_response(session)
 
 
@@ -189,6 +190,7 @@ async def get_upload_session(
 async def finalize_upload_session(
     session_id: Annotated[str, Path(min_length=1)],
     x_user_id: str = Header(default="", alias="X-User-Id"),
+    x_claim_id: str = Header(default="", alias="X-Claim-Id"),
 ):
     """Validate all chunks and ownership, then assemble the final file."""
     try:
@@ -196,14 +198,14 @@ async def finalize_upload_session(
     except UploadSessionError as exc:
         raise _http_error(exc)
 
-    logger.info(
-        "evidence_upload_finalized",
-        extra={
-            "event": "evidence_upload_finalized",
-            "session_id": session.session_id,
-            "artifact_id": session.artifact_id,
-        },
-    )
+    log_extra = {
+        "event": "evidence_upload_finalized",
+        "session_id": session.session_id,
+        "artifact_id": session.artifact_id,
+    }
+    if x_claim_id:
+        log_extra["claim_id"] = x_claim_id
+    logger.info("evidence_upload_finalized", extra=log_extra)
     return FinalizeUploadResponse(
         session_id=session.session_id,
         artifact_id=session.artifact_id or "",

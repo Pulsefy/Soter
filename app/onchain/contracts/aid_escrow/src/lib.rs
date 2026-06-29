@@ -173,7 +173,7 @@ pub struct BatchCreatedEvent {
 
 #[contractevent]
 pub struct ExtendedEvent {
-    pub id: u64,
+    pub package_id: u64,
     pub admin: Address,
     pub old_expires_at: u64,
     pub new_expires_at: u64,
@@ -1094,7 +1094,7 @@ impl AidEscrow {
         env.storage().persistent().set(&key, &package);
 
         ExtendedEvent {
-            id,
+            package_id: id,
             admin,
             old_expires_at,
             new_expires_at,
