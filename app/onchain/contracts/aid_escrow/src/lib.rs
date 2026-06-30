@@ -22,7 +22,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, symbol_short, Address,
-    Bytes, Env, IntoVal, Map, String, Symbol, Val, Vec,
+    Bytes, BytesN, Env, IntoVal, Map, String, Symbol, Val, Vec,
 };
 
 // --- Storage Keys ---
@@ -135,6 +135,12 @@ pub struct PackageClaimed {
     pub amount: i128,
     pub actor: Address,
     pub timestamp: u64,
+    /// Optional off-chain receipt hash commitment (e.g. SHA-256 of a
+    /// delivery receipt).  Appended at the end of the payload so that
+    /// existing indexers that only read the original five fields
+    /// continue to work unchanged.  New indexers should treat the
+    /// absence (None) as an unanchored claim/cash transfer.
+    pub receipt_hash: Option<BytesN<32>>,
 }
 
 #[contractevent]
@@ -144,6 +150,10 @@ pub struct PackageDisbursed {
     pub amount: i128,
     pub actor: Address,
     pub timestamp: u64,
+    /// Optional off-chain receipt hash commitment for admin-driven
+    /// disbursements.  Same forward-compatibility rules as
+    /// ``PackageClaimed::receipt_hash``.
+    pub receipt_hash: Option<BytesN<32>>,
 }
 
 #[contractevent]
@@ -755,6 +765,10 @@ impl AidEscrow {
     // --- Recipient Actions ---
 
     /// Recipient claims the package.
+    ///
+    /// The emitted ``PackageClaimed`` event carries ``receipt_hash = None``
+    /// because the contract has not been supplied with one.  Use
+    /// :meth:`claim_with_receipt` to anchor an off-chain receipt hash.
     pub fn claim(env: Env, id: u64) -> Result<(), Error> {
         Self::check_action_paused(&env, symbol_short!("claim"))?;
         let key = (symbol_short!("pkg"), id);
@@ -786,7 +800,73 @@ impl AidEscrow {
         package.recipient.require_auth();
         let payout_recipient = package.recipient.clone();
 
-        Self::finalize_claim(&env, &key, &mut package, id, &payout_recipient, now)
+        Self::finalize_claim(
+            &env,
+            &key,
+            &mut package,
+            id,
+            &payout_recipient,
+            now,
+            None,
+        )
+    }
+
+    /// Recipient claims a package and anchors an off-chain receipt hash
+    /// on-chain.  Behaviour, authorization checks and state transitions
+    /// are identical to :meth:`claim`; the only difference is that the
+    /// emitted ``PackageClaimed`` event carries
+    /// ``receipt_hash = Some(hash)`` so that indexers can correlate the
+    /// on-chain transfer with the corresponding off-chain receipt
+    /// (e.g. delivery confirmation, signed proof of receipt photo).
+    ///
+    /// # Errors
+    /// Returns the same errors as :meth:`claim`.
+    pub fn claim_with_receipt(
+        env: Env,
+        id: u64,
+        receipt_hash: BytesN<32>,
+    ) -> Result<(), Error> {
+        Self::check_action_paused(&env, symbol_short!("claim"))?;
+        let key = (symbol_short!("pkg"), id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        if package.status != PackageStatus::Created {
+            return Err(Error::PackageNotActive);
+        }
+
+        let now = env.ledger().timestamp();
+        if now < package.claim_starts_at {
+            return Err(Error::ClaimTooEarly);
+        }
+
+        if package.expires_at > 0 && now > package.expires_at {
+            return Err(Error::PackageExpired);
+        }
+
+        // Packages configured with a Merkle allowlist must be claimed
+        // through ``claim_with_proof`` so eligibility can be verified.
+        // We intentionally do not require an additional receipt-hash
+        // entrypoint there to keep the two claim paths orthogonal.
+        if Self::merkle_root_from_metadata(&env, &package.metadata).is_some() {
+            return Err(Error::InvalidProof);
+        }
+
+        package.recipient.require_auth();
+        let payout_recipient = package.recipient.clone();
+
+        Self::finalize_claim(
+            &env,
+            &key,
+            &mut package,
+            id,
+            &payout_recipient,
+            now,
+            Some(receipt_hash),
+        )
     }
 
     /// Claim a package guarded by an optional Merkle allowlist.
@@ -831,13 +911,13 @@ impl AidEscrow {
                 if !Self::verify_merkle_proof_for_claimant(&env, &claimant, &proof, root) {
                     return Err(Error::InvalidProof);
                 }
-                Self::finalize_claim(&env, &key, &mut package, id, &claimant, now)
+                Self::finalize_claim(&env, &key, &mut package, id, &claimant, now, None)
             }
             None => {
                 if claimant != package.recipient {
                     return Err(Error::NotAuthorized);
                 }
-                Self::finalize_claim(&env, &key, &mut package, id, &claimant, now)
+                Self::finalize_claim(&env, &key, &mut package, id, &claimant, now, None)
             }
         }
     }
@@ -845,7 +925,35 @@ impl AidEscrow {
     // --- Admin Actions ---
 
     /// Admin manually triggers disbursement (overrides recipient claim need, strictly checks status).
+    ///
+    /// The emitted ``PackageDisbursed`` event carries ``receipt_hash = None``
+    /// because the contract has not been supplied with one.  Use
+    /// :meth:`disburse_with_receipt` to anchor an off-chain receipt hash.
     pub fn disburse(env: Env, id: u64) -> Result<(), Error> {
+        Self::process_disburse(&env, id, None)
+    }
+
+    /// Admin manually triggers disbursement and anchors an off-chain
+    /// receipt hash on-chain.  Same authorisation/state-transition
+    /// rules as :meth:`disburse`; the only difference is that the
+    /// emitted ``PackageDisbursed`` event carries
+    /// ``receipt_hash = Some(hash)``.
+    ///
+    /// # Errors
+    /// Returns the same errors as :meth:`disburse`.
+    pub fn disburse_with_receipt(
+        env: Env,
+        id: u64,
+        receipt_hash: BytesN<32>,
+    ) -> Result<(), Error> {
+        Self::process_disburse(&env, id, Some(receipt_hash))
+    }
+
+    fn process_disburse(
+        env: &Env,
+        id: u64,
+        receipt_hash: Option<BytesN<32>>,
+    ) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
 
@@ -863,7 +971,7 @@ impl AidEscrow {
         // Transfer before accounting updates so reverted token transfers cannot
         // leave the escrow state inconsistent.
         Self::transfer_token(
-            &env,
+            env,
             &package.token,
             &env.current_contract_address(),
             &package.recipient,
@@ -875,7 +983,7 @@ impl AidEscrow {
         env.storage().persistent().set(&key, &package);
 
         // Update Locked
-        Self::decrement_locked(&env, &package.token, package.amount);
+        Self::decrement_locked(env, &package.token, package.amount);
 
         let timestamp = env.ledger().timestamp();
         PackageDisbursed {
@@ -884,8 +992,9 @@ impl AidEscrow {
             amount: package.amount,
             actor: admin.clone(),
             timestamp,
+            receipt_hash,
         }
-        .publish(&env);
+        .publish(env);
 
         Ok(())
     }
@@ -1279,6 +1388,7 @@ impl AidEscrow {
         package_id: u64,
         payout_recipient: &Address,
         now: u64,
+        receipt_hash: Option<BytesN<32>>,
     ) -> Result<(), Error> {
         Self::transfer_token(
             env,
@@ -1312,6 +1422,7 @@ impl AidEscrow {
             amount: package.amount,
             actor: payout_recipient.clone(),
             timestamp: now,
+            receipt_hash,
         }
         .publish(env);
 
