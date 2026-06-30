@@ -1,37 +1,40 @@
-import { IsString, IsUUID, IsOptional, IsObject, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsArray, IsUUID, IsNotEmpty, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 /**
- * Contract-aware metadata for AI verification results
+ * Stable identifiers that link verification results to on-chain events
  */
-export class ContractMetadataDto {
+export class ContractAwareMetadata {
   @IsUUID()
+  @IsNotEmpty()
   campaignId: string;
 
   @IsUUID()
+  @IsNotEmpty()
   claimId: string;
 
   @IsString()
+  @IsNotEmpty()
   packageId: string;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   transactionHash?: string;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   contractAddress?: string;
 
-  @IsOptional()
   @IsString()
-  network?: string;
-
   @IsOptional()
-  @IsString()
   chainId?: string;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
+  network?: string;
+
+  @IsString()
+  @IsOptional()
   version?: string;
 
   @IsOptional()
@@ -39,46 +42,59 @@ export class ContractMetadataDto {
 }
 
 /**
- * AI verification result DTO with metadata
+ * Enhanced verification result with contract-aware metadata
  */
-export class AIVerificationResultDto {
+export class VerificationResultDto {
   @IsNumber()
+  @Min(0)
+  @Max(1)
   score: number;
 
   @IsNumber()
+  @Min(0)
+  @Max(1)
   confidence: number;
 
   @IsOptional()
-  @IsObject()
   details?: {
     factors?: string[];
     riskLevel?: 'low' | 'medium' | 'high';
     recommendations?: string[];
+    rawResponse?: any;
   };
 
   @IsOptional()
-  @ValidateNested()
-  @Type(() => ContractMetadataDto)
-  metadata?: ContractMetadataDto;
+  @Type(() => Date)
+  processedAt?: Date;
 
   @IsOptional()
+  metadata?: ContractAwareMetadata;
+
+  @IsOptional()
+  @IsArray()
   @IsString({ each: true })
   warnings?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  validationErrors?: string[];
 }
 
 /**
- * Webhook payload with contract-aware metadata validation
+ * DTO for webhook payload with metadata validation
  */
-export class AIVerificationWebhookDto {
+export class VerificationWebhookPayload {
   @IsUUID()
-  @IsString()
+  @IsNotEmpty()
   claimId: string;
 
   @IsUUID()
-  @IsString()
+  @IsNotEmpty()
   campaignId: string;
 
   @IsString()
+  @IsNotEmpty()
   packageId: string;
 
   @IsOptional()
@@ -93,14 +109,10 @@ export class AIVerificationWebhookDto {
   @IsString()
   network?: string;
 
-  @ValidateNested()
-  @Type(() => AIVerificationResultDto)
-  result: AIVerificationResultDto;
+  result: VerificationResultDto;
 
   @IsOptional()
+  @IsArray()
   @IsString({ each: true })
   warnings?: string[];
 }
-
-// Keep existing exports for backward compatibility
-export * from '../../ai-verification.dto';
