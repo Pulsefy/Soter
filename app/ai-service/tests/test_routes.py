@@ -59,6 +59,7 @@ class TestOCRRoutes:
         )
         assert response.status_code == 200
         data = response.json()
+        # Legacy /ai/ocr returns OCRResponse (old flat shape)
         assert "processing_time_ms" in data
 
 
