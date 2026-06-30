@@ -44,13 +44,11 @@ jobs:
       working-directory: ./app/ai-service
       run: |
         black --check .
-      continue-on-error: true
       
     - name: Type checking with mypy
       working-directory: ./app/ai-service
       run: |
         mypy . --ignore-missing-imports
-      continue-on-error: true
 
   test:
     runs-on: ubuntu-latest
@@ -77,7 +75,6 @@ jobs:
       working-directory: ./app/ai-service
       run: |
         pytest --cov=. --cov-report=xml || echo "No tests found or tests failed"
-      continue-on-error: true
       
     - name: Run setup verification
       working-directory: ./app/ai-service
