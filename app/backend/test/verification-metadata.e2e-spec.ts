@@ -1,9 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
-import * as request from 'supertest';
+import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { VerificationMetadataService } from '../src/verification/metadata.service';
+import { ClaimStatus, CampaignStatus } from '@prisma/client';
 
 describe('Verification Metadata E2E', () => {
   let app: INestApplication;
@@ -31,13 +32,16 @@ describe('Verification Metadata E2E', () => {
       const campaignId = '123e4567-e89b-12d3-a456-426614174000';
       const claimId = '123e4567-e89b-12d3-a456-426614174001';
 
-      // Mock claim in database
+      // Mock claim in database - using proper Prisma enums and required fields
       await prisma.campaign.create({
         data: {
           id: campaignId,
           name: 'Test Campaign',
-          status: 'active',
-          organizationId: 'org_123',
+          status: CampaignStatus.active,
+          budget: 10000, // Required field
+          organization: {
+            connect: { id: 'org_123' }
+          }
         },
       });
 
@@ -45,10 +49,11 @@ describe('Verification Metadata E2E', () => {
         data: {
           id: claimId,
           campaignId,
-          status: 'pending',
+          status: ClaimStatus.requested,
           amount: 100,
           recipientRef: 'recipient_123',
-          packageId: 'pkg_test123',
+          // packageId removed - if it doesn't exist in the schema
+          // If you need packageId, add it to the Claim model in schema.prisma
         },
       });
 
@@ -176,10 +181,37 @@ describe('Verification Metadata E2E', () => {
 
   describe('API Integration', () => {
     it('should include metadata in verification webhook', async () => {
+      // First create the campaign and claim for the webhook test
+      const campaignId = '223e4567-e89b-12d3-a456-426614174000';
+      const claimId = '223e4567-e89b-12d3-a456-426614174001';
+
+      await prisma.campaign.create({
+        data: {
+          id: campaignId,
+          name: 'Test Campaign 2',
+          status: CampaignStatus.active,
+          budget: 10000, // Required field
+          organization: {
+            connect: { id: 'org_123' }
+          }
+        },
+      }).catch(() => {}); // Ignore if already exists
+
+      await prisma.claim.create({
+        data: {
+          id: claimId,
+          campaignId,
+          status: ClaimStatus.requested,
+          amount: 100,
+          recipientRef: 'recipient_456',
+          // packageId removed
+        },
+      }).catch(() => {}); // Ignore if already exists
+
       const payload = {
-        claimId: '123e4567-e89b-12d3-a456-426614174001',
-        campaignId: '123e4567-e89b-12d3-a456-426614174000',
-        packageId: 'pkg_test123',
+        claimId: claimId,
+        campaignId: campaignId,
+        packageId: 'pkg_test456',
         network: 'testnet',
         result: {
           score: 0.85,

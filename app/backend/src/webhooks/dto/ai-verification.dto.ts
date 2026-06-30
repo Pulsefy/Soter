@@ -1,4 +1,4 @@
-import { IsString, IsUUID, IsOptional, IsObject, ValidateNested } from 'class-validator';
+import { IsString, IsUUID, IsOptional, IsObject, ValidateNested, IsNumber } from 'class-validator'; // Added IsNumber
 import { Type } from 'class-transformer';
 
 /**
