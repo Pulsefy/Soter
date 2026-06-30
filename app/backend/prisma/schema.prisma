@@ -819,6 +819,8 @@ model ReviewCase {
   @@index([riskLevel])
   @@index([createdAt])
   @@index([claimId])
+}
+
 enum SorobanEventTopic {
   package_created
   package_claimed
