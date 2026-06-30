@@ -1,18 +1,42 @@
-"""Humanitarian claim verification service with model/provider fallbacks."""
+"""Humanitarian claim verification service with provider abstraction.
+
+The verification service no longer talks to OpenAI/Groq directly.  It
+fetches providers from an :class:`LLMProviderRegistry` which can be
+constructed once and shared across the application.  Routes only call
+:meth:`HumanitarianVerificationService.verify_claim` and never need to
+know which backend is configured - swapping providers is a registry
+configuration change.
+
+Circuit-breaker handling, prompt fallback and JSON parsing stay in
+this module because they are part of the *verification policy*, not
+of the provider contract.  Each provider is keyed by ``provider.name``
+so the breaker state is stable across provider swaps.
+"""
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
 import time
+from typing import Any, Dict, List, Optional, Union
+
 import metrics
 
-import httpx
-
 from config import settings
-from services.humanitarian_prompt import HumanitarianPromptEngine
-from services.circuit_breaker import CircuitBreaker
-from services.test_provider import TestProvider
 from exceptions import AIServiceError
+from services.circuit_breaker import CircuitBreaker
+from services.humanitarian_prompt import HumanitarianPromptEngine
+from services.providers import (
+    GroqProvider,
+    LLMProvider,
+    LLMProviderRegistry,
+    LLMRequest,
+    OpenAIProvider,
+    ProviderConfigurationError,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderResponseError,
+    ProviderTimeoutError,
+    build_default_llm_registry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +44,17 @@ logger = logging.getLogger(__name__)
 class HumanitarianVerificationService:
     """Runs humanitarian verification against configured LLM providers."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        llm_registry: Optional[LLMProviderRegistry] = None,
+        breakers: Optional[Dict[str, CircuitBreaker]] = None,
+    ):
         self.prompt_engine = HumanitarianPromptEngine()
-        self.test_provider = TestProvider()
-        self.breakers = {
+        self.llm_registry = llm_registry or build_default_llm_registry()
+        # Circuit breakers keyed by provider ``name`` so that swapping a
+        # provider implementation does not silently reset the breaker
+        # state.
+        self.breakers: Dict[str, CircuitBreaker] = breakers or {
             "openai": CircuitBreaker(
                 name="openai",
                 failure_threshold=settings.circuit_breaker_failure_threshold,
@@ -34,7 +65,16 @@ class HumanitarianVerificationService:
                 failure_threshold=settings.circuit_breaker_failure_threshold,
                 recovery_timeout=settings.circuit_breaker_recovery_timeout_seconds,
             ),
+            "test": CircuitBreaker(
+                name="test",
+                failure_threshold=settings.circuit_breaker_failure_threshold,
+                recovery_timeout=settings.circuit_breaker_recovery_timeout_seconds,
+            ),
         }
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def verify_claim(
         self,
@@ -62,28 +102,41 @@ class HumanitarianVerificationService:
 
             providers = self._provider_attempt_order(provider_preference)
             if not providers:
-                raise RuntimeError("No LLM providers configured for humanitarian verification")
+                raise RuntimeError(
+                    "No LLM providers configured for humanitarian verification"
+                )
 
             errors: List[str] = []
 
-            for provider in providers:
-                breaker = self.breakers.get(provider)
+            for provider_entry in providers:
+                provider_name = self._provider_name_of(provider_entry)
+                breaker = self._breaker_for(provider_entry)
                 if breaker and not breaker.allow_request():
-                    logger.warning("Circuit breaker is OPEN for provider=%s. Skipping.", provider)
-                    errors.append(f"provider={provider}, error=Circuit breaker is OPEN")
+                    logger.warning(
+                        "Circuit breaker is OPEN for provider=%s. Skipping.",
+                        provider_name,
+                    )
+                    errors.append(
+                        f"provider={provider_name}, error=Circuit breaker is OPEN"
+                    )
                     continue
 
-                model = self._get_model_for_provider(provider)
-                for prompt_variant, prompt in (("primary", primary_prompt), ("fallback", fallback_prompt)):
+                model = self._get_model_for_provider(provider_entry)
+
+                for prompt_variant, prompt in (
+                    ("primary", primary_prompt),
+                    ("fallback", fallback_prompt),
+                ):
                     try:
                         logger.info(
-                            "Attempting humanitarian verification with provider=%s model=%s prompt=%s",
-                            provider,
+                            "Attempting humanitarian verification with provider=%s "
+                            "model=%s prompt=%s",
+                            provider_name,
                             model,
                             prompt_variant,
                         )
                         raw_content = self._call_provider(
-                            provider=provider,
+                            provider=provider_entry,
                             model=model,
                             system_prompt=prompt["system"],
                             user_prompt=prompt["user"],
@@ -93,7 +146,7 @@ class HumanitarianVerificationService:
                         if breaker:
                             breaker.record_success()
                         return {
-                            "provider": provider,
+                            "provider": provider_name,
                             "model": model,
                             "prompt_variant": prompt_variant,
                             "verification": parsed,
@@ -102,37 +155,31 @@ class HumanitarianVerificationService:
                     except Exception as exc:
                         if breaker:
                             breaker.record_failure()
-                        err = f"provider={provider}, model={model}, prompt={prompt_variant}, error={exc}"
+                        err = (
+                            f"provider={provider_name}, model={model}, "
+                            f"prompt={prompt_variant}, error={exc}"
+                        )
                         errors.append(err)
-                        logger.warning("Humanitarian verification attempt failed: %s", err)
+                        logger.warning(
+                            "Humanitarian verification attempt failed: %s", err
+                        )
 
-            raise RuntimeError("All humanitarian verification attempts failed: " + " | ".join(errors))
+            raise RuntimeError(
+                "All humanitarian verification attempts failed: "
+                + " | ".join(errors)
+            )
         finally:
             latency = time.time() - start_time
-            metrics.PIPELINE_STEP_LATENCY.labels(step_name='verify').observe(latency)
-
-    def _provider_attempt_order(self, provider_preference: str) -> List[str]:
-        available: List[str] = []
-        if settings.test_provider_mode:
-            available.append("test")
-        if settings.openai_api_key:
-            available.append("openai")
-        if settings.groq_api_key:
-            available.append("groq")
-
-        preference = (provider_preference or "auto").lower()
-        if preference == "test" and settings.test_provider_mode:
-            return [preference]
-        if preference in ("openai", "groq", "test") and preference in available:
-            return [preference] + [provider for provider in available if provider != preference]
-        return available
+            metrics.PIPELINE_STEP_LATENCY.labels(step_name="verify").observe(
+                latency
+            )
 
     def all_providers_unavailable(self) -> bool:
         """Return True when every configured LLM provider circuit is open."""
         if settings.test_provider_mode:
             return False
 
-        providers = []
+        providers: List[str] = []
         if settings.openai_api_key:
             providers.append("openai")
         if settings.groq_api_key:
@@ -141,11 +188,42 @@ class HumanitarianVerificationService:
             return False
 
         return all(
-            provider in self.breakers and not self.breakers[provider].allow_request()
+            provider in self.breakers
+            and not self.breakers[provider].allow_request()
             for provider in providers
         )
 
-    def _get_model_for_provider(self, provider: str) -> str:
+    # ------------------------------------------------------------------
+    # Internal helpers (kept stable for tests that monkeypatch them)
+    # ------------------------------------------------------------------
+
+    def _provider_attempt_order(
+        self, provider_preference: str
+    ) -> List[Union[str, LLMProvider]]:
+        """Resolve providers to try, in order.
+
+        Thin wrapper around the registry that raises the same
+        ``RuntimeError`` the legacy implementation caused when no
+        provider is configured.  Returns a mix of strings (legacy
+        monkeypatches) and :class:`LLMProvider` instances (registry
+        output); both shapes are accepted everywhere downstream.
+        """
+        try:
+            providers = self.llm_registry.get_attempt_order(provider_preference)
+        except ProviderConfigurationError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return list(providers)
+
+    def _get_model_for_provider(
+        self, provider: Union[str, LLMProvider]
+    ) -> str:
+        """Resolve the model name for a provider entry.
+
+        Accepts either a string (legacy monkeypatches) or an
+        :class:`LLMProvider` instance (registry output).
+        """
+        if isinstance(provider, LLMProvider):
+            return provider.model
         if provider == "test":
             return "test-provider/fixture"
         if provider == "openai":
@@ -154,21 +232,105 @@ class HumanitarianVerificationService:
             return settings.groq_model
         raise ValueError(f"Unsupported provider: {provider}")
 
+    def _breaker_for(
+        self, provider: Union[str, LLMProvider]
+    ) -> Optional[CircuitBreaker]:
+        return self.breakers.get(self._provider_name_of(provider))
+
+    def _provider_name_of(self, provider: Union[str, LLMProvider]) -> str:
+        if isinstance(provider, LLMProvider):
+            return provider.name
+        return str(provider)
+
     def _call_provider(
         self,
-        provider: str,
+        provider: Union[str, LLMProvider],
         model: str,
         system_prompt: str,
         user_prompt: str,
         timeout: Optional[float] = None,
     ) -> str:
+        """Dispatch a provider call through the LLMProvider abstraction.
+
+        Accepts either a string (preserved for legacy test mocks) or
+        an :class:`LLMProvider` instance (the new abstraction).  Both
+        paths route through concrete provider classes so behaviour
+        stays consistent and there is exactly one HTTP transport.
+        """
+        deterministic = bool(settings.ai_deterministic_mode)
+        deterministic_response = (
+            self._get_deterministic_response(model, system_prompt, user_prompt)
+            if deterministic
+            else None
+        )
+
+        if isinstance(provider, LLMProvider):
+            request = LLMRequest(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                timeout=timeout,
+                deterministic=deterministic,
+                metadata={"provider_preference": provider.name},
+            )
+            try:
+                response = provider.generate(request)
+            except ProviderTimeoutError as exc:
+                raise AIServiceError(
+                    message=(
+                        f"LLM request timed out after "
+                        f"{exc.details.get('timeout_seconds')}s"
+                    ),
+                    code="AI_TIMEOUT",
+                    details={
+                        "provider": provider.name,
+                        **(exc.details or {}),
+                    },
+                ) from exc
+            except ProviderConnectionError as exc:
+                raise AIServiceError(
+                    message=f"LLM connection error: {exc.message}",
+                    code="AI_CONNECTION_ERROR",
+                    details={
+                        "provider": provider.name,
+                        **(exc.details or {}),
+                    },
+                ) from exc
+            except ProviderResponseError as exc:
+                raise AIServiceError(
+                    message=f"LLM response error: {exc.message}",
+                    code="AI_PROVIDER_ERROR",
+                    details={
+                        "provider": provider.name,
+                        **(exc.details or {}),
+                    },
+                ) from exc
+            except ProviderError as exc:
+                raise AIServiceError(
+                    message=f"LLM provider error: {exc.message}",
+                    code="AI_PROVIDER_ERROR",
+                    details={
+                        "provider": provider.name,
+                        **(exc.details or {}),
+                    },
+                ) from exc
+            return str(response.content)
+
+        # --- legacy string dispatch (preserved for existing tests) ---
         if provider == "test":
             return self._call_test(model, system_prompt, user_prompt)
         if provider == "openai":
-            return self._call_openai(model, system_prompt, user_prompt, timeout)
+            return self._call_openai(
+                model, system_prompt, user_prompt, timeout, deterministic_response
+            )
         if provider == "groq":
-            return self._call_groq(model, system_prompt, user_prompt, timeout)
+            return self._call_groq(
+                model, system_prompt, user_prompt, timeout, deterministic_response
+            )
         raise ValueError(f"Unsupported provider: {provider}")
+
+    # ------------------------------------------------------------------
+    # Legacy hooks retained so test mocks continue to operate
+    # ------------------------------------------------------------------
 
     def _call_openai(
         self,
@@ -176,17 +338,59 @@ class HumanitarianVerificationService:
         system_prompt: str,
         user_prompt: str,
         timeout: Optional[float] = None,
+        deterministic_response: Optional[str] = None,
     ) -> str:
-        if not settings.openai_api_key:
-            raise RuntimeError("OpenAI API key is not configured")
-        return self._call_chat_completion_api(
-            base_url="https://api.openai.com/v1/chat/completions",
-            api_key=settings.openai_api_key,
+        """Legacy hook: OpenAI calls route through :class:`OpenAIProvider`.
+
+        Provider errors are converted to :class:`AIServiceError` with
+        the same codes (``AI_TIMEOUT`` / ``AI_CONNECTION_ERROR`` /
+        ``AI_PROVIDER_ERROR``) the original implementation emitted, so
+        error-handler integration is unchanged.
+        """
+        provider = OpenAIProvider(
             model=model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            timeout=timeout,
+            api_key=settings.openai_api_key,
+            timeout_seconds=settings.llm_timeout_seconds,
+            deterministic_response=deterministic_response,
         )
+        try:
+            return str(
+                provider.generate(
+                    LLMRequest(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        timeout=timeout,
+                        deterministic=bool(settings.ai_deterministic_mode),
+                    )
+                ).content
+            )
+        except ProviderTimeoutError as exc:
+            raise AIServiceError(
+                message=(
+                    f"LLM request timed out after "
+                    f"{exc.details.get('timeout_seconds')}s"
+                ),
+                code="AI_TIMEOUT",
+                details={"provider": "openai", **(exc.details or {})},
+            ) from exc
+        except ProviderConnectionError as exc:
+            raise AIServiceError(
+                message=f"LLM connection error: {exc.message}",
+                code="AI_CONNECTION_ERROR",
+                details={"provider": "openai", **(exc.details or {})},
+            ) from exc
+        except ProviderResponseError as exc:
+            raise AIServiceError(
+                message=f"LLM response error: {exc.message}",
+                code="AI_PROVIDER_ERROR",
+                details={"provider": "openai", **(exc.details or {})},
+            ) from exc
+        except ProviderError as exc:
+            raise AIServiceError(
+                message=f"LLM provider error: {exc.message}",
+                code="AI_PROVIDER_ERROR",
+                details={"provider": "openai", **(exc.details or {})},
+            ) from exc
 
     def _call_groq(
         self,
@@ -194,95 +398,83 @@ class HumanitarianVerificationService:
         system_prompt: str,
         user_prompt: str,
         timeout: Optional[float] = None,
+        deterministic_response: Optional[str] = None,
     ) -> str:
-        if not settings.groq_api_key:
-            raise RuntimeError("Groq API key is not configured")
-        return self._call_chat_completion_api(
-            base_url="https://api.groq.com/openai/v1/chat/completions",
-            api_key=settings.groq_api_key,
+        """Legacy hook: Groq calls route through :class:`GroqProvider`."""
+        provider = GroqProvider(
             model=model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            timeout=timeout,
+            api_key=settings.groq_api_key,
+            timeout_seconds=settings.llm_timeout_seconds,
+            deterministic_response=deterministic_response,
         )
+        try:
+            return str(
+                provider.generate(
+                    LLMRequest(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        timeout=timeout,
+                        deterministic=bool(settings.ai_deterministic_mode),
+                    )
+                ).content
+            )
+        except ProviderTimeoutError as exc:
+            raise AIServiceError(
+                message=(
+                    f"LLM request timed out after "
+                    f"{exc.details.get('timeout_seconds')}s"
+                ),
+                code="AI_TIMEOUT",
+                details={"provider": "groq", **(exc.details or {})},
+            ) from exc
+        except ProviderConnectionError as exc:
+            raise AIServiceError(
+                message=f"LLM connection error: {exc.message}",
+                code="AI_CONNECTION_ERROR",
+                details={"provider": "groq", **(exc.details or {})},
+            ) from exc
+        except ProviderResponseError as exc:
+            raise AIServiceError(
+                message=f"LLM response error: {exc.message}",
+                code="AI_PROVIDER_ERROR",
+                details={"provider": "groq", **(exc.details or {})},
+            ) from exc
+        except ProviderError as exc:
+            raise AIServiceError(
+                message=f"LLM provider error: {exc.message}",
+                code="AI_PROVIDER_ERROR",
+                details={"provider": "groq", **(exc.details or {})},
+            ) from exc
 
-    def _call_chat_completion_api(
+    def _call_test(
         self,
-        base_url: str,
-        api_key: str,
         model: str,
         system_prompt: str,
         user_prompt: str,
-        timeout: Optional[float] = None,
     ) -> str:
-        if settings.ai_deterministic_mode:
-            logger.info("Deterministic AI mode enabled: returning stable response")
-            return self._get_deterministic_response(model, system_prompt, user_prompt)
+        """Legacy hook retained for tests that patch ``_call_test`` directly."""
+        # Delegates to the FixtureLLMProvider which uses the same
+        # fixture file as the legacy TestProvider.  Kept stable so
+        # test mocks that replace ``_call_test`` continue to work.
+        from services.providers import FixtureLLMProvider
 
-        payload = {
-            "model": model,
-            "temperature": 0.1,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        }
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-
-        req_timeout = timeout if timeout is not None else float(settings.llm_timeout_seconds)
-        provider_name = "openai" if "openai" in base_url else "groq"
-
-        try:
-            with httpx.Client(timeout=req_timeout) as client:
-                response = client.post(base_url, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-        except httpx.TimeoutException as exc:
-            logger.error("LLM provider %s request timed out after %s seconds", provider_name, req_timeout)
-            raise AIServiceError(
-                message=f"LLM request timed out after {req_timeout}s",
-                code="AI_TIMEOUT",
-                details={"provider": provider_name, "timeout_seconds": req_timeout},
-            ) from exc
-        except httpx.HTTPStatusError as exc:
-            logger.error("LLM provider %s returned status %s: %s", provider_name, exc.response.status_code, exc.response.text)
-            raise AIServiceError(
-                message=f"LLM request failed with status {exc.response.status_code}",
-                code="AI_PROVIDER_ERROR",
-                details={"provider": provider_name, "status_code": exc.response.status_code},
-            ) from exc
-        except Exception as exc:
-            logger.error("LLM provider %s connection or unexpected error: %s", provider_name, str(exc))
-            raise AIServiceError(
-                message=f"LLM connection error: {str(exc)}",
-                code="AI_CONNECTION_ERROR",
-                details={"provider": provider_name},
-            ) from exc
-
-        try:
-            content = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError(f"Unexpected LLM response format: {data}") from exc
-
-        if not content:
-            raise RuntimeError("LLM returned empty content")
-
-        return str(content)
-
-    def _call_test(self, model: str, system_prompt: str, user_prompt: str) -> str:
-        response = self.test_provider.get_response(
-            endpoint="humanitarian",
-            request_data={
-                "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
-            },
+        provider = FixtureLLMProvider()
+        return str(
+            provider.generate(
+                LLMRequest(system_prompt=system_prompt, user_prompt=user_prompt)
+            ).content
         )
-        return json.dumps(response, separators=(",", ":"), sort_keys=True)
 
-    def _get_deterministic_response(self, model: str, system_prompt: str, user_prompt: str) -> str:
+    # ------------------------------------------------------------------
+    # Pure helpers
+    # ------------------------------------------------------------------
+
+    def _get_deterministic_response(
+        self,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> str:
         stable_response = {
             "verdict": "credible",
             "confidence": 0.74,
