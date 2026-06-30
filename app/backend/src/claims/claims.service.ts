@@ -111,6 +111,9 @@ export class ClaimsService {
 
     claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
+    // Track funnel stage metric
+    this.metricsService.incrementFunnelStage('created', claim.campaignId);
+
     // Stub audit hook
     void this.auditLog('claim', claim.id, 'created', {
       status: claim.status,
@@ -153,19 +156,25 @@ export class ClaimsService {
   }
 
   async verify(id: string) {
-    return this.transitionStatus(
+    const claim = await this.transitionStatus(
       id,
       ClaimStatus.requested,
       ClaimStatus.verified,
     );
+    // Track funnel stage metric
+    this.metricsService.incrementFunnelStage('verified', claim.campaignId);
+    return claim;
   }
 
   async approve(id: string) {
-    return this.transitionStatus(
+    const claim = await this.transitionStatus(
       id,
       ClaimStatus.verified,
       ClaimStatus.approved,
     );
+    // Track funnel stage metric
+    this.metricsService.incrementFunnelStage('approved', claim.campaignId);
+    return claim;
   }
 
   async disburse(id: string) {
@@ -236,6 +245,8 @@ export class ClaimsService {
       });
     }
 
+    // Proceed with status transition
+    const claim = await this.transitionStatus(
     // Update claim status to disbursed (optimistic update)
     // The Soroban transaction will be processed asynchronously with full retry logic
     const updatedClaim = await this.transitionStatus(
@@ -243,6 +254,9 @@ export class ClaimsService {
       ClaimStatus.approved,
       ClaimStatus.disbursed,
     );
+    // Track funnel stage metric
+    this.metricsService.incrementFunnelStage('disbursed', claim.campaignId);
+    return claim;
 
     this.logger.log(
       `Claim ${id} marked as disbursed with Soroban transaction tracking`,

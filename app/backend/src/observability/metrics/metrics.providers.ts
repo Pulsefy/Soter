@@ -60,6 +60,17 @@ export const metricsProviders = [
     labelNames: ['operation', 'adapter'],
     buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
   }),
+
+  // Funnel Stage Metrics
+  makeCounterProvider({
+    name: 'claims_funnel_stage_total',
+    help: 'Total number of claims at each funnel stage',
+    labelNames: ['stage', 'campaign_id'],
+  }),
+  makeGaugeProvider({
+    name: 'claims_funnel_stage_current',
+    help: 'Current number of claims at each funnel stage',
+    labelNames: ['stage', 'campaign_id'],
   makeHistogramProvider({
     name: 'contract_call_latency_seconds',
     help: 'Latency of Testnet contract calls grouped by operation and status',
