@@ -8,6 +8,7 @@ import {
   OnchainOperationType,
 } from './interfaces/onchain-job.interface';
 import { ONCHAIN_ADAPTER_TOKEN, OnchainAdapter } from './onchain.adapter';
+import { SorobanEventCorrelationService, CorrelationJobData } from './soroban-event-correlation.service';
 
 import { DlqService } from '../jobs/dlq.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
@@ -21,6 +22,7 @@ export class OnchainProcessor extends WorkerHost {
   constructor(
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
+    private readonly eventCorrelationService: SorobanEventCorrelationService,
     private readonly dlqService: DlqService,
     private readonly metricsService: MetricsService,
   ) {
@@ -51,6 +53,17 @@ export class OnchainProcessor extends WorkerHost {
           break;
         case OnchainOperationType.DISBURSE:
           result = await this.onchainAdapter.disburse(job.data.params);
+          break;
+        case OnchainOperationType.EVENT_CORRELATION:
+          result = await this.eventCorrelationService.correlateEvents(
+            job.data.params as CorrelationJobData,
+          );
+          break;
+        case OnchainOperationType.EVENT_CORRELATION_TRANSACTION:
+          result = await this.eventCorrelationService.correlateTransaction(
+            (job.data.params as any).txHash,
+            'on_demand',
+          );
           break;
         default:
           throw new Error(

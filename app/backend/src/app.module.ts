@@ -23,6 +23,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { APP_GUARD } from '@nestjs/core';
 import { ApiKeyGuard } from './common/guards/api-key.guard';
 import { RolesGuard } from './auth/roles.guard';
+import { ScopesGuard } from './api-keys/scopes.guard';
 import { ObservabilityModule } from './observability/observability.module';
 import { ClaimsModule } from './claims/claims.module';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
@@ -47,6 +48,7 @@ import { SandboxModule } from './sandbox/sandbox.module';
 import { CacheModule } from './common/cache/cache.module';
 import { CacheResponseInterceptor } from './common/interceptors/cache-response.interceptor';
 
+import { WebhooksModule } from 'src/webhooks.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -116,6 +118,7 @@ import { CacheResponseInterceptor } from './common/interceptors/cache-response.i
     EntityLinkingModule,
     DeploymentMetadataModule,
     SandboxModule,
+    WebhooksModule,
     RedisModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
@@ -148,6 +151,10 @@ import { CacheResponseInterceptor } from './common/interceptors/cache-response.i
     {
       provide: APP_GUARD,
       useClass: RolesGuard, // runs second — checks request.user.role against @Roles()
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ScopesGuard, // runs third — checks request.user.scopes against @Scopes()
     },
     {
       provide: APP_GUARD,

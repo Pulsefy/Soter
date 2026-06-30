@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { AuditService } from './audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MetricsService } from './metrics.service';
 
 describe('AuditService', () => {
   let service: AuditService;
@@ -26,6 +27,15 @@ describe('AuditService', () => {
     $transaction: jest.fn().mockResolvedValue([[mockRow], 1]),
   };
 
+  const mockMetricsService = {
+    dbQueryDuration: {
+      startTimer: jest.fn(() => jest.fn()),
+    },
+    dbErrorsTotal: {
+      inc: jest.fn(),
+    },
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -33,6 +43,10 @@ describe('AuditService', () => {
         {
           provide: PrismaService,
           useValue: mockPrisma,
+        },
+        {
+          provide: MetricsService,
+          useValue: mockMetricsService,
         },
       ],
     }).compile();

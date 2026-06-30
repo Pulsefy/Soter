@@ -5,8 +5,19 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AdminSearchService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async search(query: string, entity: string | undefined, orgId: string) {
-    const results: any[] = [];
+  async search(
+    query: string,
+    entity: string | undefined,
+    orgId: string,
+  ): Promise<
+    Array<{ type: string; label: string; status: string; id: string }>
+  > {
+    const results: Array<{
+      type: string;
+      label: string;
+      status: string;
+      id: string;
+    }> = [];
     const q = query.toLowerCase();
 
     // 1. Search Campaigns

@@ -195,5 +195,23 @@
     "dashboardPage": "Panel de Control",
     "verificationReviewPage": "Revisión de Verificación",
     "resetChecklist": "Reiniciar progreso de la lista"
+  },
+  "faucet": {
+    "title": "Asistente de Faucet Testnet",
+    "subtitle": "Herramienta de Desarrollo Stellar / Soroban",
+    "connectWallet": "Por favor, conecta tu billetera en la barra de navegación para ver el saldo y solicitar fondos.",
+    "unfundedAccount": "Cuenta no creada aún (necesita activación/fondos)",
+    "lastUpdated": "Última actualización: {time}",
+    "refresh": "Actualizar Saldo",
+    "requestFunds": "Solicitar 10,000 XLM",
+    "requesting": "Solicitando...",
+    "success": "¡Cuenta financiada exitosamente!",
+    "error": "Error al financiar la cuenta. Inténtalo de nuevo.",
+    "instructionsTitle": "Instrucciones Paso a Paso",
+    "step1": "Conecta tu billetera Freighter configurada en Stellar Testnet.",
+    "step2": "Haz clic en 'Solicitar 10,000 XLM' o usa los enlaces oficiales de faucet de Stellar.",
+    "step3": "Verifica que tu saldo esté actualizado para realizar acciones en la cadena.",
+    "linksTitle": "Faucets Oficiales de Stellar",
+    "faucetNote": "Visible solo en entornos testnet."
   }
 }

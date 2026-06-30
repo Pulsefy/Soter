@@ -69,7 +69,7 @@
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",
     "@types/express": "^5.0.0",
-    "@types/jest": "^29.5.12",
+    "@types/jest": "^29.5.14",
     "@types/multer": "^2.1.0",
     "@types/node": "^22.19.7",
     "@types/supertest": "^6.0.3",
@@ -110,7 +110,12 @@
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "moduleNameMapper": {
-      "^src/(.*)$": "<rootDir>/src/$1"
+      "^src/(.*)$": "<rootDir>/src/$1",
+      ".*metrics/metrics\\.service$": "<rootDir>/src/observability/metrics/metrics.service",
+      ".*/session/session\\.service$": "<rootDir>/src/session/session.service",
+      ".*/prisma/prisma\\.service$": "<rootDir>/src/prisma/prisma.service",
+      ".*config/config$": "<rootDir>/src/config/config",
+      ".*guards/hmac-auth\\.guard$": "<rootDir>/src/common/guards/hmac.guard"
     }
   },
   "prisma": {
