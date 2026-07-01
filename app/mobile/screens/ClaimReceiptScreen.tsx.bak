@@ -1,0 +1,176 @@
+import React from "react";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Linking,
+  ScrollView,
+  Alert,
+} from "react-native";
+import * as Clipboard from "expo-clipboard";
+import { getTxExplorerUrl, getContractExplorerUrl } from "../utils/explorerUtils";
+
+type ClaimReceiptScreenProps = {
+  route: {
+    params: {
+      txHash: string;
+      contractId: string;
+      claimantAddress: string;
+      aidPackageId: string;
+      timestamp: string;
+    };
+  };
+};
+
+export default function ClaimReceiptScreen({ route }: ClaimReceiptScreenProps) {
+  const { txHash, contractId, claimantAddress, aidPackageId, timestamp } =
+    route.params;
+
+  async function copyToClipboard(value: string, label: string) {
+    await Clipboard.setStringAsync(value);
+    Alert.alert("Copied", `${label} copied to clipboard.`);
+  }
+
+  function openLink(url: string) {
+    Linking.openURL(url).catch(() =>
+      Alert.alert("Error", "Could not open link.")
+    );
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.heading}>Claim Receipt</Text>
+
+      <View style={styles.card}>
+        <Text style={styles.label}>Aid Package ID</Text>
+        <Text style={styles.value}>{aidPackageId}</Text>
+
+        <Text style={styles.label}>Timestamp</Text>
+        <Text style={styles.value}>{timestamp}</Text>
+
+        <Text style={styles.label}>Claimant Address</Text>
+        <Text style={styles.value} numberOfLines={1} ellipsizeMode="middle">
+          {claimantAddress}
+        </Text>
+        <TouchableOpacity
+          style={styles.copyButton}
+          onPress={() => copyToClipboard(claimantAddress, "Claimant address")}
+        >
+          <Text style={styles.copyButtonText}>Copy Address</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.label}>Transaction Hash</Text>
+        <Text style={styles.value} numberOfLines={1} ellipsizeMode="middle">
+          {txHash}
+        </Text>
+        <View style={styles.row}>
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={() => copyToClipboard(txHash, "Transaction hash")}
+          >
+            <Text style={styles.copyButtonText}>Copy Tx Hash</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.linkButton}
+            onPress={() => openLink(getTxExplorerUrl(txHash))}
+          >
+            <Text style={styles.linkButtonText}>View on Explorer</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.label}>Contract ID</Text>
+        <Text style={styles.value} numberOfLines={1} ellipsizeMode="middle">
+          {contractId}
+        </Text>
+        <View style={styles.row}>
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={() => copyToClipboard(contractId, "Contract ID")}
+          >
+            <Text style={styles.copyButtonText}>Copy Contract ID</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.linkButton}
+            onPress={() => openLink(getContractExplorerUrl(contractId))}
+          >
+            <Text style={styles.linkButtonText}>View Contract</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    padding: 20,
+    backgroundColor: "#f5f5f5",
+    flexGrow: 1,
+  },
+  heading: {
+    fontSize: 22,
+    fontWeight: "700",
+    marginBottom: 20,
+    color: "#1a1a2e",
+  },
+  card: {
+    backgroundColor: "#ffffff",
+    borderRadius: 10,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#888",
+    marginBottom: 4,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  value: {
+    fontSize: 14,
+    color: "#1a1a2e",
+    marginBottom: 10,
+    fontFamily: "monospace",
+  },
+  row: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  copyButton: {
+    backgroundColor: "#e8f0fe",
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flex: 1,
+    alignItems: "center",
+  },
+  copyButtonText: {
+    color: "#1a73e8",
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  linkButton: {
+    backgroundColor: "#1a73e8",
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flex: 1,
+    alignItems: "center",
+  },
+  linkButtonText: {
+    color: "#ffffff",
+    fontWeight: "600",
+    fontSize: 13,
+  },
+});

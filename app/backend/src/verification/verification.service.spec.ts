@@ -34,6 +34,7 @@ describe('VerificationService', () => {
     verificationResult: null,
     verifiedAt: null,
     metadata: null,
+    anchorMetadata: null,
   };
 
   beforeEach(async () => {
@@ -374,6 +375,162 @@ describe('VerificationService', () => {
       await expect(service.findOne('non-existent-id')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('anchor metadata persistence', () => {
+    it('should persist anchor_metadata when AI returns it', async () => {
+      const anchorMetadata = {
+        campaignRef: 'CAMPAIGN-001',
+        claimId: 'claim-ref-123',
+        packageId: 'PKG-456',
+      };
+
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+
+      const updateSpy = jest
+        .spyOn(prismaService.claim, 'update')
+        .mockResolvedValue({
+          ...mockClaim,
+          status: ClaimStatus.verified,
+          anchorMetadata,
+        });
+
+      await service.processVerification({
+        claimId: 'test-claim-id',
+        timestamp: Date.now(),
+        anchorMetadata,
+      });
+
+      expect(updateSpy).toHaveBeenCalledWith({
+        where: { id: 'test-claim-id' },
+        data: {
+          status: expect.any(String),
+          anchorMetadata: {
+            campaignRef: 'CAMPAIGN-001',
+            claimId: 'claim-ref-123',
+            packageId: 'PKG-456',
+          },
+        },
+      });
+    });
+
+    it('should store null anchor_metadata when AI omits it', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+
+      const updateSpy = jest
+        .spyOn(prismaService.claim, 'update')
+        .mockResolvedValue({
+          ...mockClaim,
+          status: ClaimStatus.verified,
+          anchorMetadata: null,
+        });
+
+      await service.processVerification({
+        claimId: 'test-claim-id',
+        timestamp: Date.now(),
+      });
+
+      expect(updateSpy).toHaveBeenCalledWith({
+        where: { id: 'test-claim-id' },
+        data: {
+          status: expect.any(String),
+          anchorMetadata: expect.anything(),
+        },
+      });
+    });
+
+    it('should enqueue verification with anchor_metadata', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+
+      const anchorMetadata = {
+        campaignRef: 'CAMPAIGN-002',
+        claimId: 'claim-ref-456',
+      };
+
+      await service.enqueueVerification('test-claim-id', anchorMetadata);
+
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'verify-claim',
+        expect.objectContaining({
+          claimId: 'test-claim-id',
+          anchorMetadata: {
+            campaignRef: 'CAMPAIGN-002',
+            claimId: 'claim-ref-456',
+            packageId: null,
+          },
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it('should return anchor_metadata in GET /verification/:id', async () => {
+      const claimWithMetadata = {
+        ...mockClaim,
+        anchorMetadata: {
+          campaignRef: 'CAMPAIGN-003',
+          claimId: 'claim-ref-789',
+          packageId: 'PKG-789',
+        },
+      };
+
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(claimWithMetadata);
+
+      const result = await service.findOne('test-claim-id');
+
+      expect(result.anchorMetadata).toEqual({
+        campaignRef: 'CAMPAIGN-003',
+        claimId: 'claim-ref-789',
+        packageId: 'PKG-789',
+      });
+    });
+
+    it('should handle partial anchor_metadata (only campaignRef)', async () => {
+      const partialAnchorMetadata = {
+        campaignRef: 'CAMPAIGN-PARTIAL',
+      };
+
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+
+      const updateSpy = jest
+        .spyOn(prismaService.claim, 'update')
+        .mockResolvedValue({
+          ...mockClaim,
+          status: ClaimStatus.verified,
+          anchorMetadata: {
+            campaignRef: 'CAMPAIGN-PARTIAL',
+            claimId: null,
+            packageId: null,
+          },
+        });
+
+      await service.processVerification({
+        claimId: 'test-claim-id',
+        timestamp: Date.now(),
+        anchorMetadata: partialAnchorMetadata,
+      });
+
+      expect(updateSpy).toHaveBeenCalledWith({
+        where: { id: 'test-claim-id' },
+        data: {
+          status: expect.any(String),
+          anchorMetadata: {
+            campaignRef: 'CAMPAIGN-PARTIAL',
+            claimId: null,
+            packageId: null,
+          },
+        },
+      });
     });
   });
 });

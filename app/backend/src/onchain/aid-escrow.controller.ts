@@ -7,6 +7,7 @@ import {
   HttpCode,
   HttpStatus,
   Req,
+  Query,
   BadRequestException,
   Logger,
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ import {
   ApiNotFoundResponse,
   ApiInternalServerErrorResponse,
   ApiBearerAuth,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { AidEscrowService } from './aid-escrow.service';
 import {
@@ -30,6 +32,7 @@ import {
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { CacheResponse } from '../common/decorators/cache-response.decorator';
 import { getCacheTTL } from '../common/config/cache.config';
+import { SorobanEventCorrelationService } from './soroban-event-correlation.service';
 
 /**
  * AidEscrowController
@@ -42,7 +45,10 @@ export class AidEscrowController {
   private readonly logger = new Logger(AidEscrowController.name);
   private readonly errorMapper = new SorobanErrorMapper();
 
-  constructor(private readonly aidEscrowService: AidEscrowService) {}
+  constructor(
+    private readonly aidEscrowService: AidEscrowService,
+    private readonly eventCorrelationService: SorobanEventCorrelationService,
+  ) {}
 
   /**
    * Create a single aid package
@@ -408,6 +414,148 @@ export class AidEscrowController {
       return await this.aidEscrowService.getTransactionStatus(hash);
     } catch (error) {
       this.logger.error('Failed to get transaction status:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Get on-chain event correlations for an aid package
+   * GET /onchain/aid-escrow/packages/:id/events
+   */
+  @Get('packages/:id/events')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get on-chain event correlations for a package',
+    description:
+      'Retrieves all Soroban on-chain events correlated to an aid package, including transaction hashes, ledger numbers, and event topics.',
+  })
+  @ApiOkResponse({
+    description: 'Event correlations retrieved successfully.',
+    schema: {
+      example: {
+        packageId: 'pkg_123456789',
+        events: [
+          {
+            id: 'corr_abc123',
+            eventTopic: 'package_created',
+            txHash: 'ABC123...',
+            ledger: 12345,
+            eventIndex: 0,
+            payload: { package_id: 'pkg_123456789', amount: '1000' },
+            correlationSource: 'scheduled',
+            createdAt: '2026-03-30T12:30:00.000Z',
+          },
+        ],
+        total: 3,
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Package not found.' })
+  @ApiInternalServerErrorResponse({
+    description: 'Failed to retrieve event correlations.',
+  })
+  async getPackageEvents(@Param('id') packageId: string): Promise<any> {
+    try {
+      const events = await this.eventCorrelationService.getCorrelationsForPackage(packageId);
+      return {
+        packageId,
+        events,
+        total: events.length,
+      };
+    } catch (error) {
+      this.logger.error('Failed to get package events:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Trigger on-demand event correlation for a specific transaction
+   * POST /onchain/aid-escrow/correlate/:txHash
+   */
+  @Post('correlate/:txHash')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Trigger on-demand event correlation for a transaction',
+    description:
+      'Correlates on-chain events from a specific transaction hash to internal records. Returns the correlation results.',
+  })
+  @ApiOkResponse({
+    description: 'Event correlation completed successfully.',
+    schema: {
+      example: {
+        correlated: 2,
+        skipped: 0,
+        errors: 0,
+        details: [
+          {
+            txHash: 'ABC123...',
+            eventIndex: 0,
+            eventTopic: 'package_created',
+            packageId: 'pkg_123456789',
+            success: true,
+          },
+        ],
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid transaction hash.' })
+  @ApiInternalServerErrorResponse({
+    description: 'Failed to correlate events.',
+  })
+  async correlateTransaction(@Param('txHash') txHash: string): Promise<any> {
+    if (!txHash || txHash.length < 10) {
+      throw new BadRequestException('Invalid transaction hash');
+    }
+    try {
+      return await this.eventCorrelationService.correlateTransaction(txHash, 'on_demand');
+    } catch (error) {
+      this.logger.error('Failed to correlate transaction:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Get all event correlations with filtering and pagination
+   * GET /onchain/aid-escrow/events
+   */
+  @Get('events')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get all event correlations',
+    description:
+      'Retrieves all Soroban event correlations with optional filtering by topic, claim, package, or ledger range.',
+  })
+  @ApiOkResponse({
+    description: 'Event correlations retrieved successfully.',
+  })
+  @ApiQuery({ name: 'page', required: false, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Items per page (default: 20, max: 100)' })
+  @ApiQuery({ name: 'eventTopic', required: false, description: 'Filter by event topic' })
+  @ApiQuery({ name: 'claimId', required: false, description: 'Filter by claim ID' })
+  @ApiQuery({ name: 'packageId', required: false, description: 'Filter by package ID' })
+  @ApiQuery({ name: 'startLedger', required: false, description: 'Start ledger sequence' })
+  @ApiQuery({ name: 'endLedger', required: false, description: 'End ledger sequence' })
+  async getEventCorrelations(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('eventTopic') eventTopic?: string,
+    @Query('claimId') claimId?: string,
+    @Query('packageId') packageId?: string,
+    @Query('startLedger') startLedger?: number,
+    @Query('endLedger') endLedger?: number,
+  ): Promise<any> {
+    try {
+      return await this.eventCorrelationService.getAllCorrelations({
+        page,
+        limit,
+        eventTopic,
+        claimId,
+        packageId,
+        startLedger,
+        endLedger,
+      });
+    } catch (error) {
+      this.logger.error('Failed to get event correlations:', error);
       this.errorMapper.throwMappedError(error);
     }
   }

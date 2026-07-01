@@ -82,6 +82,14 @@ class Settings(BaseSettings):
     verification_artifact_url_ttl_seconds: int = 300
     artifact_signing_secret: str = secrets.token_urlsafe(32)
 
+    # CORS configuration
+    # Comma-separated list of allowed origins for production
+    cors_allowed_origins: str = ""
+    # Allow Vercel preview deployments (pattern: *.vercel.app)
+    cors_allow_vercel_previews: bool = True
+    # Additional custom origins (comma-separated)
+    cors_custom_origins: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -128,6 +136,69 @@ class Settings(BaseSettings):
         if self.groq_api_key:
             return "groq"
         return None
+
+    def get_cors_allowed_origins(self) -> list[str]:
+        """
+        Build the list of allowed CORS origins based on configuration.
+
+        Returns:
+            List of allowed origins including:
+            - Production origins from cors_allowed_origins
+            - Vercel preview deployments if cors_allow_vercel_previews is True
+            - Custom origins from cors_custom_origins
+        """
+        origins = []
+
+        # Add production origins
+        if self.cors_allowed_origins:
+            origins.extend(
+                [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
+            )
+
+        # Add Vercel preview pattern if enabled
+        if self.cors_allow_vercel_previews:
+            origins.append("https://*.vercel.app")
+            origins.append("https://*.vercel.app:*")
+
+        # Add custom origins
+        if self.cors_custom_origins:
+            origins.extend(
+                [origin.strip() for origin in self.cors_custom_origins.split(",") if origin.strip()]
+            )
+
+        # Always allow localhost for development
+        if self.app_env == "development":
+            origins.extend(["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"])
+
+        return origins
+
+    def is_origin_allowed(self, origin: str) -> bool:
+        """
+        Check if a given origin is allowed based on CORS configuration.
+
+        Args:
+            origin: The Origin header value to check
+
+        Returns:
+            True if origin is allowed, False otherwise
+        """
+        if not origin:
+            return False
+
+        allowed_origins = self.get_cors_allowed_origins()
+
+        for allowed in allowed_origins:
+            # Handle wildcard patterns (e.g., https://*.vercel.app)
+            if "*" in allowed:
+                pattern = allowed.replace("*", "[^\"]*")
+                import re
+                if re.match(f"^{pattern}$", origin):
+                    return True
+            # Exact match
+            elif origin == allowed:
+                return True
+
+        return False
 
 
 settings = Settings()

@@ -196,7 +196,14 @@ export class VerificationService {
   // Public API
   // -------------------------------------------------------------------------
 
-  async enqueueVerification(claimId: string): Promise<{ jobId: string }> {
+  async enqueueVerification(
+    claimId: string,
+    anchorMetadata?: {
+      campaignRef?: string;
+      claimId?: string;
+      packageId?: string;
+    },
+  ): Promise<{ jobId: string }> {
     const claim = await this.prisma.claim.findUnique({
       where: { id: claimId },
     });
@@ -213,6 +220,13 @@ export class VerificationService {
     const jobData: VerificationJobData = {
       claimId,
       timestamp: Date.now(),
+      anchorMetadata: anchorMetadata
+        ? {
+            campaignRef: anchorMetadata.campaignRef ?? null,
+            claimId: anchorMetadata.claimId ?? null,
+            packageId: anchorMetadata.packageId ?? null,
+          }
+        : undefined,
     };
 
     const job = await this.verificationQueue.add('verify-claim', jobData, {
@@ -234,7 +248,7 @@ export class VerificationService {
       entity: 'verification',
       entityId: claimId,
       action: 'enqueue',
-      metadata: { jobId: job.id || 'unknown' },
+      metadata: { jobId: job.id || 'unknown', anchorMetadata },
     });
 
     return { jobId: job.id || 'unknown' };
@@ -243,7 +257,7 @@ export class VerificationService {
   async processVerification(
     jobData: VerificationJobData,
   ): Promise<VerificationResult> {
-    const { claimId } = jobData;
+    const { claimId, anchorMetadata } = jobData;
 
     this.logger.log(
       `Processing verification for claim ${claimId} in ${this.verificationMode} mode`,
@@ -269,10 +283,22 @@ export class VerificationService {
 
     const shouldVerify = result.score >= this.verificationThreshold;
 
+    // Build anchor metadata to persist
+    const anchorMetadataToPersist = anchorMetadata
+      ? {
+          campaignRef: anchorMetadata.campaignRef ?? null,
+          claimId: anchorMetadata.claimId ?? null,
+          packageId: anchorMetadata.packageId ?? null,
+        }
+      : null;
+
     await this.prisma.claim.update({
       where: { id: claimId },
       data: {
         status: shouldVerify ? 'verified' : 'requested',
+        anchorMetadata: anchorMetadataToPersist === null
+          ? Prisma.JsonNull
+          : (anchorMetadataToPersist as Prisma.InputJsonValue),
       },
     });
 
@@ -289,6 +315,7 @@ export class VerificationService {
       metadata: {
         score: result.score,
         status: shouldVerify ? 'verified' : 'requested',
+        anchorMetadata: anchorMetadataToPersist,
       },
     });
 

@@ -107,14 +107,15 @@ def test_proof_of_life_success(client, monkeypatch):
         "confidence_threshold": 0.70,
     }
 
+    # /ai/proof-of-life redirects to /v1/ai/proof-of-life which returns ResultEnvelope
     response = client.post("/ai/proof-of-life", json=payload)
     assert response.status_code == 200
 
     data = response.json()
-    assert data["is_real_person"] is True
-    assert data["confidence"] == 0.91
-    assert data["threshold"] == 0.70
-    assert data["checks"]["face_detected"] is True
+    assert data["result"]["is_real_person"] is True
+    assert data["confidence"] == pytest.approx(0.91)
+    assert data["result"]["threshold"] == pytest.approx(0.70)
+    assert data["result"]["checks"]["face_detected"] is True
 
 
 def test_proof_of_life_invalid_image(client, monkeypatch):
@@ -152,15 +153,17 @@ def test_anonymize_endpoint_success(client):
         "text": "On 15 Jan 2025, Mary Johnson received support in Borno State.",
     }
 
+    # /ai/anonymize redirects to /v1/ai/anonymize which returns ResultEnvelope
     response = client.post("/ai/anonymize", json=payload)
     assert response.status_code == 200
 
     data = response.json()
-    assert data["success"] is True
-    assert "anonymized_text" in data
-    assert "received support" in data["anonymized_text"]
-    assert "[RECIPIENT_NAME]" in data["anonymized_text"]
-    assert data["pii_summary"]["total"] >= 3
+    assert "result" in data
+    result = data["result"]
+    assert "anonymized_text" in result
+    assert "received support" in result["anonymized_text"]
+    assert "[RECIPIENT_NAME]" in result["anonymized_text"]
+    assert result["pii_summary"]["total"] >= 3
 
 
 def test_anonymize_endpoint_validation(client):
@@ -199,20 +202,23 @@ def test_humanitarian_verification_success(client, monkeypatch):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["success"] is True
-    assert data["provider"] == "openai"
-    assert data["verification"]["verdict"] == "credible"
+    # /ai/humanitarian/verify redirects to /v1/... which returns ResultEnvelope
+    assert "result" in data
+    assert data["result"]["provider"] == "openai"
+    assert data["result"]["verification"]["verdict"] == "credible"
 
 
-def test_humanitarian_verification_failure(client, monkeypatch):
-    """Test humanitarian verification failure path."""
+def test_humanitarian_verification_failure(monkeypatch):
+    """Test humanitarian verification failure path returns an error envelope."""
 
     def fake_verify_claim(aid_claim, supporting_evidence=None, context_factors=None, provider_preference="auto"):
         raise RuntimeError("all providers unavailable")
 
     monkeypatch.setattr(main.humanitarian_verification_service, "verify_claim", fake_verify_claim)
 
-    response = client.post(
+    # Use raise_server_exceptions=False so RuntimeError returns a 500 response
+    safe_client = TestClient(app, raise_server_exceptions=False)
+    response = safe_client.post(
         "/ai/humanitarian/verify",
         json={
             "aid_claim": "Temporary clinics are fully operational in all camps.",
@@ -222,7 +228,8 @@ def test_humanitarian_verification_failure(client, monkeypatch):
         },
     )
 
-    assert response.status_code == 200
+    # v1 endpoint re-raises; global handler returns 500 error envelope
+    assert response.status_code == 500
     data = response.json()
-    assert data["success"] is False
-    assert "all providers unavailable" in data["error"]
+    assert "error" in data
+    assert data["error"]["code"] == "INTERNAL_SERVER_ERROR"

@@ -17,15 +17,15 @@ const STATUS_STYLES: Record<AidPackageStatus, string> = {
 
 const TABLE_HEADERS = ['ID', 'Title', 'Region', 'Amount', 'Recipients', 'Status', 'Token'];
 
-function StatusBadge({ status }: { status: AidPackageStatus }) {
+const StatusBadge = React.memo(function StatusBadge({ status }: { status: AidPackageStatus }) {
   return (
     <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[status]}`}>
       {status}
     </span>
   );
-}
+});
 
-function SkeletonRow() {
+const SkeletonRow = React.memo(function SkeletonRow() {
   return (
     <tr>
       {TABLE_HEADERS.map(h => (
@@ -35,9 +35,9 @@ function SkeletonRow() {
       ))}
     </tr>
   );
-}
+});
 
-function PackageCard({ pkg }: { pkg: AidPackage }) {
+const PackageCard = React.memo(function PackageCard({ pkg }: { pkg: AidPackage }) {
   return (
     <div className="p-4 rounded-lg border border-gray-100 dark:border-gray-800 space-y-1.5">
       <div className="flex items-start justify-between gap-2">
@@ -55,13 +55,13 @@ function PackageCard({ pkg }: { pkg: AidPackage }) {
       <p className="text-xs font-mono text-gray-400">{pkg.id}</p>
     </div>
   );
-}
+});
 
 interface FilteredPackageListProps {
   filters: AidPackageFilters;
 }
 
-export function FilteredPackageList({ filters }: FilteredPackageListProps) {
+export const FilteredPackageList = React.memo(function FilteredPackageList({ filters }: FilteredPackageListProps) {
   const { data: packages, isLoading, error } = useAidPackages(filters);
   const role = getAppUserRole();
   const hasFilters = Boolean(filters.search || filters.status || filters.token);
@@ -216,4 +216,4 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
       </div>
     </>
   );
-}
+});

@@ -4,6 +4,7 @@ import {
   IsUUID,
   IsEnum,
   IsObject,
+  IsOptional,
 } from 'class-validator';
 
 export enum VerificationStatus {
@@ -25,4 +26,17 @@ export class AiVerificationPayloadDto {
 
   @IsObject()
   details: Record<string, any>;
+
+  @IsOptional()
+  @IsString()
+  campaignRef?: string;
+
+  @IsOptional()
+  @IsString()
+  claimId?: string;
+
+  @IsOptional()
+  @IsString()
+  packageId?: string;
 }
+

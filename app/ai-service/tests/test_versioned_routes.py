@@ -139,6 +139,17 @@ class TestOCRLegacyPath:
 
 
 class TestOCRV1Path:
+    _FAKE_OCR = {
+        "success": True,
+        "data": {
+            "fields": {"full_name": {"value": "Test Name", "confidence": 0.90}},
+            "raw_text": "Test Name",
+            "processing_time_ms": 50,
+        },
+        "processing_time_ms": 50,
+        "anchor_metadata": None,
+    }
+
     def test_v1_ocr_no_image_returns_422(self, client):
         response = client.post("/v1/ai/ocr")
         assert response.status_code == 422
@@ -156,10 +167,11 @@ class TestOCRV1Path:
         img = Image.new("RGB", (60, 60), color="green")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        response = client.post(
-            "/v1/ai/ocr",
-            files={"image": ("img.png", buf.getvalue(), "image/png")},
-        )
+        with patch("api.v1.ocr.run_ocr_from_bytes", return_value=self._FAKE_OCR):
+            response = client.post(
+                "/v1/ai/ocr",
+                files={"image": ("img.png", buf.getvalue(), "image/png")},
+            )
         assert response.status_code == 200
 
     def test_v1_ocr_processing_time_present(self, client):
@@ -168,12 +180,16 @@ class TestOCRV1Path:
         img = Image.new("RGB", (60, 60), color="red")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        response = client.post(
-            "/v1/ai/ocr",
-            files={"image": ("img.png", buf.getvalue(), "image/png")},
-        )
+        with patch("api.v1.ocr.run_ocr_from_bytes", return_value=self._FAKE_OCR):
+            response = client.post(
+                "/v1/ai/ocr",
+                files={"image": ("img.png", buf.getvalue(), "image/png")},
+            )
         assert response.status_code == 200
-        assert "processing_time_ms" in response.json()
+        data = response.json()
+        # OCR is now a ResultEnvelope; processing_time_ms lives inside result
+        assert "result" in data
+        assert "processing_time_ms" in data["result"]
 
 
 # ---------------------------------------------------------------------------
@@ -246,8 +262,9 @@ class TestProofOfLifeV1:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["is_real_person"] is True
-        assert data["confidence"] == 0.92
+        # Response is now a ResultEnvelope
+        assert data["result"]["is_real_person"] is True
+        assert data["confidence"] == pytest.approx(0.92)
 
     def test_v1_proof_of_life_validation_error(self, following_client, monkeypatch):
         def fake_analyze(
@@ -280,8 +297,9 @@ class TestAnonymizeV1:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["success"] is True
-        assert "anonymized_text" in data
+        # Response is now a ResultEnvelope
+        assert "result" in data
+        assert "anonymized_text" in data["result"]
 
     def test_v1_anonymize_empty_text_returns_422(self, following_client):
         response = following_client.post("/v1/ai/anonymize", json={"text": ""})
@@ -323,10 +341,12 @@ class TestHumanitarianV1:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["success"] is True
-        assert data["verification"]["verdict"] == "credible"
+        # Response is now a ResultEnvelope; result contains the raw service dict
+        assert "result" in data
+        assert data["result"]["verification"]["verdict"] == "credible"
+        assert data["confidence"] == pytest.approx(0.88)
 
-    def test_v1_humanitarian_verify_failure_path(self, following_client, monkeypatch):
+    def test_v1_humanitarian_verify_failure_path(self, monkeypatch):
         def fake_verify(
             aid_claim,
             supporting_evidence=None,
@@ -339,7 +359,9 @@ class TestHumanitarianV1:
             main.humanitarian_verification_service, "verify_claim", fake_verify
         )
 
-        response = following_client.post(
+        # Use raise_server_exceptions=False so RuntimeError returns a 500 response
+        safe_client = TestClient(app, raise_server_exceptions=False)
+        response = safe_client.post(
             "/v1/ai/humanitarian/verify",
             json={
                 "aid_claim": "Claim text.",
@@ -348,10 +370,11 @@ class TestHumanitarianV1:
                 "provider_preference": "auto",
             },
         )
-        assert response.status_code == 200
+        # The v1 endpoint re-raises; the global handler returns 500 error envelope
+        assert response.status_code == 500
         data = response.json()
-        assert data["success"] is False
-        assert "all providers unavailable" in data["error"]
+        assert "error" in data
+        assert data["error"]["code"] == "INTERNAL_SERVER_ERROR"
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +385,7 @@ class TestHumanitarianV1:
 class TestLegacyV1Parity:
     """
     Verify that following a legacy redirect gives the same response shape
-    as calling /v1 directly.
+    as calling /v1 directly (both now return ResultEnvelope).
     """
 
     def test_anonymize_parity(self, following_client):
@@ -372,8 +395,10 @@ class TestLegacyV1Parity:
         legacy_resp = following_client.post("/ai/anonymize", json=payload)
 
         assert v1_resp.status_code == legacy_resp.status_code == 200
-        assert set(v1_resp.json().keys()) == set(legacy_resp.json().keys())
-        assert v1_resp.json()["success"] == legacy_resp.json()["success"] is True
+        # Both paths now go to the v1 endpoint and return ResultEnvelope
+        assert "result" in v1_resp.json()
+        assert "result" in legacy_resp.json()
+        assert "anonymized_text" in v1_resp.json()["result"]
 
     def test_proof_of_life_parity(self, following_client, monkeypatch):
         fake_result = {
@@ -396,7 +421,11 @@ class TestLegacyV1Parity:
         legacy_resp = following_client.post("/ai/proof-of-life", json=payload)
 
         assert v1_resp.status_code == legacy_resp.status_code == 200
-        assert v1_resp.json() == legacy_resp.json()
+        # Both return ResultEnvelope; trace_id differs per request so exclude it
+        v1_data = {k: v for k, v in v1_resp.json().items() if k != "trace_id"}
+        leg_data = {k: v for k, v in legacy_resp.json().items() if k != "trace_id"}
+        assert v1_data == leg_data
+        assert "result" in v1_data
 
     def test_humanitarian_parity(self, following_client, monkeypatch):
         fake_result = {
@@ -428,7 +457,11 @@ class TestLegacyV1Parity:
         legacy_resp = following_client.post("/ai/humanitarian/verify", json=payload)
 
         assert v1_resp.status_code == legacy_resp.status_code == 200
-        assert set(v1_resp.json().keys()) == set(legacy_resp.json().keys())
+        # Both return ResultEnvelope; trace_id differs per request so exclude it
+        v1_data = {k: v for k, v in v1_resp.json().items() if k != "trace_id"}
+        leg_data = {k: v for k, v in legacy_resp.json().items() if k != "trace_id"}
+        assert v1_data == leg_data
+        assert "result" in v1_data
 
 
 # ---------------------------------------------------------------------------

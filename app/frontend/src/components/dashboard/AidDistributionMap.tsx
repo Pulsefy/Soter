@@ -130,7 +130,7 @@ function ZoomWatcher({ onZoom }: { onZoom: (zoom: number) => void }) {
   return null;
 }
 
-export default function AidDistributionMap() {
+const AidDistributionMap = React.memo(function AidDistributionMap() {
   const role = getAppUserRole();
   const [points, setPoints] = useState<AidPackagePoint[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -322,4 +322,6 @@ export default function AidDistributionMap() {
       </div>
     </div>
   );
-}
+});
+
+export default AidDistributionMap;

@@ -12,6 +12,18 @@ import {
 } from '../src/onchain/dto/aid-escrow.dto';
 import { ONCHAIN_ADAPTER_TOKEN } from '../src/onchain/onchain.adapter';
 import { BadRequestException } from '@nestjs/common';
+import { SorobanEventCorrelationService } from '../src/onchain/soroban-event-correlation.service';
+
+const mockEventCorrelationService = {
+  getCorrelationsForPackage: jest.fn().mockResolvedValue([]),
+  getCorrelationsForClaim: jest.fn().mockResolvedValue([]),
+  correlateTransaction: jest
+    .fn()
+    .mockResolvedValue({ correlated: 0, skipped: 0, errors: 0, details: [] }),
+  getAllCorrelations: jest
+    .fn()
+    .mockResolvedValue({ data: [], total: 0, page: 1, limit: 20 }),
+};
 
 describe('AidEscrow Integration Tests', () => {
   let service: AidEscrowService;
@@ -37,6 +49,10 @@ describe('AidEscrow Integration Tests', () => {
         {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('testnet') },
+        },
+        {
+          provide: SorobanEventCorrelationService,
+          useValue: mockEventCorrelationService,
         },
       ],
     }).compile();

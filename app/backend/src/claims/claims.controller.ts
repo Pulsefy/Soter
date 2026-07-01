@@ -41,6 +41,7 @@ import { AppRole } from 'src/auth/app-role.enum';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
 import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
+import { SorobanEventCorrelationService } from '../onchain/soroban-event-correlation.service';
 
 @ApiTags('Onchain Proxy')
 @ApiBearerAuth('JWT-auth')
@@ -50,6 +51,7 @@ export class ClaimsController {
     private readonly claimsService: ClaimsService,
     private readonly cancelAndReissueService: CancelAndReissueService,
     private readonly internalNotesService: InternalNotesService,
+    private readonly eventCorrelationService: SorobanEventCorrelationService,
   ) {}
 
   private ensureOrgAccess(user: any, claim: any) {
@@ -322,6 +324,53 @@ export class ClaimsController {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
     return this.internalNotesService.findNotesByEntity('claim', id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Event Correlation
+  // ---------------------------------------------------------------------------
+
+  @Get(':id/events')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Get on-chain event correlations for a claim',
+    description:
+      'Retrieves all Soroban on-chain events correlated to a claim, including transaction hashes, ledger numbers, and event topics.',
+  })
+  @ApiOkResponse({
+    description: 'Event correlations retrieved successfully.',
+    schema: {
+      example: {
+        claimId: 'claim_123',
+        events: [
+          {
+            id: 'corr_abc123',
+            eventTopic: 'claim_created',
+            txHash: 'ABC123...',
+            ledger: 12345,
+            eventIndex: 0,
+            payload: { claim_id: 'claim_123', amount: '1000' },
+            correlationSource: 'scheduled',
+            createdAt: '2026-03-30T12:30:00.000Z',
+          },
+        ],
+        total: 2,
+      },
+    },
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - staff role required.',
+  })
+  @ApiNotFoundResponse({ description: 'Claim not found.' })
+  async getClaimEvents(@Param('id') id: string, @Request() req: ExpressRequest) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
+    const events = await this.eventCorrelationService.getCorrelationsForClaim(id);
+    return {
+      claimId: id,
+      events,
+      total: events.length,
+    };
   }
 
   // ---------------------------------------------------------------------------

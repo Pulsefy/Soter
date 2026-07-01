@@ -26,7 +26,7 @@ import {
   ApiUnauthorizedResponse,
   ApiNotFoundResponse,
   ApiForbiddenResponse,
-  ApiTooManyRequestsResponse,
+  ApiBody,
 } from '@nestjs/swagger';
 import { VerificationService } from './verification.service';
 import { VerificationFlowService } from './verification-flow.service';
@@ -68,6 +68,17 @@ export class VerificationController {
     description: 'Unique identifier of the claim to verify',
     example: 'clv789xyz123',
   })
+  @ApiBody({
+    description: 'Optional anchor metadata for AI verification correlation',
+    schema: {
+      example: {
+        campaignRef: 'CAMPAIGN-001',
+        claimId: 'claim-ref-123',
+        packageId: 'PKG-456',
+      },
+    },
+    required: false,
+  })
   @ApiAcceptedResponse({
     description: 'Verification job enqueued successfully.',
     schema: {
@@ -88,11 +99,14 @@ export class VerificationController {
   @ApiUnauthorizedResponse({
     description: 'Invalid or missing API key.',
   })
-  @ApiTooManyRequestsResponse({
-    description: 'Too many verification requests.',
-  })
-  async enqueueVerification(@Param('id') id: string) {
-    const { jobId } = await this.verificationService.enqueueVerification(id);
+  async enqueueVerification(
+    @Param('id') id: string,
+    @Body() body?: { campaignRef?: string; claimId?: string; packageId?: string },
+  ) {
+    const { jobId } = await this.verificationService.enqueueVerification(
+      id,
+      body,
+    );
     return {
       jobId,
       claimId: id,
