@@ -12,7 +12,7 @@ import { HealthService } from './health.service';
 import { LivenessResponse, ReadinessResponse } from './health.service';
 import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { Public } from '../common/decorators/public.decorator';
-import { Throttle } from '@nestjs/throttler';
+import { SkipThrottle } from '../common/decorators/skip-throttle.decorator';
 
 @ApiTags('Health')
 @Controller('health')
@@ -20,8 +20,8 @@ export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
   @Public()
+  @SkipThrottle()
   @Get()
-  @Throttle({ default: { ttl: 60, limit: 100 } }) // Limit to 100 requests per minute for this endpoint
   @Version(API_VERSIONS.V1)
   @ApiOperation({
     summary: 'Check system liveness and basic service metadata',
@@ -46,6 +46,7 @@ export class HealthController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get('live')
   @Version(API_VERSIONS.V1)
   @ApiOperation({
@@ -67,6 +68,7 @@ export class HealthController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get('ready')
   @Version(API_VERSIONS.V1)
   @ApiOperation({
@@ -111,6 +113,7 @@ export class HealthController {
   }
 
   @Get('error')
+  @SkipThrottle()
   @Version(API_VERSIONS.V1)
   @ApiOperation({ summary: 'Trigger an error for testing' })
   @ApiInternalServerErrorResponse({
@@ -127,6 +130,7 @@ export class HealthController {
   }
 
   @Get('onchain')
+  @SkipThrottle()
   @Version(API_VERSIONS.V1)
   @ApiOperation({
     summary: 'On-chain contract health probe (internal use)',

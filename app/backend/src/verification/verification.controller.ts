@@ -11,6 +11,7 @@ import {
   Request,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -55,6 +56,7 @@ export class VerificationController {
 
   @Post('claims/:id/enqueue')
   @Version('1')
+  @Throttle('verify', { limit: 30, ttl: 60 }) // Strict: General verification operations
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
     summary: 'Enqueue claim verification job',
@@ -142,6 +144,7 @@ export class VerificationController {
 
   @Post('start')
   @Version('1')
+  @Throttle('verify-otp', { limit: 20, ttl: 60 }) // Strictest: OTP/email/phone operations
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Start verification flow (OTP/email/phone)',
@@ -181,12 +184,16 @@ export class VerificationController {
     description:
       'Invalid input parameters or rate limit exceeded for this identifier.',
   })
+  @ApiTooManyRequestsResponse({
+    description: 'Too many requests. High-cost operation (email/SMS sending).',
+  })
   async startVerification(@Body() dto: StartVerificationDto) {
     return this.verificationFlowService.start(dto);
   }
 
   @Post('resend')
   @Version('1')
+  @Throttle('verify-otp', { limit: 20, ttl: 60 }) // Strictest: Resend is also OTP/email/phone operation
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Resend verification code',
@@ -210,12 +217,16 @@ export class VerificationController {
   @ApiNotFoundResponse({
     description: 'The specified verification session was not found.',
   })
+  @ApiTooManyRequestsResponse({
+    description: 'Too many requests. High-cost operation (email/SMS sending).',
+  })
   async resendVerification(@Body() dto: ResendVerificationDto) {
     return this.verificationFlowService.resend(dto);
   }
 
   @Post('complete')
   @Version('1')
+  @Throttle('verify-otp', { limit: 20, ttl: 60 }) // Strictest: OTP verification attempts
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Complete verification with OTP',
@@ -238,12 +249,17 @@ export class VerificationController {
   @ApiNotFoundResponse({
     description: 'The specified verification session was not found.',
   })
+  @ApiTooManyRequestsResponse({
+    description:
+      'Too many failed attempts or rate limit exceeded for verification.',
+  })
   async completeVerification(@Body() dto: CompleteVerificationDto) {
     return this.verificationFlowService.complete(dto);
   }
 
   @Post()
   @Version(API_VERSIONS.V1)
+  @Throttle('verify', { limit: 30, ttl: 60 }) // Strict: General verification operations
   @ApiOperation({
     summary: 'Submit identity verification request (v1)',
     description:
@@ -268,6 +284,9 @@ export class VerificationController {
   })
   @ApiUnauthorizedResponse({
     description: 'Missing or invalid authentication credentials.',
+  })
+  @ApiTooManyRequestsResponse({
+    description: 'Too many verification requests.',
   })
   create(@Body() createVerificationDto: CreateVerificationDto) {
     return this.verificationService.create(createVerificationDto);
