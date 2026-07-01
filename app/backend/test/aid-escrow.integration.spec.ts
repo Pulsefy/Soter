@@ -30,6 +30,51 @@ describe('AidEscrow Integration Tests', () => {
   let controller: AidEscrowController;
   let mockAdapter: MockOnchainAdapter;
 
+  // Helper to create a mock request object
+  const createMockRequest = (address: string) => {
+    return {
+      user: { address },
+      get: jest.fn(),
+      header: jest.fn(),
+      accepts: jest.fn(),
+      acceptsCharsets: jest.fn(),
+      acceptsEncodings: jest.fn(),
+      acceptsLanguages: jest.fn(),
+      range: jest.fn(),
+      param: jest.fn(),
+      is: jest.fn(),
+      protocol: 'http',
+      secure: false,
+      ip: '127.0.0.1',
+      ips: [],
+      subdomains: [],
+      path: '/test',
+      hostname: 'localhost',
+      fresh: true,
+      stale: false,
+      xhr: false,
+      body: {},
+      cookies: {},
+      signedCookies: {},
+      params: {},
+      query: {},
+      route: {},
+      session: {},
+      sessionID: 'test-session',
+      method: 'POST',
+      url: '/test',
+      originalUrl: '/test',
+      baseUrl: '',
+      headers: {},
+      httpVersion: '1.1',
+      complete: false,
+      aborted: false,
+      connection: {},
+      socket: {},
+      // Add any other properties needed by the type
+    } as any; // Use type assertion to satisfy the Request type
+  };
+
   beforeEach(async () => {
     mockAdapter = new MockOnchainAdapter();
 
@@ -357,13 +402,10 @@ describe('AidEscrow Integration Tests', () => {
         expiresAt: Math.floor(Date.now() / 1000) + 86400 * 30,
       };
 
-      const req = {
-        user: {
-          address: 'GOPER8TORADDRESS00000000000000000000000000000000000000',
-        },
-      };
-      // Cast literal payload context as any to satisfy express engine requirements
-      const result = await controller.createAidPackage(dto, req as any);
+      const req = createMockRequest(
+        'GOPER8TORADDRESS00000000000000000000000000000000000000',
+      );
+      const result = await controller.createAidPackage(dto, req);
 
       expect(result).toBeDefined();
       expect(result.packageId).toBe(dto.packageId);
@@ -381,11 +423,9 @@ describe('AidEscrow Integration Tests', () => {
         expiresAt: Math.floor(Date.now() / 1000) + 86400 * 30,
       };
 
-      const req = {
-        user: {
-          address: 'GOPER8TORADDRESS00000000000000000000000000000000000000',
-        },
-      };
+      const req = createMockRequest(
+        'GOPER8TORADDRESS00000000000000000000000000000000000000',
+      );
       const result = await controller.dryRunAidPackageIssuance(dto, req);
 
       expect(result).toBeDefined();
@@ -406,13 +446,10 @@ describe('AidEscrow Integration Tests', () => {
         expiresIn: 2592000,
       };
 
-      const req = {
-        user: {
-          address: 'GOPER8TORADDRESS00000000000000000000000000000000000000',
-        },
-      };
-      // Cast literal payload context as any to satisfy express engine requirements
-      const result = await controller.batchCreateAidPackages(dto, req as any);
+      const req = createMockRequest(
+        'GOPER8TORADDRESS00000000000000000000000000000000000000',
+      );
+      const result = await controller.batchCreateAidPackages(dto, req);
 
       expect(result).toBeDefined();
       expect(result.packageIds).toHaveLength(2);
@@ -420,13 +457,10 @@ describe('AidEscrow Integration Tests', () => {
     });
 
     it('should handle POST /packages/:id/claim', async () => {
-      const req = {
-        user: {
-          address: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
-        },
-      };
-      // Cast literal payload context as any to satisfy express engine requirements
-      const result = await controller.claimAidPackage('pkg-001', req as any);
+      const req = createMockRequest(
+        'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+      );
+      const result = await controller.claimAidPackage('pkg-001', req);
 
       expect(result).toBeDefined();
       expect(result.packageId).toBe('pkg-001');
@@ -450,12 +484,12 @@ describe('AidEscrow Integration Tests', () => {
     });
 
     it('should throw error when claiming without recipient address', async () => {
-      const req = { user: undefined };
+      const req = createMockRequest('');
+      req.user = undefined;
 
-      // Cast literal payload context as any to satisfy express engine requirements
-      await expect(
-        controller.claimAidPackage('pkg-001', req as any),
-      ).rejects.toThrow(BadRequestException);
+      await expect(controller.claimAidPackage('pkg-001', req)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -471,15 +505,12 @@ describe('AidEscrow Integration Tests', () => {
         expiresIn: 2592000,
       };
 
-      const req = {
-        user: {
-          address: 'GOPER8TORADDRESS00000000000000000000000000000000000000',
-        },
-      };
+      const req = createMockRequest(
+        'GOPER8TORADDRESS00000000000000000000000000000000000000',
+      );
 
-      // Cast literal payload context as any to satisfy express engine requirements
       await expect(
-        controller.batchCreateAidPackages(dto, req as any),
+        controller.batchCreateAidPackages(dto, req),
       ).rejects.toThrow();
     });
   });

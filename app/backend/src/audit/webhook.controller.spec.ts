@@ -6,7 +6,7 @@ import { HmacGuard } from './hmac.guard';
 import {
   AiVerificationPayloadDto,
   VerificationStatus,
-} from 'src/ai-verification.dto';
+} from '../ai-verification.dto'; // Changed from ../audit/ai-verification.dto
 
 describe('WebhookController', () => {
   let controller: WebhookController;
@@ -46,10 +46,11 @@ describe('WebhookController', () => {
 
   describe('handleAiVerification', () => {
     it('should call webhooksService.handleAiVerification with parsed parameters', async () => {
+      // Use main DTO fields
       const payload: AiVerificationPayloadDto = {
         eventId: 'd9e1b233-8083-4a25-8236-c69a997c306a',
         sessionId: 'session-123',
-        status: VerificationStatus.COMPLETED,
+        status: VerificationStatus.VERIFIED,
         details: { verificationScore: 0.95 },
       };
 

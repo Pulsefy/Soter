@@ -1,3 +1,5 @@
+import { ContractAwareMetadata } from '../dto/verification-result.dto';
+
 export interface AnchorMetadata {
   campaignRef?: string | null;
   claimId?: string | null;
@@ -20,4 +22,7 @@ export interface VerificationResult {
     recommendations?: string[];
   };
   processedAt: Date;
+  metadata?: ContractAwareMetadata;
+  warnings?: string[];
+  validationErrors?: string[];
 }
