@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AppRole } from '../auth/app-role.enum';
 import { ApiKeyScope } from './api-key-scope.enum';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
+import { AuditService } from '../audit/audit.service';
 
 type Actor = { apiKeyId?: string; authType?: string; role?: AppRole };
 
@@ -61,7 +62,10 @@ function deserializeRow<T extends { scopes?: string | null }>(
 
 @Injectable()
 export class ApiKeysService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   private newRawKey(): string {
     return `s2s_${randomBytes(32).toString('base64url')}`;
@@ -97,7 +101,16 @@ export class ApiKeysService {
       select: selectFields,
     });
 
-    return { ...deserializeRow(row), apiKey: rawKey };
+await this.auditService.record({
+  actorId: this.actorId(actor),
+  entity: 'ApiKey',
+  entityId: row.id,
+  action: 'api_key_created',
+  metadata: { role: row.role, ngoId: row.ngoId, description: row.description },
+});
+
+return { ...deserializeRow(row), apiKey: rawKey };
+
   }
 
   async list() {
@@ -126,7 +139,8 @@ export class ApiKeysService {
       return deserializeRow(row!);
     }
 
-    const row = await this.prisma.apiKey.update({
+const row = await this.prisma.apiKey.update({
+
       where: { id },
       data: {
         revokedAt: new Date(),
@@ -136,7 +150,16 @@ export class ApiKeysService {
       select: selectFields,
     });
 
-    return deserializeRow(row);
+await this.auditService.record({
+  actorId: this.actorId(actor),
+  entity: 'ApiKey',
+  entityId: id,
+  action: 'api_key_revoked',
+  metadata: { reason: reason ?? 'revoked' },
+});
+
+return deserializeRow(row);
+
   }
 
   async rotate(id: string, actor?: Actor) {
@@ -186,7 +209,16 @@ export class ApiKeysService {
         },
       });
 
-      return { replacement: deserializeRow(replacement), apiKey: rawKey };
+await this.auditService.record({
+  actorId: this.actorId(actor),
+  entity: 'ApiKey',
+  entityId: existing.id,
+  action: 'api_key_rotated',
+  metadata: { oldKeyId: existing.id, newKeyId: replacement.id },
+});
+
+return { replacement: deserializeRow(replacement), apiKey: rawKey };
+
     });
   }
 }

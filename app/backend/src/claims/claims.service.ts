@@ -111,10 +111,17 @@ export class ClaimsService {
 
     claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
-    // Stub audit hook
-    void this.auditLog('claim', claim.id, 'created', {
-      status: claim.status,
-      tokenAddress: createClaimDto.tokenAddress,
+    await this.auditService.record({
+      actorId: 'system',
+      entity: 'Claim',
+      entityId: claim.id,
+      action: 'claim_created',
+      metadata: {
+        status: claim.status,
+        campaignId: claim.campaignId,
+        amount: claim.amount,
+        tokenAddress: createClaimDto.tokenAddress,
+      },
     });
 
     return claim;
@@ -152,19 +159,23 @@ export class ClaimsService {
     };
   }
 
-  async verify(id: string) {
+  async verify(id: string, actorId?: string) {
     return this.transitionStatus(
       id,
       ClaimStatus.requested,
       ClaimStatus.verified,
+      undefined,
+      actorId,
     );
   }
 
-  async approve(id: string) {
+  async approve(id: string, actorId?: string) {
     return this.transitionStatus(
       id,
       ClaimStatus.verified,
       ClaimStatus.approved,
+      undefined,
+      actorId,
     );
   }
 
@@ -242,6 +253,8 @@ export class ClaimsService {
       id,
       ClaimStatus.approved,
       ClaimStatus.disbursed,
+// nothing here
+
     );
 
     this.logger.log(
@@ -418,6 +431,7 @@ export class ClaimsService {
     fromStatus: ClaimStatus,
     toStatus: ClaimStatus,
     onchainResult?: DisburseResult | null,
+    actorId?: string,
   ) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
@@ -436,15 +450,25 @@ export class ClaimsService {
         include: { campaign: true },
       });
 
-      void this.auditLog('claim', id, `status_changed_to_${toStatus}`, {
-        from: fromStatus,
-        to: toStatus,
-        onchainResult: onchainResult
-          ? {
-              transactionHash: onchainResult.transactionHash,
-              status: onchainResult.status,
-            }
-          : undefined,
+// Unified audit log for claim status change
+await this.auditService.record({
+  actorId: actorId || 'system',
+  entity: 'Claim',
+  entityId: id,
+  action: `status_changed_to_${toStatus}`,
+  metadata: {
+    from: fromStatus,
+    to: toStatus,
+    campaignId: claim.campaignId,
+    onchainResult: onchainResult
+      ? {
+          transactionHash: onchainResult.transactionHash,
+          status: onchainResult.status,
+        }
+      : undefined,
+  },
+});
+
       });
 
       return updated;
@@ -453,14 +477,35 @@ export class ClaimsService {
     return updatedClaim;
   }
 
-  private auditLog(
-    entity: string,
-    entityId: string,
-    action: string,
-    metadata?: Record<string, unknown>,
-  ) {
-    console.log(`Audit: ${entity} ${entityId} ${action}`, metadata);
-  }
+// Centralized audit logging for claim status changes
+private auditLog(
+  entity: string,
+  entityId: string,
+  action: string,
+  metadata?: Record<string, unknown>,
+) {
+  // Delegate to auditService for structured logging
+  return this.auditService.record({
+    actorId: 'system', // or pass through actorId if available
+    entity,
+    entityId,
+    action,
+    metadata,
+  });
+}
+
+// Usage example
+await this.auditLog('Claim', id, `status_changed_to_${toStatus}`, {
+  from: fromStatus,
+  to: toStatus,
+  campaignId: claim.campaignId,
+  onchainResult: onchainResult
+    ? {
+        transactionHash: onchainResult.transactionHash,
+        status: onchainResult.status,
+      }
+    : undefined,
+});
 
   /**
    * Generate a receipt DTO for a claim
@@ -520,10 +565,19 @@ export class ClaimsService {
         shareDto.message ?? undefined,
       );
     }
-    void this.auditLog('claim', id, 'receipt_shared', {
-      channel: shareDto.channel,
-      emailCount: shareDto.emailAddresses?.length || 0,
-      smsCount: shareDto.phoneNumbers?.length || 0,
+// Audit log the share action
+await this.auditService.record({
+  actorId: 'system',
+  entity: 'Claim',
+  entityId: id,
+  action: 'claim_receipt_shared',
+  metadata: {
+    channel: shareDto.channel,
+    emailCount: shareDto.emailAddresses?.length || 0,
+    smsCount: shareDto.phoneNumbers?.length || 0,
+  },
+});
+
     });
 
     return {

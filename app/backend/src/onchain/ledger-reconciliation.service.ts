@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { AuditService } from '../audit/audit.service';
 
 export interface ReconciliationJobData {
   startLedger: number;
@@ -45,6 +46,7 @@ export class LedgerReconciliationService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue('onchain') private readonly onchainQueue: Queue,
+    private readonly auditService: AuditService,
   ) {}
 
   async triggerReconciliation(
@@ -83,6 +85,14 @@ export class LedgerReconciliationService {
         },
       },
     );
+
+    await this.auditService.record({
+      actorId: 'system:admin',
+      entity: 'LedgerReconciliation',
+      entityId: job.id || 'unknown',
+      action: 'ledger_reconciliation_triggered',
+      metadata: { startLedger, endLedger, campaignId, thresholdPercent, totalLedgers },
+    });
 
     return {
       jobId: job.id || 'unknown',

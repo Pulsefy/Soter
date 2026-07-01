@@ -9,7 +9,8 @@ import {
   Request,
   Res,
   Version,
-  ForbiddenException,
+import { ForbiddenException } from '@nestjs/common';
+
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Request as ExpressRequest } from 'express';
@@ -138,10 +139,12 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  async verify(@Param('id') id: string, @Request() req: ExpressRequest) {
-    const claim = await this.claimsService.findOne(id);
-    this.ensureOrgAccess(req.user, claim);
-    return this.claimsService.verify(id);
+async verify(@Param('id') id: string, @Request() req: ExpressRequest) {
+  const claim = await this.claimsService.findOne(id);
+  this.ensureOrgAccess(req.user, claim);
+  return this.claimsService.verify(id);
+}
+
   }
 
   @Post(':id/approve')
@@ -162,10 +165,15 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  async approve(@Param('id') id: string, @Request() req: ExpressRequest) {
-    const claim = await this.claimsService.findOne(id);
-    this.ensureOrgAccess(req.user, claim);
-    return this.claimsService.approve(id);
+@Patch(':id/approve')
+async approve(@Param('id') id: string, @Request() req: ExpressRequest) {
+  const claim = await this.claimsService.findOne(id);
+  this.ensureOrgAccess(req.user, claim);
+
+  const actorId = req.user?.id || req.user?.apiKeyId || 'system';
+  return this.claimsService.approve(id, actorId);
+}
+
   }
 
   @Post(':id/disburse')

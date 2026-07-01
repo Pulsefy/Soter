@@ -66,7 +66,8 @@ export class CampaignsController {
     description: 'Access denied - insufficient permissions for this operation.',
   })
   async create(@Body() dto: CreateCampaignDto, @Req() req: Request) {
-    const campaign = await this.campaigns.create(dto, req.user?.ngoId);
+    const actorId = req.user?.id || req.user?.apiKeyId || 'system';
+    const campaign = await this.campaigns.create(dto, req.user?.ngoId, actorId);
     return ApiResponseDto.ok(campaign, 'Campaigns created successfully');
   }
 
@@ -125,8 +126,9 @@ export class CampaignsController {
   @ApiForbiddenResponse({
     description: 'Access denied - insufficient permissions.',
   })
-  async update(@Param('id') id: string, @Body() dto: UpdateCampaignDto) {
-    const updateData = await this.campaigns.update(id, dto);
+  async update(@Param('id') id: string, @Body() dto: UpdateCampaignDto, @Req() req: Request) {
+    const actorId = req.user?.id || req.user?.apiKeyId || 'system';
+    const updateData = await this.campaigns.update(id, dto, actorId);
     return ApiResponseDto.ok(updateData, 'Campaign updated successfully');
   }
 
@@ -145,8 +147,9 @@ export class CampaignsController {
   @ApiForbiddenResponse({
     description: 'Access denied - insufficient permissions.',
   })
-  async archive(@Param('id') id: string) {
-    const campaignData = await this.campaigns.archive(id);
+  async archive(@Param('id') id: string, @Req() req: Request) {
+    const actorId = req.user?.id || req.user?.apiKeyId || 'system';
+    const campaignData = await this.campaigns.archive(id, actorId);
     const { campaign, alreadyArchived } = campaignData;
     const msg = alreadyArchived
       ? 'Campaign already archived'
