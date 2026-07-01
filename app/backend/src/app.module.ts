@@ -30,8 +30,10 @@ import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { LoggerService } from './logger/logger.service';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { AnalyticsModule } from './analytics/analytics.module';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerStorageRedisService } from '@nestjs/throttler';
 import { AidEscrowModule } from './onchain/aid-escrow.module';
+import { CostAwareThrottlerGuard } from './common/guards/throttle.guard';
+import { getThrottlerConfig } from './common/config/rate-limit.config';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { SessionModule } from './session/session.module';
 import { CommonServicesModule } from './common/services/common-services.module';
@@ -129,12 +131,56 @@ import { WebhooksModule } from 'src/webhooks.module';
       }),
       inject: [ConfigService],
     }),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000, // 60 seconds window
-        limit: 20, // default: 20 req/min
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => {
+        const redisHost = configService.get<string>('REDIS_HOST') ?? 'localhost';
+        const redisPort = parseInt(
+          configService.get<string>('REDIS_PORT') ?? '6379',
+          10,
+        );
+
+        // Try to use Redis storage for multi-instance compatibility
+        // Falls back to in-memory storage if Redis is unavailable
+        try {
+          const { createClient } = await import('redis');
+          const client = createClient({
+            socket: {
+              host: redisHost,
+              port: redisPort,
+              reconnectStrategy: (retries: number) => {
+                if (retries > 10) {
+                  console.warn(
+                    'ThrottlerModule: Failed to connect to Redis after 10 retries, falling back to in-memory storage',
+                  );
+                  return new Error(
+                    'Max retries exceeded for ThrottlerModule Redis',
+                  );
+                }
+                return retries * 50;
+              },
+            },
+          });
+
+          await client.connect();
+
+          return {
+            throttlers: getThrottlerConfig(),
+            storage: new ThrottlerStorageRedisService(client),
+          };
+        } catch (error) {
+          console.warn(
+            'ThrottlerModule: Redis unavailable, using in-memory storage',
+            error instanceof Error ? error.message : error,
+          );
+          // Fall back to in-memory storage for local development
+          return {
+            throttlers: getThrottlerConfig(),
+          };
+        }
       },
-    ]),
+      inject: [ConfigService],
+    }),
   ],
 
   controllers: [AppController],
@@ -159,6 +205,10 @@ import { WebhooksModule } from 'src/webhooks.module';
     {
       provide: APP_GUARD,
       useClass: AdaptiveRateLimitGuard, // Adaptive rate limiting using Redis
+    },
+    {
+      provide: APP_GUARD,
+      useClass: CostAwareThrottlerGuard, // NestJS Throttler with cost-aware per-endpoint limits
     },
     {
       provide: APP_INTERCEPTOR,
