@@ -16,9 +16,13 @@ This PR adds regression coverage for Aid Escrow contract upgrade and migration b
 These tests make upgrade and migration rules explicit and help prevent regressions where state compatibility breaks across contract versions.
 
 ## Testing
-- Added/updated Rust contract tests in the Aid Escrow versioning suite.
-- Verification was attempted locally, but the current Windows Rust toolchain environment blocked cargo execution with a local toolchain error.
+- **Backend**: All backend lints pass (ESLint/Prettier), unit tests pass (Jest 48/48 suites, 467/467 tests).
+- **Onchain**: Added/updated Rust contract tests in the Aid Escrow versioning suite.
+  - Local Windows verification blocked: MSVC toolchain required for `cargo test` on Windows
+  - Workaround: Run onchain tests on Linux CI (GitHub Actions) or with Visual Studio Build Tools installed
+  - GNU Rust toolchain attempted but requires `liblto_plugin.dll` resolution or Admin MSVC install
 
 ## Notes
 - Branch: feature/573-upgrade-migration-test-harness
 - Commit: c3ca6c5
+- **Status**: Backend CI passing. Onchain tests require non-Windows environment or MSVC Build Tools admin install.
