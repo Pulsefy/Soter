@@ -39,4 +39,3 @@ export class AiVerificationPayloadDto {
   @IsString()
   packageId?: string;
 }
-

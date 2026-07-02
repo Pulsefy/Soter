@@ -6,7 +6,7 @@ import { HmacGuard } from './hmac.guard';
 import {
   AiVerificationPayloadDto,
   VerificationStatus,
-} from 'src/ai-verification.dto';
+} from '../ai-verification.dto'; // Changed from 'src/ai-verification.dto' to relative import
 
 describe('WebhookController', () => {
   let controller: WebhookController;
@@ -49,7 +49,7 @@ describe('WebhookController', () => {
       const payload: AiVerificationPayloadDto = {
         eventId: 'd9e1b233-8083-4a25-8236-c69a997c306a',
         sessionId: 'session-123',
-        status: VerificationStatus.COMPLETED,
+        status: VerificationStatus.VERIFIED,
         details: { verificationScore: 0.95 },
       };
 

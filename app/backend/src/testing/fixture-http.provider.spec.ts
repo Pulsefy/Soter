@@ -21,7 +21,7 @@ describe('FixtureHttpProvider', () => {
 
   it('should throw for an unknown fixture key', () => {
     expect(() => provider.get('nonexistent')).toThrow(
-      '[FixtureHttpProvider] No fixture found for key: "nonexistent"'
+      '[FixtureHttpProvider] No fixture found for key: "nonexistent"',
     );
   });
 });

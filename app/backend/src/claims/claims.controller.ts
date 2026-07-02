@@ -362,10 +362,14 @@ export class ClaimsController {
     description: 'Access denied - staff role required.',
   })
   @ApiNotFoundResponse({ description: 'Claim not found.' })
-  async getClaimEvents(@Param('id') id: string, @Request() req: ExpressRequest) {
+  async getClaimEvents(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ) {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
-    const events = await this.eventCorrelationService.getCorrelationsForClaim(id);
+    const events =
+      await this.eventCorrelationService.getCorrelationsForClaim(id);
     return {
       claimId: id,
       events,
@@ -464,7 +468,10 @@ export class ClaimsController {
     description: 'Access denied - operator role required.',
   })
   @ApiNotFoundResponse({ description: 'Claim not found.' })
-  async getReissueHistory(@Param('id') id: string, @Request() req: ExpressRequest) {
+  async getReissueHistory(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ) {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
     return this.cancelAndReissueService.getReissueHistory(id);

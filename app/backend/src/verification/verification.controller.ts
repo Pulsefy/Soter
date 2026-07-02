@@ -99,7 +99,8 @@ export class VerificationController {
   })
   async enqueueVerification(
     @Param('id') id: string,
-    @Body() body?: { campaignRef?: string; claimId?: string; packageId?: string },
+    @Body()
+    body?: { campaignRef?: string; claimId?: string; packageId?: string },
   ) {
     const { jobId } = await this.verificationService.enqueueVerification(
       id,

@@ -49,6 +49,8 @@ import { CacheModule } from './common/cache/cache.module';
 import { CacheResponseInterceptor } from './common/interceptors/cache-response.interceptor';
 
 import { WebhooksModule } from 'src/webhooks.module';
+import { CorrelationModule } from './common/modules/correlation.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -119,6 +121,7 @@ import { WebhooksModule } from 'src/webhooks.module';
     DeploymentMetadataModule,
     SandboxModule,
     WebhooksModule,
+    CorrelationModule,
     RedisModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({

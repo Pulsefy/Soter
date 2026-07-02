@@ -456,7 +456,8 @@ export class AidEscrowController {
   })
   async getPackageEvents(@Param('id') packageId: string): Promise<any> {
     try {
-      const events = await this.eventCorrelationService.getCorrelationsForPackage(packageId);
+      const events =
+        await this.eventCorrelationService.getCorrelationsForPackage(packageId);
       return {
         packageId,
         events,
@@ -507,7 +508,10 @@ export class AidEscrowController {
       throw new BadRequestException('Invalid transaction hash');
     }
     try {
-      return await this.eventCorrelationService.correlateTransaction(txHash, 'on_demand');
+      return await this.eventCorrelationService.correlateTransaction(
+        txHash,
+        'on_demand',
+      );
     } catch (error) {
       this.logger.error('Failed to correlate transaction:', error);
       this.errorMapper.throwMappedError(error);
@@ -528,13 +532,41 @@ export class AidEscrowController {
   @ApiOkResponse({
     description: 'Event correlations retrieved successfully.',
   })
-  @ApiQuery({ name: 'page', required: false, description: 'Page number (default: 1)' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Items per page (default: 20, max: 100)' })
-  @ApiQuery({ name: 'eventTopic', required: false, description: 'Filter by event topic' })
-  @ApiQuery({ name: 'claimId', required: false, description: 'Filter by claim ID' })
-  @ApiQuery({ name: 'packageId', required: false, description: 'Filter by package ID' })
-  @ApiQuery({ name: 'startLedger', required: false, description: 'Start ledger sequence' })
-  @ApiQuery({ name: 'endLedger', required: false, description: 'End ledger sequence' })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    description: 'Page number (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Items per page (default: 20, max: 100)',
+  })
+  @ApiQuery({
+    name: 'eventTopic',
+    required: false,
+    description: 'Filter by event topic',
+  })
+  @ApiQuery({
+    name: 'claimId',
+    required: false,
+    description: 'Filter by claim ID',
+  })
+  @ApiQuery({
+    name: 'packageId',
+    required: false,
+    description: 'Filter by package ID',
+  })
+  @ApiQuery({
+    name: 'startLedger',
+    required: false,
+    description: 'Start ledger sequence',
+  })
+  @ApiQuery({
+    name: 'endLedger',
+    required: false,
+    description: 'End ledger sequence',
+  })
   async getEventCorrelations(
     @Query('page') page?: number,
     @Query('limit') limit?: number,

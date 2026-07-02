@@ -5,13 +5,19 @@ export class FixtureHttpProvider {
   private fixtures: Record<string, any> = {};
 
   constructor(fixtureName: string) {
-    const fixturePath = path.join(__dirname, 'fixtures', `${fixtureName}.fixture.json`);
+    const fixturePath = path.join(
+      __dirname,
+      'fixtures',
+      `${fixtureName}.fixture.json`,
+    );
     this.fixtures = JSON.parse(fs.readFileSync(fixturePath, 'utf-8'));
   }
 
   get(key: string): any {
     if (!(key in this.fixtures)) {
-      throw new Error(`[FixtureHttpProvider] No fixture found for key: "${key}"`);
+      throw new Error(
+        `[FixtureHttpProvider] No fixture found for key: "${key}"`,
+      );
     }
     return this.fixtures[key];
   }

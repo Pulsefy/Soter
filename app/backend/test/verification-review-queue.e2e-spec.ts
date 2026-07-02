@@ -4,10 +4,10 @@ import {
   VersioningType,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { ClaimStatus } from '@prisma/client';
+import { ClaimStatus, CampaignStatus } from '@prisma/client';
 import request from 'supertest';
-import { AppModule } from 'src/app.module';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { AppModule } from '../src/app.module'; // Changed from 'src/app.module' to relative import
+import { PrismaService } from '../src/prisma/prisma.service'; // Changed from 'src/prisma/prisma.service' to relative import
 
 type ReviewQueueResponse = {
   items: Array<{
@@ -94,7 +94,7 @@ describe('Verification review queue (e2e)', () => {
       data: {
         name: 'Queue Campaign A',
         budget: 1000,
-        status: 'active',
+        status: CampaignStatus.active, // Use enum
       },
     });
 
@@ -102,7 +102,7 @@ describe('Verification review queue (e2e)', () => {
       data: {
         name: 'Queue Campaign B',
         budget: 2000,
-        status: 'paused',
+        status: CampaignStatus.paused, // Use enum
       },
     });
 
@@ -116,7 +116,7 @@ describe('Verification review queue (e2e)', () => {
         amount: 125,
         recipientRef: 'recipient-a',
         evidenceRef: 'evidence-a',
-        status: 'requested',
+        status: ClaimStatus.requested, // Use enum
         createdAt: middle,
       },
     });
@@ -127,7 +127,7 @@ describe('Verification review queue (e2e)', () => {
         amount: 150,
         recipientRef: 'recipient-b',
         evidenceRef: 'evidence-b',
-        status: 'verified',
+        status: ClaimStatus.verified, // Use enum
         createdAt: oldest,
       },
     });
@@ -138,7 +138,7 @@ describe('Verification review queue (e2e)', () => {
         amount: 175,
         recipientRef: 'recipient-c',
         evidenceRef: 'evidence-c',
-        status: 'requested',
+        status: ClaimStatus.requested, // Use enum
         createdAt: newest,
       },
     });
@@ -161,7 +161,7 @@ describe('Verification review queue (e2e)', () => {
       request(app.getHttpServer())
         .get(base)
         .query({
-          status: ['requested'],
+          status: [ClaimStatus.requested], // Use enum
           campaignId: fixture.campaignA.id,
           page: 1,
           limit: 10,
@@ -172,7 +172,7 @@ describe('Verification review queue (e2e)', () => {
 
     expect(body.items).toHaveLength(1);
     expect(body.items[0]?.id).toBe(fixture.claims.requestedA.id);
-    expect(body.items[0]?.status).toBe('requested');
+    expect(body.items[0]?.status).toBe(ClaimStatus.requested);
     expect(body.items[0]?.campaignId).toBe(fixture.campaignA.id);
     expect(body.pagination).toMatchObject({
       mode: 'page',
@@ -183,7 +183,7 @@ describe('Verification review queue (e2e)', () => {
       hasNextPage: false,
     });
     expect(body.filters).toEqual({
-      status: ['requested'],
+      status: [ClaimStatus.requested],
       campaignId: fixture.campaignA.id,
     });
   });
@@ -229,7 +229,11 @@ describe('Verification review queue (e2e)', () => {
       limit: 2,
       hasNextPage: true,
     });
-    expect(firstCursorPage.pagination.nextCursor).toEqual(expect.any(String));
+
+    // Type guard to safely access nextCursor
+    if (firstCursorPage.pagination.mode === 'cursor') {
+      expect(firstCursorPage.pagination.nextCursor).toEqual(expect.any(String));
+    }
 
     const nextCursor =
       firstCursorPage.pagination.mode === 'cursor'
@@ -253,8 +257,12 @@ describe('Verification review queue (e2e)', () => {
       mode: 'cursor',
       limit: 2,
       hasNextPage: false,
-      nextCursor: null,
     });
+
+    // Type guard to safely access nextCursor
+    if (nextCursorPage.pagination.mode === 'cursor') {
+      expect(nextCursorPage.pagination.nextCursor).toBeNull();
+    }
   });
 
   it('returns nextCursor when cursor pagination has more results', async () => {
@@ -265,7 +273,7 @@ describe('Verification review queue (e2e)', () => {
         .get(base)
         .query({
           paginationMode: 'cursor',
-          status: ['requested', 'verified'],
+          status: [ClaimStatus.requested, ClaimStatus.verified], // Use enum
           limit: 2,
         }),
     ).expect(200);
@@ -275,7 +283,11 @@ describe('Verification review queue (e2e)', () => {
     expect(body.items).toHaveLength(2);
     expect(body.pagination.mode).toBe('cursor');
     expect(body.pagination.hasNextPage).toBe(true);
-    expect(body.pagination.nextCursor).toEqual(expect.any(String));
+
+    // Type guard to safely access nextCursor
+    if (body.pagination.mode === 'cursor') {
+      expect(body.pagination.nextCursor).toEqual(expect.any(String));
+    }
   });
 
   it('rejects invalid query combinations and values', async () => {
