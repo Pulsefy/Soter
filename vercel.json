@@ -1,6 +1,7 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "app/frontend/package.json", "use": "@vercel/next" }
-  ]
+  "rootDirectory": "app/frontend",
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "framework": "nextjs"
 }

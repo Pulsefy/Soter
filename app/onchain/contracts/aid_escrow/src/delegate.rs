@@ -97,7 +97,7 @@ fn validate_package_state(env: &Env, package_id: u64) -> Result<(), Error> {
         return Err(Error::PackageNotFound);
     }
 
-    let package: crate::AidPackage = env.storage()
+    let package: crate::Package = env.storage()
         .persistent()
         .get(&package_key)
         .unwrap();
@@ -138,6 +138,7 @@ fn record_delegate_change_system(
     package_id: u64,
     previous_delegate: Option<Address>,
     new_delegate: &Address,
+    changed_by: &Address,
     reason: &str,
 ) {
     let mut history = load_delegate_history(env);
@@ -145,7 +146,7 @@ fn record_delegate_change_system(
         package_id,
         previous_delegate,
         new_delegate: new_delegate.clone(),
-        changed_by: Address::generate(env), // System-generated placeholder
+        changed_by: changed_by.clone(),
         changed_at: env.ledger().timestamp(),
         reason: reason.to_string(),
     };
@@ -176,7 +177,7 @@ pub fn set_delegate(
 
     // Get package to validate delegate is not the recipient
     let package_key = (symbol_short!("pkg"), package_id);
-    let package: crate::AidPackage = env.storage()
+    let package: crate::Package = env.storage()
         .persistent()
         .get(&package_key)
         .unwrap();
@@ -341,7 +342,7 @@ pub fn get_authorization_info(
 
 /// Remove the delegate for `package_id` (call after a successful claim to
 /// prevent any further reassignment).
-pub fn clear_delegate(env: &Env, package_id: u64) {
+pub fn clear_delegate(env: &Env, package_id: u64, changed_by: &Address) {
     let mut map = load_delegates(env);
     let previous_delegate = map.get(package_id);
     
@@ -359,7 +360,8 @@ pub fn clear_delegate(env: &Env, package_id: u64) {
             env,
             package_id,
             Some(delegate),
-            &Address::generate(env),
+            changed_by,
+            changed_by,
             "Delegate cleared after claim",
         );
     }
@@ -401,16 +403,18 @@ pub fn cleanup_expired_delegates(env: &Env, caller: &Address) -> Result<u32, Err
 mod tests {
     use super::*;
     use soroban_sdk::{testutils::Address as _, Env};
-    use crate::{AidPackage, PackageStatus};
+    use crate::{Package, PackageStatus};
 
     fn create_test_package(env: &Env, package_id: u64, recipient: &Address, status: PackageStatus) {
-        let package = AidPackage {
+        let package = Package {
+            id: package_id,
             recipient: recipient.clone(),
             amount: 1000,
             token: Address::generate(env),
             status,
             created_at: env.ledger().timestamp(),
             expires_at: 0,
+            claim_starts_at: env.ledger().timestamp(),
             metadata: soroban_sdk::Map::new(env),
         };
         env.storage().persistent().set(&(symbol_short!("pkg"), package_id), &package);
@@ -449,7 +453,7 @@ mod tests {
         create_test_package(&env, 7, &recipient, PackageStatus::Created);
         env.mock_all_auths();
         set_delegate(&env, &admin, 7, &delegate).unwrap();
-        clear_delegate(&env, 7);
+        clear_delegate(&env, 7, &admin);
 
         assert!(!is_authorised_claimer(&env, 7, &recipient, &delegate));
     }

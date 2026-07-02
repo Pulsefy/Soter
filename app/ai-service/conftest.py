@@ -28,6 +28,7 @@ _PKG_STUBS = [
     "openai", "openai.types", "openai.types.chat",
     "groq", "anthropic",
     "numpy",
+    "sklearn", "sklearn.preprocessing", "sklearn.neighbors",
 ]
 
 import importlib.util
