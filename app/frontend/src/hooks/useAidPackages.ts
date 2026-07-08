@@ -46,5 +46,6 @@ export function useAidPackages(filters?: AidPackageFilters) {
   return useQuery({
     queryKey: ['aid-packages', search, status, token],
     queryFn: () => fetchAidPackages(filters),
+    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }

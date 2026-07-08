@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApiKeysService } from './api-keys.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppRole } from '../auth/app-role.enum';
+import { ApiKeyScope } from './api-key-scope.enum';
 
 describe('ApiKeysService', () => {
   let service: ApiKeysService;
@@ -36,6 +37,7 @@ describe('ApiKeysService', () => {
     mockPrisma.apiKey.create.mockResolvedValue({
       id: 'k1',
       role: AppRole.operator,
+      scopes: '["admin"]',
       ngoId: null,
       description: 'test',
       createdAt: new Date(),
@@ -55,6 +57,44 @@ describe('ApiKeysService', () => {
 
     expect(result.id).toBe('k1');
     expect(result.apiKey).toMatch(/^s2s_/);
+    expect(result.scopes).toEqual([ApiKeyScope.admin]);
+  });
+
+  it('creates a key with custom scopes', async () => {
+    mockPrisma.apiKey.create.mockResolvedValue({
+      id: 'k2',
+      role: AppRole.operator,
+      scopes: '["read","write"]',
+      ngoId: null,
+      description: 'read-write key',
+      createdAt: new Date(),
+      lastUsedAt: null,
+      createdBy: 'env:API_KEY',
+      revokedAt: null,
+      revokedBy: null,
+      revokedReason: null,
+      replacedById: null,
+      keyPreview: 's2s_cd...ghij',
+    });
+
+    const result = await service.create(
+      {
+        role: AppRole.operator,
+        scopes: [ApiKeyScope.read, ApiKeyScope.write],
+        description: 'read-write key',
+      },
+      { authType: 'envApiKey' },
+    );
+
+    expect(result.id).toBe('k2');
+    expect(result.scopes).toEqual([ApiKeyScope.read, ApiKeyScope.write]);
+    expect(mockPrisma.apiKey.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          scopes: '["read","write"]',
+        }),
+      }),
+    );
   });
 
   it('requires ngoId for NGO role', async () => {
@@ -65,14 +105,38 @@ describe('ApiKeysService', () => {
 
   it('lists keys without returning raw secrets', async () => {
     mockPrisma.apiKey.findMany.mockResolvedValue([
-      { id: 'k1', keyPreview: 's2s_12...abcd', role: AppRole.admin },
+      {
+        id: 'k1',
+        keyPreview: 's2s_12...abcd',
+        role: AppRole.admin,
+        scopes: '["admin"]',
+      },
     ]);
 
     const result = await service.list();
     expect(result).toEqual([
-      { id: 'k1', keyPreview: 's2s_12...abcd', role: AppRole.admin },
+      {
+        id: 'k1',
+        keyPreview: 's2s_12...abcd',
+        role: AppRole.admin,
+        scopes: [ApiKeyScope.admin],
+      },
     ]);
     expect((result[0] as any).apiKey).toBeUndefined();
+  });
+
+  it('lists keys with custom scopes', async () => {
+    mockPrisma.apiKey.findMany.mockResolvedValue([
+      {
+        id: 'k2',
+        keyPreview: 's2s_cd...ghij',
+        role: AppRole.operator,
+        scopes: '["read"]',
+      },
+    ]);
+
+    const result = await service.list();
+    expect(result[0].scopes).toEqual([ApiKeyScope.read]);
   });
 
   describe('revoke', () => {
@@ -90,7 +154,7 @@ describe('ApiKeysService', () => {
       });
       mockPrisma.apiKey.update.mockResolvedValue({
         id: 'k1',
-        revokedAt: new Date(),
+        scopes: '["admin"]',
       });
 
       await service.revoke('k1', 'compromised', { apiKeyId: 'actor-1' });
@@ -132,6 +196,7 @@ describe('ApiKeysService', () => {
               role: AppRole.admin,
               ngoId: null,
               description: null,
+              scopes: '["admin"]',
               revokedAt: new Date(),
             }),
           },
@@ -151,6 +216,7 @@ describe('ApiKeysService', () => {
             role: AppRole.operator,
             ngoId: null,
             description: 'worker',
+            scopes: '["read","write"]',
             revokedAt: null,
           }),
           create: jest.fn().mockResolvedValue({
@@ -158,6 +224,7 @@ describe('ApiKeysService', () => {
             role: AppRole.operator,
             ngoId: null,
             description: 'worker',
+            scopes: '["read","write"]',
             createdAt: new Date(),
             lastUsedAt: null,
             createdBy: 'actor-1',
@@ -177,6 +244,10 @@ describe('ApiKeysService', () => {
 
       expect(result.replacement.id).toBe('new');
       expect(result.apiKey).toMatch(/^s2s_/);
+      expect(result.replacement.scopes).toEqual([
+        ApiKeyScope.read,
+        ApiKeyScope.write,
+      ]);
       expect(tx.apiKey.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'old' },
@@ -184,6 +255,50 @@ describe('ApiKeysService', () => {
             revokedAt: expect.any(Date),
             revokedReason: 'rotated',
             replacedById: 'new',
+          }),
+        }),
+      );
+    });
+
+    it('preserves scopes on rotation', async () => {
+      const tx = {
+        apiKey: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'read-key',
+            role: AppRole.client,
+            ngoId: null,
+            description: 'read-only',
+            scopes: '["read"]',
+            revokedAt: null,
+          }),
+          create: jest.fn().mockResolvedValue({
+            id: 'new-read-key',
+            role: AppRole.client,
+            ngoId: null,
+            description: 'read-only',
+            scopes: '["read"]',
+            createdAt: new Date(),
+            lastUsedAt: null,
+            createdBy: 'actor-1',
+            revokedAt: null,
+            revokedBy: null,
+            revokedReason: null,
+            replacedById: null,
+            keyPreview: 's2s_new...read',
+          }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrisma.$transaction.mockImplementation((fn: any) => fn(tx));
+
+      const result = await service.rotate('read-key', { apiKeyId: 'actor-1' });
+
+      expect(result.replacement.scopes).toEqual([ApiKeyScope.read]);
+      expect(tx.apiKey.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            scopes: '["read"]',
           }),
         }),
       );

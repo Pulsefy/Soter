@@ -38,6 +38,8 @@ model AidPackage {
   claimedAmount   Float @default(0)
   remainingAmount Float @default(0)
 
+  sorobanEventCorrelations SorobanEventCorrelation[]
+
   @@index([campaignId])
   @@index([campaignId, status])
 }
@@ -237,8 +239,12 @@ model Claim {
   reissuedFrom   Claim?    @relation("ReissueChain", fields: [reissuedFromId], references: [id])
   reissuedTo     Claim[]   @relation("ReissueChain")
 
+  /// Stores AI verification anchor metadata (campaign_ref, claim_id, package_id)
+  anchorMetadata Json?
+
   balanceLedger     BalanceLedger[]
   sorobanTransactions SorobanTransaction[]
+  sorobanEventCorrelations SorobanEventCorrelation[]
 
   @@index([status])
   @@index([campaignId])
@@ -465,6 +471,7 @@ model ApiKey {
   keyHash     String?  @unique
   keyPreview  String?
   role        AppRole
+  scopes      String   @default("[\"admin\"]") // JSON array of ApiKeyScope values
   ngoId       String?
   orgId       String?
   organization Organization? @relation(fields: [orgId], references: [id])
@@ -781,4 +788,63 @@ model DeploymentMetadata {
   @@index([network])
   @@index([contractId])
   @@index([deployedAt])
+}
+
+enum SorobanEventTopic {
+  package_created
+  package_claimed
+  package_disbursed
+  package_cancelled
+  package_expired
+  package_refunded
+  package_revoked
+  claim_created
+  claim_verified
+  claim_approved
+  claim_disbursed
+  claim_cancelled
+  claim_archived
+  escrow_initialized
+  config_updated
+  admin_updated
+  tokens_allowed
+  tokens_removed
+}
+
+/// Stores correlation between Soroban on-chain events and internal records
+/// Maps event topics, transaction hashes, ledger numbers to internal claim/package IDs
+model SorobanEventCorrelation {
+  id              String              @id @default(cuid())
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  // Event identification
+  eventTopic      SorobanEventTopic
+  txHash          String              // Transaction hash from Soroban
+  ledger          Int                 // Ledger sequence number
+  eventIndex      Int                 // Index of event within transaction
+
+  // Internal record references
+  claimId         String?             // Reference to internal Claim
+  claim           Claim?              @relation(fields: [claimId], references: [id])
+  packageId       String?             // Soroban package ID (on-chain)
+  aidPackageId    String?             // Reference to internal AidPackage
+  aidPackage      AidPackage?         @relation(fields: [aidPackageId], references: [id])
+
+  // Event payload (JSON for flexibility)
+  payload         Json                // Full event payload from contract
+
+  // Processing metadata
+  processedAt     DateTime            @default(now())
+  correlationSource String            @default("scheduled") // "scheduled" | "on_demand" | "manual"
+
+  @@index([claimId])
+  @@index([packageId])
+  @@index([aidPackageId])
+  @@index([txHash])
+  @@index([ledger])
+  @@index([eventTopic])
+  @@index([createdAt])
+  @@index([correlationSource])
+  @@unique([txHash, eventIndex]) // Each event in a transaction is unique
 }

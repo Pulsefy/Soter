@@ -4,7 +4,9 @@ import {
   ExecutionContext,
   HttpException,
   HttpStatus,
+  Inject,
 } from '@nestjs/common';
+import { ConfigType } from '@nestjs/config';
 import { RedisService } from '@liaoliaots/nestjs-redis';
 import { Request } from 'express';
 import type { Redis } from 'ioredis';
@@ -32,7 +34,8 @@ type RateLimitConfig = Record<
 interface RateLimitUser {
   id?: string;
   apiKeyId?: string;
-  authType?: 'apiKey' | 'envApiKey';
+  authType?: 'apiKey' | 'envApiKey' | 'jwt' | 'wallet';
+  role?: string;
 }
 
 @Injectable()
@@ -50,10 +53,18 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<RateLimitedRequest>();
     const client: Redis = this.redisService.getOrThrow();
 
-    const strategy = this.getStrategy(request);
-    const { limit, window } = this.limits[strategy];
-    const identifier = this.getIdentifier(request);
-    const key = `ratelimit:${strategy}:${identifier}`;
+    const user = request.user as RateLimitUser | undefined;
+    const userType = this.getUserType(user);
+    const policy = this.getPolicyForRequest(request, userType);
+
+    // Skip rate limiting if disabled
+    if (policy.enabled === false) {
+      return true;
+    }
+
+    const { limit, window, keyPrefix } = policy;
+    const identifier = this.getIdentifier(request, user);
+    const key = `ratelimit:${keyPrefix || userType}:${identifier}`;
 
     const current = await client.incr(key);
     if (current === 1) {
@@ -61,17 +72,26 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     }
 
     if (current > limit) {
+      const ttl = await client.ttl(key);
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
           message: 'Too many requests, please try again later.',
-          strategy,
+          code: 'RATE_LIMIT_EXCEEDED',
           limit,
-          resetIn: await client.ttl(key),
+          window,
+          retryAfter: ttl > 0 ? ttl : 1,
+          resetIn: ttl,
         },
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
+
+    // Add rate limit headers
+    const response = context.switchToHttp().getResponse();
+    response.setHeader('X-RateLimit-Limit', limit);
+    response.setHeader('X-RateLimit-Remaining', Math.max(0, limit - current));
+    response.setHeader('X-RateLimit-Policy', keyPrefix || userType);
 
     return true;
   }
@@ -80,11 +100,13 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     const path = request.path ?? request.url ?? '';
     if (path.includes('/search')) return 'search';
 
-    const user = request.user as RateLimitUser | undefined;
-    if (user) {
-      if (user.authType === 'apiKey' || user.authType === 'envApiKey') {
-        return 'apiKey';
-      }
+    // API key users
+    if (user.authType === 'apiKey' || user.authType === 'envApiKey') {
+      return 'apiKey';
+    }
+
+    // Authenticated users
+    if (user.id || user.authType === 'jwt' || user.authType === 'wallet') {
       return 'auth';
     }
 
@@ -96,9 +118,7 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     if (user?.id) return user.id;
     if (user?.apiKeyId) return user.apiKeyId;
 
-    const ips: string[] = request.ips;
-    const forwardedIp: string | undefined =
-      Array.isArray(ips) && ips.length > 0 ? ips[0] : undefined;
-    return forwardedIp ?? request.ip ?? 'anonymous';
+    // Ultimate fallback
+    return 'ip:anonymous';
   }
 }

@@ -103,7 +103,10 @@ export class DeploymentMetadataService {
         deployer: dto.deployer,
         transactionHash: dto.transactionHash,
         // Ensure explicit fallback behavior for Json type check compliance
-        metadata: dto.metadata === null ? Prisma.DbNull : (dto.metadata as Prisma.InputJsonValue | undefined),
+        metadata:
+          dto.metadata === null
+            ? Prisma.DbNull
+            : (dto.metadata as Prisma.InputJsonValue | undefined),
       },
     });
 

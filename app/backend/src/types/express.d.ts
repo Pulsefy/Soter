@@ -1,4 +1,5 @@
 import { AppRole } from '../auth/app-role.enum';
+import { ApiKeyScope } from '../api-keys/api-key-scope.enum';
 
 declare global {
   namespace Express {
@@ -12,6 +13,7 @@ declare global {
         orgId?: string | null;
         apiKeyId?: string;
         authType?: 'apiKey' | 'envApiKey';
+        scopes?: ApiKeyScope[];
       };
     }
   }

@@ -17,7 +17,7 @@ This policy applies to:
 ### 1. Key Separation
 - **Testnet keys must never be used on mainnet**
 - Separate admin keys for each environment (testnet, futurenet, standalone)
-- Deployer keys should be distinct from admin keys where possible
+- **Deployer vs. Admin/Operator Separation:** Deployer keys must be strictly distinct from operator and admin keys where feasible. The deployer key should be treated as an ephemeral credential used only for code upload, while administrative and day-to-day operational actions are handled by separate, isolated accounts to enforce least-privilege security.
 - Distributor keys should be separate from admin keys
 
 ### 2. Key Generation & Storage
@@ -26,6 +26,10 @@ This policy applies to:
 - Store secret keys in environment variables (`.env` files)
 - Never commit `.env` files or secret keys to version control
 - Add `.env` to `.gitignore` in all relevant directories
+
+#### Minimum Policy for Key Storage During Testnet
+- **No Keys in Repository:** Under no circumstances may any private seed or secret key be hardcoded or committed to any repository branch.
+- **Clear Env Naming:** All environment variables storing keys must follow strict, unambiguous naming structures to prevent cross-contamination between test networks and development environments (e.g., explicitly separating `TESTNET_SECRET_KEY` from mainnet templates).
 
 ### 3. Key Access Control
 - Admin keys should only be accessible to authorized team members
@@ -151,6 +155,12 @@ If a testnet admin key is compromised:
 5. Notify team of the incident
 6. Document the incident and lessons learned
 
+#### Short Checklist for Rotating a Compromised Testnet Key
+- [ ] **Halt Operations:** Immediately run the pause script to freeze the compromised contract state.
+- [ ] **Generate Clean Credentials:** Generate a brand-new Ed25519 keypair locally using the secure environment guidelines.
+- [ ] **Redeploy and Initialize:** Deploy a fresh instance of the contract code and initialize it using the new, secure public key.
+- [ ] **Purge System References:** Update backend environment files with the new contract ID, flush active cache states, and reboot dependent processes.
+
 ### Lost Key
 If a testnet admin key is lost:
 1. Deploy a new contract instance with a new admin key
@@ -204,7 +214,7 @@ CONTRACT_ID=CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
 CONTRACT_VERSION=0.1.0
 
 # RPC Configuration
-TESTNET_RPC_URL=https://soroban-testnet.stellar.org:443
+TESTNET_RPC_URL=[https://soroban-testnet.stellar.org:443](https://soroban-testnet.stellar.org:443)
 ```
 
 ### Quick Reference Commands
@@ -217,7 +227,7 @@ soroban keys generate
 soroban keys address "$SECRET_KEY"
 
 # Fund account via Friendbot
-curl "https://friendbot.stellar.org?addr=<PUBLIC_KEY>"
+curl "[https://friendbot.stellar.org?addr=](https://friendbot.stellar.org?addr=)<PUBLIC_KEY>"
 
 # Check admin on contract
 ./scripts/testnet-invoke.sh get-admin --contract-id "$CONTRACT_ID"

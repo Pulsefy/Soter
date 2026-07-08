@@ -281,9 +281,7 @@ describe('ContractConfigCacheService', () => {
       const setCalls = mockRedis.set.mock.calls.map(([k]) => k as string);
       expect(setCalls).toContain('contract-config:all');
       expect(setCalls).toContain('contract-config:network:testnet');
-      expect(setCalls).toContain(
-        'contract-config:contract:testnet:AidEscrow',
-      );
+      expect(setCalls).toContain('contract-config:contract:testnet:AidEscrow');
       expect(setCalls).toContain('contract-config:id:CABC123');
 
       // Stats
@@ -327,9 +325,7 @@ describe('ContractConfigCacheService', () => {
       const setCalls = mockRedis.set.mock.calls.map(([k]) => k as string);
       expect(setCalls).toContain('contract-config:network:testnet');
       expect(setCalls).toContain('contract-config:network:mainnet');
-      expect(setCalls).toContain(
-        'contract-config:contract:mainnet:TokenVault',
-      );
+      expect(setCalls).toContain('contract-config:contract:mainnet:TokenVault');
       expect(setCalls).toContain('contract-config:id:CDEF456');
     });
   });

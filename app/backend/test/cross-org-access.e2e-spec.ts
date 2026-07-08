@@ -19,7 +19,11 @@ describe('Cross-org access protection (e2e)', () => {
 
     app = moduleRef.createNestApplication();
     app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
     );
     await app.init();
     prisma = app.get(PrismaService);
@@ -40,12 +44,18 @@ describe('Cross-org access protection (e2e)', () => {
     const orgA = await prisma.organization.create({ data: { name: 'Org A' } });
     const orgB = await prisma.organization.create({ data: { name: 'Org B' } });
 
-    const campaignB = await prisma.campaign.create({ data: { name: 'Campaign B', budget: 1000, orgId: orgB.id } });
+    const campaignB = await prisma.campaign.create({
+      data: { name: 'Campaign B', budget: 1000, orgId: orgB.id },
+    });
 
-    const claim = await prisma.claim.create({ data: { campaignId: campaignB.id, amount: 10, recipientRef: 'r1' } });
+    const claim = await prisma.claim.create({
+      data: { campaignId: campaignB.id, amount: 10, recipientRef: 'r1' },
+    });
 
     // create an API key scoped to orgA (ngo)
-    await prisma.apiKey.create({ data: { key: 'ngo-key-1', role: 'ngo', ngoId: orgA.id } });
+    await prisma.apiKey.create({
+      data: { key: 'ngo-key-1', role: 'ngo', ngoId: orgA.id },
+    });
 
     await request(app.getHttpServer())
       .get(`${base}/${claim.id}`)

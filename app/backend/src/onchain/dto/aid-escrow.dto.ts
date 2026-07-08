@@ -149,7 +149,8 @@ export class DryRunAidPackageResultDto {
   @ApiProperty({
     description: 'Additional non-mutating simulation metadata',
     example: {
-      operatorAddress: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+      operatorAddress:
+        'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
       tokenAddress: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
       stateChanges: false,
     },

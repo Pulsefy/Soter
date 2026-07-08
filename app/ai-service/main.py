@@ -20,6 +20,7 @@ from exceptions import AIServiceError, LoadShedError
 from schemas.errors import ErrorDetail, ErrorEnvelope
 import time
 import metrics
+import re
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -182,6 +183,75 @@ class ProofOfLifeResponse(BaseModel):
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    """
+    Custom CORS middleware with allowlist-based origin validation.
+
+    - Validates origins against configured allowlist
+    - Supports Vercel preview deployments via wildcard patterns
+    - Protects sensitive endpoints by disallowing CORS entirely
+    - Handles preflight OPTIONS requests
+    """
+    origin = request.headers.get("origin")
+    path = request.url.path
+
+    # Sensitive endpoints that should NEVER allow CORS
+    # These require direct server-to-server communication or same-origin
+    SENSITIVE_ENDPOINTS = {
+        "/v1/ai/verification-artifacts",
+        "/ai/verification-artifacts",
+    }
+
+    is_sensitive = any(path.startswith(endpoint) for endpoint in SENSITIVE_ENDPOINTS)
+
+    # For sensitive endpoints, reject CORS entirely
+    if is_sensitive and origin:
+        logger.warning(
+            "cors_rejected_sensitive_endpoint",
+            extra={
+                "event": "cors_rejected",
+                "origin": origin,
+                "path": path,
+                "reason": "sensitive_endpoint",
+            },
+        )
+        return JSONResponse(
+            status_code=403,
+            content={"error": {"code": "CORS_NOT_ALLOWED", "message": "CORS not allowed for sensitive endpoints"}},
+        )
+
+    # Check if origin is allowed
+    is_allowed = False
+    if origin:
+        is_allowed = settings.is_origin_allowed(origin)
+
+    # Handle preflight requests
+    if request.method == "OPTIONS":
+        if is_allowed:
+            response = Response()
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-Role, X-Org-Id, X-User-Id, X-Correlation-Id, X-Request-Id"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Max-Age"] = "86400"
+            return response
+        else:
+            # Reject preflight for disallowed origins
+            return Response(status_code=204)
+
+    # Process the request
+    response = await call_next(request)
+
+    # Add CORS headers for allowed origins on non-sensitive endpoints
+    if is_allowed and not is_sensitive:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Expose-Headers"] = "X-Correlation-Id, X-Request-Id, Trace-Id"
+
+    return response
 
 
 @app.middleware("http")

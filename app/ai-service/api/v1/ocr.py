@@ -16,7 +16,8 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 import tasks
-from schemas.ocr import OCRResponse
+from schemas.ocr import OCRData
+from schemas.common import ResultEnvelope
 from services.ocr_job import run_ocr_from_bytes
 from config import settings
 
@@ -46,7 +47,7 @@ async def process_ocr(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
     anchor_metadata: Annotated[Optional[str], Form(description="JSON encoded AnchorMetadata")] = None,
-) -> OCRResponse:
+) -> ResultEnvelope[OCRData]:
     """Extract text fields from an uploaded document image."""
     start_time = time.time()
 
@@ -75,22 +76,36 @@ async def process_ocr(
             )
 
         _validate_image_bytes(contents)
-        result = run_ocr_from_bytes(contents, anchor_metadata)
+        raw = run_ocr_from_bytes(contents, anchor_metadata)
 
-        return OCRResponse(**result)
+        from main import correlation_id_var
+        ocr_data = OCRData(**raw["data"]) if isinstance(raw["data"], dict) else raw["data"]
+        fields = ocr_data.fields
+        avg_confidence: Optional[float] = (
+            round(sum(f.confidence for f in fields.values()) / len(fields), 4)
+            if fields
+            else None
+        )
+
+        return ResultEnvelope[OCRData](
+            result=ocr_data,
+            confidence=avg_confidence,
+            reasons=None,
+            anchor_metadata=raw.get("anchor_metadata"),
+            trace_id=correlation_id_var.get() or None,
+        )
 
     except HTTPException:
         raise
     except Exception as e:
         processing_time_ms = int((time.time() - start_time) * 1000)
-        return OCRResponse(
-            success=False,
-            error={
+        # Surface as a structured HTTP error rather than returning a partial envelope
+        raise HTTPException(
+            status_code=500,
+            detail={
                 "code": "processing_error",
                 "message": str(e),
             },
-            processing_time_ms=processing_time_ms,
-            anchor_metadata=None, # Cannot easily re-parse here without duplicating, so omit or ignore
         )
 
 
