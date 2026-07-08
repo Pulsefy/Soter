@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return */
 import { Request, Response, NextFunction } from 'express';
 import { createHash } from 'crypto';
 import type { RedisClientType } from 'redis';

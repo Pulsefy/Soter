@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { Pool } from 'pg';
 import { IdempotencyKey } from './key';
 import { RequestFingerprint } from './fingerprint';

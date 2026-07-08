@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma, DeploymentMetadata } from '@prisma/client';
+import { DeploymentMetadata, Prisma } from '@prisma/client';
 import {
   CreateDeploymentMetadataDto,
   UpdateDeploymentMetadataDto,
@@ -142,22 +142,28 @@ export class DeploymentMetadataService {
    * Map Prisma model to response DTO
    */
   private mapToResponse(
-    metadata: DeploymentMetadata,
+    deploymentMetadata: DeploymentMetadata,
   ): DeploymentMetadataResponseDto {
+    const additionalMetadata =
+      typeof deploymentMetadata.metadata === 'object' &&
+      deploymentMetadata.metadata !== null &&
+      !Array.isArray(deploymentMetadata.metadata)
+        ? (deploymentMetadata.metadata as Record<string, unknown>)
+        : undefined;
+
     return {
-      id: metadata.id,
-      contractName: metadata.contractName,
-      network: metadata.network,
-      contractId: metadata.contractId,
-      wasmHash: metadata.wasmHash,
-      deployedAt: metadata.deployedAt,
-      commitSha: metadata.commitSha ?? undefined,
-      deployer: metadata.deployer ?? undefined,
-      transactionHash: metadata.transactionHash ?? undefined,
-      metadata:
-        (metadata.metadata as Record<string, unknown> | null) ?? undefined,
-      createdAt: metadata.createdAt,
-      updatedAt: metadata.updatedAt,
+      id: deploymentMetadata.id,
+      contractName: deploymentMetadata.contractName,
+      network: deploymentMetadata.network,
+      contractId: deploymentMetadata.contractId,
+      wasmHash: deploymentMetadata.wasmHash,
+      deployedAt: deploymentMetadata.deployedAt,
+      commitSha: deploymentMetadata.commitSha ?? undefined,
+      deployer: deploymentMetadata.deployer ?? undefined,
+      transactionHash: deploymentMetadata.transactionHash ?? undefined,
+      metadata: additionalMetadata,
+      createdAt: deploymentMetadata.createdAt,
+      updatedAt: deploymentMetadata.updatedAt,
     };
   }
 }

@@ -27,10 +27,13 @@ import { VerificationInboxService } from './verification-inbox.service';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
 
-interface InboxUser {
+/** Shape of the JWT payload attached to `req.user` by the auth guard. */
+interface JwtPayload {
   sub?: string;
   apiKeyId?: string;
 }
+
+type AuthenticatedRequest = ExpressRequest & { user: JwtPayload };
 
 @ApiTags('Verification Inbox')
 @ApiBearerAuth('JWT-auth')
@@ -100,8 +103,9 @@ export class VerificationInboxController {
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
-    const user = req?.user as InboxUser | undefined;
-    const userId: string | undefined = user?.apiKeyId;
+    const userId =
+      (req?.user as JwtPayload | undefined)?.sub ??
+      (req?.user as JwtPayload | undefined)?.apiKeyId;
 
     return this.verificationInboxService.getInbox(
       status,
@@ -173,10 +177,9 @@ export class VerificationInboxController {
   async approve(
     @Param('id') id: string,
     @Body() body: { nextStepMessage?: string; internalNote?: string },
-    @Request() req: ExpressRequest,
+    @Request() req: AuthenticatedRequest,
   ) {
-    const user = req.user as InboxUser | undefined;
-    const reviewerId: string = user?.apiKeyId ?? 'system';
+    const reviewerId = req.user.sub ?? req.user.apiKeyId ?? 'system';
     return this.verificationInboxService.updateStatus(
       id,
       'approved',
@@ -226,10 +229,9 @@ export class VerificationInboxController {
       nextStepMessage?: string;
       internalNote?: string;
     },
-    @Request() req: ExpressRequest,
+    @Request() req: AuthenticatedRequest,
   ) {
-    const user = req.user as InboxUser | undefined;
-    const reviewerId: string = user?.apiKeyId ?? 'system';
+    const reviewerId = req.user.sub ?? req.user.apiKeyId ?? 'system';
     return this.verificationInboxService.updateStatus(
       id,
       'rejected',
@@ -279,10 +281,9 @@ export class VerificationInboxController {
       nextStepMessage: string;
       internalNote?: string;
     },
-    @Request() req: ExpressRequest,
+    @Request() req: AuthenticatedRequest,
   ) {
-    const user = req.user as InboxUser | undefined;
-    const reviewerId: string = user?.apiKeyId ?? 'system';
+    const reviewerId = req.user.sub ?? req.user.apiKeyId ?? 'system';
     return this.verificationInboxService.updateStatus(
       id,
       'needs_resubmission',
@@ -362,10 +363,9 @@ export class VerificationInboxController {
   async addInternalNote(
     @Param('id') id: string,
     @Body() body: { content: string; category?: string },
-    @Request() req: ExpressRequest,
+    @Request() req: AuthenticatedRequest,
   ) {
-    const user = req.user as InboxUser | undefined;
-    const authorId: string = user?.apiKeyId ?? 'system';
+    const authorId = req.user.sub ?? req.user.apiKeyId ?? 'system';
     return this.verificationInboxService.addInternalNote(
       id,
       body.content,

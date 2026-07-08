@@ -1,0 +1,17 @@
+{
+  "default": {
+    "package": {
+      "id": "fixture-package-001",
+      "recipient": "GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ",
+      "amount": "1000000000",
+      "token": "GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN",
+      "status": "Created",
+      "createdAt": 1705312800,
+      "expiresAt": 1707904800,
+      "metadata": {
+        "campaign_ref": "fixture-campaign-001"
+      }
+    },
+    "timestamp": "2024-01-15T12:00:00.000Z"
+  }
+}

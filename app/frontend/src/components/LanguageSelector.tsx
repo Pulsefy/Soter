@@ -4,7 +4,6 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useLocale } from 'next-intl';
 import { useTransition } from 'react';
 import { Globe } from 'lucide-react';
-import { useLocaleStore } from '@/lib/localeStore';
 import type { Locale } from '@/i18n';
 
 const localeNames: Record<Locale, string> = {
@@ -17,16 +16,12 @@ export function LanguageSelector() {
   const router = useRouter();
   const pathname = usePathname();
   const currentLocale = useLocale() as Locale;
-  const { setLocale } = useLocaleStore();
   const [isPending, startTransition] = useTransition();
 
   const handleLocaleChange = (newLocale: Locale) => {
     if (newLocale === currentLocale) return;
 
     startTransition(() => {
-      // Update the locale in the store
-      setLocale(newLocale);
-
       // Navigate to the new locale - replace the current locale in the path
       const segments = pathname.split('/');
       segments[1] = newLocale; // Replace the locale segment

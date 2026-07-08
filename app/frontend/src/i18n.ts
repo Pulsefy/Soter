@@ -16,10 +16,31 @@ const messages = {
 export default getRequestConfig(async ({ requestLocale }) => {
   const locale = await requestLocale;
 
-  if (!locale || !locales.includes(locale as any)) notFound();
+  if (!locale || !(locales as readonly string[]).includes(locale)) notFound();
 
   return {
     locale,
     messages: messages[locale as Locale],
+    getMessageFallback({ namespace, key, error }) {
+      const path = [namespace, key].filter((part) => part != null).join('.');
+
+      if (error.code === 'MISSING_MESSAGE') {
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn(`[next-intl] Missing translation: ${path}`);
+        }
+        return path;
+      }
+
+      return 'Error: ' + path;
+    },
+    onError(error) {
+      if (error.code === 'MISSING_MESSAGE') {
+        // Missing keys are handled in getMessageFallback
+        return;
+      }
+      if (process.env.NODE_ENV !== 'production') {
+        console.error(error);
+      }
+    }
   };
 });

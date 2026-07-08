@@ -9,11 +9,27 @@ import {
 import { ConfigType } from '@nestjs/config';
 import { RedisService } from '@liaoliaots/nestjs-redis';
 import { Request } from 'express';
-import rateLimitConfig from '../../config/rate-limit.config';
-import {
-  RateLimitPolicy,
-  getRateLimitPolicy,
-} from '../../config/rate-limit.config';
+import type { Redis } from 'ioredis';
+
+interface RateLimitedUser {
+  id?: string;
+  apiKeyId?: string;
+  authType?: 'apiKey' | 'envApiKey';
+}
+
+type RateLimitedRequest = Request & {
+  path?: string;
+  url?: string;
+  ip?: string;
+  ips?: string[];
+  user?: RateLimitedUser;
+};
+
+type RateLimitStrategy = 'auth' | 'search' | 'public' | 'apiKey';
+type RateLimitConfig = Record<
+  RateLimitStrategy,
+  { limit: number; window: number }
+>;
 
 interface RateLimitUser {
   id?: string;
@@ -24,15 +40,18 @@ interface RateLimitUser {
 
 @Injectable()
 export class AdaptiveRateLimitGuard implements CanActivate {
-  constructor(
-    private readonly redisService: RedisService,
-    @Inject(rateLimitConfig.KEY)
-    private readonly config: ConfigType<typeof rateLimitConfig>,
-  ) {}
+  private readonly limits: RateLimitConfig = {
+    auth: { limit: 5, window: 60 },
+    search: { limit: 30, window: 60 },
+    public: { limit: 10, window: 60 },
+    apiKey: { limit: 100, window: 60 },
+  };
+
+  constructor(private readonly redisService: RedisService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request: Request = context.switchToHttp().getRequest<Request>();
-    const client = this.redisService.getOrThrow();
+    const request = context.switchToHttp().getRequest<RateLimitedRequest>();
+    const client: Redis = this.redisService.getOrThrow();
 
     const user = request.user as RateLimitUser | undefined;
     const userType = this.getUserType(user);
@@ -77,21 +96,9 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     return true;
   }
 
-  /**
-   * Get the user type for rate limit policy selection
-   * Backward compatible with the old strategy detection
-   */
-  private getUserType(
-    user?: RateLimitUser,
-  ): 'public' | 'auth' | 'apiKey' | 'admin' {
-    if (!user) {
-      return 'public';
-    }
-
-    // Admin users get admin policy
-    if (user.role === 'admin' || user.role === 'super_admin') {
-      return 'admin';
-    }
+  private getStrategy(request: RateLimitedRequest): RateLimitStrategy {
+    const path = request.path ?? request.url ?? '';
+    if (path.includes('/search')) return 'search';
 
     // API key users
     if (user.authType === 'apiKey' || user.authType === 'envApiKey') {
@@ -106,67 +113,10 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     return 'public';
   }
 
-  /**
-   * Get the rate limit policy for the current request
-   * Maintains backward compatibility with the old hardcoded limits
-   */
-  private getPolicyForRequest(
-    request: Request,
-    userType: 'public' | 'auth' | 'apiKey' | 'admin',
-  ): RateLimitPolicy {
-    const path = request.path || request.url || '';
-
-    // Check for search path - backward compatible with old logic
-    if (path.includes('/search')) {
-      // Use config if available, otherwise fall back to search defaults
-      const searchPolicy = this.config.search;
-      if (searchPolicy) {
-        return searchPolicy;
-      }
-      // Fallback to hardcoded search limit for backward compatibility
-      return { limit: 30, window: 60, keyPrefix: 'search', enabled: true };
-    }
-
-    // Use the config-based policy resolution
-    return getRateLimitPolicy(this.config, path, userType);
-  }
-
-  /**
-   * Get unique identifier for rate limiting
-   * Enhanced with better IP detection and backward compatibility
-   */
-  private getIdentifier(request: Request, user?: RateLimitUser): string {
-    // Authenticated user: use user ID
-    if (user?.id) {
-      return `user:${user.id}`;
-    }
-
-    // API key: use API key ID
-    if (user?.apiKeyId) {
-      return `apikey:${user.apiKeyId}`;
-    }
-
-    // IP-based for public/unauthenticated requests
-    // Try x-forwarded-for first (for proxied requests)
-    const forwardedIp = request.headers['x-forwarded-for'] as
-      | string
-      | undefined;
-    if (forwardedIp) {
-      const ips = forwardedIp.split(',').map(ip => ip.trim());
-      if (ips.length > 0 && ips[0]) {
-        return `ip:${ips[0]}`;
-      }
-    }
-
-    // Try request.ips (Express array)
-    if (request.ips && request.ips.length > 0) {
-      return `ip:${request.ips[0]}`;
-    }
-
-    // Fallback to request.ip
-    if (request.ip) {
-      return `ip:${request.ip}`;
-    }
+  private getIdentifier(request: RateLimitedRequest): string {
+    const user = request.user;
+    if (user?.id) return user.id;
+    if (user?.apiKeyId) return user.apiKeyId;
 
     // Ultimate fallback
     return 'ip:anonymous';

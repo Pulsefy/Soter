@@ -30,6 +30,15 @@ import {
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 
+function hasPrismaErrorCode(error: unknown): error is { code: string } {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string'
+  );
+}
+
 /**
  * DeploymentMetadataController
  * REST API endpoints for managing and querying contract deployment metadata.
@@ -76,7 +85,7 @@ export class DeploymentMetadataController {
       return await this.deploymentMetadataService.create(dto);
     } catch (error: unknown) {
       this.logger.error('Failed to create deployment metadata:', error);
-      if ((error as { code?: string }).code === 'P2002') {
+      if (hasPrismaErrorCode(error) && error.code === 'P2002') {
         throw new BadRequestException(
           `Deployment metadata already exists for ${dto.network}/${dto.contractName}`,
         );
