@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
 from schemas.common import AnchorMetadata
@@ -33,7 +33,39 @@ class PIISummary(BaseModel):
     }
 
 
+class AnonymizeResult(BaseModel):
+    """Payload nested inside the ResultEnvelope for anonymization responses."""
+
+    anonymized_text: str = Field(examples=["[NAME] from [LOCATION] on [DATE] requested aid"])
+    original_length: int = Field(examples=[50])
+    pii_summary: Dict[str, Any] = Field(
+        default_factory=dict,
+        examples=[{"names": 1, "locations": 1, "dates": 1, "total": 3}],
+    )
+    token_counts: Dict[str, int] = Field(default_factory=dict, examples=[{"original": 10, "anonymized": 10}])
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "anonymized_text": "[NAME] from [LOCATION] on [DATE] requested aid",
+                    "original_length": 50,
+                    "pii_summary": {"names": 1, "locations": 1, "dates": 1, "total": 3},
+                    "token_counts": {"[RECIPIENT_NAME]": 1, "[LOCATION]": 1, "[EVENT_DATE]": 1},
+                }
+            ]
+        }
+    }
+
+
 class AnonymizeResponse(BaseModel):
+    """
+    Legacy response model — kept for backward compatibility.
+
+    New consumers should use the ``ResultEnvelope[AnonymizeResult]`` shape
+    returned by the v1 endpoint.
+    """
+
     success: bool = Field(examples=[True])
     anonymized_text: str = Field(examples=["[NAME] from [LOCATION] on [DATE] requested aid"])
     original_length: int = Field(examples=[50])

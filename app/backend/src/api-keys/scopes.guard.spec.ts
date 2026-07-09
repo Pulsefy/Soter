@@ -80,9 +80,7 @@ describe('ScopesGuard', () => {
     const context = createContext({
       scopes: [ApiKeyScope.read],
     });
-    expect(() => guard.canActivate(context as any)).toThrow(
-      ForbiddenException,
-    );
+    expect(() => guard.canActivate(context as any)).toThrow(ForbiddenException);
   });
 
   it('denies write scope from accessing admin endpoint', () => {
@@ -91,9 +89,7 @@ describe('ScopesGuard', () => {
     const context = createContext({
       scopes: [ApiKeyScope.write],
     });
-    expect(() => guard.canActivate(context as any)).toThrow(
-      ForbiddenException,
-    );
+    expect(() => guard.canActivate(context as any)).toThrow(ForbiddenException);
   });
 
   it('allows webhook scope to access webhook endpoint', () => {
@@ -111,27 +107,21 @@ describe('ScopesGuard', () => {
     const context = createContext({
       scopes: [ApiKeyScope.read],
     });
-    expect(() => guard.canActivate(context as any)).toThrow(
-      ForbiddenException,
-    );
+    expect(() => guard.canActivate(context as any)).toThrow(ForbiddenException);
   });
 
   it('denies access when user has no scopes', () => {
     mockReflector.getAllAndOverride.mockReturnValue([ApiKeyScope.read]);
 
     const context = createContext({});
-    expect(() => guard.canActivate(context as any)).toThrow(
-      ForbiddenException,
-    );
+    expect(() => guard.canActivate(context as any)).toThrow(ForbiddenException);
   });
 
   it('denies access when user is undefined', () => {
     mockReflector.getAllAndOverride.mockReturnValue([ApiKeyScope.read]);
 
     const context = createContext();
-    expect(() => guard.canActivate(context as any)).toThrow(
-      ForbiddenException,
-    );
+    expect(() => guard.canActivate(context as any)).toThrow(ForbiddenException);
   });
 
   it('allows multiple scopes with sufficient privilege', () => {
@@ -155,8 +145,6 @@ describe('ScopesGuard', () => {
     const context = createContext({
       scopes: [ApiKeyScope.read],
     });
-    expect(() => guard.canActivate(context as any)).toThrow(
-      ForbiddenException,
-    );
+    expect(() => guard.canActivate(context as any)).toThrow(ForbiddenException);
   });
 });

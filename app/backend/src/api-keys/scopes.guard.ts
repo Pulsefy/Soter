@@ -33,10 +33,12 @@ export class ScopesGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<Request>();
-    const user = request.user as {
-      scopes?: ApiKeyScope[];
-      authType?: string;
-    } | undefined;
+    const user = request.user as
+      | {
+          scopes?: ApiKeyScope[];
+          authType?: string;
+        }
+      | undefined;
 
     if (!user) {
       throw new ForbiddenException('Access denied: no authenticated user');
@@ -48,9 +50,7 @@ export class ScopesGuard implements CanActivate {
       throw new ForbiddenException('Access denied: no API key scopes');
     }
 
-    const grantedLevels = grantedScopes.map(
-      s => SCOPE_HIERARCHY[s] ?? 0,
-    );
+    const grantedLevels = grantedScopes.map(s => SCOPE_HIERARCHY[s] ?? 0);
     const maxGrantedLevel = Math.max(...grantedLevels, 0);
 
     const hasWebhook = grantedScopes.includes(WEBHOOK_SCOPE);
@@ -60,9 +60,7 @@ export class ScopesGuard implements CanActivate {
 
       if (required === WEBHOOK_SCOPE) {
         if (!hasWebhook) {
-          throw new ForbiddenException(
-            `Access denied: webhook scope required`,
-          );
+          throw new ForbiddenException(`Access denied: webhook scope required`);
         }
         continue;
       }
