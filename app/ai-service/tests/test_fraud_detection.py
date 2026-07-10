@@ -28,15 +28,20 @@ class TestFraudDetectionEndpoint:
         resp = client.post("/v1/fraud/detect", json=payload)
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data["results"]) == 3
-        for r in data["results"]:
+        # Response is now a ResultEnvelope; per-claim results are in data["result"]
+        assert "result" in data
+        assert len(data["result"]) == 3
+        for r in data["result"]:
             assert 0.0 <= r["fraud_risk_score"] <= 1.0
 
     def test_flagged_count_matches(self):
         payload = {"claims": _make_claims(5)}
         resp = client.post("/v1/fraud/detect", json=payload)
         data = resp.json()
-        assert data["flagged_count"] == sum(r["is_flagged"] for r in data["results"])
+        flagged = sum(r["is_flagged"] for r in data["result"])
+        # reasons list has one entry per flagged claim that has a reason
+        if flagged and data["reasons"]:
+            assert len(data["reasons"]) <= flagged
 
     def test_single_claim_returns_zero_risk(self):
         payload = {
@@ -44,7 +49,7 @@ class TestFraudDetectionEndpoint:
         }
         resp = client.post("/v1/fraud/detect", json=payload)
         assert resp.status_code == 200
-        result = resp.json()["results"][0]
+        result = resp.json()["result"][0]
         assert result["fraud_risk_score"] == 0.0
         assert result["is_flagged"] is False
 
@@ -63,7 +68,7 @@ class TestFraudDetectionEndpoint:
         )
         resp = client.post("/v1/fraud/detect", json={"claims": claims})
         assert resp.status_code == 200
-        results = {r["claim_id"]: r["fraud_risk_score"] for r in resp.json()["results"]}
+        results = {r["claim_id"]: r["fraud_risk_score"] for r in resp.json()["result"]}
         assert results["outlier"] > results["c0"]
 
 

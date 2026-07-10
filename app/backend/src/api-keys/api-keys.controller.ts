@@ -13,6 +13,8 @@ import { Request } from 'express';
 import { ApiResponseDto } from '../common/dto/api-response.dto';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
+import { Scopes } from './scopes.decorator';
+import { ApiKeyScope } from './api-key-scope.enum';
 import { ApiKeysService } from './api-keys.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { RevokeApiKeyDto } from './dto/revoke-api-key.dto';
@@ -25,6 +27,7 @@ export class ApiKeysController {
 
   @Post()
   @Roles(AppRole.admin)
+  @Scopes(ApiKeyScope.admin)
   @ApiOperation({
     summary: 'Create an API key (returned once)',
     description:
@@ -41,6 +44,7 @@ export class ApiKeysController {
 
   @Get()
   @Roles(AppRole.admin)
+  @Scopes(ApiKeyScope.admin)
   @ApiOperation({
     summary: 'List API keys (masked previews only)',
   })
@@ -52,6 +56,7 @@ export class ApiKeysController {
 
   @Post(':id/rotate')
   @Roles(AppRole.admin)
+  @Scopes(ApiKeyScope.admin)
   @ApiOperation({
     summary: 'Rotate an API key (revoke old, create new)',
   })
@@ -64,6 +69,7 @@ export class ApiKeysController {
 
   @Post(':id/revoke')
   @Roles(AppRole.admin)
+  @Scopes(ApiKeyScope.admin)
   @ApiOperation({
     summary: 'Revoke an API key',
   })

@@ -1,0 +1,13 @@
+{
+  "getAccount": {
+    "id": "GTEST1234567890ABCDEF",
+    "sequence": "1000",
+    "balances": [
+      { "asset_type": "native", "balance": "100.0000000" }
+    ]
+  },
+  "submitTransaction": {
+    "successful": true,
+    "hash": "abc123fixture000000000000000000000000000000000000000000000000000"
+  }
+}
