@@ -800,15 +800,7 @@ impl AidEscrow {
         package.recipient.require_auth();
         let payout_recipient = package.recipient.clone();
 
-        Self::finalize_claim(
-            &env,
-            &key,
-            &mut package,
-            id,
-            &payout_recipient,
-            now,
-            None,
-        )
+        Self::finalize_claim(&env, &key, &mut package, id, &payout_recipient, now, None)
     }
 
     /// Recipient claims a package and anchors an off-chain receipt hash
@@ -821,11 +813,7 @@ impl AidEscrow {
     ///
     /// # Errors
     /// Returns the same errors as :meth:`claim`.
-    pub fn claim_with_receipt(
-        env: Env,
-        id: u64,
-        receipt_hash: BytesN<32>,
-    ) -> Result<(), Error> {
+    pub fn claim_with_receipt(env: Env, id: u64, receipt_hash: BytesN<32>) -> Result<(), Error> {
         Self::check_action_paused(&env, symbol_short!("claim"))?;
         let key = (symbol_short!("pkg"), id);
         let mut package: Package = env
@@ -941,19 +929,11 @@ impl AidEscrow {
     ///
     /// # Errors
     /// Returns the same errors as :meth:`disburse`.
-    pub fn disburse_with_receipt(
-        env: Env,
-        id: u64,
-        receipt_hash: BytesN<32>,
-    ) -> Result<(), Error> {
+    pub fn disburse_with_receipt(env: Env, id: u64, receipt_hash: BytesN<32>) -> Result<(), Error> {
         Self::process_disburse(&env, id, Some(receipt_hash))
     }
 
-    fn process_disburse(
-        env: &Env,
-        id: u64,
-        receipt_hash: Option<BytesN<32>>,
-    ) -> Result<(), Error> {
+    fn process_disburse(env: &Env, id: u64, receipt_hash: Option<BytesN<32>>) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
 

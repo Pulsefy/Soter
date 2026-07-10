@@ -1010,6 +1010,12 @@
                 },
                 {
                   "key": {
+                    "symbol": "receipt_hash"
+                  },
+                  "val": "void"
+                },
+                {
+                  "key": {
                     "symbol": "recipient"
                   },
                   "val": {
