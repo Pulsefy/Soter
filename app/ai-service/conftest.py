@@ -1,6 +1,7 @@
 """
 Stub out native/optional dependencies unavailable outside Docker.
 """
+
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -19,27 +20,36 @@ def _make_pkg(name: str):
 
 
 _PKG_STUBS = [
-    "pytesseract", "cv2",
-    "PIL", "PIL.Image",
+    "pytesseract",
+    "cv2",
+    "PIL",
+    "PIL.Image",
     "prometheus_client",
-    "celery", "celery.result",
+    "celery",
+    "celery.result",
     "redis",
-    "spacy", "spacy.language", "spacy.tokens", "spacy.tokens.doc",
-    "openai", "openai.types", "openai.types.chat",
-    "groq", "anthropic",
+    "spacy",
+    "spacy.language",
+    "spacy.tokens",
+    "spacy.tokens.doc",
+    "openai",
+    "openai.types",
+    "openai.types.chat",
+    "groq",
+    "anthropic",
     "numpy",
 ]
 
 import importlib.util
 
 for _mod in _PKG_STUBS:
-    root = _mod.split('.')[0]
+    root = _mod.split(".")[0]
     try:
         spec = importlib.util.find_spec(root)
         has_pkg = spec is not None
     except Exception:
         has_pkg = False
-        
+
     if not has_pkg:
         if _mod not in sys.modules:
             sys.modules[_mod] = _make_pkg(_mod)
@@ -53,4 +63,5 @@ sys.modules["proof_of_life"] = _pol
 # Patch metrics.check_system_resources so the monitor_requests middleware
 # doesn't crash when torch (vram) is a MagicMock.
 import metrics
+
 metrics.check_system_resources = lambda **kwargs: True

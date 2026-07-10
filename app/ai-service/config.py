@@ -93,13 +93,17 @@ class Settings(BaseSettings):
         if self.app_env == "staging":
             self.request_rate_limit = "5/minute"
             self.ai_deterministic_mode = True
-            if not (self.openai_api_key or self.groq_api_key or self.test_provider_mode):
+            if not (
+                self.openai_api_key or self.groq_api_key or self.test_provider_mode
+            ):
                 self.test_provider_mode = True
 
         if self.app_env == "test":
             self.request_rate_limit = "5/minute"
             self.ai_deterministic_mode = True
-            if not (self.openai_api_key or self.groq_api_key or self.test_provider_mode):
+            if not (
+                self.openai_api_key or self.groq_api_key or self.test_provider_mode
+            ):
                 self.test_provider_mode = True
 
         if self.app_env == "production":
@@ -107,7 +111,9 @@ class Settings(BaseSettings):
                 self.log_level = "WARNING"
             if self.request_rate_limit == "10/minute":
                 self.request_rate_limit = "20/minute"
-            if not (self.openai_api_key or self.groq_api_key or self.test_provider_mode):
+            if not (
+                self.openai_api_key or self.groq_api_key or self.test_provider_mode
+            ):
                 raise ValueError(
                     "Production environment requires OPENAI_API_KEY, GROQ_API_KEY, or TEST_PROVIDER_MODE=true"
                 )
@@ -115,7 +121,9 @@ class Settings(BaseSettings):
         return self
 
     def validate_api_keys(self) -> bool:
-        has_key = bool(self.openai_api_key or self.groq_api_key or self.test_provider_mode)
+        has_key = bool(
+            self.openai_api_key or self.groq_api_key or self.test_provider_mode
+        )
         if not has_key:
             logger.warning("No API keys configured. AI features will be unavailable.")
         return has_key

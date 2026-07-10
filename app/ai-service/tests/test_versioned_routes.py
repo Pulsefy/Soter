@@ -30,7 +30,6 @@ import main
 import metrics
 from main import app
 
-
 # ---------------------------------------------------------------------------
 # Session-level resource-check bypass
 # Every test gets healthy resources unless it opts out explicitly.
@@ -194,16 +193,16 @@ class TestLegacyRedirects:
     @pytest.mark.parametrize("method,path,expected_location", REDIRECT_CASES)
     def test_redirect_status_308(self, client, method, path, expected_location):
         response = client.request(method, path, json={})
-        assert response.status_code == 308, (
-            f"Expected 308 for {method} {path}, got {response.status_code}"
-        )
+        assert (
+            response.status_code == 308
+        ), f"Expected 308 for {method} {path}, got {response.status_code}"
 
     @pytest.mark.parametrize("method,path,expected_location", REDIRECT_CASES)
     def test_redirect_location_header(self, client, method, path, expected_location):
         response = client.request(method, path, json={})
-        assert response.headers.get("location") == expected_location, (
-            f"Wrong Location for {method} {path}: {response.headers.get('location')}"
-        )
+        assert (
+            response.headers.get("location") == expected_location
+        ), f"Wrong Location for {method} {path}: {response.headers.get('location')}"
 
 
 class TestLegacyPrefixRedirects:

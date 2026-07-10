@@ -11,7 +11,9 @@ from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
-_FIXTURES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fixtures")
+_FIXTURES_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fixtures"
+)
 
 
 class TestProvider:
@@ -29,14 +31,18 @@ class TestProvider:
         self._fixtures_dir = fixtures_dir
         self._cache: Dict[str, Any] = {}
 
-    def get_response(self, endpoint: str, request_data: Dict[str, Any]) -> Dict[str, Any]:
+    def get_response(
+        self, endpoint: str, request_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         fixture = self._load_fixtures(endpoint)
         key = self._deterministic_key(endpoint, request_data)
         idx = int(hashlib.sha256(key.encode()).hexdigest(), 16) % len(fixture)
         selected = fixture[idx]
         logger.info(
             "TestProvider returning fixture %d/%d for endpoint=%s",
-            idx, len(fixture), endpoint,
+            idx,
+            len(fixture),
+            endpoint,
         )
         return dict(selected)
 

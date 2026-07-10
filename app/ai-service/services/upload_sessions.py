@@ -194,9 +194,7 @@ class UploadSessionService:
 
             safe_name = os.path.basename(session.filename) or "artifact"
             artifact_id = uuid.uuid4().hex
-            artifact_path = os.path.join(
-                self.storage_dir, f"{artifact_id}_{safe_name}"
-            )
+            artifact_path = os.path.join(self.storage_dir, f"{artifact_id}_{safe_name}")
             with open(artifact_path, "wb") as output:
                 for index in range(session.total_chunks):
                     with open(self._chunk_path(session_id, index), "rb") as part:

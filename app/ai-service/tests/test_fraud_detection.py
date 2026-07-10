@@ -12,7 +12,12 @@ client = TestClient(app)
 
 def _make_claims(n: int):
     return [
-        {"claim_id": f"c{i}", "ip_address": "1.2.3.4", "evidence_hash": f"hash{i}", "amount": 100.0}
+        {
+            "claim_id": f"c{i}",
+            "ip_address": "1.2.3.4",
+            "evidence_hash": f"hash{i}",
+            "amount": 100.0,
+        }
         for i in range(n)
     ]
 
@@ -34,7 +39,9 @@ class TestFraudDetectionEndpoint:
         assert data["flagged_count"] == sum(r["is_flagged"] for r in data["results"])
 
     def test_single_claim_returns_zero_risk(self):
-        payload = {"claims": [{"claim_id": "solo", "ip_address": "9.9.9.9", "amount": 50.0}]}
+        payload = {
+            "claims": [{"claim_id": "solo", "ip_address": "9.9.9.9", "amount": 50.0}]
+        }
         resp = client.post("/v1/fraud/detect", json=payload)
         assert resp.status_code == 200
         result = resp.json()["results"][0]
@@ -51,7 +58,9 @@ class TestFraudDetectionEndpoint:
             {"claim_id": f"c{i}", "ip_address": "1.2.3.4", "amount": 100.0}
             for i in range(8)
         ]
-        claims.append({"claim_id": "outlier", "ip_address": "99.99.99.99", "amount": 9999.0})
+        claims.append(
+            {"claim_id": "outlier", "ip_address": "99.99.99.99", "amount": 9999.0}
+        )
         resp = client.post("/v1/fraud/detect", json={"claims": claims})
         assert resp.status_code == 200
         results = {r["claim_id"]: r["fraud_risk_score"] for r in resp.json()["results"]}
@@ -66,7 +75,10 @@ class TestFraudDetectionService:
         assert results[0].fraud_risk_score == 0.0
 
     def test_scores_in_range(self):
-        claims = [ClaimMetadata(claim_id=f"c{i}", ip_address="1.1.1.1", amount=float(i)) for i in range(5)]
+        claims = [
+            ClaimMetadata(claim_id=f"c{i}", ip_address="1.1.1.1", amount=float(i))
+            for i in range(5)
+        ]
         results = detect_fraud(claims)
         for r in results:
             assert 0.0 <= r.fraud_risk_score <= 1.0

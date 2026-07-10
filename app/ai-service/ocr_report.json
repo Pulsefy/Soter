@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "accuracy": 100.0,
+    "error_breakdown": {
+      "missing_field": 0,
+      "incorrect_value": 0,
+      "unexpected_field": 0,
+      "image_not_found": 0,
+      "low_confidence": 0,
+      "bbox_mismatch": 0
+    }
+  },
+  "details": [
+    {
+      "sample_id": "sample_001",
+      "passed": true,
+      "fields": [
+        {
+          "name": "name",
+          "expected": "John Doe",
+          "actual": "John Doe",
+          "match": true,
+          "error": null,
+          "confidence": 0.8
+        },
+        {
+          "name": "date_of_birth",
+          "expected": "15 Jan 1990",
+          "actual": "15 Jan 1990",
+          "match": true,
+          "error": null,
+          "confidence": 0.8
+        },
+        {
+          "name": "id_number",
+          "expected": "AB123456",
+          "actual": "AB123456",
+          "match": true,
+          "error": null,
+          "confidence": 0.92
+        }
+      ]
+    }
+  ]
+}

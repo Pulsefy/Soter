@@ -15,6 +15,7 @@ __test__ = True
 # TestProvider unit-level determinism
 # -----------------------------------------------------------------------
 
+
 class TestTestProviderDeterminism:
     def setup_method(self):
         self.provider = TestProvider()
@@ -51,6 +52,7 @@ class TestTestProviderDeterminism:
 # Humanitarian verification – stability
 # -----------------------------------------------------------------------
 
+
 class TestHumanitarianTestProviderStability:
     def setup_method(self):
         self.service = HumanitarianVerificationService()
@@ -58,8 +60,12 @@ class TestHumanitarianTestProviderStability:
     def test_deterministic_verify_claim_outputs_remain_stable(self, monkeypatch):
         monkeypatch.setattr(settings, "ai_deterministic_mode", True)
         monkeypatch.setattr(settings, "openai_api_key", "test-api-key")
-        monkeypatch.setattr(self.service, "_provider_attempt_order", lambda p: ["openai"])
-        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda p: "test-model")
+        monkeypatch.setattr(
+            self.service, "_provider_attempt_order", lambda p: ["openai"]
+        )
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda p: "test-model"
+        )
 
         first = self.service.verify_claim(
             aid_claim="Emergency medical supplies delivered.",
@@ -105,13 +111,18 @@ class TestHumanitarianTestProviderStability:
         assert "verdict" in result["verification"]
         assert "confidence" in result["verification"]
         assert "summary" in result["verification"]
-        assert result["verification"]["verdict"] in ("credible", "inconclusive", "not_credible")
+        assert result["verification"]["verdict"] in (
+            "credible",
+            "inconclusive",
+            "not_credible",
+        )
         assert 0.0 <= result["verification"]["confidence"] <= 1.0
 
 
 # -----------------------------------------------------------------------
 # OCR – stability (test provider bypasses Tesseract)
 # -----------------------------------------------------------------------
+
 
 class TestOCRTestProviderStability:
     def setup_method(self):
@@ -121,6 +132,7 @@ class TestOCRTestProviderStability:
         monkeypatch.setattr(settings, "test_provider_mode", True)
 
         from PIL import Image
+
         img = Image.new("RGB", (100, 50), color="white")
 
         first = self.service.process_image(img)
@@ -134,6 +146,7 @@ class TestOCRTestProviderStability:
         monkeypatch.setattr(settings, "test_provider_mode", True)
 
         from PIL import Image
+
         img = Image.new("RGB", (200, 100), color="white")
 
         result = self.service.process_image(img)
@@ -155,6 +168,7 @@ class TestOCRTestProviderStability:
     def test_ocr_regular_service_unchanged(self):
         """Without test_provider_mode, OCR still requires real dependencies."""
         from PIL import Image
+
         img = Image.new("RGB", (50, 50), color="red")
 
         with pytest.raises(Exception):
@@ -164,6 +178,7 @@ class TestOCRTestProviderStability:
 # -----------------------------------------------------------------------
 # PII scrubber – stability (test provider bypasses spaCy)
 # -----------------------------------------------------------------------
+
 
 class TestPIIscrubberTestProviderStability:
     def setup_method(self):
@@ -207,12 +222,16 @@ class TestPIIscrubberTestProviderStability:
         summary = result["pii_summary"]
         assert summary["names"] >= 0
         assert summary["locations"] >= 0
-        assert summary["total"] == sum(summary[k] for k in ("names", "locations", "dates", "emails", "phones", "ids"))
+        assert summary["total"] == sum(
+            summary[k]
+            for k in ("names", "locations", "dates", "emails", "phones", "ids")
+        )
 
 
 # -----------------------------------------------------------------------
 # Cross-endpoint determinism sanity
 # -----------------------------------------------------------------------
+
 
 class TestCrossEndpointStability:
     def setup_method(self):

@@ -39,9 +39,7 @@ ALLOWED_EVIDENCE_CONTENT_TYPES = {
     "application/pdf",
 }
 
-EVIDENCE_UPLOAD_DIR = os.getenv(
-    "EVIDENCE_UPLOAD_DIR", "./artifacts/evidence-uploads"
-)
+EVIDENCE_UPLOAD_DIR = os.getenv("EVIDENCE_UPLOAD_DIR", "./artifacts/evidence-uploads")
 EVIDENCE_MAX_UPLOAD_BYTES = int(
     os.getenv("EVIDENCE_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))
 )

@@ -165,14 +165,11 @@ class HumanitarianVerificationService:
                         )
 
             raise RuntimeError(
-                "All humanitarian verification attempts failed: "
-                + " | ".join(errors)
+                "All humanitarian verification attempts failed: " + " | ".join(errors)
             )
         finally:
             latency = time.time() - start_time
-            metrics.PIPELINE_STEP_LATENCY.labels(step_name="verify").observe(
-                latency
-            )
+            metrics.PIPELINE_STEP_LATENCY.labels(step_name="verify").observe(latency)
 
     def all_providers_unavailable(self) -> bool:
         """Return True when every configured LLM provider circuit is open."""
@@ -188,8 +185,7 @@ class HumanitarianVerificationService:
             return False
 
         return all(
-            provider in self.breakers
-            and not self.breakers[provider].allow_request()
+            provider in self.breakers and not self.breakers[provider].allow_request()
             for provider in providers
         )
 
@@ -214,9 +210,7 @@ class HumanitarianVerificationService:
             raise RuntimeError(str(exc)) from exc
         return list(providers)
 
-    def _get_model_for_provider(
-        self, provider: Union[str, LLMProvider]
-    ) -> str:
+    def _get_model_for_provider(self, provider: Union[str, LLMProvider]) -> str:
         """Resolve the model name for a provider entry.
 
         Accepts either a string (legacy monkeypatches) or an

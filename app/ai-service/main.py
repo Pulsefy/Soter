@@ -55,7 +55,9 @@ class CorrelationIdFilter(logging.Filter):
 limiter = Limiter(key_func=get_remote_address)
 
 # Set up structured logging with correlation ID
-log_level_name = settings.log_level.upper() if hasattr(settings, "log_level") else "INFO"
+log_level_name = (
+    settings.log_level.upper() if hasattr(settings, "log_level") else "INFO"
+)
 log_level = getattr(logging, log_level_name, logging.INFO)
 
 # Configure root logger
@@ -116,6 +118,7 @@ async def lifespan(app: FastAPI):
 
     # Initialize cache service
     from services.cache import CacheService
+
     app.state.cache = CacheService(settings)
     if app.state.cache.enabled:
         logger.info("Response caching enabled with Redis")
@@ -222,24 +225,28 @@ async def legacy_redirect_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
-    correlation_id = request.headers.get("x-correlation-id") or request.headers.get("x-request-id") or str(uuid.uuid4())
-    
+    correlation_id = (
+        request.headers.get("x-correlation-id")
+        or request.headers.get("x-request-id")
+        or str(uuid.uuid4())
+    )
+
     # Attach correlation ID to request state
     request.state.correlation_id = correlation_id
-    
+
     # Set context variable for logging
     correlation_id_token = correlation_id_var.set(correlation_id)
-    
+
     try:
         response = await call_next(request)
     finally:
         correlation_id_var.reset(correlation_id_token)
-    
+
     # Set correlation ID headers in response
     response.headers["x-correlation-id"] = correlation_id
     response.headers["x-request-id"] = correlation_id
     response.headers["trace_id"] = correlation_id
-    
+
     return response
 
 
@@ -611,7 +618,9 @@ async def general_exception_handler(request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content=ErrorEnvelope(
-            error=ErrorDetail(code="INTERNAL_SERVER_ERROR", message="Internal server error")
+            error=ErrorDetail(
+                code="INTERNAL_SERVER_ERROR", message="Internal server error"
+            )
         ).model_dump(),
     )
 

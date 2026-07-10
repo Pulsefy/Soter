@@ -45,14 +45,10 @@ async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
             else:
                 raise exc
         return HumanitarianVerificationResponse(
-            success=True,
-            anchor_metadata=request.anchor_metadata,
-            **result
+            success=True, anchor_metadata=request.anchor_metadata, **result
         )
     except Exception as e:
         logger.error("Humanitarian verification failed: %s", str(e), exc_info=True)
         return HumanitarianVerificationResponse(
-            success=False,
-            error=str(e),
-            anchor_metadata=request.anchor_metadata
+            success=False, error=str(e), anchor_metadata=request.anchor_metadata
         )

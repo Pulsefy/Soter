@@ -9,7 +9,9 @@ class ClaimMetadata(BaseModel):
     evidence_hash: Optional[str] = Field(None, examples=["abc123def456"])
     amount: Optional[float] = Field(None, examples=[100.0])
     location: Optional[str] = Field(None, examples=["Kano, Nigeria"])
-    extra: Dict[str, Any] = Field(default_factory=dict, examples=[{"source": "mobile_app"}])
+    extra: Dict[str, Any] = Field(
+        default_factory=dict, examples=[{"source": "mobile_app"}]
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -18,7 +20,7 @@ class ClaimMetadata(BaseModel):
                     "claim_id": "claim-abc123",
                     "ip_address": "192.168.1.1",
                     "amount": 100.0,
-                    "location": "Kano, Nigeria"
+                    "location": "Kano, Nigeria",
                 }
             ]
         }
@@ -34,10 +36,20 @@ class FraudDetectionRequest(BaseModel):
             "examples": [
                 {
                     "claims": [
-                        {"claim_id": "claim-abc123", "ip_address": "192.168.1.1", "amount": 100.0, "location": "Kano, Nigeria"},
-                        {"claim_id": "claim-def456", "ip_address": "192.168.1.2", "amount": 100.0, "location": "Kano, Nigeria"}
+                        {
+                            "claim_id": "claim-abc123",
+                            "ip_address": "192.168.1.1",
+                            "amount": 100.0,
+                            "location": "Kano, Nigeria",
+                        },
+                        {
+                            "claim_id": "claim-def456",
+                            "ip_address": "192.168.1.2",
+                            "amount": 100.0,
+                            "location": "Kano, Nigeria",
+                        },
                     ],
-                    "anchor_metadata": {"campaign_ref": "campaign-2024-001"}
+                    "anchor_metadata": {"campaign_ref": "campaign-2024-001"},
                 }
             ]
         }
@@ -53,8 +65,17 @@ class ClaimFraudResult(BaseModel):
     model_config = {
         "json_schema_extra": {
             "examples": [
-                {"claim_id": "claim-abc123", "fraud_risk_score": 0.15, "is_flagged": False},
-                {"claim_id": "claim-def456", "fraud_risk_score": 0.95, "is_flagged": True, "reason": "Statistical outlier in amount"}
+                {
+                    "claim_id": "claim-abc123",
+                    "fraud_risk_score": 0.15,
+                    "is_flagged": False,
+                },
+                {
+                    "claim_id": "claim-def456",
+                    "fraud_risk_score": 0.95,
+                    "is_flagged": True,
+                    "reason": "Statistical outlier in amount",
+                },
             ]
         }
     }
@@ -70,11 +91,20 @@ class FraudDetectionResponse(BaseModel):
             "examples": [
                 {
                     "results": [
-                        {"claim_id": "claim-abc123", "fraud_risk_score": 0.15, "is_flagged": False},
-                        {"claim_id": "claim-def456", "fraud_risk_score": 0.95, "is_flagged": True, "reason": "Statistical outlier in amount"}
+                        {
+                            "claim_id": "claim-abc123",
+                            "fraud_risk_score": 0.15,
+                            "is_flagged": False,
+                        },
+                        {
+                            "claim_id": "claim-def456",
+                            "fraud_risk_score": 0.95,
+                            "is_flagged": True,
+                            "reason": "Statistical outlier in amount",
+                        },
                     ],
                     "flagged_count": 1,
-                    "anchor_metadata": {"campaign_ref": "campaign-2024-001"}
+                    "anchor_metadata": {"campaign_ref": "campaign-2024-001"},
                 }
             ]
         }

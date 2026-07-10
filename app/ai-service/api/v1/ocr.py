@@ -32,6 +32,7 @@ ALLOWED_CONTENT_TYPES = {
     "image/webp",
 }
 
+
 class QueuedOCRResponse(BaseModel):
     success: bool
     task_id: str
@@ -45,7 +46,9 @@ class QueuedOCRResponse(BaseModel):
 async def process_ocr(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
-    anchor_metadata: Annotated[Optional[str], Form(description="JSON encoded AnchorMetadata")] = None,
+    anchor_metadata: Annotated[
+        Optional[str], Form(description="JSON encoded AnchorMetadata")
+    ] = None,
 ) -> OCRResponse:
     """Extract text fields from an uploaded document image."""
     start_time = time.time()
@@ -90,7 +93,7 @@ async def process_ocr(
                 "message": str(e),
             },
             processing_time_ms=processing_time_ms,
-            anchor_metadata=None, # Cannot easily re-parse here without duplicating, so omit or ignore
+            anchor_metadata=None,  # Cannot easily re-parse here without duplicating, so omit or ignore
         )
 
 
@@ -103,7 +106,9 @@ async def process_ocr(
 async def queue_ocr_job(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
-    anchor_metadata: Annotated[Optional[str], Form(description="JSON encoded AnchorMetadata")] = None,
+    anchor_metadata: Annotated[
+        Optional[str], Form(description="JSON encoded AnchorMetadata")
+    ] = None,
 ) -> QueuedOCRResponse:
     """Queue OCR processing and return immediately with a pollable job URL."""
     if image.content_type not in ALLOWED_CONTENT_TYPES:

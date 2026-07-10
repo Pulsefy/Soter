@@ -10,7 +10,6 @@ from schemas.common import AnchorMetadata
 from schemas.ocr import OCRData, OCRFieldResult
 from services.ocr import OCRService
 
-
 ocr_service = OCRService()
 
 

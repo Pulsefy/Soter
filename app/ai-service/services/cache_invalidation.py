@@ -31,7 +31,9 @@ class CacheInvalidationHelper:
         pattern = f"cache:ai:task_status:*{task_id}*"
         deleted = self.cache.delete_pattern(pattern)
         if deleted > 0:
-            logger.info(f"Invalidated {deleted} task status cache entries for task {task_id}")
+            logger.info(
+                f"Invalidated {deleted} task status cache entries for task {task_id}"
+            )
         return deleted
 
     def invalidate_all_task_statuses(self) -> int:
@@ -60,7 +62,9 @@ class CacheInvalidationHelper:
         pattern = f"cache:ai:artifact_access:*{artifact_id}*"
         deleted = self.cache.delete_pattern(pattern)
         if deleted > 0:
-            logger.info(f"Invalidated {deleted} artifact access cache entries for {artifact_id}")
+            logger.info(
+                f"Invalidated {deleted} artifact access cache entries for {artifact_id}"
+            )
         return deleted
 
     def invalidate_all(self) -> int:
@@ -76,7 +80,9 @@ class CacheInvalidationHelper:
         return deleted
 
 
-def get_invalidation_helper(cache_service: Optional[CacheService] = None) -> CacheInvalidationHelper:
+def get_invalidation_helper(
+    cache_service: Optional[CacheService] = None,
+) -> CacheInvalidationHelper:
     """
     Get a cache invalidation helper instance.
 
@@ -89,6 +95,7 @@ def get_invalidation_helper(cache_service: Optional[CacheService] = None) -> Cac
     """
     if cache_service is None:
         from main import app
+
         cache_service = getattr(app.state, "cache", None)
         if cache_service is None:
             raise RuntimeError("Cache service not available")

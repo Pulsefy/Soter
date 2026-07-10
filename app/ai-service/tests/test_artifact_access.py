@@ -144,7 +144,10 @@ def test_access_denied_for_wrong_org(client: TestClient, artifact_fixture: str):
         json={"mode": "signed_url"},
     )
     assert response.status_code == 403
-    assert response.json()["error"]["message"] == "Access denied: artifact belongs to a different organization"
+    assert (
+        response.json()["error"]["message"]
+        == "Access denied: artifact belongs to a different organization"
+    )
 
 
 def test_signed_url_and_download(client: TestClient, artifact_fixture: str):
@@ -237,7 +240,9 @@ def test_tampered_token_rejected(client: TestClient, artifact_fixture: str):
     tampered_token = token[:-5] + "XXXXX"  # Modify last 5 characters
 
     # Try to download with tampered token
-    response = client.get(f"/v1/ai/verification-artifacts/download?token={tampered_token}")
+    response = client.get(
+        f"/v1/ai/verification-artifacts/download?token={tampered_token}"
+    )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "invalid_token_signature"
 
@@ -262,14 +267,14 @@ def test_token_org_mismatch_rejected(client: TestClient, artifact_fixture: str):
     )
     assert access_response.status_code == 200
     download_url = access_response.json()["download_url"]
-    
+
     # Create a valid token for a different org
     import api.v1.artifacts as artifacts_module
-    
+
     valid_token = artifacts_module.artifact_access_service.create_signed_token(
         artifact_fixture, "org-999", "user-1"
     )
-    
+
     # Try to download with token from different org
     response = client.get(f"/v1/ai/verification-artifacts/download?token={valid_token}")
     assert response.status_code == 403
@@ -290,4 +295,3 @@ def test_all_authorized_roles_have_access(client: TestClient, artifact_fixture: 
         )
         assert response.status_code == 200, f"Role {role} should have access"
         assert "download_url" in response.json()
-

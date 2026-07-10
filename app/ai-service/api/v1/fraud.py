@@ -15,7 +15,9 @@ router = APIRouter(tags=["fraud"])
 
 
 @router.post("/fraud/detect", response_model=FraudDetectionResponse)
-async def detect_fraud_endpoint(request: FraudDetectionRequest) -> FraudDetectionResponse:
+async def detect_fraud_endpoint(
+    request: FraudDetectionRequest,
+) -> FraudDetectionResponse:
     """
     Analyse a batch of claims for suspicious patterns.
 
@@ -28,7 +30,7 @@ async def detect_fraud_endpoint(request: FraudDetectionRequest) -> FraudDetectio
         return FraudDetectionResponse(
             results=results,
             flagged_count=sum(r.is_flagged for r in results),
-            anchor_metadata=request.anchor_metadata
+            anchor_metadata=request.anchor_metadata,
         )
     except Exception as exc:
         logger.error("Fraud detection failed: %s", exc)

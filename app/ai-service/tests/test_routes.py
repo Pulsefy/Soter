@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 from main import app
 from schemas.ocr import OCRResponse
 
-
 client = TestClient(app)
 
 
@@ -94,6 +93,7 @@ class TestHealthDependenciesEndpoint:
         text = response.text
         # Ensure no API key values leak into the response
         from config import settings
+
         for secret in filter(None, [settings.openai_api_key, settings.groq_api_key]):
             assert secret not in text
 
@@ -102,7 +102,9 @@ class TestHealthDependenciesEndpoint:
 
         with patch("redis.from_url") as mock_from_url:
             mock_client = MagicMock()
-            mock_client.ping.side_effect = redis_lib.exceptions.ConnectionError("refused")
+            mock_client.ping.side_effect = redis_lib.exceptions.ConnectionError(
+                "refused"
+            )
             mock_from_url.return_value = mock_client
 
             response = client.get("/health/dependencies")

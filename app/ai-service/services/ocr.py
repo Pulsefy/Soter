@@ -24,8 +24,10 @@ from config import settings
 from services.preprocessing import ImagePreprocessor
 from services.providers import (
     OCRProvider,
+    OCRProviderOutput,
     OCRProviderSelector,
     OCRRequest,
+    TesseractOCRProvider,
     build_default_ocr_selector,
 )
 
@@ -169,9 +171,7 @@ class OCRService:
 
         fields = self.field_detector.detect_fields(raw_text)
         for field_name, field_match in fields.items():
-            field_chars = self._extract_field_chars(
-                provider_output, field_match.value
-            )
+            field_chars = self._extract_field_chars(provider_output, field_match.value)
             field_match.confidence = self.field_detector.aggregate_confidence(
                 field_chars
             )

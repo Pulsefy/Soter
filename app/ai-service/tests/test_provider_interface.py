@@ -42,7 +42,6 @@ from services.providers import (
 from services.providers.base import ProviderError
 from services.humanitarian_verification import HumanitarianVerificationService
 
-
 # ---------------------------------------------------------------------------
 # Test fixtures
 # ---------------------------------------------------------------------------
@@ -174,19 +173,13 @@ class TestExceptionHierarchy:
 class TestFixtureLLMProvider:
     def test_returns_deterministic_responses(self):
         provider = FixtureLLMProvider()
-        first = provider.generate(
-            LLMRequest(system_prompt="sys", user_prompt="hello")
-        )
-        second = provider.generate(
-            LLMRequest(system_prompt="sys", user_prompt="hello")
-        )
+        first = provider.generate(LLMRequest(system_prompt="sys", user_prompt="hello"))
+        second = provider.generate(LLMRequest(system_prompt="sys", user_prompt="hello"))
         assert first.content == second.content
 
     def test_response_is_serialisable_json(self):
         provider = FixtureLLMProvider()
-        response = provider.generate(
-            LLMRequest(system_prompt="s", user_prompt="u")
-        )
+        response = provider.generate(LLMRequest(system_prompt="s", user_prompt="u"))
         # Must be valid JSON; the humanitarian service parses this.
         import json
 
@@ -195,9 +188,7 @@ class TestFixtureLLMProvider:
 
     def test_provider_name_and_model_in_response(self):
         provider = FixtureLLMProvider()
-        response = provider.generate(
-            LLMRequest(system_prompt="s", user_prompt="u")
-        )
+        response = provider.generate(LLMRequest(system_prompt="s", user_prompt="u"))
         assert response.provider_name == "test"
         assert response.model == "test-provider/fixture"
 
@@ -245,9 +236,7 @@ class TestOpenAIProvider:
 
                 class FakeResponse:
                     def __init__(self):
-                        self._data = {
-                            "choices": [{"message": {"content": "ok"}}]
-                        }
+                        self._data = {"choices": [{"message": {"content": "ok"}}]}
 
                     def raise_for_status(self):
                         return None
@@ -286,9 +275,7 @@ class TestGroqProvider:
 
                 class FakeResponse:
                     def __init__(self):
-                        self._data = {
-                            "choices": [{"message": {"content": "ok"}}]
-                        }
+                        self._data = {"choices": [{"message": {"content": "ok"}}]}
 
                     def raise_for_status(self):
                         return None
@@ -299,12 +286,8 @@ class TestGroqProvider:
                 return FakeResponse()
 
         monkeypatch.setattr("httpx.Client", FakeClient)
-        provider = GroqProvider(
-            model="llama-3.3-70b-versatile", api_key="groq-key"
-        )
-        response = provider.generate(
-            LLMRequest(system_prompt="s", user_prompt="u")
-        )
+        provider = GroqProvider(model="llama-3.3-70b-versatile", api_key="groq-key")
+        response = provider.generate(LLMRequest(system_prompt="s", user_prompt="u"))
         assert any("groq" in url for url in urls)
         assert response.provider_name == "groq"
         assert response.model == "llama-3.3-70b-versatile"
@@ -401,9 +384,7 @@ class TestBuildDefaultLLMRegistry:
         monkeypatch.setattr(settings, "test_provider_mode", True)
         registry = build_default_llm_registry(cfg)
         # Only the fixture provider is attempted in auto mode.
-        assert [p.name for p in registry.get_attempt_order("auto")] == [
-            "test"
-        ]
+        assert [p.name for p in registry.get_attempt_order("auto")] == ["test"]
 
 
 # ---------------------------------------------------------------------------
