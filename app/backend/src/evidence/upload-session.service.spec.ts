@@ -314,6 +314,45 @@ describe('UploadSessionService', () => {
       await service.finalize('sess-1', 'owner-1');
       expect(fsPromises.unlink).toHaveBeenCalledTimes(chunks.length);
     });
+
+    it('verifies the assembled artifact checksum matches declared hash', async () => {
+      // Build a deterministic assembled buffer so we can compute expected hash.
+      const assembled = Buffer.concat([chunkBuf, chunkBuf, chunkBuf]);
+      const expectedHash = crypto
+        .createHash('sha256')
+        .update(assembled)
+        .digest('hex');
+
+      // The service computes fileHash from the assembled buffer internally —
+      // confirm it matches what we compute here.
+      let capturedHash: string | undefined;
+      mockPrisma.evidenceQueueItem.create.mockImplementation(
+        async ({ data }: { data: { fileHash: string } }) => {
+          capturedHash = data.fileHash;
+          return { id: 'ev-1', fileName: 'evidence.txt' };
+        },
+      );
+
+      await service.finalize('sess-1', 'owner-1');
+
+      expect(capturedHash).toBe(expectedHash);
+    });
+
+    it('throws ConflictException when assembled file hash matches an existing evidence item', async () => {
+      // Simulates a duplicate upload being detected via the artifact hash.
+      mockPrisma.evidenceQueueItem.findFirst.mockResolvedValue({
+        id: 'existing-ev',
+        fileHash: 'some-hash',
+      });
+      (fsPromises.unlink as jest.Mock).mockResolvedValue(undefined);
+
+      await expect(service.finalize('sess-1', 'owner-1')).rejects.toThrow(
+        ConflictException,
+      );
+
+      // Duplicate artifact file must be cleaned up immediately.
+      expect(fsPromises.unlink).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ── getStatus (resume) ────────────────────────────────────────────────────────

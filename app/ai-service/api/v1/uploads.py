@@ -66,6 +66,9 @@ _ERROR_STATUS = {
     "invalid_chunk_index": 400,
     "invalid_request": 400,
     "empty_chunk": 400,
+    "chunk_checksum_mismatch": 422,
+    "chunk_index_conflict": 409,
+    "artifact_checksum_mismatch": 422,
     "session_already_finalized": 409,
     "incomplete_upload": 409,
     "size_mismatch": 400,
@@ -119,6 +122,7 @@ async def create_upload_session(
             content_type=body.content_type,
             total_size=body.total_size,
             total_chunks=body.total_chunks,
+            expected_artifact_checksum=body.expected_artifact_checksum,
         )
     except UploadSessionError as exc:
         raise _http_error(exc)
@@ -143,23 +147,42 @@ async def upload_chunk(
     chunk_index: Annotated[int, Path(ge=0)],
     chunk: Annotated[UploadFile, File(description="Raw bytes for this chunk")],
     x_user_id: str = Header(default="", alias="X-User-Id"),
+    x_chunk_checksum: str = Header(
+        default="",
+        alias="X-Chunk-Checksum",
+        description=(
+            "Optional SHA-256 hex digest of the chunk bytes. "
+            "When provided, the server verifies the digest before persisting "
+            "the chunk. Supplying this header is strongly recommended to "
+            "detect corruption in transit."
+        ),
+    ),
 ):
-    """Upload a single chunk for an existing session."""
+    """Upload a single chunk for an existing session.
+
+    Optionally supply the ``X-Chunk-Checksum`` header with the SHA-256 hex
+    digest of the chunk bytes.  The server always computes and returns the
+    digest so clients can confirm the stored checksum matches their expectation.
+    """
     data = await chunk.read()
+    declared_checksum = x_chunk_checksum.strip() or None
     try:
         session = upload_session_service.save_chunk(
             session_id=session_id,
             owner_id=x_user_id,
             chunk_index=chunk_index,
             data=data,
+            checksum=declared_checksum,
         )
     except UploadSessionError as exc:
         raise _http_error(exc)
 
     received = UploadSessionService.received_chunks_sorted(session)
+    server_checksum = session.chunk_checksums.get(chunk_index, "")
     return ChunkUploadResponse(
         session_id=session.session_id,
         chunk_index=chunk_index,
+        chunk_checksum=server_checksum,
         received_chunks=received,
         remaining_chunks=session.total_chunks - len(received),
         status="completed" if session.completed else "in_progress",
@@ -210,5 +233,6 @@ async def finalize_upload_session(
         filename=session.filename,
         content_type=session.content_type,
         total_size=session.total_size,
+        artifact_checksum=session.artifact_checksum or "",
         status="completed",
     )

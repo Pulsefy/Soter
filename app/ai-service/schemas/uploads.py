@@ -14,6 +14,15 @@ class CreateUploadSessionRequest(BaseModel):
     content_type: str = Field(..., min_length=1, examples=["image/jpeg"])
     total_size: int = Field(..., gt=0, description="Total file size in bytes", examples=[1048576])
     total_chunks: int = Field(..., gt=0, description="Number of chunks to be sent", examples=[10])
+    expected_artifact_checksum: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional SHA-256 hex digest of the complete assembled file. "
+            "When provided, finalization verifies the artifact against this value "
+            "so a silently corrupted upload is caught before being accepted."
+        ),
+        examples=["e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"],
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -67,6 +76,10 @@ class ChunkUploadResponse(BaseModel):
 
     session_id: str = Field(examples=["sess_abc123def456"])
     chunk_index: int = Field(examples=[3])
+    chunk_checksum: str = Field(
+        description="SHA-256 hex digest of the accepted chunk bytes as computed by the server.",
+        examples=["e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"],
+    )
     received_chunks: List[int] = Field(examples=[[0, 1, 2, 3]])
     remaining_chunks: int = Field(examples=[6])
     status: str = Field(examples=["in_progress"])
@@ -94,6 +107,10 @@ class FinalizeUploadResponse(BaseModel):
     filename: str = Field(examples=["evidence_photo.jpg"])
     content_type: str = Field(examples=["image/jpeg"])
     total_size: int = Field(examples=[1048576])
+    artifact_checksum: str = Field(
+        description="SHA-256 hex digest of the fully assembled artifact as computed by the server.",
+        examples=["e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"],
+    )
     status: str = Field(examples=["completed"])
 
     model_config = {

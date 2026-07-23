@@ -3,13 +3,22 @@ Resumable evidence upload session management.
 
 Supports creating upload sessions, receiving file chunks in any order,
 tracking session state and expiry, and validating content type, size,
-and ownership before assembling the final artifact.
+ownership, and integrity before assembling the final artifact.
+
+Per-chunk SHA-256 checksums are verified on receipt so that a corrupted
+or replayed chunk is rejected immediately rather than silently assembled
+into the artifact.  The assembled artifact's SHA-256 is always returned
+on finalization.  If the caller declares an ``expected_artifact_checksum``
+at session-creation time the finalized artifact is verified against it
+before being accepted, so a partially-corrupted resumed upload is caught
+at completion even when each individual chunk passed its own check.
 
 Chunks are persisted to disk per session so that an interrupted upload
 can resume from the last successfully received chunk instead of
 restarting from zero.
 """
 
+import hashlib
 import os
 import shutil
 import threading
@@ -45,9 +54,15 @@ class UploadSession:
     created_at: float
     expires_at: float
     received_chunks: Set[int] = field(default_factory=set)
+    # Maps chunk_index -> declared SHA-256 hex checksum for idempotency checks.
+    chunk_checksums: Dict[int, str] = field(default_factory=dict)
     received_bytes: int = 0
     completed: bool = False
     artifact_id: Optional[str] = None
+    artifact_checksum: Optional[str] = None
+    # If set at creation time, finalize must verify the assembled artifact
+    # against this value before accepting the upload.
+    expected_artifact_checksum: Optional[str] = None
 
 
 class UploadSessionService:
@@ -104,6 +119,10 @@ class UploadSessionService:
                 total += os.path.getsize(path)
         return total
 
+    @staticmethod
+    def _sha256(data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+
     # -- public API ----------------------------------------------------------
 
     def create_session(
@@ -113,6 +132,7 @@ class UploadSessionService:
         content_type: str,
         total_size: int,
         total_chunks: int,
+        expected_artifact_checksum: Optional[str] = None,
     ) -> UploadSession:
         if not owner_id:
             raise UploadSessionError("missing_owner")
@@ -134,6 +154,7 @@ class UploadSessionService:
             total_chunks=total_chunks,
             created_at=now,
             expires_at=now + self.session_ttl_seconds,
+            expected_artifact_checksum=expected_artifact_checksum,
         )
         with self._lock:
             self._sessions[session_id] = session
@@ -150,7 +171,27 @@ class UploadSessionService:
         owner_id: str,
         chunk_index: int,
         data: bytes,
+        checksum: Optional[str] = None,
     ) -> UploadSession:
+        """Store a chunk after verifying its SHA-256 checksum.
+
+        Args:
+            session_id:   Active session identifier.
+            owner_id:     Must match the session owner.
+            chunk_index:  Zero-based index; must be in ``[0, total_chunks)``.
+            data:         Raw chunk bytes.
+            checksum:     Client-supplied SHA-256 hex digest of *data*.
+                          When provided, the server recomputes the digest and
+                          rejects the chunk if they differ.  Callers should
+                          always supply this to enable corruption detection.
+
+        Raises:
+            UploadSessionError("chunk_checksum_mismatch") when the declared
+            checksum does not match the received bytes.
+            UploadSessionError("chunk_index_conflict") when the same index was
+            previously accepted with a different checksum, indicating a
+            corrupted resume attempt.
+        """
         with self._lock:
             session = self._require_active_session(session_id, owner_id)
             if session.completed:
@@ -160,22 +201,54 @@ class UploadSessionService:
             if not data:
                 raise UploadSessionError("empty_chunk")
 
+            # --- per-chunk integrity check ----------------------------------
+            actual_checksum = self._sha256(data)
+            if checksum is not None and actual_checksum != checksum:
+                raise UploadSessionError(
+                    "chunk_checksum_mismatch",
+                    f"Chunk {chunk_index}: declared checksum {checksum!r} does not "
+                    f"match computed {actual_checksum!r}.",
+                )
+
+            # --- idempotency / resume conflict check ------------------------
+            if chunk_index in session.received_chunks:
+                prior = session.chunk_checksums.get(chunk_index)
+                if prior and prior != actual_checksum:
+                    raise UploadSessionError(
+                        "chunk_index_conflict",
+                        f"Chunk {chunk_index} was previously accepted with a "
+                        f"different checksum ({prior!r} vs {actual_checksum!r}). "
+                        "Resume sequence is corrupted.",
+                    )
+                # Exact duplicate — idempotent accept, no re-write.
+                return session
+
             chunk_path = self._chunk_path(session_id, chunk_index)
             with open(chunk_path, "wb") as handle:
                 handle.write(data)
             session.received_chunks.add(chunk_index)
+            session.chunk_checksums[chunk_index] = actual_checksum
             session.received_bytes = self._recalculate_received_bytes(session)
 
             if session.received_bytes > self.max_upload_bytes:
                 # Roll back the chunk that pushed us over the limit.
                 os.remove(chunk_path)
                 session.received_chunks.discard(chunk_index)
+                session.chunk_checksums.pop(chunk_index, None)
                 session.received_bytes = self._recalculate_received_bytes(session)
                 raise UploadSessionError("file_too_large")
 
             return session
 
     def finalize(self, session_id: str, owner_id: str) -> UploadSession:
+        """Assemble all chunks into the final artifact and verify integrity.
+
+        After concatenation the artifact's SHA-256 is computed and stored on
+        the session.  If an ``expected_artifact_checksum`` was declared at
+        session-creation time the artifact is verified against it; a mismatch
+        raises ``UploadSessionError("artifact_checksum_mismatch")`` and the
+        incomplete artifact file is removed so no corrupt data persists.
+        """
         with self._lock:
             session = self._require_active_session(session_id, owner_id)
             if session.completed:
@@ -197,13 +270,40 @@ class UploadSessionService:
             artifact_path = os.path.join(
                 self.storage_dir, f"{artifact_id}_{safe_name}"
             )
-            with open(artifact_path, "wb") as output:
-                for index in range(session.total_chunks):
-                    with open(self._chunk_path(session_id, index), "rb") as part:
-                        shutil.copyfileobj(part, output)
+
+            # --- assemble and hash in a single streaming pass ---------------
+            hasher = hashlib.sha256()
+            try:
+                with open(artifact_path, "wb") as output:
+                    for index in range(session.total_chunks):
+                        with open(self._chunk_path(session_id, index), "rb") as part:
+                            chunk_data = part.read()
+                            output.write(chunk_data)
+                            hasher.update(chunk_data)
+            except Exception:
+                # Clean up partial artifact on any I/O failure.
+                if os.path.exists(artifact_path):
+                    os.remove(artifact_path)
+                raise
+
+            artifact_checksum = hasher.hexdigest()
+
+            # --- verify against declared artifact checksum ------------------
+            if (
+                session.expected_artifact_checksum is not None
+                and artifact_checksum != session.expected_artifact_checksum
+            ):
+                os.remove(artifact_path)
+                raise UploadSessionError(
+                    "artifact_checksum_mismatch",
+                    f"Assembled artifact checksum {artifact_checksum!r} does not "
+                    f"match expected {session.expected_artifact_checksum!r}. "
+                    "The upload may have been corrupted during transmission.",
+                )
 
             session.completed = True
             session.artifact_id = artifact_id
+            session.artifact_checksum = artifact_checksum
             shutil.rmtree(self._session_dir(session_id), ignore_errors=True)
             return session
 
