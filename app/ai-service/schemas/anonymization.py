@@ -4,6 +4,20 @@ from pydantic import BaseModel, Field
 from schemas.common import AnchorMetadata
 
 
+class RedactionSegment(BaseModel):
+    type: str = Field(..., pattern="^(original|scrubbed)$")
+    content: str
+    label: Optional[str] = None
+    original_text_length: Optional[int] = None
+
+
+class RedactionPreviewResult(BaseModel):
+    segments: List[RedactionSegment]
+    original_length: int
+    pii_count: int
+    pii_summary: Dict[str, Any]
+
+
 class AnonymizeRequest(BaseModel):
     text: str = Field(min_length=1, description="Input text to anonymize before LLM processing", examples=["John Doe from New York on 2024-01-01 requested aid"])
     anchor_metadata: Optional[AnchorMetadata] = None

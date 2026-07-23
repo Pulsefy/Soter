@@ -44,3 +44,23 @@ async def anonymize_text(request: AnonymizeRequest) -> ResultEnvelope[AnonymizeR
     except Exception as e:
         logger.error(f"Anonymization failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to anonymize text")
+
+
+@router.post("/ai/redaction-preview", response_model=ResultEnvelope[RedactionPreviewResult])
+async def redaction_preview_diff(request: AnonymizeRequest) -> ResultEnvelope[RedactionPreviewResult]:
+    """Return a redaction preview diff before final anonymization."""
+    import main as _main
+    from main import correlation_id_var
+
+    try:
+        raw = _main.pii_scrubber_service.preview_redaction_diff(request.text)
+        result = RedactionPreviewResult(**raw)
+        return ResultEnvelope[RedactionPreviewResult](
+            result=result,
+            reasons=[f"Preview generated with {result.pii_count} PII segments."],
+            anchor_metadata=request.anchor_metadata,
+            trace_id=correlation_id_var.get() or None,
+        )
+    except Exception as e:
+        logger.error(f"Preview failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate preview")
