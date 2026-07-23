@@ -93,12 +93,54 @@ echo "📦 Contract: $CONTRACT_NAME (v$CONTRACT_VERSION)"
 echo "📄 WASM file: $WASM_FILE"
 echo "🔑 Using key: ${SECRET_KEY:0:10}..."
 
-# Deploy contract
+# 1) Install WASM to get network hash
+echo "📡 Installing WASM on $NETWORK to get checksum..."
+INSTALL_OUTPUT=$(stellar contract install \
+    --wasm "$WASM_FILE" \
+    --source "$SECRET_KEY" \
+    --network "$NETWORK" \
+    2>&1 || true)
+
+if echo "$INSTALL_OUTPUT" | grep -q "error"; then
+    echo "❌ WASM installation failed:"
+    echo "$INSTALL_OUTPUT"
+    exit 1
+fi
+
+# Extract Wasm hash (64 character hex string)
+NETWORK_CHECKSUM=$(echo "$INSTALL_OUTPUT" | grep -o -E "[0-9a-f]{64}" | tail -1)
+
+if [ -z "$NETWORK_CHECKSUM" ]; then
+    echo "❌ Failed to extract network checksum from install output:"
+    echo "$INSTALL_OUTPUT"
+    exit 1
+fi
+
+echo "✅ WASM installed successfully"
+echo "🔍 Network Checksum: $NETWORK_CHECKSUM"
+
+# Verify local checksum (the "registry checksum")
+if command -v sha256sum >/dev/null 2>&1; then
+    LOCAL_CHECKSUM=$(sha256sum "$WASM_FILE" | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+    LOCAL_CHECKSUM=$(shasum -a 256 "$WASM_FILE" | awk '{print $1}')
+else
+    LOCAL_CHECKSUM=$(python3 -c "import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())" "$WASM_FILE")
+fi
+
+if [ "$NETWORK_CHECKSUM" != "$LOCAL_CHECKSUM" ]; then
+    echo "❌ Verification failed: uploaded artifact checksum ($NETWORK_CHECKSUM) diverges from registry checksum ($LOCAL_CHECKSUM)!"
+    exit 1
+fi
+
+echo "✅ Checksum verified against local registry artifact"
+
+# 2) Deploy contract using the hash
 echo ""
-echo "📡 Deploying to $NETWORK..."
+echo "📡 Deploying instance to $NETWORK..."
 
 DEPLOY_OUTPUT=$(stellar contract deploy \
-    --wasm "$WASM_FILE" \
+    --wasm-hash "$NETWORK_CHECKSUM" \
     --source "$SECRET_KEY" \
     --network "$NETWORK" \
     2>&1 || true)
@@ -116,6 +158,7 @@ if [ -n "$CONTRACT_ID" ]; then
     echo ""
     echo "✅ Deployment successful!"
     echo "📋 Contract ID: $CONTRACT_ID"
+    echo "🔒 WASM Checksum: $NETWORK_CHECKSUM"
     echo "🏷️  Contract Version: $CONTRACT_VERSION"
     echo ""
     echo "💡 Save this ID for future interactions:"
@@ -136,7 +179,14 @@ if [ -n "$CONTRACT_ID" ]; then
             echo "CONTRACT_VERSION=$CONTRACT_VERSION" >> "$PROJECT_DIR/.env"
         fi
         
-        echo "📝 Updated .env with contract ID and version"
+        # Log wasm checksum to .env
+        if grep -q "WASM_CHECKSUM=" "$PROJECT_DIR/.env"; then
+            sed -i.bak "s|WASM_CHECKSUM=.*|WASM_CHECKSUM=$NETWORK_CHECKSUM|" "$PROJECT_DIR/.env"
+        else
+            echo "WASM_CHECKSUM=$NETWORK_CHECKSUM" >> "$PROJECT_DIR/.env"
+        fi
+        
+        echo "📝 Updated .env with contract ID, version, and checksum"
     fi
 
     # Register in deployments/registry.json and write markdown record
