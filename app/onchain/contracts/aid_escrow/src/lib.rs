@@ -58,6 +58,7 @@ pub enum PackageStatus {
 pub struct Package {
     pub id: u64,
     pub recipient: Address,
+    /// Original locked amount for this package.
     pub amount: i128,
     pub token: Address,
     pub status: PackageStatus,
@@ -65,6 +66,19 @@ pub struct Package {
     pub expires_at: u64,
     pub claim_starts_at: u64,
     pub metadata: Map<Symbol, String>,
+    // --- Tranche / partial-claim fields ---
+    /// When `true`, the recipient may call `partial_claim` to withdraw funds
+    /// in multiple instalments.  `false` means the package must be fully claimed
+    /// in a single call (legacy behaviour).
+    pub partial_claim_enabled: bool,
+    /// Maximum number of partial claims allowed.  `0` means no cap.
+    /// Only consulted when `partial_claim_enabled` is `true`.
+    pub max_tranches: u32,
+    /// How many partial claims have been executed so far.
+    pub tranches_claimed: u32,
+    /// Funds that have not yet been disbursed.  Initialised to `amount` on
+    /// creation.  Decremented on every partial/full claim.
+    pub remaining_balance: i128,
 }
 
 #[contracttype]
@@ -105,6 +119,12 @@ pub enum Error {
     InvalidProof = 16,
     InvalidToken = 17,
     TokenTransferFailed = 18,
+    /// `partial_claim` was called on a package that has `partial_claim_enabled = false`.
+    PartialClaimNotEnabled = 19,
+    /// The requested partial-claim amount is zero or exceeds `remaining_balance`.
+    TrancheAmountInvalid = 20,
+    /// The package has already reached its `max_tranches` limit.
+    TranchesExhausted = 21,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -133,6 +153,23 @@ pub struct PackageClaimed {
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub actor: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted on every successful `partial_claim` call, including the final one
+/// that drains the remaining balance (at which point `remaining_balance` will
+/// be 0 and the package status transitions to `Claimed`).
+#[contractevent]
+pub struct PackagePartialClaimed {
+    pub package_id: u64,
+    pub recipient: Address,
+    /// Amount transferred in *this* partial claim.
+    pub amount_claimed: i128,
+    /// Remaining balance after *this* partial claim.
+    pub remaining_balance: i128,
+    /// 1-indexed sequential number of this tranche.
+    pub tranche_number: u32,
     pub actor: Address,
     pub timestamp: u64,
 }
@@ -497,6 +534,10 @@ impl AidEscrow {
     /// * `token` - Token contract address
     /// * `expires_at` - Expiration timestamp (0 for no expiration)
     /// * `metadata` - Arbitrary key-value metadata for the package
+    /// * `partial_claim_enabled` - When `true` the recipient may call
+    ///   `partial_claim` to withdraw funds in multiple instalments.
+    /// * `max_tranches` - Maximum number of partial claims allowed (0 = no cap).
+    ///   Only meaningful when `partial_claim_enabled` is `true`.
     #[allow(clippy::too_many_arguments)]
     pub fn create_package(
         env: Env,
@@ -507,6 +548,8 @@ impl AidEscrow {
         token: Address,
         expires_at: u64,
         metadata: Map<Symbol, String>,
+        partial_claim_enabled: bool,
+        max_tranches: u32,
     ) -> Result<u64, Error> {
         Self::check_action_paused(&env, symbol_short!("create"))?;
         Self::require_admin_or_distributor(&env, &operator)?;
@@ -584,6 +627,10 @@ impl AidEscrow {
             expires_at,
             claim_starts_at,
             metadata,
+            partial_claim_enabled,
+            max_tranches,
+            tranches_claimed: 0,
+            remaining_balance: amount,
         };
 
         env.storage().persistent().set(&key, &package);
@@ -621,6 +668,9 @@ impl AidEscrow {
     /// * `token` - Token contract address
     /// * `expires_in` - Expiry duration in seconds from now
     /// * `metadatas` - List of metadata maps, one per package
+    /// * `partial_claim_enabled` - When `true`, all created packages allow partial
+    ///   claims by the recipient.
+    /// * `max_tranches` - Maximum partial claims per package (0 = no cap).
     pub fn batch_create_packages(
         env: Env,
         operator: Address,
@@ -629,6 +679,8 @@ impl AidEscrow {
         token: Address,
         expires_in: u64,
         metadatas: Vec<Map<Symbol, String>>,
+        partial_claim_enabled: bool,
+        max_tranches: u32,
     ) -> Result<Vec<u64>, Error> {
         Self::check_action_paused(&env, symbol_short!("create"))?;
         Self::require_admin_or_distributor(&env, &operator)?;
@@ -710,6 +762,10 @@ impl AidEscrow {
                 expires_at,
                 claim_starts_at,
                 metadata: metadata.clone(),
+                partial_claim_enabled,
+                max_tranches,
+                tranches_claimed: 0,
+                remaining_balance: amount,
             };
 
             env.storage().persistent().set(&key, &package);
@@ -842,6 +898,125 @@ impl AidEscrow {
         }
     }
 
+    // --- Partial / Tranche Claim ---
+
+    /// Recipient claims a portion of their package funds.
+    ///
+    /// This entrypoint is only available when the package was created with
+    /// `partial_claim_enabled = true`.  The caller specifies the exact
+    /// `amount` they wish to withdraw; it must be > 0 and ≤ the package's
+    /// current `remaining_balance`.  If a `max_tranches` cap was set at
+    /// creation time, calling beyond that cap is rejected.
+    ///
+    /// When `amount == remaining_balance` (i.e., this is the final tranche),
+    /// the package status transitions to `Claimed` exactly as a full claim
+    /// would.  For intermediate tranches the status remains `Created` so
+    /// subsequent partial claims remain possible.
+    ///
+    /// # Errors
+    /// - `Error::PackageNotFound`        — unknown package ID
+    /// - `Error::PartialClaimNotEnabled` — `partial_claim_enabled` is false
+    /// - `Error::PackageNotActive`       — package is not in `Created` status
+    /// - `Error::ClaimTooEarly`          — before `claim_starts_at`
+    /// - `Error::PackageExpired`         — past `expires_at`
+    /// - `Error::TranchesExhausted`      — `max_tranches` limit already reached
+    /// - `Error::TrancheAmountInvalid`   — `amount` is 0 or > `remaining_balance`
+    /// - `Error::InvalidProof`           — Merkle-guarded package; use `claim_with_proof`
+    pub fn partial_claim(env: Env, id: u64, amount: i128) -> Result<(), Error> {
+        Self::check_action_paused(&env, symbol_short!("claim"))?;
+
+        let key = (symbol_short!("pkg"), id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        // Feature gate: package must have been created with partial claiming on.
+        if !package.partial_claim_enabled {
+            return Err(Error::PartialClaimNotEnabled);
+        }
+
+        if package.status != PackageStatus::Created {
+            return Err(Error::PackageNotActive);
+        }
+
+        let now = env.ledger().timestamp();
+        if now < package.claim_starts_at {
+            return Err(Error::ClaimTooEarly);
+        }
+        if package.expires_at > 0 && now > package.expires_at {
+            return Err(Error::PackageExpired);
+        }
+
+        // Merkle-guarded packages need proof; redirect caller.
+        if Self::merkle_root_from_metadata(&env, &package.metadata).is_some() {
+            return Err(Error::InvalidProof);
+        }
+
+        // Tranche cap check (0 means unlimited).
+        if package.max_tranches > 0 && package.tranches_claimed >= package.max_tranches {
+            return Err(Error::TranchesExhausted);
+        }
+
+        // Amount validation.
+        if amount <= 0 || amount > package.remaining_balance {
+            return Err(Error::TrancheAmountInvalid);
+        }
+
+        // Auth: only the designated recipient may trigger a partial claim.
+        package.recipient.require_auth();
+
+        // Transfer the requested tranche.
+        Self::transfer_token(
+            &env,
+            &package.token,
+            &env.current_contract_address(),
+            &package.recipient,
+            &amount,
+        )?;
+
+        // Update bookkeeping.
+        package.remaining_balance -= amount;
+        package.tranches_claimed += 1;
+
+        // Decrement the contract-wide locked amount by the amount actually sent.
+        Self::decrement_locked(&env, &package.token, amount);
+
+        // Update the cumulative claimed tracker.
+        let mut claimed_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_CLAIMED)
+            .unwrap_or(Map::new(&env));
+        let current_total = claimed_map.get(package.token.clone()).unwrap_or(0);
+        claimed_map.set(package.token.clone(), current_total + amount);
+        env.storage()
+            .instance()
+            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+
+        // If no remaining balance, close the package.
+        if package.remaining_balance == 0 {
+            package.status = PackageStatus::Claimed;
+        }
+
+        env.storage().persistent().set(&key, &package);
+
+        // Emit the partial-claim event (covers both intermediate and final tranches).
+        PackagePartialClaimed {
+            package_id: id,
+            recipient: package.recipient.clone(),
+            amount_claimed: amount,
+            remaining_balance: package.remaining_balance,
+            tranche_number: package.tranches_claimed,
+            actor: package.recipient.clone(),
+            timestamp: now,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
     // --- Admin Actions ---
 
     /// Admin manually triggers disbursement (overrides recipient claim need, strictly checks status).
@@ -862,26 +1037,29 @@ impl AidEscrow {
 
         // Transfer before accounting updates so reverted token transfers cannot
         // leave the escrow state inconsistent.
+        // Use remaining_balance: admin disburse pays out whatever is still owed.
+        let disburse_amount = package.remaining_balance;
         Self::transfer_token(
             &env,
             &package.token,
             &env.current_contract_address(),
             &package.recipient,
-            &package.amount,
+            &disburse_amount,
         )?;
 
         // State Transition
+        package.remaining_balance = 0;
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&key, &package);
 
         // Update Locked
-        Self::decrement_locked(&env, &package.token, package.amount);
+        Self::decrement_locked(&env, &package.token, disburse_amount);
 
         let timestamp = env.ledger().timestamp();
         PackageDisbursed {
             package_id: id,
             recipient: package.recipient.clone(),
-            amount: package.amount,
+            amount: disburse_amount,
             actor: admin.clone(),
             timestamp,
         }
@@ -910,8 +1088,8 @@ impl AidEscrow {
         package.status = PackageStatus::Cancelled;
         env.storage().persistent().set(&key, &package);
 
-        // Unlock funds (return to pool)
-        Self::decrement_locked(&env, &package.token, package.amount);
+        // Unlock funds (return to pool) — only the portion still outstanding.
+        Self::decrement_locked(&env, &package.token, package.remaining_balance);
 
         let timestamp = env.ledger().timestamp();
         PackageRevoked {
@@ -959,20 +1137,24 @@ impl AidEscrow {
         // If Cancelled, funds were already unlocked in `revoke`.
         // Expired packages are unlocked only after a successful refund transfer.
 
-        // Transfer Contract -> Admin
+        // Transfer Contract -> Admin.
+        // Use remaining_balance: for partially-claimed packages, only the
+        // still-outstanding portion is returned.
+        let refund_amount = package.remaining_balance;
         Self::transfer_token(
             &env,
             &package.token,
             &env.current_contract_address(),
             &admin,
-            &package.amount,
+            &refund_amount,
         )?;
 
         if should_unlock_locked {
-            Self::decrement_locked(&env, &package.token, package.amount);
+            Self::decrement_locked(&env, &package.token, refund_amount);
         }
 
         // State Transition
+        package.remaining_balance = 0;
         package.status = PackageStatus::Refunded;
         env.storage().persistent().set(&key, &package);
 
@@ -980,7 +1162,7 @@ impl AidEscrow {
         PackageRefunded {
             package_id: id,
             recipient: package.recipient.clone(),
-            amount: package.amount,
+            amount: refund_amount,
             actor: admin.clone(),
             timestamp,
         }
@@ -1018,8 +1200,9 @@ impl AidEscrow {
         package.status = PackageStatus::Cancelled;
         env.storage().persistent().set(&key, &package);
 
-        // 5. Unlock funds (Decrement the global locked amount so funds return to the pool)
-        Self::decrement_locked(&env, &package.token, package.amount);
+        // 5. Unlock funds (Decrement the global locked amount so funds return to the pool).
+        //    Only the remaining (not yet claimed) portion is still locked.
+        Self::decrement_locked(&env, &package.token, package.remaining_balance);
 
         let timestamp = env.ledger().timestamp();
         PackageRevoked {
@@ -1280,20 +1463,25 @@ impl AidEscrow {
         payout_recipient: &Address,
         now: u64,
     ) -> Result<(), Error> {
+        // Use `remaining_balance` so that packages which already had partial
+        // claims only transfer whatever is still outstanding.
+        let payout_amount = package.remaining_balance;
+
         Self::transfer_token(
             env,
             &package.token,
             &env.current_contract_address(),
             payout_recipient,
-            &package.amount,
+            &payout_amount,
         )?;
 
         // State Transition
+        package.remaining_balance = 0;
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(key, package);
 
         // Update Global Locked (Bookkeeping)
-        Self::decrement_locked(env, &package.token, package.amount);
+        Self::decrement_locked(env, &package.token, payout_amount);
 
         let mut claimed_map: Map<Address, i128> = env
             .storage()
@@ -1301,7 +1489,7 @@ impl AidEscrow {
             .get(&KEY_TOTAL_CLAIMED)
             .unwrap_or(Map::new(env));
         let current_total = claimed_map.get(package.token.clone()).unwrap_or(0);
-        claimed_map.set(package.token.clone(), current_total + package.amount);
+        claimed_map.set(package.token.clone(), current_total + payout_amount);
         env.storage()
             .instance()
             .set(&KEY_TOTAL_CLAIMED, &claimed_map);
@@ -1309,7 +1497,7 @@ impl AidEscrow {
         PackageClaimed {
             package_id,
             recipient: payout_recipient.clone(),
-            amount: package.amount,
+            amount: payout_amount,
             actor: payout_recipient.clone(),
             timestamp: now,
         }
@@ -1501,7 +1689,9 @@ impl AidEscrow {
                     if package.token == token {
                         match package.status {
                             PackageStatus::Created => {
-                                total_committed += package.amount;
+                                // Use remaining_balance so partially-claimed packages
+                                // only count what is still locked/outstanding.
+                                total_committed += package.remaining_balance;
                             }
                             PackageStatus::Claimed => {
                                 total_claimed += package.amount;
@@ -1640,10 +1830,12 @@ mod tests {
             &admin,
             &1,
             &recipient,
-            &10_000_000, // <--- CHANGED THIS from 1_000_000 to 10_000_000
+            &10_000_000,
             &token,
             &86400,
             &package_metadata,
+            &false,
+            &0u32,
         );
 
         client.cancel_package(&package_id);
@@ -1674,6 +1866,8 @@ mod tests {
             &token,
             &86400,
             &empty_metadata,
+            &false,
+            &0u32,
         );
         client.create_package(
             &admin,
@@ -1683,6 +1877,8 @@ mod tests {
             &token,
             &86400,
             &empty_metadata,
+            &false,
+            &0u32,
         );
 
         let packages = client.list_recipient_packages(&recipient1, &0, &10);
@@ -1712,6 +1908,8 @@ mod tests {
                 &token,
                 &86400,
                 &Map::new(&env),
+                &false,
+                &0u32,
             ));
         }
 
@@ -1741,6 +1939,8 @@ mod tests {
             &token,
             &86400,
             &Map::new(&env),
+            &false,
+            &0u32,
         );
         assert!(result.is_err());
     }

@@ -61,6 +61,8 @@ fn test_batch_create_packages_success() {
         &token_client.address,
         &86400,
         &empty_metadata(&env, 3),
+        &false,
+        &0u32,
     );
 
     assert_eq!(ids.len(), 3);
@@ -100,6 +102,8 @@ fn test_batch_create_packages_insufficient_funds() {
         &token_client.address,
         &86400,
         &empty_metadata(&env, 2),
+        &false,
+        &0u32,
     );
 
     assert_eq!(result, Err(Ok(Error::InsufficientFunds)));
@@ -139,6 +143,8 @@ fn test_batch_then_individual_no_id_collision() {
         &token_client.address,
         &86400,
         &empty_metadata(&env, 2),
+        &false,
+        &0u32,
     );
 
     assert_eq!(ids.get(0).unwrap(), 0);
@@ -154,6 +160,8 @@ fn test_batch_then_individual_no_id_collision() {
         &token_client.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     assert_eq!(client.get_package(&manual_id).recipient, recipient3);
@@ -186,6 +194,8 @@ fn test_batch_create_packages_mismatched_arrays() {
         &token_client.address,
         &86400,
         &empty_metadata(&env, 2),
+        &false,
+        &0u32,
     );
     assert_eq!(result, Err(Ok(Error::MismatchedArrays)));
 }
@@ -213,6 +223,8 @@ fn test_batch_create_packages_empty_arrays() {
         &token_client.address,
         &86400,
         &Vec::new(&env),
+        &false,
+        &0u32,
     );
     assert_eq!(ids.len(), 0);
 }

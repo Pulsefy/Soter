@@ -80,6 +80,8 @@ fn test_withdraw_surplus_insufficient_surplus() {
         &token_client.address,
         &(env.ledger().timestamp() + 1000),
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     // Balance 10, Locked 8, Surplus 2. Request 3.

@@ -56,6 +56,8 @@ fn test_view_package_status() {
         &token_client.address,
         &expires_at,
         &metadata,
+        &false,
+        &0u32,
     );
 
     let status = client.view_package_status(&pkg_id);

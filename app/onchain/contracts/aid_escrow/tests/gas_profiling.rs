@@ -137,6 +137,8 @@ fn profile_single_create_package() {
         &t.token,
         &expires_at,
         &metadata,
+        &false,
+        &0u32,
     );
 
     let after = capture_budget(&t.env);
@@ -161,6 +163,8 @@ fn profile_single_claim() {
         &t.token,
         &expires_at,
         &metadata,
+        &false,
+        &0u32,
     );
 
     let before = capture_budget(&t.env);
@@ -187,6 +191,8 @@ fn profile_single_refund() {
         &t.token,
         &expires_at,
         &metadata,
+        &false,
+        &0u32,
     );
 
     t.env.ledger().with_mut(|li| li.timestamp = expires_at + 1);
@@ -243,7 +249,7 @@ fn profile_batch_create(batch_size: u32) {
     let before = capture_budget(&t.env);
 
     t.client
-        .batch_create_packages(&t.admin, &recipients, &amounts, &t.token, &3600, &metadatas);
+        .batch_create_packages(&t.admin, &recipients, &amounts, &t.token, &3600, &metadatas, &false, &0u32);
 
     let after = capture_budget(&t.env);
     let metrics = diff_budget(&before, &after);
@@ -301,6 +307,8 @@ fn profile_claim_with_proof() {
         &t.token,
         &expires_at,
         &metadata,
+        &false,
+        &0u32,
     );
 
     let before = capture_budget(&t.env);
@@ -342,6 +350,8 @@ fn profile_get_package() {
         &t.token,
         &expires_at,
         &metadata,
+        &false,
+        &0u32,
     );
 
     let before = capture_budget(&t.env);
@@ -371,7 +381,7 @@ fn profile_get_aggregates() {
     t.fund_contract(total_amount);
 
     t.client
-        .batch_create_packages(&t.admin, &recipients, &amounts, &t.token, &3600, &metadatas);
+        .batch_create_packages(&t.admin, &recipients, &amounts, &t.token, &3600, &metadatas, &false, &0u32);
 
     let before = capture_budget(&t.env);
     t.client.get_aggregates(&t.token);

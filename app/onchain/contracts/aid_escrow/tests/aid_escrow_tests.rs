@@ -96,6 +96,8 @@ impl TestSetup {
             &self.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         )
     }
 }
@@ -137,6 +139,8 @@ mod create_package {
             &t.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         );
         let pkg = t.client.get_package(&id);
         assert_eq!(
@@ -161,6 +165,8 @@ mod create_package {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert_eq!(result, Err(Ok(Error::InvalidAmount)));
     }
@@ -178,6 +184,8 @@ mod create_package {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert_eq!(result, Err(Ok(Error::PackageIdExists)));
     }
@@ -194,6 +202,8 @@ mod create_package {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert_eq!(result, Err(Ok(Error::InsufficientFunds)));
     }
@@ -223,6 +233,8 @@ mod token_interactions {
             &invalid_token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
 
         assert_eq!(result, Err(Ok(Error::InvalidToken)));
@@ -337,6 +349,8 @@ mod claim {
             &t.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         );
         // Try to claim before claim_starts_at
         let result = t.client.try_claim(&id);
@@ -368,6 +382,8 @@ mod claim {
             &t.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         );
         // Try to claim before claim_starts_at
         let result = t.client.try_claim(&id);
@@ -412,6 +428,8 @@ mod claim {
             &t.token,
             &(t.now() + 3600),
             &metadata,
+            &false,
+            &0u32,
         );
 
         // Direct claim path should reject Merkle-protected package.
@@ -450,6 +468,8 @@ mod claim {
             &t.token,
             &(t.now() + 3600),
             &metadata,
+            &false,
+            &0u32,
         );
 
         let proof: Vec<soroban_sdk::String> = Vec::new(&t.env);
@@ -489,6 +509,8 @@ mod edge_cases {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
 
         // Contract balance is now fully locked. 2nd package should fail.
@@ -500,6 +522,8 @@ mod edge_cases {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert_eq!(r2, Err(Ok(Error::InsufficientFunds)));
 
@@ -514,6 +538,8 @@ mod edge_cases {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert!(r3.is_ok());
     }
@@ -538,6 +564,8 @@ mod token_decimal_normalization {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert_eq!(result, Err(Ok(Error::InvalidAmount)));
     }
@@ -554,6 +582,8 @@ mod token_decimal_normalization {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert!(result.is_ok());
     }
