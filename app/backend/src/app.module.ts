@@ -50,6 +50,8 @@ import { CacheResponseInterceptor } from './common/interceptors/cache-response.i
 
 import { WebhooksModule } from 'src/webhooks.module';
 import { CorrelationModule } from './common/modules/correlation.module';
+import { VersionController } from './controllers/version.controller';
+import { VersionService } from './services/version.service';
 
 @Module({
   imports: [
@@ -140,8 +142,9 @@ import { CorrelationModule } from './common/modules/correlation.module';
     ]),
   ],
 
-  controllers: [AppController],
+  controllers: [AppController, VersionController],
   providers: [
+    VersionService,
     AppService,
     {
       provide: APP_FILTER,

@@ -64,13 +64,14 @@ export const useVersionStore = create<VersionState>()(
 // Mock service for version data
 export class VersionService {
   static async fetchVersionConfig(): Promise<VersionConfig> {
-    // Simulate network delay
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    
-    // In the future, this would make an API call:
-    // const response = await fetch('/api/app/version');
-    // return response.json();
-    
-    return MOCK_VERSION_CONFIG;
+    // Fetch version configuration from backend API
+    const response = await fetch('/api/version');
+    if (!response.ok) {
+      // Fallback to mock config on error
+      console.error('Failed to fetch version config, using mock');
+      return MOCK_VERSION_CONFIG;
+    }
+    const config = await response.json();
+    return config as VersionConfig;
   }
 }
