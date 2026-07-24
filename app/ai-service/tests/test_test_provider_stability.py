@@ -7,6 +7,8 @@ from services.test_provider import TestProvider
 from services.humanitarian_verification import HumanitarianVerificationService
 from services.ocr import OCRService
 from services.pii_scrubber import PIIScrubberService
+from services.providers.base import LLMProvider
+from services.providers.openai_provider import OpenAIProvider
 
 __test__ = True
 
@@ -58,7 +60,7 @@ class TestHumanitarianTestProviderStability:
     def test_deterministic_verify_claim_outputs_remain_stable(self, monkeypatch):
         monkeypatch.setattr(settings, "ai_deterministic_mode", True)
         monkeypatch.setattr(settings, "openai_api_key", "test-api-key")
-        monkeypatch.setattr(self.service, "_provider_attempt_order", lambda p: ["openai"])
+        monkeypatch.setattr(self.service, "providers", [OpenAIProvider(api_key="test-api-key")])
         monkeypatch.setattr(self.service, "_get_model_for_provider", lambda p: "test-model")
 
         first = self.service.verify_claim(
@@ -73,17 +75,22 @@ class TestHumanitarianTestProviderStability:
         )
         assert first == second
 
-    def test_test_provider_stable_across_runs(self, monkeypatch):
+    def _make_service_with_test_provider(self, monkeypatch):
         monkeypatch.setattr(settings, "test_provider_mode", True)
         monkeypatch.setattr(settings, "openai_api_key", None)
         monkeypatch.setattr(settings, "groq_api_key", None)
+        from services.providers import get_llm_providers
+        return HumanitarianVerificationService(providers=get_llm_providers())
 
-        first = self.service.verify_claim(
+    def test_test_provider_stable_across_runs(self, monkeypatch):
+        service = self._make_service_with_test_provider(monkeypatch)
+
+        first = service.verify_claim(
             aid_claim="Food distribution reached 500 households.",
             supporting_evidence=["WFP log #A-42"],
             context_factors={"disaster": "flooding"},
         )
-        second = self.service.verify_claim(
+        second = service.verify_claim(
             aid_claim="Food distribution reached 500 households.",
             supporting_evidence=["WFP log #A-42"],
             context_factors={"disaster": "flooding"},
@@ -91,11 +98,9 @@ class TestHumanitarianTestProviderStability:
         assert first == second
 
     def test_test_provider_output_structure(self, monkeypatch):
-        monkeypatch.setattr(settings, "test_provider_mode", True)
-        monkeypatch.setattr(settings, "openai_api_key", None)
-        monkeypatch.setattr(settings, "groq_api_key", None)
+        service = self._make_service_with_test_provider(monkeypatch)
 
-        result = self.service.verify_claim(
+        result = service.verify_claim(
             aid_claim="Test claim.",
             supporting_evidence=["doc"],
             context_factors={},
@@ -216,7 +221,6 @@ class TestPIIscrubberTestProviderStability:
 
 class TestCrossEndpointStability:
     def setup_method(self):
-        self.humanitarian = HumanitarianVerificationService()
         self.ocr = OCRService()
         self.pii = PIIScrubberService()
 
@@ -224,10 +228,12 @@ class TestCrossEndpointStability:
         monkeypatch.setattr(settings, "test_provider_mode", True)
         monkeypatch.setattr(settings, "openai_api_key", None)
         monkeypatch.setattr(settings, "groq_api_key", None)
+        from services.providers import get_llm_providers
+        humanitarian = HumanitarianVerificationService(providers=get_llm_providers())
 
         from PIL import Image
 
-        h = self.humanitarian.verify_claim("Test claim.", ["doc"], {})
+        h = humanitarian.verify_claim("Test claim.", ["doc"], {})
         o = self.ocr.process_image(Image.new("RGB", (50, 50), color="white"))
         a = self.pii.anonymize("Test text.")
 
