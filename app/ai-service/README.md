@@ -152,6 +152,28 @@ Response body:
 }
 ```
 
+### Load Shedding
+
+The service rejects incoming work with `503` and a standard error envelope
+(`{"error": {"code": "SERVICE_OVERLOADED", "message", "details"}}`) when it's
+under pressure, instead of queuing work it can't reliably finish:
+
+- **Memory** - shed when host RAM exceeds `LOAD_SHED_MEMORY_THRESHOLD_PERCENT` (default 90%).
+- **Queue depth, priority-aware** - shed when the Celery queue depth exceeds
+  `LOAD_SHED_MAX_CELERY_QUEUE_DEPTH` (default 100), scaled by the job's declared
+  `priority` (`low`/`normal`/`high`/`urgent`, on `POST /v1/ai/inference`): low-priority
+  backlog is shed at half the configured depth, urgent jobs tolerate 3x. Middleware
+  performs a cheap pre-check at the "normal" tier before the body is parsed; the
+  precise, priority-scaled check runs again right before a job is queued.
+- **Provider health** - shed when configured LLM providers (OpenAI/Groq) are all
+  unavailable, both for the synchronous `POST /ai/humanitarian/verify` route and
+  for async jobs queued via `/v1/ai/inference` with `"type": "humanitarian_verification"`,
+  so work that would fail once dequeued is rejected up front instead.
+
+Every shed response is counted in `requests_shed_total{reason,method,endpoint}`;
+queue-pressure sheds are also broken down in `queue_shed_by_priority_total{priority}`
+(both scraped at `GET /ai/metrics`).
+
 ## Project Structure
 
 ```

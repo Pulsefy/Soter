@@ -16,6 +16,11 @@ REQUESTS_SHED_TOTAL = Counter(
     'Requests rejected due to overload (load shedding)',
     ['reason', 'method', 'endpoint'],
 )
+QUEUE_SHED_BY_PRIORITY_TOTAL = Counter(
+    'queue_shed_by_priority_total',
+    'Job-creation requests shed for queue pressure, broken down by job priority tier',
+    ['priority'],
+)
 CELERY_QUEUE_DEPTH = Gauge('celery_queue_depth', 'Pending tasks in the Celery default queue')
 
 # AI Model metrics
