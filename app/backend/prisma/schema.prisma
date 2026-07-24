@@ -389,6 +389,7 @@ model User {
   role      AppRole   @default(client)
   orgId     String?
   organization Organization? @relation(fields: [orgId], references: [id])
+  webAuthnCredentials WebAuthnCredential[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
@@ -866,4 +867,67 @@ model SorobanEventCorrelation {
   @@index([createdAt])
   @@index([correlationSource])
   @@unique([txHash, eventIndex]) // Each event in a transaction is unique
+}
+
+// ============================================================================
+// WEBAUTHN / BIOMETRIC AUTHENTICATION
+// ============================================================================
+
+/// Stores registered WebAuthn credentials (passkeys) for biometric authentication.
+/// Each credential corresponds to a platform authenticator (Touch ID, Face ID, Windows Hello)
+/// or a roaming authenticator (YubiKey, security key) registered by a user.
+model WebAuthnCredential {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+
+  /// Base64url-encoded credential ID returned by the authenticator
+  credentialId     String   @unique
+
+  /// Base64url-encoded public key from the authenticator
+  publicKey        String
+
+  /// Signature counter — incremented on every authentication to detect cloning
+  counter          Int      @default(0)
+
+  /// Authenticator Attachment: "platform" (device biometric) or "cross-platform" (security key)
+  attachment       String   @default("platform")
+
+  /// AAGUID — identifies the authenticator model/type
+  aaguid           String?
+
+  /// Human-readable label set by the user (e.g. "MacBook Touch ID")
+  label            String?
+
+  /// Whether this credential has been verified at least once
+  verified         Boolean  @default(false)
+
+  /// Soft-delete timestamp
+  deletedAt        DateTime?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  lastUsedAt       DateTime?
+
+  @@index([userId])
+  @@index([credentialId])
+  @@index([deletedAt])
+  @@index([lastUsedAt])
+}
+
+/// Stores ephemeral WebAuthn challenges used during registration and authentication
+/// ceremonies. Challenges are short-lived and single-use.
+model WebAuthnChallenge {
+  id           String   @id @default(cuid())
+  userId       String?
+  challenge    String   @unique
+  type         String   // "registration" | "authentication"
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([challenge])
+  @@index([expiresAt])
+  @@index([consumedAt])
 }
