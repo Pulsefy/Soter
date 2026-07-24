@@ -62,6 +62,39 @@ class TestOCRRoutes:
         # Legacy /ai/ocr returns OCRResponse (old flat shape)
         assert "processing_time_ms" in data
 
+    def test_ocr_endpoint_with_language_hint(self):
+        from PIL import Image
+
+        img = Image.new("RGB", (50, 50), color="blue")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        
+        with patch("services.ocr.OCRService._run_tesseract", return_value={"text": ["Test"], "conf": [90]}) as mock_run:
+            response = client.post(
+                "/ai/ocr",
+                files={"image": ("test.png", buf.getvalue(), "image/png")},
+                data={"language_hint": "eng"},
+            )
+        assert response.status_code == 200
+        mock_run.assert_called_once()
+        assert mock_run.call_args[1].get("language_hint") == "eng"
+
+    def test_ocr_endpoint_unsupported_language_hint(self):
+        from PIL import Image
+
+        img = Image.new("RGB", (50, 50), color="blue")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        
+        response = client.post(
+            "/ai/ocr",
+            files={"image": ("test.png", buf.getvalue(), "image/png")},
+            data={"language_hint": "invalid"},
+        )
+        assert response.status_code == 422
+
 
 class TestRootEndpoint:
     def test_root_returns_welcome(self):

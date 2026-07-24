@@ -59,8 +59,11 @@ class TestFraudDetectionEndpoint:
         claims.append({"claim_id": "outlier", "ip_address": "99.99.99.99", "amount": 9999.0})
         resp = client.post("/v1/fraud/detect", json={"claims": claims})
         assert resp.status_code == 200
-        results = {r["claim_id"]: r["fraud_risk_score"] for r in resp.json()["result"]}
-        assert results["outlier"] > results["c0"]
+        results = {r["claim_id"]: r for r in resp.json()["result"]}
+        assert results["outlier"]["fraud_risk_score"] > results["c0"]["fraud_risk_score"]
+        if results["outlier"]["is_flagged"]:
+            assert results["outlier"]["code"] == "ANOMALY_DETECTED"
+            assert "Anomalous pattern" in results["outlier"]["reason"]
 
 
 class TestFraudDetectionService:

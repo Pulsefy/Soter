@@ -18,7 +18,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 import tasks
-from schemas.ocr import OCRData, BatchOCRResponse, BatchOCRJobResponse
+from schemas.ocr import OCRData, LanguageHint, BatchOCRResponse, BatchOCRJobResponse
 from schemas.common import ResultEnvelope
 from services.ocr_job import run_ocr_from_bytes, process_batch_ocr
 from config import settings
@@ -58,6 +58,7 @@ async def process_ocr(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
     anchor_metadata: Annotated[Optional[str], Form(description="JSON encoded AnchorMetadata")] = None,
+    language_hint: Annotated[Optional[LanguageHint], Form(description="Language hint for OCR")] = None,
 ) -> ResultEnvelope[OCRData]:
     """Extract text fields from an uploaded document image."""
     start_time = time.time()
@@ -87,7 +88,11 @@ async def process_ocr(
             )
 
         _validate_image_bytes(contents)
-        raw = run_ocr_from_bytes(contents, anchor_metadata)
+        raw = run_ocr_from_bytes(
+            contents,
+            anchor_metadata,
+            language_hint=language_hint.value if language_hint else None
+        )
 
         from main import correlation_id_var
         ocr_data = OCRData(**raw["data"]) if isinstance(raw["data"], dict) else raw["data"]
@@ -129,6 +134,7 @@ async def queue_ocr_job(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
     anchor_metadata: Annotated[Optional[str], Form(description="JSON encoded AnchorMetadata")] = None,
+    language_hint: Annotated[Optional[LanguageHint], Form(description="Language hint for OCR")] = None,
 ) -> QueuedOCRResponse:
     """Queue OCR processing and return immediately with a pollable job URL."""
     if image.content_type not in ALLOWED_CONTENT_TYPES:
@@ -162,6 +168,7 @@ async def queue_ocr_job(
             "content_type": image.content_type,
             "filename": image.filename,
             "anchor_metadata": anchor_metadata,
+            "language_hint": language_hint.value if language_hint else None,
         },
     )
 

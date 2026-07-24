@@ -20,6 +20,11 @@ import {
   VerificationJobData,
   VerificationResult,
 } from './interfaces/verification-job.interface';
+import {
+  DEFAULT_VERIFICATION_PRIORITY,
+  EnqueueVerificationDto,
+  VerificationPriority,
+} from './dto/enqueue-verification.dto';
 import { AuditService } from '../audit/audit.service';
 import { firstValueFrom } from 'rxjs';
 import OpenAI from 'openai';
@@ -28,6 +33,7 @@ import { CircuitBreaker } from '../common/utils/circuit-breaker.util';
 import { VerificationMetadataService } from './metadata.service';
 import { VerificationResultDto } from './dto/verification-result.dto';
 import { CorrelationPropagationUtil } from '../common/utils/correlation-propagation.util';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 // ---------------------------------------------------------------------------
 // OCR service types
@@ -144,6 +150,7 @@ export class VerificationService {
     private readonly httpService: HttpService,
     private readonly verificationMetadataService: VerificationMetadataService,
     private readonly correlationUtil: CorrelationPropagationUtil,
+    private readonly metricsService: MetricsService,
   ) {
     this.verificationMode =
       this.configService.get<string>('VERIFICATION_MODE') || 'mock';
@@ -204,12 +211,8 @@ export class VerificationService {
 
   async enqueueVerification(
     claimId: string,
-    anchorMetadata?: {
-      campaignRef?: string;
-      claimId?: string;
-      packageId?: string;
-    },
-  ): Promise<{ jobId: string }> {
+    dto?: EnqueueVerificationDto,
+  ): Promise<{ jobId: string; priority: VerificationPriority }> {
     const claim = await this.prisma.claim.findUnique({
       where: { id: claimId },
     });
@@ -220,12 +223,19 @@ export class VerificationService {
 
     if (claim.status === 'verified') {
       this.logger.warn(`Claim ${claimId} is already verified`);
-      return { jobId: 'already-verified' };
+      return {
+        jobId: 'already-verified',
+        priority: DEFAULT_VERIFICATION_PRIORITY,
+      };
     }
+
+    const priority = dto?.priority ?? DEFAULT_VERIFICATION_PRIORITY;
+    const anchorMetadata = dto?.anchorMetadata;
 
     const jobData: VerificationJobData = {
       claimId,
       timestamp: Date.now(),
+      priority,
       anchorMetadata: anchorMetadata
         ? {
             campaignRef: anchorMetadata.campaignRef ?? null,
@@ -236,6 +246,7 @@ export class VerificationService {
     };
 
     const job = await this.verificationQueue.add('verify-claim', jobData, {
+      priority,
       attempts: parseInt(
         this.configService.get<string>('QUEUE_MAX_RETRIES') || '3',
       ),
@@ -247,26 +258,38 @@ export class VerificationService {
       removeOnFail: 50,
     });
 
-    this.logger.log(`Enqueued verification job ${job.id} for claim ${claimId}`);
+    const priorityLabel = VerificationPriority[priority] ?? String(priority);
+    this.logger.log(
+      `Enqueued verification job ${job.id} for claim ${claimId} [priority=${priorityLabel}(${priority})]`,
+    );
+
+    this.metricsService.incrementVerificationJobEnqueued(priorityLabel);
 
     await this.auditService.record({
       actorId: 'system',
       entity: 'verification',
       entityId: claimId,
       action: 'enqueue',
-      metadata: { jobId: job.id || 'unknown', anchorMetadata },
+      metadata: {
+        jobId: job.id || 'unknown',
+        priority,
+        priorityLabel,
+        anchorMetadata,
+      },
     });
 
-    return { jobId: job.id || 'unknown' };
+    return { jobId: job.id || 'unknown', priority };
   }
 
   async processVerification(
     jobData: VerificationJobData,
   ): Promise<VerificationResult> {
-    const { claimId, anchorMetadata } = jobData;
+    const { claimId, anchorMetadata, priority } = jobData;
+    const priorityLabel = VerificationPriority[priority] ?? String(priority);
 
     this.logger.log(
-      `Processing verification for claim ${claimId} in ${this.verificationMode} mode`,
+      `Processing verification for claim ${claimId} in ${this.verificationMode} mode` +
+        ` [priority=${priorityLabel}(${priority})]`,
     );
 
     const claim = await this.prisma.claim.findUnique({
@@ -1002,12 +1025,57 @@ the JSON verdict.
       this.verificationQueue.getFailedCount(),
     ]);
 
+    // Build a per-priority breakdown of waiting jobs.
+    // BullMQ stores waiting jobs with their priority in the payload; we iterate
+    // the waiting set and tally by the `priority` field we embed in jobData.
+    const waitingJobs = await this.verificationQueue.getWaiting(0, -1);
+    const priorityCounts: Record<string, number> = {
+      [VerificationPriority.URGENT]: 0,
+      [VerificationPriority.HIGH]: 0,
+      [VerificationPriority.NORMAL]: 0,
+      [VerificationPriority.LOW]: 0,
+    };
+    for (const job of waitingJobs) {
+      const p =
+        (job.data as VerificationJobData).priority ??
+        DEFAULT_VERIFICATION_PRIORITY;
+      if (p in priorityCounts) {
+        priorityCounts[p]++;
+      }
+    }
+
+    const breakdown = {
+      urgent: priorityCounts[VerificationPriority.URGENT],
+      high: priorityCounts[VerificationPriority.HIGH],
+      normal: priorityCounts[VerificationPriority.NORMAL],
+      low: priorityCounts[VerificationPriority.LOW],
+    };
+
+    // Keep Prometheus gauges in sync with the current snapshot.
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'URGENT',
+      breakdown.urgent,
+    );
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'HIGH',
+      breakdown.high,
+    );
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'NORMAL',
+      breakdown.normal,
+    );
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'LOW',
+      breakdown.low,
+    );
+
     return {
       waiting,
       active,
       completed,
       failed,
       total: waiting + active + completed + failed,
+      priorityBreakdown: breakdown,
     };
   }
 

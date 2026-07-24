@@ -49,7 +49,33 @@ export class MetricsService {
     public analyticsCacheMissesCounter: Counter<string>,
     @InjectMetric('analytics_cache_invalidations_total')
     public analyticsCacheInvalidationsCounter: Counter<string>,
+    @InjectMetric('verification_jobs_enqueued_total')
+    public verificationJobsEnqueuedCounter: Counter<string>,
+    @InjectMetric('verification_queue_waiting_by_priority')
+    public verificationQueueWaitingByPriorityGauge: Gauge<string>,
   ) {}
+
+  /**
+   * Increment the counter tracking how many jobs have been enqueued per priority tier.
+   * Call once per successful enqueue, passing the priority label (e.g. 'URGENT', 'NORMAL').
+   */
+  incrementVerificationJobEnqueued(priorityLabel: string): void {
+    this.verificationJobsEnqueuedCounter.inc({ priority: priorityLabel });
+  }
+
+  /**
+   * Set the current snapshot of waiting verification jobs per priority tier.
+   * Call after getQueueMetrics to keep the gauge in sync.
+   */
+  setVerificationQueueWaitingByPriority(
+    priorityLabel: string,
+    count: number,
+  ): void {
+    this.verificationQueueWaitingByPriorityGauge.set(
+      { priority: priorityLabel },
+      count,
+    );
+  }
 
   /**
    * Increment HTTP request counter

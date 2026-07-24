@@ -84,7 +84,7 @@ class TestOCRService:
         
         from PIL import Image
 
-        def fake_run_tesseract(_image):
+        def fake_run_tesseract(_image, **kwargs):
             return {
                 "text": ["Name:", "John", "Doe", "ID", "AB123456"],
                 "conf": [90, 92, 91, 88, 95],
@@ -101,6 +101,29 @@ class TestOCRService:
         
         mock_labels.assert_called_with(step_name='ocr')
         assert mock_observe.call_count == 2
+
+    @patch('metrics.PIPELINE_STEP_LATENCY.labels')
+    def test_process_image_passes_language_hint(self, mock_labels, monkeypatch):
+        mock_observe = MagicMock()
+        mock_labels.return_value.observe = mock_observe
+        
+        from PIL import Image
+
+        captured_kwargs = {}
+        def fake_run_tesseract(_image, **kwargs):
+            captured_kwargs.update(kwargs)
+            return {
+                "text": ["Name:", "Jane"],
+                "conf": [90, 92],
+            }
+
+        monkeypatch.setattr(self.ocr, "_run_tesseract", fake_run_tesseract)
+
+        img = Image.new("RGB", (200, 100), color="white")
+        result = self.ocr.process_image(img, language_hint="fra")
+        
+        assert captured_kwargs.get("language_hint") == "fra"
+        assert result.raw_text == "Name: Jane"
 
     def test_process_image_empty_image(self):
         from PIL import Image

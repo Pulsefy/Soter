@@ -66,7 +66,7 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
 
   const renderItem = ({ item }: { item: QueuedSyncAction }) => {
     const actionLabel = ACTION_LABELS[item.type] ?? item.type;
-    const canRetry = item.state === 'failed';
+    const canRetry = item.state === 'failed' || item.state === 'retrying';
 
     return (
       <View style={styles.card}>

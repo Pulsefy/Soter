@@ -226,12 +226,17 @@ async def cancel_task(task_id: str):
     logger.info(f"Attempting to cancel task: {task_id}")
 
     try:
-        from celery.result import AsyncResult
+        import metrics
+        
+        # Get task status to identify task type (if available) before cancelling
+        status_info = tasks.get_task_status(task_id)
+        task_type = "unknown"
+        if status_info.get("status") != "not_found":
+            # For simplicity, default to unknown if we can't determine it
+            task_type = "inference"
 
-        result = AsyncResult(task_id, app=tasks.get_celery_app())
-        result.revoke(terminate=True)
-
-        tasks.update_task_status(task_id, "cancelled")
+        tasks.cancel_task(task_id)
+        metrics.JOB_CANCELLED_TOTAL.labels(task_type=task_type).inc()
 
         return {
             "success": True,
@@ -243,3 +248,30 @@ async def cancel_task(task_id: str):
     except Exception as e:
         logger.error(f"Failed to cancel task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to cancel task: {str(e)}")
+
+@router.post("/ai/task/{task_id}/expire")
+async def expire_task(task_id: str):
+    """Expire a pending or in-progress inference task."""
+    logger.info(f"Attempting to expire task: {task_id}")
+
+    try:
+        import metrics
+        
+        status_info = tasks.get_task_status(task_id)
+        task_type = "unknown"
+        if status_info.get("status") != "not_found":
+            task_type = "inference"
+
+        tasks.expire_task(task_id)
+        metrics.JOB_EXPIRED_TOTAL.labels(task_type=task_type).inc()
+
+        return {
+            "success": True,
+            "task_id": task_id,
+            "status": "expired",
+            "message": "Task has been expired",
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to expire task: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to expire task: {str(e)}")

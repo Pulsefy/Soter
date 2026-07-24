@@ -18,6 +18,7 @@ from services.load_shedder import ensure_queue_capacity
 from services.pii_scrubber import PIIScrubberService
 from services.humanitarian_verification import HumanitarianVerificationService
 from services.ocr_job import run_ocr_from_base64
+from services.dead_letter import dead_letter_queue
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -92,12 +93,28 @@ def get_process_heavy_inference_task():
                 update_task_status(task_id, 'retrying', error=str(exc))
                 raise self.retry(exc=exc, countdown=retry_delay)
 
-            error_msg = str(exc)
-            update_task_status(task_id, 'failed', error=error_msg)
-            send_webhook_notification(task_id, 'failed', error=error_msg)
+            handle_task_retries_exhausted(task_id, payload, str(exc))
             raise
-    
+
     return process_heavy_inference_task
+
+
+def handle_task_retries_exhausted(task_id: str, payload: Dict[str, Any], error_msg: str) -> None:
+    """
+    Finalize a task that has exhausted its Celery retry budget: mark it
+    failed, notify the backend, and dead-letter it so an operator can
+    replay it later without waiting on another transient-failure window.
+    """
+    update_task_status(task_id, 'failed', error=error_msg)
+    send_webhook_notification(task_id, 'failed', error=error_msg)
+    dead_letter_queue.add(
+        kind="async_job",
+        task_id=task_id,
+        payload=payload,
+        error=error_msg,
+        task_type=payload.get('type') if isinstance(payload, dict) else None,
+    )
+    metrics.DEAD_LETTER_ITEMS_TOTAL.labels(kind="async_job").inc()
 
 # Task status storage (in production, use Redis with proper TTL)
 task_results: Dict[str, Dict[str, Any]] = {}
@@ -177,25 +194,87 @@ def send_webhook_notification(task_id: str, status: str, result: Any = None, err
 
         def send_notification() -> None:
             try:
-                with httpx.Client(timeout=10.0) as client:
-                    response = client.post(
-                        settings.backend_webhook_url,
-                        content=body_bytes,
-                        headers=headers,
-                    )
-                    if response.status_code >= 400:
-                        logger.error(
-                            f"Webhook notification failed: {response.status_code} - {response.text}"
-                        )
-                    else:
-                        logger.info(f"Webhook notification sent for task {task_id}")
+                deliver_webhook(body_bytes, headers)
+                logger.info(f"Webhook notification sent for task {task_id}")
             except Exception as exc:
                 logger.error(f"Failed to send webhook notification: {exc}")
+                dead_letter_queue.add(
+                    kind="callback",
+                    task_id=task_id,
+                    payload={"status": status, "result": result, "error": error},
+                    error=str(exc),
+                )
+                metrics.DEAD_LETTER_ITEMS_TOTAL.labels(kind="callback").inc()
 
         thread = threading.Thread(target=send_notification, daemon=True)
         thread.start()
     except Exception as exc:
         logger.error(f"Error setting up webhook notification thread: {exc}")
+
+
+def deliver_webhook(body_bytes: bytes, headers: Dict[str, str]) -> None:
+    """
+    Synchronously POST a webhook body to the configured backend URL.
+
+    Raises on any non-2xx response or connection failure. Shared by the
+    fire-and-forget notification path and dead-letter replay so both
+    paths agree on what counts as a delivery failure.
+    """
+    with httpx.Client(timeout=10.0) as client:
+        response = client.post(
+            settings.backend_webhook_url,
+            content=body_bytes,
+            headers=headers,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"Webhook delivery failed: {response.status_code} - {response.text}"
+            )
+
+
+def replay_callback_delivery(task_id: str, payload: Dict[str, Any]) -> None:
+    """
+    Rebuild and resend a dead-lettered callback payload.
+
+    Args:
+        task_id: The AI task the callback belongs to.
+        payload: The dead-letter entry's stored payload, containing the
+            original ``status``, ``result``, and ``error`` fields.
+
+    Raises:
+        RuntimeError: If the webhook URL is not configured or delivery fails.
+    """
+    if not settings.backend_webhook_url:
+        raise RuntimeError("Backend webhook URL not configured, cannot replay callback")
+
+    callback_payload = AiCallbackPayload.build(
+        task_id=task_id,
+        status=CallbackStatus(payload.get("status")),
+        result=payload.get("result"),
+        error=payload.get("error"),
+    )
+
+    body_bytes = callback_payload.to_json_bytes()
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if settings.webhook_secret:
+        headers["x-webhook-signature"] = callback_payload.sign(settings.webhook_secret)
+
+    deliver_webhook(body_bytes, headers)
+
+
+def replay_async_job(task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Re-run a dead-lettered async job synchronously.
+
+    Reuses the same processing implementation the Celery worker calls, so a
+    successful replay leaves the task in the same terminal 'completed' state
+    (and fires the same completion webhook) as if it had succeeded on the
+    original attempt.
+
+    Raises:
+        Exception: Whatever the underlying task processing raised.
+    """
+    return process_heavy_inference_impl(None, task_id, payload)
 
 
 def process_heavy_inference_impl(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -268,6 +347,7 @@ def _process_ocr(payload: Dict[str, Any]) -> Dict[str, Any]:
         'result': run_ocr_from_base64(
             image_base64,
             payload.get('anchor_metadata'),
+            language_hint=payload.get('language_hint'),
         ),
     }
 
@@ -421,7 +501,7 @@ def get_task_status(task_id: str) -> Dict[str, Any]:
         dict: Task status information
     """
     local_status = task_results.get(task_id)
-    if local_status and local_status.get('status') in {'completed', 'failed', 'retrying', 'cancelled'}:
+    if local_status and local_status.get('status') in {'completed', 'failed', 'retrying', 'cancelled', 'expired'}:
         return {
             'task_id': task_id,
             **local_status,
@@ -493,6 +573,28 @@ def create_task(task_type: str, payload: Dict[str, Any]) -> str:
         update_task_status(task_id, 'failed', error=str(e))
         raise
     
+    
     logger.info(f"Created task {task_id} of type {task_type}")
     
     return task_id
+
+
+def cancel_task(task_id: str) -> None:
+    """
+    Cancel a background task.
+    """
+    from celery.result import AsyncResult
+    result = AsyncResult(task_id, app=get_celery_app())
+    result.revoke(terminate=True)
+    update_task_status(task_id, 'cancelled')
+
+
+def expire_task(task_id: str) -> None:
+    """
+    Expire a background task.
+    """
+    from celery.result import AsyncResult
+    result = AsyncResult(task_id, app=get_celery_app())
+    result.revoke(terminate=True)
+    update_task_status(task_id, 'expired')
+

@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     load_shed_memory_threshold_percent: float = 90.0
     load_shed_max_celery_queue_depth: int = 100
 
+    # Dead-letter replay settings
+    dead_letter_max_replay_attempts: int = 5
+    dead_letter_replay_cooldown_seconds: float = 10.0
+    dead_letter_replay_rate_limit: str = "10/minute"
+
     # Cache TTL settings (in seconds)
     cache_ttl_task_status: int = 30  # Short TTL for responsive polling
     cache_ttl_artifact_access: int = 60  # 1 minute for artifact metadata

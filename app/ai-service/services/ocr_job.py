@@ -18,12 +18,13 @@ ocr_service = OCRService()
 def run_ocr_from_bytes(
     contents: bytes,
     anchor_metadata: Optional[str] = None,
+    language_hint: Optional[str] = None,
 ) -> dict:
     start_time = time.time()
     img = Image.open(io.BytesIO(contents))
 
     start_inference = time.time()
-    result = ocr_service.process_image(img)
+    result = ocr_service.process_image(img, language_hint=language_hint)
     inference_latency = time.time() - start_inference
 
     metrics.INFERENCE_LATENCY.labels(task_type="ocr").observe(inference_latency)
@@ -53,8 +54,9 @@ def run_ocr_from_bytes(
 def run_ocr_from_base64(
     image_base64: str,
     anchor_metadata: Optional[str] = None,
+    language_hint: Optional[str] = None,
 ) -> dict:
-    return run_ocr_from_bytes(base64.b64decode(image_base64), anchor_metadata)
+    return run_ocr_from_bytes(base64.b64decode(image_base64), anchor_metadata, language_hint=language_hint)
 
 
 def process_batch_ocr(

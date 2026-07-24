@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getAppUserRole, getRoleAwareHelpCopy, getRoleLabel, isOperationsRole } from '@/lib/app-role';
+import { DeviceDiagnosticsExport } from '@/components/DeviceDiagnosticsExport';
 
 export default function HelpPage() {
   const role = getAppUserRole();
@@ -9,13 +10,15 @@ export default function HelpPage() {
       <div className="mx-auto max-w-5xl space-y-8">
         <div className="space-y-3">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-            Contributor Guide
+            Contributor Guide & Support
           </p>
-          <h1 className="text-4xl font-semibold text-slate-900 dark:text-slate-50">Explore the app without live data</h1>
+          <h1 className="text-4xl font-semibold text-slate-900 dark:text-slate-50">Explore & Support Diagnostics</h1>
           <p className="max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
             Role: <span className="font-medium text-slate-900 dark:text-slate-100">{getRoleLabel(role)}</span>. {getRoleAwareHelpCopy(role)}
           </p>
         </div>
+
+        <DeviceDiagnosticsExport />
 
         <section className="grid gap-6 md:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">

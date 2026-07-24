@@ -16,6 +16,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { EncryptionModule } from '../common/encryption/encryption.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { DeploymentMetadataModule } from '../deployment-metadata/deployment-metadata.module';
+import { MetricsModule } from '../observability/metrics/metrics.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { DeploymentMetadataModule } from '../deployment-metadata/deployment-meta
     }),
     JobsModule,
     DeploymentMetadataModule, // Added for contract-aware metadata
+    MetricsModule, // Added for verification priority metrics
   ],
   controllers: [VerificationController, VerificationInboxController],
   providers: [

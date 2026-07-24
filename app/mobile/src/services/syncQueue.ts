@@ -638,7 +638,7 @@ export const retryFailedAction = async (actionId: string) => {
   await hydrateQueue();
   const now = new Date().toISOString();
   const items = queueState.items.map((item) =>
-    item.id === actionId && item.state === 'failed'
+    item.id === actionId && (item.state === 'failed' || item.state === 'retrying')
       ? { ...item, state: 'pending' as SyncActionState, retryCount: 0, nextRetryAt: now, lastError: null, updatedAt: now }
       : item,
   );

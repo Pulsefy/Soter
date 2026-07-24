@@ -163,6 +163,7 @@ class TestFraudEnvelope:
             assert "claim_id" in item
             assert "fraud_risk_score" in item
             assert "is_flagged" in item
+            assert "code" in item
 
     def test_confidence_in_range(self):
         data = client.post("/v1/fraud/detect", json=self._CLAIMS_PAYLOAD).json()

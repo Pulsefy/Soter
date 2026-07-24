@@ -251,7 +251,35 @@ describe('syncQueue – retryFailedAction', () => {
     expect(stateAfter.items[0].lastError).toBeNull();
   });
 
-  it('does not change a non-failed item', async () => {
+  it('resets a retrying item back to pending', async () => {
+    const retryingItem = {
+      id: 'test-id-3',
+      type: 'claim-submission',
+      payload: { aidId: 'aid-4', claimId: 'claim-4', idempotencyKey: 'idem-retry-retrying' },
+      state: 'retrying',
+      retryCount: 2,
+      maxRetries: 5,
+      nextRetryAt: new Date(Date.now() + 100000).toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastError: 'network timeout',
+    };
+    await seedStorage([retryingItem]);
+
+    const { getSyncQueueState, retryFailedAction } = loadFreshQueue();
+
+    const stateBefore = await getSyncQueueState();
+    expect(stateBefore.items[0].state).toBe('retrying');
+
+    await retryFailedAction(stateBefore.items[0].id);
+
+    const stateAfter = await getSyncQueueState();
+    expect(stateAfter.items[0].state).toBe('pending');
+    expect(stateAfter.items[0].retryCount).toBe(0);
+    expect(stateAfter.items[0].lastError).toBeNull();
+  });
+
+  it('does not change a non-failed/non-retrying item', async () => {
     const pendingItem = {
       id: 'test-id-2',
       type: 'claim-submission',
@@ -344,13 +372,16 @@ describe('SubmissionStatusBadge', () => {
     expect(getByText('Failed')).toBeTruthy();
   });
 
-  it('shows retry button only in failed state', () => {
+  it('shows retry button in failed and retrying states', () => {
     const onRetry = jest.fn();
-    const { getByTestId } = render(<SubmissionStatusBadge state="failed" onRetry={onRetry} />);
-    expect(getByTestId('badge-retry-button')).toBeTruthy();
+    const { getByTestId: getByTestIdFailed } = render(<SubmissionStatusBadge state="failed" onRetry={onRetry} />);
+    expect(getByTestIdFailed('badge-retry-button')).toBeTruthy();
+
+    const { getByTestId: getByTestIdRetrying } = render(<SubmissionStatusBadge state="retrying" onRetry={onRetry} />);
+    expect(getByTestIdRetrying('badge-retry-button')).toBeTruthy();
   });
 
-  it('does not show retry button in non-failed states', () => {
+  it('does not show retry button in non-retryable states', () => {
     const onRetry = jest.fn();
     const { queryByTestId } = render(<SubmissionStatusBadge state="pending" onRetry={onRetry} />);
     expect(queryByTestId('badge-retry-button')).toBeNull();
@@ -366,6 +397,9 @@ describe('SubmissionStatusBadge', () => {
   it('does not show retry button when onRetry is not provided', () => {
     const { queryByTestId } = render(<SubmissionStatusBadge state="failed" />);
     expect(queryByTestId('badge-retry-button')).toBeNull();
+
+    const { queryByTestId: queryByTestIdRetrying } = render(<SubmissionStatusBadge state="retrying" />);
+    expect(queryByTestIdRetrying('badge-retry-button')).toBeNull();
   });
 });
 

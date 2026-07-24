@@ -174,6 +174,35 @@ class TestOCRV1Path:
             )
         assert response.status_code == 200
 
+    def test_v1_ocr_with_language_hint_returns_200(self, client):
+        from PIL import Image
+
+        img = Image.new("RGB", (60, 60), color="green")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        with patch("api.v1.ocr.run_ocr_from_bytes", return_value=self._FAKE_OCR) as mock_run:
+            response = client.post(
+                "/v1/ai/ocr",
+                files={"image": ("img.png", buf.getvalue(), "image/png")},
+                data={"language_hint": "eng"},
+            )
+        assert response.status_code == 200
+        mock_run.assert_called_once()
+        assert mock_run.call_args[1].get("language_hint") == "eng"
+
+    def test_v1_ocr_unsupported_language_hint_returns_422(self, client):
+        from PIL import Image
+
+        img = Image.new("RGB", (60, 60), color="green")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        response = client.post(
+            "/v1/ai/ocr",
+            files={"image": ("img.png", buf.getvalue(), "image/png")},
+            data={"language_hint": "unsupported"},
+        )
+        assert response.status_code == 422
+
     def test_v1_ocr_processing_time_present(self, client):
         from PIL import Image
 
