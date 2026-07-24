@@ -58,6 +58,17 @@ class TestHumanitarianVerificationService:
                 context_factors={},
             )
 
+    def test_get_model_version_resolves_provider_and_model(self, monkeypatch):
+        monkeypatch.setattr(self.service, "_provider_attempt_order", lambda provider_preference: ["groq"])
+        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda provider: "llama-3.3-70b-versatile")
+
+        assert self.service.get_model_version("auto") == "groq:llama-3.3-70b-versatile"
+
+    def test_get_model_version_returns_none_when_no_provider_available(self, monkeypatch):
+        monkeypatch.setattr(self.service, "_provider_attempt_order", lambda provider_preference: [])
+
+        assert self.service.get_model_version("auto") == "none:none"
+
     def test_parse_json_response_supports_markdown_block(self):
         content = "```json\n{\"verdict\":\"credible\",\"confidence\":0.9}\n```"
         parsed = self.service._parse_json_response(content)

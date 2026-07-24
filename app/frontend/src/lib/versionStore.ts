@@ -61,16 +61,20 @@ export const useVersionStore = create<VersionState>()(
   )
 );
 
-// Mock service for version data
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+
+// Service for version data
 export class VersionService {
   static async fetchVersionConfig(): Promise<VersionConfig> {
-    // Simulate network delay
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    
-    // In the future, this would make an API call:
-    // const response = await fetch('/api/app/version');
-    // return response.json();
-    
-    return MOCK_VERSION_CONFIG;
+    try {
+      const response = await fetch(`${API_URL}/api/v1/config/version?platform=web`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch version config: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.warn('Network error fetching version config from backend, falling back to mock:', error);
+      return MOCK_VERSION_CONFIG;
+    }
   }
 }

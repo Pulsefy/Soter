@@ -40,11 +40,15 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   const isConnected = status === 'connected';
   const isBusy = status === 'connecting';
   const isAwaitingApproval = status === 'awaiting-approval';
+  const requiresReconnect = Boolean(
+    error && /expired|reconnect|missing account state|wrong network|did not expose|not valid/i.test(error),
+  );
 
   const walletButtonLabel = (() => {
     if (isConnected) return 'Disconnect Wallet';
     if (isBusy) return 'Preparing WalletConnect…';
     if (isAwaitingApproval) return 'Waiting for Wallet Approval';
+    if (requiresReconnect) return 'Reconnect Wallet';
     return 'Connect Wallet';
   })();
 

@@ -38,6 +38,13 @@ PIPELINE_STEP_LATENCY = Histogram('pipeline_step_latency_seconds', 'Pipeline ste
 JOB_CANCELLED_TOTAL = Counter('job_cancelled_total', 'Total jobs cancelled', ['task_type'])
 JOB_EXPIRED_TOTAL = Counter('job_expired_total', 'Total jobs expired', ['task_type'])
 
+# Cache invalidation metrics
+CACHE_INVALIDATION_TOTAL = Counter(
+    'cache_invalidation_total',
+    'Cache invalidation operations performed',
+    ['reason'],
+)
+
 def check_system_resources(memory_threshold_percent: float = 90.0) -> bool:
     """
     Check if system RAM or VRAM is above threshold.

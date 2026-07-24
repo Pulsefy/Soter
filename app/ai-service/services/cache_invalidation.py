@@ -4,6 +4,7 @@ Cache invalidation helpers for AI service
 
 import logging
 from typing import Optional
+import metrics
 from services.cache import CacheService
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class CacheInvalidationHelper:
         """
         pattern = f"cache:ai:task_status:*{task_id}*"
         deleted = self.cache.delete_pattern(pattern)
+        metrics.CACHE_INVALIDATION_TOTAL.labels(reason="task_status").inc()
         if deleted > 0:
             logger.info(f"Invalidated {deleted} task status cache entries for task {task_id}")
         return deleted
@@ -43,6 +45,7 @@ class CacheInvalidationHelper:
         """
         pattern = "cache:ai:task_status:*"
         deleted = self.cache.delete_pattern(pattern)
+        metrics.CACHE_INVALIDATION_TOTAL.labels(reason="task_status").inc()
         if deleted > 0:
             logger.info(f"Invalidated {deleted} task status cache entries")
         return deleted
@@ -59,8 +62,54 @@ class CacheInvalidationHelper:
         """
         pattern = f"cache:ai:artifact_access:*{artifact_id}*"
         deleted = self.cache.delete_pattern(pattern)
+        metrics.CACHE_INVALIDATION_TOTAL.labels(reason="artifact_access").inc()
         if deleted > 0:
             logger.info(f"Invalidated {deleted} artifact access cache entries for {artifact_id}")
+        return deleted
+
+    def invalidate_verification_by_artifact(self, artifact_id: str) -> int:
+        """
+        Invalidate cached AI verification responses that referenced a given
+        evidence artifact, e.g. after the artifact's content has been updated.
+
+        Relies on the artifact ID being embedded literally in the cache key
+        (see `artifact_tag` in api/v1/humanitarian.py) rather than only being
+        part of the hashed inputs, so it can be matched without knowing the
+        exact hash of every request that referenced it.
+
+        Args:
+            artifact_id: The evidence artifact ID that changed
+
+        Returns:
+            Number of keys deleted
+        """
+        pattern = f"cache:ai:humanitarian_verification:*artifact_tag=*{artifact_id}*"
+        deleted = self.cache.delete_pattern(pattern)
+        metrics.CACHE_INVALIDATION_TOTAL.labels(reason="artifact_updated").inc()
+        if deleted > 0:
+            logger.info(f"Invalidated {deleted} verification cache entries for artifact {artifact_id}")
+        return deleted
+
+    def invalidate_verification_by_model_version(self, provider: str, model: str) -> int:
+        """
+        Invalidate cached AI verification responses produced by a specific
+        provider/model pairing, e.g. after upgrading the configured model.
+
+        Args:
+            provider: The LLM provider (e.g. "openai", "groq")
+            model: The model identifier (e.g. "gpt-4o-mini")
+
+        Returns:
+            Number of keys deleted
+        """
+        model_version = CacheService._sanitize_tag_value(f"{provider}:{model}")
+        pattern = f"cache:ai:humanitarian_verification:*model_version={model_version}*"
+        deleted = self.cache.delete_pattern(pattern)
+        metrics.CACHE_INVALIDATION_TOTAL.labels(reason="model_version_changed").inc()
+        if deleted > 0:
+            logger.info(
+                f"Invalidated {deleted} verification cache entries for model version {provider}:{model}"
+            )
         return deleted
 
     def invalidate_all(self) -> int:
@@ -72,6 +121,7 @@ class CacheInvalidationHelper:
         """
         pattern = "cache:ai:*"
         deleted = self.cache.delete_pattern(pattern)
+        metrics.CACHE_INVALIDATION_TOTAL.labels(reason="all").inc()
         logger.warning(f"Invalidated ALL AI cache entries ({deleted} keys)")
         return deleted
 

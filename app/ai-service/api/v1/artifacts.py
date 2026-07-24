@@ -33,6 +33,11 @@ class AccessModeRequest(BaseModel):
     mode: Literal["signed_url", "proxy"] = "signed_url"
 
 
+class CacheInvalidationResponse(BaseModel):
+    artifact_id: str
+    invalidated_entries: int
+
+
 def _create_error_response(code: str, status_code: int, detail: str) -> tuple:
     """Create standardized error response with logging."""
     logger.warning(
@@ -267,3 +272,51 @@ async def download_artifact_with_token(
             "mime_type", "application/octet-stream"
         ),
     )
+
+
+@router.post(
+    "/ai/verification-artifacts/{artifact_id}/invalidate-cache",
+    response_model=CacheInvalidationResponse,
+)
+async def invalidate_artifact_cache(
+    artifact_id: str,
+    x_user_role: str = Header(default="", alias="X-User-Role"),
+):
+    """
+    Explicitly invalidate cached data tied to a verification artifact.
+
+    Call this after an artifact's content has been updated in place (same
+    artifact_id, new bytes) so stale artifact-access checks and AI
+    verification responses that referenced it aren't served from cache.
+    Restricted to admin/operator roles since it's a mutating operation.
+    """
+    if x_user_role not in {"admin", "operator"}:
+        response, _ = _create_error_response(
+            "forbidden_role",
+            403,
+            f"User role '{x_user_role}' is not authorized to invalidate cache",
+        )
+        return response
+
+    from main import app
+    from services.cache_invalidation import get_invalidation_helper
+
+    cache = getattr(app.state, "cache", None)
+    if not cache or not cache.enabled:
+        return CacheInvalidationResponse(artifact_id=artifact_id, invalidated_entries=0)
+
+    helper = get_invalidation_helper(cache)
+    deleted = helper.invalidate_artifact_access(
+        artifact_id
+    ) + helper.invalidate_verification_by_artifact(artifact_id)
+
+    logger.info(
+        "artifact_cache_invalidated",
+        extra={
+            "event": "artifact_cache_invalidated",
+            "artifact_id": artifact_id,
+            "invalidated_entries": deleted,
+        },
+    )
+
+    return CacheInvalidationResponse(artifact_id=artifact_id, invalidated_entries=deleted)
