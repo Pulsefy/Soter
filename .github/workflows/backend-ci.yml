@@ -5,12 +5,10 @@ on:
     branches: ['main']
     paths:
       - 'app/backend/**'
-      - '.github/workflows/backend-ci.yml'
   pull_request:
     branches: ['main']
     paths:
       - 'app/backend/**'
-      - '.github/workflows/backend-ci.yml'
 
 jobs:
   build-and-test:
@@ -31,17 +29,13 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        working-directory: ./app/backend
         run: pnpm install --no-frozen-lockfile --engine-strict=false
 
       - name: Lint
-        working-directory: ./app/backend
-        run: pnpm run lint
+        run: pnpm --filter backend run lint
 
       - name: Test
-        working-directory: ./app/backend
-        run: pnpm run test
+        run: pnpm --filter backend run test
 
       - name: Build
-        working-directory: ./app/backend
-        run: pnpm run build
+        run: pnpm --filter backend run build
