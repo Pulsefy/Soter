@@ -1,24 +1,30 @@
 import { VersionInfo } from '../types/update';
-
-// In a real app, this would be a URL to your backend or a config file (e.g., hosted on GitHub or S3)
-const VERSION_CONFIG_URL = 'https://api.pulsefy.org/soter/mobile/version';
+import { config } from '../config';
 
 export const fetchVersionInfo = async (): Promise<VersionInfo> => {
   try {
-    // For now, we'll return mock data. 
-    // In production, uncomment the fetch block.
-    /*
-    const response = await fetch(VERSION_CONFIG_URL);
+    const response = await fetch(`${config.apiUrl}/api/v1/config/version?platform=mobile`);
     if (!response.ok) throw new Error('Failed to fetch version info');
-    return await response.json();
-    */
-
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 800));
-
+    const data = await response.json();
+    return {
+      latestVersion: data.latestVersion,
+      minRequiredVersion: data.minRequiredVersion || data.currentVersion,
+      releaseNotes: data.releaseNotes?.changes || data.releaseNotesArray || [
+        'Added support for on-chain verification',
+        'Improved sync reliability in low-bandwidth areas',
+        'Fixed a bug in QR code scanning for legacy NGO cards',
+        'Reduced app bundle size by 15%',
+      ],
+      storeUrl: data.storeUrl || {
+        ios: 'https://apps.apple.com/app/soter',
+        android: 'https://play.google.com/store/apps/details?id=org.pulsefy.soter.mobile',
+      },
+    };
+  } catch (error) {
+    console.error('UpdateService: Error fetching version info from backend, falling back to mock:', error);
     return {
       latestVersion: '1.1.0',
-      minRequiredVersion: '1.0.0', // Set to something higher than current to test force upgrade
+      minRequiredVersion: '1.0.0',
       releaseNotes: [
         'Added support for on-chain verification',
         'Improved sync reliability in low-bandwidth areas',
@@ -30,9 +36,6 @@ export const fetchVersionInfo = async (): Promise<VersionInfo> => {
         android: 'https://play.google.com/store/apps/details?id=org.pulsefy.soter.mobile',
       },
     };
-  } catch (error) {
-    console.error('UpdateService: Error fetching version info', error);
-    throw error;
   }
 };
 

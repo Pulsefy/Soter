@@ -30,7 +30,7 @@ export const SubmissionStatusBadge: React.FC<Props> = ({ state, onRetry }) => {
         <MaterialCommunityIcons name={icon as any} size={14} color={fg} />
       )}
       <Text style={[styles.label, { color: fg }]}>{label}</Text>
-      {state === 'failed' && onRetry && (
+      {(state === 'failed' || state === 'retrying') && onRetry && (
         <TouchableOpacity
           onPress={onRetry}
           accessibilityRole="button"

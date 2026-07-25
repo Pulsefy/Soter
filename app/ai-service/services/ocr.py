@@ -1,7 +1,7 @@
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Optional
 
 import pytesseract
 from PIL import Image
@@ -83,7 +83,7 @@ class OCRService:
         self.field_detector = FieldDetector()
         self.test_provider = TestProvider()
 
-    def process_image(self, image: Image.Image) -> OCRResult:
+    def process_image(self, image: Image.Image, language_hint: Optional[str] = None) -> OCRResult:
         if settings.test_provider_mode:
             response = self.test_provider.get_response("ocr", {"image_size": str(image.size)})
             fields: Dict[str, FieldMatch] = {}
@@ -108,7 +108,7 @@ class OCRService:
                 processing_time_ms=int((time.time() - start_time) * 1000),
             )
 
-        tesseract_data = self._run_tesseract(preprocessed)
+        tesseract_data = self._run_tesseract(preprocessed, language_hint=language_hint)
 
         raw_text = tesseract_data.get("text", "")
         if isinstance(raw_text, list):
@@ -132,11 +132,12 @@ class OCRService:
             processing_time_ms=int(latency * 1000),
         )
 
-    def _run_tesseract(self, image: Image.Image) -> dict:
+    def _run_tesseract(self, image: Image.Image, language_hint: Optional[str] = None) -> dict:
         config = "--psm 6 --oem 3"
-        data = pytesseract.image_to_data(
-            image, config=config, output_type=pytesseract.Output.DICT
-        )
+        kwargs = {"config": config, "output_type": pytesseract.Output.DICT}
+        if language_hint:
+            kwargs["lang"] = language_hint
+        data = pytesseract.image_to_data(image, **kwargs)
         return data
 
     def _extract_field_chars(

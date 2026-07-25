@@ -30,7 +30,7 @@ export class CreateDeploymentMetadataDto {
 
   @IsOptional()
   @IsObject()
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export class UpdateDeploymentMetadataDto {
@@ -52,7 +52,7 @@ export class UpdateDeploymentMetadataDto {
 
   @IsOptional()
   @IsObject()
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export class DeploymentMetadataResponseDto {
@@ -65,7 +65,7 @@ export class DeploymentMetadataResponseDto {
   commitSha?: string;
   deployer?: string;
   transactionHash?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 }

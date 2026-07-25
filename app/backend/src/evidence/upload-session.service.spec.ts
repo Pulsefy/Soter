@@ -38,17 +38,21 @@ function baseSession() {
 
 // ── mocks ────────────────────────────────────────────────────────────────────
 
+const mockStore = {
+  getSession: jest.fn(),
+  createSession: jest.fn(),
+  updateSessionStatus: jest.fn(),
+  storeChunk: jest.fn(),
+  getChunk: jest.fn(),
+  getExistingChunkChecksum: jest.fn(),
+  addReceivedChunk: jest.fn(),
+  isChunkReceived: jest.fn(),
+  getReceivedChunks: jest.fn(),
+  getAllChunks: jest.fn(),
+  cleanupSession: jest.fn(),
+};
+
 const mockPrisma = {
-  uploadSession: {
-    create: jest.fn(),
-    findUnique: jest.fn(),
-    update: jest.fn(),
-  },
-  uploadChunk: {
-    findUnique: jest.fn(),
-    create: jest.fn(),
-    findMany: jest.fn(),
-  },
   evidenceQueueItem: {
     findFirst: jest.fn(),
     create: jest.fn(),
@@ -56,7 +60,7 @@ const mockPrisma = {
 };
 
 const mockEncryption = {
-  encryptBuffer: jest.fn((buf: Buffer) => buf), // identity for tests
+  encryptBuffer: jest.fn((buf: Buffer) => buf),
 };
 
 const mockAudit = {
@@ -85,13 +89,14 @@ describe('UploadSessionService', () => {
       mockPrisma as any,
       mockEncryption as any,
       mockAudit as any,
+      mockStore as any,
     );
   });
 
   // ── create ──────────────────────────────────────────────────────────────────
 
   describe('create', () => {
-    it('creates a session and returns it', async () => {
+    it('creates a session via the store and returns it', async () => {
       const dto = {
         fileName: 'doc.txt',
         mimeType: 'text/plain',
@@ -99,14 +104,13 @@ describe('UploadSessionService', () => {
         chunkSize: 100,
       };
       const created = makeSession({ totalChunks: 2 });
-      mockPrisma.uploadSession.create.mockResolvedValue(created);
+      mockStore.createSession.mockResolvedValue(created);
 
       const result = await service.create(dto, 'owner-1');
 
-      expect(mockPrisma.uploadSession.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ totalChunks: 2 }),
-        }),
+      expect(mockStore.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ totalChunks: 2 }),
+        expect.any(Number),
       );
       expect(result).toBe(created);
     });
@@ -161,10 +165,10 @@ describe('UploadSessionService', () => {
     const checksum = sha256(chunk);
 
     beforeEach(() => {
-      mockPrisma.uploadSession.findUnique.mockResolvedValue(makeSession());
-      mockPrisma.uploadChunk.findUnique.mockResolvedValue(null);
-      mockPrisma.uploadChunk.create.mockResolvedValue({});
-      (fsPromises.writeFile as jest.Mock).mockResolvedValue(undefined);
+      mockStore.getSession.mockResolvedValue(makeSession());
+      mockStore.getExistingChunkChecksum.mockResolvedValue(null);
+      mockStore.storeChunk.mockResolvedValue(undefined);
+      mockStore.addReceivedChunk.mockResolvedValue(undefined);
     });
 
     it('accepts a valid chunk', async () => {
@@ -181,14 +185,16 @@ describe('UploadSessionService', () => {
         received: true,
         duplicate: false,
       });
-      expect(fsPromises.writeFile).toHaveBeenCalled();
+      expect(mockStore.storeChunk).toHaveBeenCalledWith(
+        'sess-1',
+        0,
+        chunk,
+        expect.any(Number),
+      );
     });
 
     it('returns duplicate:true for an already-received chunk with matching checksum', async () => {
-      mockPrisma.uploadChunk.findUnique.mockResolvedValue({
-        index: 0,
-        checksum,
-      });
+      mockStore.getExistingChunkChecksum.mockResolvedValue(checksum);
 
       const result = await service.uploadChunk(
         'sess-1',
@@ -198,14 +204,11 @@ describe('UploadSessionService', () => {
         'owner-1',
       );
       expect(result).toMatchObject({ duplicate: true });
-      expect(fsPromises.writeFile).not.toHaveBeenCalled();
+      expect(mockStore.storeChunk).not.toHaveBeenCalled();
     });
 
     it('throws ConflictException for duplicate chunk with different checksum', async () => {
-      mockPrisma.uploadChunk.findUnique.mockResolvedValue({
-        index: 0,
-        checksum: 'different',
-      });
+      mockStore.getExistingChunkChecksum.mockResolvedValue('different');
 
       await expect(
         service.uploadChunk('sess-1', 0, checksum, chunk, 'owner-1'),
@@ -239,17 +242,17 @@ describe('UploadSessionService', () => {
     });
 
     it('throws NotFoundException for unknown session', async () => {
-      mockPrisma.uploadSession.findUnique.mockResolvedValue(null);
+      mockStore.getSession.mockResolvedValue(null);
       await expect(
         service.uploadChunk('sess-1', 0, checksum, chunk, 'owner-1'),
       ).rejects.toThrow(NotFoundException);
     });
 
     it('throws BadRequestException for expired session', async () => {
-      mockPrisma.uploadSession.findUnique.mockResolvedValue(
+      mockStore.getSession.mockResolvedValue(
         makeSession({ expiresAt: new Date(Date.now() - 1000) }),
       );
-      mockPrisma.uploadSession.update.mockResolvedValue({});
+      mockStore.updateSessionStatus.mockResolvedValue(undefined);
       await expect(
         service.uploadChunk('sess-1', 0, checksum, chunk, 'owner-1'),
       ).rejects.toThrow(/expired/i);
@@ -261,40 +264,33 @@ describe('UploadSessionService', () => {
   describe('finalize', () => {
     const chunkBuf = Buffer.alloc(100, 0x61);
 
-    const chunks = [0, 1, 2].map(i => ({
-      index: i,
-      size: 100,
-      checksum: sha256(chunkBuf),
-      filePath: `/tmp/sess-1-${i}`,
-    }));
-
     beforeEach(() => {
-      mockPrisma.uploadSession.findUnique.mockResolvedValue(makeSession());
-      mockPrisma.uploadChunk.findMany.mockResolvedValue(chunks);
+      mockStore.getSession.mockResolvedValue(makeSession());
+      mockStore.getReceivedChunks.mockResolvedValue([0, 1, 2]);
+      mockStore.getAllChunks.mockResolvedValue([chunkBuf, chunkBuf, chunkBuf]);
+      mockStore.updateSessionStatus.mockResolvedValue(undefined);
+      mockStore.cleanupSession.mockResolvedValue(undefined);
       mockPrisma.evidenceQueueItem.findFirst.mockResolvedValue(null);
       mockPrisma.evidenceQueueItem.create.mockResolvedValue({
         id: 'ev-1',
         fileName: 'evidence.txt',
       });
-      mockPrisma.uploadSession.update.mockResolvedValue({});
-      (fsPromises.readFile as jest.Mock).mockResolvedValue(chunkBuf);
       (fsPromises.writeFile as jest.Mock).mockResolvedValue(undefined);
       (fsPromises.unlink as jest.Mock).mockResolvedValue(undefined);
     });
 
-    it('assembles chunks and creates an evidence queue item', async () => {
+    it('assembles chunks from Redis and creates an evidence queue item', async () => {
       const result = await service.finalize('sess-1', 'owner-1');
       expect(result).toMatchObject({ id: 'ev-1' });
       expect(mockPrisma.evidenceQueueItem.create).toHaveBeenCalled();
-      expect(mockPrisma.uploadSession.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { status: UploadSessionStatus.completed },
-        }),
+      expect(mockStore.updateSessionStatus).toHaveBeenCalledWith(
+        'sess-1',
+        UploadSessionStatus.completed,
       );
     });
 
     it('throws BadRequestException when chunks are missing', async () => {
-      mockPrisma.uploadChunk.findMany.mockResolvedValue([chunks[0]]); // only 1 of 3
+      mockStore.getReceivedChunks.mockResolvedValue([0]); // only 1 of 3
       await expect(service.finalize('sess-1', 'owner-1')).rejects.toThrow(
         /Missing chunks/i,
       );
@@ -310,9 +306,9 @@ describe('UploadSessionService', () => {
       );
     });
 
-    it('cleans up chunk files after finalization', async () => {
+    it('cleans up Redis keys after finalization', async () => {
       await service.finalize('sess-1', 'owner-1');
-      expect(fsPromises.unlink).toHaveBeenCalledTimes(chunks.length);
+      expect(mockStore.cleanupSession).toHaveBeenCalledWith('sess-1', 3);
     });
   });
 
@@ -320,11 +316,8 @@ describe('UploadSessionService', () => {
 
   describe('getStatus', () => {
     it('returns received chunk indices for resume', async () => {
-      mockPrisma.uploadSession.findUnique.mockResolvedValue(makeSession());
-      mockPrisma.uploadChunk.findMany.mockResolvedValue([
-        { index: 0 },
-        { index: 1 },
-      ]);
+      mockStore.getSession.mockResolvedValue(makeSession());
+      mockStore.getReceivedChunks.mockResolvedValue([0, 1]);
 
       const status = await service.getStatus('sess-1', 'owner-1');
       expect(status).toEqual({
@@ -335,8 +328,8 @@ describe('UploadSessionService', () => {
     });
 
     it('returns empty array when no chunks received yet', async () => {
-      mockPrisma.uploadSession.findUnique.mockResolvedValue(makeSession());
-      mockPrisma.uploadChunk.findMany.mockResolvedValue([]);
+      mockStore.getSession.mockResolvedValue(makeSession());
+      mockStore.getReceivedChunks.mockResolvedValue([]);
 
       const status = await service.getStatus('sess-1', 'owner-1');
       expect(status.receivedChunks).toEqual([]);

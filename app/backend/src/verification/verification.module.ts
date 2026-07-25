@@ -13,7 +13,6 @@ import { AuditModule } from '../audit/audit.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { EncryptionModule } from '../common/encryption/encryption.module';
 import { JobsModule } from '../jobs/jobs.module';
-import { MetricsModule } from '../observability/metrics/metrics.module';
 
 @Module({
   imports: [
@@ -23,7 +22,6 @@ import { MetricsModule } from '../observability/metrics/metrics.module';
     AuditModule,
     NotificationsModule,
     EncryptionModule,
-    MetricsModule,
     BullModule.registerQueueAsync({
       name: 'verification',
       imports: [ConfigModule],

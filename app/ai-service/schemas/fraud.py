@@ -1,6 +1,12 @@
+from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from schemas.common import AnchorMetadata
+
+
+class FraudExplanationCode(str, Enum):
+    ANOMALY_DETECTED = "ANOMALY_DETECTED"
+    # Additional codes can be added here as new detection rules are implemented
 
 
 class ClaimMetadata(BaseModel):
@@ -48,13 +54,14 @@ class ClaimFraudResult(BaseModel):
     claim_id: str = Field(examples=["claim-abc123"])
     fraud_risk_score: float = Field(ge=0.0, le=1.0, examples=[0.15, 0.95])
     is_flagged: bool = Field(examples=[False, True])
+    code: Optional[FraudExplanationCode] = Field(None, examples=[FraudExplanationCode.ANOMALY_DETECTED])
     reason: Optional[str] = Field(None, examples=["Statistical outlier in amount"])
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {"claim_id": "claim-abc123", "fraud_risk_score": 0.15, "is_flagged": False},
-                {"claim_id": "claim-def456", "fraud_risk_score": 0.95, "is_flagged": True, "reason": "Statistical outlier in amount"}
+                {"claim_id": "claim-def456", "fraud_risk_score": 0.95, "is_flagged": True, "code": "ANOMALY_DETECTED", "reason": "Statistical outlier in amount"}
             ]
         }
     }
@@ -71,7 +78,7 @@ class FraudDetectionResponse(BaseModel):
                 {
                     "results": [
                         {"claim_id": "claim-abc123", "fraud_risk_score": 0.15, "is_flagged": False},
-                        {"claim_id": "claim-def456", "fraud_risk_score": 0.95, "is_flagged": True, "reason": "Statistical outlier in amount"}
+                        {"claim_id": "claim-def456", "fraud_risk_score": 0.95, "is_flagged": True, "code": "ANOMALY_DETECTED", "reason": "Statistical outlier in amount"}
                     ],
                     "flagged_count": 1,
                     "anchor_metadata": {"campaign_ref": "campaign-2024-001"}

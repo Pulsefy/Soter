@@ -12,7 +12,7 @@ import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from sklearn.neighbors import LocalOutlierFactor
 
-from schemas.fraud import ClaimMetadata, ClaimFraudResult
+from schemas.fraud import ClaimMetadata, ClaimFraudResult, FraudExplanationCode
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +76,13 @@ def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
     for claim, raw, score in zip(claims, raw_scores, normalised):
         is_flagged = raw < _OUTLIER_THRESHOLD
         reason = "Anomalous pattern detected" if is_flagged else None
+        code = FraudExplanationCode.ANOMALY_DETECTED if is_flagged else None
         results.append(
             ClaimFraudResult(
                 claim_id=claim.claim_id,
                 fraud_risk_score=round(float(score), 4),
                 is_flagged=is_flagged,
+                code=code,
                 reason=reason,
             )
         )

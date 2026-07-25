@@ -226,6 +226,117 @@ const campaignUpdateHandler: MockHandler = async (url, options) => {
   });
 };
 
+const campaignGetHandler: MockHandler = async (url) => {
+  const urlParts = url.split('?')[0].split('/');
+  const id = urlParts[urlParts.length - 1];
+  const campaign = campaignsStore.find(item => item.id === id);
+
+  if (!campaign) {
+    return new Response(JSON.stringify({ success: false, message: 'Campaign not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  return new Response(JSON.stringify({ success: true, data: campaign, message: 'Campaign fetched successfully' }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+const campaignTimelineHandler: MockHandler = async (url) => {
+  const parts = url.split('?')[0].split('/');
+  const id = parts[parts.length - 2];
+  const campaign = campaignsStore.find(item => item.id === id);
+
+  if (!campaign) {
+    return new Response(JSON.stringify({ success: false, message: 'Campaign not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  const now = Date.now();
+  const data = [
+    {
+      id: 'issuance',
+      label: 'Issuance',
+      status: 'completed',
+      occurredAt: campaign.createdAt,
+      description: 'Campaign issued with recipient package preparation started.',
+    },
+    {
+      id: 'verification',
+      label: 'Verification',
+      status: campaign.status === 'paused' ? 'delayed' : 'completed',
+      occurredAt: new Date(now - 1000 * 60 * 60 * 12).toISOString(),
+      description: campaign.status === 'paused' ? 'Verification updates are delayed.' : 'Recipient verifications are flowing from the review queue.',
+      correlationId: 'mock-review-correlation-001',
+    },
+    {
+      id: 'claim',
+      label: 'Claim',
+      status: 'completed',
+      occurredAt: new Date(now - 1000 * 60 * 45).toISOString(),
+      description: 'Onchain claim transaction confirmed for the latest package.',
+      transactionHash: '6f6b4a9f6bb87ac7e5f0783fd7f4ff1d4c0a9df7db49e2749d7d117e7d2be001',
+      explorerUrl: 'https://stellar.expert/explorer/testnet/tx/6f6b4a9f6bb87ac7e5f0783fd7f4ff1d4c0a9df7db49e2749d7d117e7d2be001',
+      correlationId: 'mock-claim-correlation-001',
+    },
+    {
+      id: 'disbursement',
+      label: 'Disbursement',
+      status: campaign.status === 'active' ? 'pending' : 'delayed',
+      description: 'Waiting for disbursement confirmation from ledger processing.',
+    },
+  ];
+
+  return new Response(JSON.stringify({ success: true, data, message: 'Campaign timeline fetched successfully' }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+const activityFeedHandler: MockHandler = async () => {
+  const now = Date.now();
+  const data = [
+    {
+      id: 'notification:mock-1',
+      type: 'notification',
+      status: 'processing',
+      title: 'SMS notification enqueued',
+      description: 'Recipient claim reminder is waiting for delivery confirmation.',
+      timestamp: new Date(now - 1000 * 60 * 8).toISOString(),
+      read: false,
+      correlationId: 'mock-sms-correlation-001',
+      linkHref: '/notifications/outbox/mock-1',
+      linkLabel: 'Open outbox record',
+    },
+    {
+      id: 'review:mock-2',
+      type: 'review',
+      status: 'pending',
+      title: 'Verification pending review',
+      description: 'A new verification request is ready for reviewer action.',
+      timestamp: new Date(now - 1000 * 60 * 24).toISOString(),
+      read: false,
+      linkHref: '/verification-review?requestId=mock-2',
+      linkLabel: 'Open review',
+    },
+    {
+      id: 'audit:mock-3',
+      type: 'audit',
+      status: 'succeeded',
+      title: 'update Campaign',
+      description: 'Actor demo-admin updated campaign 1',
+      timestamp: new Date(now - 1000 * 60 * 90).toISOString(),
+      read: true,
+      correlationId: 'mock-audit-correlation-001',
+      linkHref: '/campaigns/1',
+      linkLabel: 'Open record',
+    },
+  ];
+
+  return new Response(JSON.stringify({ success: true, data, message: 'Activity feed fetched' }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
 const recipientsImportValidateHandler: MockHandler = async (_url, options) => {
   const body = options?.body;
 
@@ -331,6 +442,7 @@ export const handlers: Record<string, MockHandler> = {
   '/aid-packages': aidPackagesHandler,
   '/recipients/import/validate': recipientsImportValidateHandler,
   '/recipients/import/confirm': recipientsImportConfirmHandler,
+  '/notifications/activity-feed': activityFeedHandler,
   '/campaigns': async (url, options) => {
     const method = options?.method?.toUpperCase() ?? 'GET';
     if (method === 'POST') {
@@ -340,8 +452,14 @@ export const handlers: Record<string, MockHandler> = {
   },
   '/campaigns/:id': async (url, options) => {
     const method = options?.method?.toUpperCase() ?? 'GET';
+    if (url.split('?')[0].endsWith('/timeline')) {
+      return campaignTimelineHandler(url, options);
+    }
     if (method === 'PATCH') {
       return campaignUpdateHandler(url, options);
+    }
+    if (method === 'GET') {
+      return campaignGetHandler(url, options);
     }
     return new Response(JSON.stringify({ success: false, message: 'Method not implemented in mock' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
   },

@@ -252,7 +252,12 @@ export default function CampaignsPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <h3 className="text-lg font-semibold">{campaign.name}</h3>
+                        <Link
+                          href={`/campaigns/${campaign.id}`}
+                          className="text-lg font-semibold text-slate-950 hover:text-blue-700 hover:underline dark:text-slate-50 dark:hover:text-blue-300"
+                        >
+                          {campaign.name}
+                        </Link>
                         <p className="text-sm text-gray-500 dark:text-gray-400">
                           Budget:{' '}
                           {campaign.budget.toLocaleString('en-US', {
@@ -277,6 +282,12 @@ export default function CampaignsPage() {
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Link
+                        href={`/campaigns/${campaign.id}`}
+                        className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        View timeline
+                      </Link>
                       <Link
                         href={`/campaigns/${campaign.id}/import-recipients`}
                         className="rounded-md border border-blue-300 px-3 py-1 text-sm text-blue-700 transition hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/30"

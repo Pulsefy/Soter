@@ -9,6 +9,12 @@ class HumanitarianVerificationRequest(BaseModel):
     context_factors: Dict[str, Any] = Field(default_factory=dict, examples=[{"location": "Kano, Nigeria", "disaster_type": "flood"}])
     provider_preference: Literal["auto", "test", "openai", "groq"] = Field("auto", examples=["auto"])
     timeout: Optional[float] = Field(default=None, description="Request-level timeout in seconds for provider call", examples=[30.0])
+    artifact_ids: List[str] = Field(
+        default_factory=list,
+        description="IDs of evidence artifacts (see /ai/verification-artifacts) referenced by this claim. "
+        "Used to key the response cache so it can be explicitly invalidated when an artifact is updated.",
+        examples=[["artifact_abc123"]],
+    )
     anchor_metadata: Optional[AnchorMetadata] = None
 
     model_config = {

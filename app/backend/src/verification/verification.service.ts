@@ -20,7 +20,6 @@ import {
   VerificationResult,
 } from './interfaces/verification-job.interface';
 import { AuditService } from '../audit/audit.service';
-import { MetricsService } from '../observability/metrics/metrics.service';
 import { firstValueFrom } from 'rxjs';
 import OpenAI from 'openai';
 import * as crypto from 'crypto';
@@ -138,7 +137,6 @@ export class VerificationService {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
-    private readonly metricsService: MetricsService,
     private readonly httpService: HttpService,
   ) {
     this.verificationMode =
@@ -271,19 +269,12 @@ export class VerificationService {
 
     const shouldVerify = result.score >= this.verificationThreshold;
 
-    const updatedClaim = await this.prisma.claim.update({
+    await this.prisma.claim.update({
       where: { id: claimId },
       data: {
         status: shouldVerify ? 'verified' : 'requested',
       },
     });
-
-    if (shouldVerify && claim.status !== ClaimStatus.verified) {
-      this.recordClaimFunnelTransition(
-        claim.status as ClaimStatus,
-        ClaimStatus.verified,
-      );
-    }
 
     this.logger.log(
       `Claim ${claimId} verification completed – score ${result.score} ` +
@@ -302,44 +293,6 @@ export class VerificationService {
     });
 
     return result;
-  }
-
-  private recordClaimFunnelTransition(
-    fromStatus: ClaimStatus | null,
-    toStatus: ClaimStatus,
-  ): void {
-    const toStage = this.claimStatusToFunnelStage(toStatus);
-    if (toStage) {
-      this.metricsService.incrementCounter('claim_funnel_total', {
-        stage: toStage,
-      });
-      this.metricsService.incrementGauge('claim_funnel_current', {
-        stage: toStage,
-      });
-    }
-
-    const fromStage =
-      fromStatus === null ? null : this.claimStatusToFunnelStage(fromStatus);
-    if (fromStage && fromStage !== toStage) {
-      this.metricsService.decrementGauge('claim_funnel_current', {
-        stage: fromStage,
-      });
-    }
-  }
-
-  private claimStatusToFunnelStage(status: ClaimStatus): string | null {
-    switch (status) {
-      case ClaimStatus.requested:
-        return 'created';
-      case ClaimStatus.verified:
-        return 'verified';
-      case ClaimStatus.approved:
-        return 'approved';
-      case ClaimStatus.disbursed:
-        return 'disbursed';
-      default:
-        return null;
-    }
   }
 
   // -------------------------------------------------------------------------

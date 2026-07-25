@@ -1,6 +1,20 @@
+from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field
 from schemas.common import AnchorMetadata
+
+
+class LanguageHint(str, Enum):
+    eng = "eng"
+    spa = "spa"
+    fra = "fra"
+    deu = "deu"
+    ita = "ita"
+    por = "por"
+    chi_sim = "chi_sim"
+    ara = "ara"
+    hin = "hin"
+    jpn = "jpn"
 
 
 class OCRFieldResult(BaseModel):

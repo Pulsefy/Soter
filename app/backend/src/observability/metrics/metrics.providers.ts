@@ -128,4 +128,16 @@ export const metricsProviders = [
     help: 'Total number of analytics cache invalidations',
     labelNames: ['reason'],
   }),
+
+  // Verification Priority Metrics
+  makeCounterProvider({
+    name: 'verification_jobs_enqueued_total',
+    help: 'Total number of verification jobs enqueued, labelled by priority tier',
+    labelNames: ['priority'],
+  }),
+  makeGaugeProvider({
+    name: 'verification_queue_waiting_by_priority',
+    help: 'Current number of waiting verification jobs by priority tier',
+    labelNames: ['priority'],
+  }),
 ];

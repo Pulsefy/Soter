@@ -152,6 +152,33 @@ Response body:
 }
 ```
 
+### Dead-Letter Replay
+
+Failed callback deliveries (webhook POSTs to the backend that keep 4xx/5xx-ing)
+and async jobs that exhaust their Celery retry budget are captured in an
+in-memory dead-letter queue instead of being silently dropped, so operators
+can recover from transient outages without manual patching.
+
+- **GET** `/v1/ai/dead-letter` - List dead-letter items (`?kind=callback|async_job&status=pending|succeeded|exhausted`)
+- **GET** `/v1/ai/dead-letter/{item_id}` - Get a single item, including its full replay audit log
+- **POST** `/v1/ai/dead-letter/{item_id}/replay` - Replay a single item (resend the callback, or re-run the async job)
+
+All three endpoints require an `X-User-Role` header (`admin`, `operator`, or
+`reviewer` to read; `admin` or `operator` to replay). Replay is rate-limited
+two ways: a per-item cooldown (`DEAD_LETTER_REPLAY_COOLDOWN_SECONDS`, default
+10s) enforced between attempts on the same item, and a per-client request
+rate limit (`DEAD_LETTER_REPLAY_RATE_LIMIT`, default `10/minute`) on the
+route itself. Items that fail `DEAD_LETTER_MAX_REPLAY_ATTEMPTS` times
+(default 5) move to `exhausted` and stop accepting further replays.
+
+Every replay attempt - success or failure - is appended to the item's
+`audit_log` with the actor (`X-User-Id`), outcome, and error.
+
+```bash
+curl -X POST "http://localhost:8000/v1/ai/dead-letter/callback:task-123/replay" \
+  -H "X-User-Role: operator" -H "X-User-Id: alice"
+```
+
 ## Project Structure
 
 ```

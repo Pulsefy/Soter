@@ -1,13 +1,27 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { NotificationOutbox } from '@prisma/client';
+import { AuditLog, NotificationOutbox } from '@prisma/client';
 import {
   NotificationJobData,
   NotificationType,
 } from './interfaces/notification-job.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
+
+export interface ActivityFeedItem {
+  id: string;
+  type: 'notification' | 'audit' | 'review';
+  status: 'pending' | 'processing' | 'succeeded' | 'failed';
+  title: string;
+  description: string;
+  timestamp: Date;
+  read: boolean;
+  correlationId?: string;
+  linkHref?: string;
+  linkLabel?: string;
+  metadata?: Record<string, unknown>;
+}
 
 @Injectable()
 export class NotificationsService {
@@ -150,5 +164,123 @@ export class NotificationsService {
       },
       orderBy: { scheduledFor: 'asc' },
     });
+  }
+
+  async getActivityFeed(limit = 30): Promise<ActivityFeedItem[]> {
+    const take = Math.min(Math.max(limit, 1), 100);
+    const [notifications, auditLogs, reviews] = await this.prisma.$transaction([
+      this.prisma.notificationOutbox.findMany({
+        orderBy: { createdAt: 'desc' },
+        take,
+      }),
+      this.prisma.auditLog.findMany({
+        where: { deletedAt: null },
+        orderBy: { timestamp: 'desc' },
+        take,
+      }),
+      this.prisma.verificationRequest.findMany({
+        where: { deletedAt: null },
+        orderBy: [{ reviewedAt: 'desc' }, { updatedAt: 'desc' }],
+        take,
+      }),
+    ]);
+
+    return [
+      ...notifications.map(record => this.mapOutboxToFeedItem(record)),
+      ...auditLogs.map(record => this.mapAuditToFeedItem(record)),
+      ...reviews.map(record => ({
+        id: `review:${record.id}`,
+        type: 'review' as const,
+        status:
+          record.status === 'rejected'
+            ? ('failed' as const)
+            : record.status === 'approved'
+              ? ('succeeded' as const)
+              : ('pending' as const),
+        title: `Verification ${record.status.replaceAll('_', ' ')}`,
+        description: record.nextStepMessage
+          ? record.nextStepMessage
+          : record.reviewedBy
+            ? `Reviewed by ${record.reviewedBy}`
+            : 'Awaiting reviewer action',
+        timestamp: record.reviewedAt ?? record.updatedAt ?? record.createdAt,
+        read: record.status === 'approved' || record.status === 'rejected',
+        linkHref: `/verification-review?requestId=${record.id}`,
+        linkLabel: 'Open review',
+        metadata: { requestId: record.id, orgId: record.orgId },
+      })),
+    ]
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      .slice(0, take);
+  }
+
+  private mapOutboxToFeedItem(record: NotificationOutbox): ActivityFeedItem {
+    const metadata = this.parseMetadata(record.metadata);
+    const correlationId =
+      typeof metadata.correlationId === 'string'
+        ? metadata.correlationId
+        : (record.jobId ?? undefined);
+
+    return {
+      id: `notification:${record.id}`,
+      type: 'notification',
+      status:
+        record.status === 'failed'
+          ? 'failed'
+          : record.status === 'sent'
+            ? 'succeeded'
+            : record.status === 'enqueued'
+              ? 'processing'
+              : 'pending',
+      title: record.subject ?? `${record.type.toUpperCase()} notification`,
+      description: record.lastError ?? record.message,
+      timestamp: record.sentAt ?? record.lastAttemptAt ?? record.createdAt,
+      read: record.status === 'sent',
+      correlationId,
+      linkHref: `/notifications/outbox/${record.id}`,
+      linkLabel: 'Open outbox record',
+      metadata: {
+        ...metadata,
+        outboxId: record.id,
+        recipient: record.recipient,
+      },
+    };
+  }
+
+  private mapAuditToFeedItem(record: AuditLog): ActivityFeedItem {
+    const metadata =
+      record.metadata && typeof record.metadata === 'object'
+        ? (record.metadata as Record<string, unknown>)
+        : {};
+    const correlationId =
+      typeof metadata.correlationId === 'string'
+        ? metadata.correlationId
+        : undefined;
+
+    return {
+      id: `audit:${record.id}`,
+      type: 'audit',
+      status: 'succeeded',
+      title: `${record.action} ${record.entity}`,
+      description: `Actor ${record.actorId} updated ${record.entityId}`,
+      timestamp: record.timestamp,
+      read: true,
+      correlationId,
+      linkHref: `/${record.entity.toLowerCase()}s/${record.entityId}`,
+      linkLabel: 'Open record',
+      metadata,
+    };
+  }
+
+  private parseMetadata(metadata: string | null): Record<string, unknown> {
+    if (!metadata) return {};
+    try {
+      const parsed = JSON.parse(metadata);
+      return parsed && typeof parsed === 'object'
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
   }
 }

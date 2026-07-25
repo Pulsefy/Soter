@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { NotificationsService } from './notifications.service';
 import { NotificationProcessor } from './notifications.processor';
 import { OutboxController } from './outbox.controller';
+import { NotificationsController } from './notifications.controller';
 import { JobsModule } from '../jobs/jobs.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
 import { LoggerModule } from '../logger/logger.module';
@@ -26,7 +27,7 @@ import { LoggerModule } from '../logger/logger.module';
     MetricsModule,
     LoggerModule,
   ],
-  controllers: [OutboxController],
+  controllers: [OutboxController, NotificationsController],
   providers: [NotificationsService, NotificationProcessor],
   exports: [NotificationsService],
 })

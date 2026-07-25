@@ -1,6 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+  ArrayUnique,
+} from 'class-validator';
 import { AppRole } from '../../auth/app-role.enum';
+import { ApiKeyScope } from '../api-key-scope.enum';
 
 export class CreateApiKeyDto {
   @ApiProperty({
@@ -10,6 +18,19 @@ export class CreateApiKeyDto {
   })
   @IsEnum(AppRole)
   role!: AppRole;
+
+  @ApiPropertyOptional({
+    enum: ApiKeyScope,
+    isArray: true,
+    description:
+      'Scopes granted to this API key. Defaults to [admin] if omitted.',
+    example: [ApiKeyScope.read, ApiKeyScope.write],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsEnum(ApiKeyScope, { each: true })
+  scopes?: ApiKeyScope[];
 
   @ApiPropertyOptional({
     description: 'Optional NGO scope for this key (required for NGO role).',

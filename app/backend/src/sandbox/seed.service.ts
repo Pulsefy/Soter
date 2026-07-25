@@ -4,6 +4,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import {
   DEMO_CAMPAIGN_SEEDS,
   DEMO_CLAIM_SEEDS,
@@ -72,13 +73,11 @@ export class SeedService {
         status: 'draft',
         budget: 0,
         ngoId: DEMO_TENANT_SEED.ngoId,
-        metadata: JSON.parse(
-          JSON.stringify({
-            description: DEMO_TENANT_SEED.description,
-            region: DEMO_TENANT_SEED.region,
-            isTenantMarker: true,
-          }),
-        ),
+        metadata: {
+          description: DEMO_TENANT_SEED.description,
+          region: DEMO_TENANT_SEED.region,
+          isTenantMarker: true,
+        } as Prisma.InputJsonValue,
       },
     });
 
@@ -109,7 +108,7 @@ export class SeedService {
             status: seed.status,
             budget: seed.budget,
             ngoId: DEMO_TENANT_SEED.ngoId,
-            metadata: JSON.parse(JSON.stringify(seed.metadata)),
+            metadata: (seed.metadata ?? {}) as Prisma.InputJsonValue,
           },
         });
         created++;
