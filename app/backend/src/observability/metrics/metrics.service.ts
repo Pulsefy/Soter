@@ -301,6 +301,52 @@ export class MetricsService {
   }
 
   /**
+   * Increment a dynamic gauge by one.
+   */
+  incrementGauge(name: string, labels?: Record<string, string>): void {
+    if (!this.dynamicGauges.has(name)) {
+      this.dynamicGauges.set(
+        name,
+        new Gauge({
+          name,
+          help: `Gauge for ${name}`,
+          labelNames: labels ? Object.keys(labels) : [],
+        }),
+      );
+    }
+
+    const gauge = this.dynamicGauges.get(name)!;
+    if (labels) {
+      gauge.inc(labels, 1);
+    } else {
+      gauge.inc(1);
+    }
+  }
+
+  /**
+   * Decrement a dynamic gauge by one.
+   */
+  decrementGauge(name: string, labels?: Record<string, string>): void {
+    if (!this.dynamicGauges.has(name)) {
+      this.dynamicGauges.set(
+        name,
+        new Gauge({
+          name,
+          help: `Gauge for ${name}`,
+          labelNames: labels ? Object.keys(labels) : [],
+        }),
+      );
+    }
+
+    const gauge = this.dynamicGauges.get(name)!;
+    if (labels) {
+      gauge.dec(labels, 1);
+    } else {
+      gauge.dec(1);
+    }
+  }
+
+  /**
    * Record histogram metrics for duration tracking
    */
   recordHistogram(

@@ -11,14 +11,16 @@ Use the backend `/metrics`, `/health`, `/api/v1/health`, and `/jobs/health` endp
 
 ## Metrics To Watch
 
-| Signal | Metric | What it means |
-| --- | --- | --- |
-| Contract latency | `contract_call_latency_seconds{operation,status}` | Slow or failed Soroban contract operations by queue operation. Watch p95/p99 by `operation`. |
-| Transaction submission failures | `tx_submission_failures_total{operation,reason}` | Transaction submission or `tx_*` failures from onchain jobs. Spikes usually mean RPC congestion, expired transactions, bad sequence state, or network mismatch. |
-| Callback failures | `callback_failures_total{callback_type,reason}` | Failed AI webhooks, notification delivery jobs, and onchain job failure callbacks. |
-| Onchain throughput | `onchain_operations_total{operation,adapter,status}` | Existing onchain success/failure counter by adapter. |
-| Job failures | `jobs_failed_total{job_type}` | Background job failures across queues. Pair with `/jobs/health`. |
-| Webhook retries | `webhook_retries_total{webhook_type,reason}` | Retry pressure for webhook delivery paths. |
+| Signal                          | Metric                                               | What it means                                                                                                                                                   |
+| ------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Contract latency                | `contract_call_latency_seconds{operation,status}`    | Slow or failed Soroban contract operations by queue operation. Watch p95/p99 by `operation`.                                                                    |
+| Transaction submission failures | `tx_submission_failures_total{operation,reason}`     | Transaction submission or `tx_*` failures from onchain jobs. Spikes usually mean RPC congestion, expired transactions, bad sequence state, or network mismatch. |
+| Callback failures               | `callback_failures_total{callback_type,reason}`      | Failed AI webhooks, notification delivery jobs, and onchain job failure callbacks.                                                                              |
+| Onchain throughput              | `onchain_operations_total{operation,adapter,status}` | Existing onchain success/failure counter by adapter.                                                                                                            |
+| Claim funnel entry              | `claim_funnel_total{stage}`                          | Total claims entering each verification/disbursement stage: `created`, `verified`, `approved`, `disbursed`.                                                     |
+| Claim funnel state              | `claim_funnel_current{stage}`                        | Current claim counts by funnel stage. Track active claims in `created`, `verified`, `approved`, and `disbursed` stages.                                         |
+| Job failures                    | `jobs_failed_total{job_type}`                        | Background job failures across queues. Pair with `/jobs/health`.                                                                                                |
+| Webhook retries                 | `webhook_retries_total{webhook_type,reason}`         | Retry pressure for webhook delivery paths.                                                                                                                      |
 
 ## Incident Checklist
 

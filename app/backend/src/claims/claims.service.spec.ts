@@ -76,6 +76,8 @@ describe('ClaimsService', () => {
     incrementOnchainOperation: jest.fn(),
     recordOnchainDuration: jest.fn(),
     incrementCounter: jest.fn(),
+    incrementGauge: jest.fn(),
+    decrementGauge: jest.fn(),
   };
 
   const mockSorobanTxLifecycleService = {
@@ -103,6 +105,9 @@ describe('ClaimsService', () => {
         {
           provide: PrismaService,
           useValue: {
+            campaign: {
+              findUnique: jest.fn(),
+            },
             claim: {
               findUnique: jest.fn(),
               update: jest.fn(),
@@ -226,6 +231,135 @@ describe('ClaimsService', () => {
       await service.disburse('claim-123');
 
       expect(mockMetricsService.incrementCounter).toHaveBeenCalled();
+    });
+
+    it('should increment funnel metrics when a new claim is created', async () => {
+      const newClaim = {
+        ...mockClaim,
+        status: ClaimStatus.requested,
+      };
+      const campaign = {
+        id: 'campaign-1',
+        name: 'Test Campaign',
+        status: 'active',
+        budget: new Prisma.Decimal('1000.00'),
+        metadata: null,
+        archivedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      jest
+        .spyOn(prismaService.campaign, 'findUnique' as any)
+        .mockResolvedValue(campaign);
+      jest.spyOn(prismaService.claim, 'create').mockResolvedValue(newClaim);
+
+      await service.create({
+        campaignId: 'campaign-1',
+        amount: new Prisma.Decimal('100.00'),
+        recipientRef: 'recipient-123',
+        evidenceRef: 'evidence-456',
+      } as any);
+
+      expect(mockMetricsService.incrementCounter).toHaveBeenCalledWith(
+        'claim_funnel_total',
+        { stage: 'created' },
+      );
+      expect(mockMetricsService.incrementGauge).toHaveBeenCalledWith(
+        'claim_funnel_current',
+        { stage: 'created' },
+      );
+    });
+
+    it('should update funnel metrics during verify/approve/disburse transitions', async () => {
+      const requestedClaim = { ...mockClaim, status: ClaimStatus.requested };
+      const verifiedClaim = { ...mockClaim, status: ClaimStatus.verified };
+      const approvedClaim = { ...mockClaim, status: ClaimStatus.approved };
+      const disbursedClaim = { ...mockClaim, status: ClaimStatus.disbursed };
+
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(requestedClaim);
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+          await Promise.resolve();
+          return callback({
+            claim: {
+              update: jest.fn().mockResolvedValue(verifiedClaim),
+            },
+          });
+        });
+
+      await service.verify('claim-123');
+      expect(mockMetricsService.incrementCounter).toHaveBeenCalledWith(
+        'claim_funnel_total',
+        { stage: 'verified' },
+      );
+      expect(mockMetricsService.incrementGauge).toHaveBeenCalledWith(
+        'claim_funnel_current',
+        { stage: 'verified' },
+      );
+      expect(mockMetricsService.decrementGauge).toHaveBeenCalledWith(
+        'claim_funnel_current',
+        { stage: 'created' },
+      );
+
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(verifiedClaim);
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+          await Promise.resolve();
+          return callback({
+            claim: {
+              update: jest.fn().mockResolvedValue(approvedClaim),
+            },
+          });
+        });
+
+      await service.approve('claim-123');
+      expect(mockMetricsService.incrementCounter).toHaveBeenCalledWith(
+        'claim_funnel_total',
+        { stage: 'approved' },
+      );
+      expect(mockMetricsService.incrementGauge).toHaveBeenCalledWith(
+        'claim_funnel_current',
+        { stage: 'approved' },
+      );
+      expect(mockMetricsService.decrementGauge).toHaveBeenCalledWith(
+        'claim_funnel_current',
+        { stage: 'verified' },
+      );
+
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(approvedClaim);
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+          await Promise.resolve();
+          return callback({
+            claim: {
+              update: jest.fn().mockResolvedValue(disbursedClaim),
+            },
+          });
+        });
+
+      await service.disburse('claim-123');
+      expect(mockMetricsService.incrementCounter).toHaveBeenCalledWith(
+        'claim_funnel_total',
+        { stage: 'disbursed' },
+      );
+      expect(mockMetricsService.incrementGauge).toHaveBeenCalledWith(
+        'claim_funnel_current',
+        { stage: 'disbursed' },
+      );
+      expect(mockMetricsService.decrementGauge).toHaveBeenCalledWith(
+        'claim_funnel_current',
+        { stage: 'approved' },
+      );
     });
 
     it('should transition claim status to disbursed', async () => {
