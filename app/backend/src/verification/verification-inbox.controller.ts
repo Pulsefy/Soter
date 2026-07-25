@@ -9,8 +9,11 @@ import {
   HttpStatus,
   HttpCode,
   Request,
+  MessageEvent,
+  Sse,
+  Res,
 } from '@nestjs/common';
-import { Request as ExpressRequest } from 'express';
+import { Request as ExpressRequest, Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -22,8 +25,11 @@ import {
   ApiUnauthorizedResponse,
   ApiNotFoundResponse,
   ApiForbiddenResponse,
+  ApiExtraModels,
 } from '@nestjs/swagger';
+import { Observable } from 'rxjs';
 import { VerificationInboxService } from './verification-inbox.service';
+import { VerificationInboxSseService } from './verification-inbox-sse.service';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
 
@@ -34,10 +40,12 @@ interface InboxUser {
 
 @ApiTags('Verification Inbox')
 @ApiBearerAuth('JWT-auth')
+@ApiExtraModels()
 @Controller('verification-inbox')
 export class VerificationInboxController {
   constructor(
     private readonly verificationInboxService: VerificationInboxService,
+    private readonly sseService: VerificationInboxSseService,
   ) {}
 
   @Get()
@@ -138,6 +146,106 @@ export class VerificationInboxController {
   })
   async getStats() {
     return this.verificationInboxService.getStats();
+  }
+
+  /**
+   * SSE stream — global inbox feed.
+   *
+   * Authenticated callers (operator / admin) open a long-lived connection here
+   * and receive real-time MessageEvent frames whenever any verification inbox
+   * item is mutated (status change or internal note added).
+   *
+   * The client can reconnect at any time; the stream always starts fresh
+   * (no replay of historical events).
+   *
+   * Event shapes:
+   *  - type: "status_updated" — data contains verificationId, previousStatus,
+   *    newStatus, reviewerId, and optional rejectionReason / nextStepMessage.
+   *  - type: "note_added" — data contains verificationId, noteId, authorId,
+   *    and optional category.
+   */
+  @Sse('events')
+  @Version('1')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Stream verification inbox updates (SSE)',
+    description:
+      'Open a persistent Server-Sent Events connection that emits real-time ' +
+      'frames for every inbox mutation. Requires operator or admin role. ' +
+      'Reconnect at any time — the stream always starts fresh.',
+  })
+  @ApiOkResponse({
+    description: 'SSE stream of inbox mutation events.',
+    content: {
+      'text/event-stream': {
+        schema: {
+          type: 'string',
+          example:
+            'event: status_updated\n' +
+            'id: v1-2026-01-25T00:00:00.000Z\n' +
+            'data: {"verificationId":"v1","timestamp":"2026-01-25T00:00:00.000Z","previousStatus":"pending_review","newStatus":"approved","reviewerId":"reviewer-1"}\n\n',
+        },
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid API key.' })
+  @ApiForbiddenResponse({
+    description: 'Insufficient role (operator or admin required).',
+  })
+  streamInboxEvents(
+    @Res({ passthrough: true }) res: Response,
+  ): Observable<MessageEvent> {
+    // Keep the connection alive with no-cache headers.
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    return this.sseService.getStream();
+  }
+
+  /**
+   * SSE stream — scoped to a single verification request.
+   *
+   * Useful for reviewer detail pages that only care about mutations on one
+   * specific item without the noise of the full inbox feed.
+   */
+  @Sse(':id/events')
+  @Version('1')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Stream updates for a single verification request (SSE)',
+    description:
+      'Open a persistent Server-Sent Events connection scoped to a single ' +
+      'verification request. Only emits events whose verificationId matches ' +
+      'the path parameter.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Unique identifier of the verification request to watch',
+  })
+  @ApiOkResponse({
+    description: 'SSE stream of mutation events for the specified request.',
+    content: {
+      'text/event-stream': {
+        schema: {
+          type: 'string',
+          example:
+            'event: note_added\n' +
+            'id: v1-2026-01-25T00:00:00.000Z\n' +
+            'data: {"verificationId":"v1","timestamp":"2026-01-25T00:00:00.000Z","noteId":"note-1","authorId":"reviewer-1"}\n\n',
+        },
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid API key.' })
+  @ApiForbiddenResponse({
+    description: 'Insufficient role (operator or admin required).',
+  })
+  streamVerificationEvents(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Observable<MessageEvent> {
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    return this.sseService.getStream(id);
   }
 
   @Post(':id/approve')
