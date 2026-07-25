@@ -2,11 +2,11 @@ name: Backend CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ['main']
     paths:
       - 'app/backend/**'
   pull_request:
-    branches: [ "main" ]
+    branches: ['main']
     paths:
       - 'app/backend/**'
 
@@ -29,13 +29,17 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
+        working-directory: ./app/backend
         run: pnpm install --no-frozen-lockfile --engine-strict=false
 
       - name: Lint
-        run: pnpm --filter backend run lint
+        working-directory: ./app/backend
+        run: pnpm run lint
 
       - name: Test
-        run: pnpm --filter backend run test
+        working-directory: ./app/backend
+        run: pnpm run test
 
       - name: Build
-        run: pnpm --filter backend run build
+        working-directory: ./app/backend
+        run: pnpm run build
