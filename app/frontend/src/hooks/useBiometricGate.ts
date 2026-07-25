@@ -2,11 +2,12 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { useBiometricStore } from '@/lib/biometricStore';
-import { 
-  getBiometricStatus, 
+import {
+  getBiometricStatus,
   promptBiometricAuthentication,
+  registerPasskey,
   BiometricAuthResult,
-  BiometricStatus 
+  BiometricStatus,
 } from '@/services/biometricService';
 import { useToast } from '@/components/ToastProvider';
 
@@ -25,6 +26,8 @@ export interface BiometricGateOptions {
   fallbackTitle?: string;
   /** Whether this is a high-risk action */
   highRisk?: boolean;
+  /** Email for WebAuthn authentication (required for real WebAuthn flow) */
+  email?: string;
 }
 
 export interface BiometricGate {
@@ -42,32 +45,44 @@ export interface UseBiometricGateReturn extends BiometricGate {
   isLoading: boolean;
   /** Last authentication result */
   lastAuthResult: BiometricAuthResult | null;
+  /** Whether the user has a registered passkey */
+  hasRegisteredPasskey: boolean;
   /** Check biometric availability (updates store) */
   checkAvailability: () => Promise<BiometricStatus>;
   /** Manually trigger biometric authentication */
-  authenticate: (reason?: string) => Promise<BiometricAuthResult>;
+  authenticate: (reason?: string, email?: string) => Promise<BiometricAuthResult>;
+  /** Register a new passkey (one-time WebAuthn registration) */
+  register: (email: string, label?: string) => Promise<boolean>;
 }
 
 /**
- * Hook for biometric authentication gate that protects high-risk actions.
- * 
+ * Hook for WebAuthn-based biometric authentication gate that protects high-risk actions.
+ *
  * Features:
- * - Checks biometric availability
- * - Triggers biometric authentication when available
- * - Falls back to confirmation dialog when biometrics unavailable
+ * - Checks WebAuthn platform authenticator availability
+ * - Supports passkey registration (one-time setup)
+ * - Triggers biometric authentication via navigator.credentials.get()
+ * - Falls back to confirmation dialog when biometrics unavailable or no passkey registered
  * - Manages loading states
  * - Integrates with toast notifications
- * 
+ *
  * Example usage:
  * ```tsx
- * const { confirmBeforeAction, isLoading } = useBiometricGate();
- * 
+ * const { confirmBeforeAction, register, hasRegisteredPasskey, isLoading } = useBiometricGate();
+ *
+ * // First-time setup: register a passkey
+ * if (!hasRegisteredPasskey) {
+ *   await register(user.email, 'My Laptop');
+ * }
+ *
+ * // Then protect high-risk actions
  * const handleDelete = async () => {
  *   await confirmBeforeAction(async () => {
  *     await deleteRecord();
  *   }, {
  *     reason: 'Delete sensitive record',
- *     fallbackMessage: 'Biometric authentication is unavailable. Continue with standard confirmation?'
+ *     email: user.email,
+ *     fallbackMessage: 'Biometric auth unavailable. Continue?'
  *   });
  * };
  * ```
@@ -78,11 +93,14 @@ export function useBiometricGate(): UseBiometricGateReturn {
   const {
     status,
     lastAuthResult,
+    hasRegisteredPasskey,
+    registeredEmail,
     setStatus,
     setLastAuthResult,
+    setHasRegisteredPasskey,
     userPreference
   } = useBiometricStore();
-  
+
   // Ref to track if a confirmation modal is open
   const isConfirmingRef = useRef(false);
 
@@ -105,17 +123,53 @@ export function useBiometricGate(): UseBiometricGateReturn {
   }, [setStatus]);
 
   /**
-   * Manually trigger biometric authentication
+   * Register a new WebAuthn passkey for a user.
+   * This triggers navigator.credentials.create() in the browser.
    */
-  const authenticate = useCallback(async (reason?: string): Promise<BiometricAuthResult> => {
+  const register = useCallback(async (
+    email: string,
+    label?: string,
+  ): Promise<boolean> => {
     setIsLoading(true);
     try {
-      const result = await promptBiometricAuthentication({ 
-        reason: reason || 'Confirm your identity' 
+      const result = await registerPasskey(email, label);
+      if (result.success) {
+        setHasRegisteredPasskey(true, email);
+        toast('Passkey registered', result.message, 'success');
+        return true;
+      } else {
+        toast('Registration failed', result.message, 'error');
+        return false;
+      }
+    } catch (error) {
+      console.error('Passkey registration error:', error);
+      toast(
+        'Registration error',
+        error instanceof Error ? error.message : 'Failed to register passkey',
+        'error',
+      );
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [setHasRegisteredPasskey, toast]);
+
+  /**
+   * Manually trigger biometric authentication via WebAuthn.
+   */
+  const authenticate = useCallback(async (
+    reason?: string,
+    email?: string,
+  ): Promise<BiometricAuthResult> => {
+    setIsLoading(true);
+    try {
+      const result = await promptBiometricAuthentication({
+        reason: reason || 'Confirm your identity',
+        email: email ?? registeredEmail ?? undefined,
       });
-      
+
       setLastAuthResult(result);
-      
+
       // Show toast feedback
       if (result === 'success') {
         toast('Authentication successful', 'Biometric verification completed', 'success');
@@ -124,7 +178,7 @@ export function useBiometricGate(): UseBiometricGateReturn {
       } else if (result === 'cancelled') {
         toast('Authentication cancelled', 'Biometric verification was cancelled', 'warning');
       }
-      
+
       return result;
     } catch (error) {
       console.error('Biometric authentication error:', error);
@@ -134,10 +188,17 @@ export function useBiometricGate(): UseBiometricGateReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [setLastAuthResult, toast]);
+  }, [registeredEmail, setLastAuthResult, toast]);
 
   /**
-   * Core function: confirm before executing high-risk action
+   * Core function: confirm before executing high-risk action.
+   *
+   * Uses WebAuthn biometric authentication when:
+   * 1. Platform authenticator is available
+   * 2. User has a registered passkey
+   * 3. User preference is not 'disabled'
+   *
+   * Falls back to standard confirmation dialog otherwise.
    */
   const confirmBeforeAction = useCallback(async <T,>(
     action: () => Promise<T> | T,
@@ -148,6 +209,7 @@ export function useBiometricGate(): UseBiometricGateReturn {
       onAuthComplete?: (result: BiometricAuthResult) => void;
       fallbackMessage?: string;
       fallbackTitle?: string;
+      email?: string;
     }
   ): Promise<T> => {
     const {
@@ -156,7 +218,8 @@ export function useBiometricGate(): UseBiometricGateReturn {
       onAuthStart,
       onAuthComplete,
       fallbackMessage = 'Biometric authentication is unavailable on this device. Do you want to continue with standard confirmation?',
-      fallbackTitle = 'Confirm Action'
+      fallbackTitle = 'Confirm Action',
+      email,
     } = options || {};
 
     // Prevent multiple concurrent confirmations
@@ -170,17 +233,18 @@ export function useBiometricGate(): UseBiometricGateReturn {
     try {
       // Check biometric availability
       const currentStatus = status === 'unknown' ? await checkAvailability() : status;
-      
+
       // Determine if we should use biometrics
-      const shouldUseBiometrics = 
-        requireBiometrics && 
+      const shouldUseBiometrics =
+        requireBiometrics &&
         currentStatus === 'available' &&
+        hasRegisteredPasskey &&
         userPreference !== 'disabled';
 
       if (shouldUseBiometrics) {
-        // Biometric authentication flow
+        // WebAuthn biometric authentication flow
         onAuthStart?.();
-        const authResult = await authenticate(reason);
+        const authResult = await authenticate(reason, email);
         onAuthComplete?.(authResult);
 
         if (authResult === 'success') {
@@ -197,11 +261,11 @@ export function useBiometricGate(): UseBiometricGateReturn {
         const shouldContinue = window.confirm(
           `${fallbackTitle}\n\n${fallbackMessage}\n\nAction: ${reason}`
         );
-        
+
         if (!shouldContinue) {
           throw new Error('Action cancelled by user');
         }
-        
+
         // User confirmed, execute the action
         const result = await action();
         return result;
@@ -210,14 +274,16 @@ export function useBiometricGate(): UseBiometricGateReturn {
       setIsLoading(false);
       isConfirmingRef.current = false;
     }
-  }, [status, checkAvailability, userPreference, authenticate]);
+  }, [status, checkAvailability, hasRegisteredPasskey, userPreference, authenticate]);
 
   return {
     status,
     isLoading,
     lastAuthResult,
+    hasRegisteredPasskey,
     checkAvailability,
     confirmBeforeAction,
-    authenticate
+    authenticate,
+    register,
   };
 }
