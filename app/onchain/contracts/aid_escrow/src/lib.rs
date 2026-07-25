@@ -75,6 +75,7 @@ pub enum Error {
     MismatchedArrays = 12,
     InsufficientSurplus = 13,
     ContractPaused = 14,
+    InvalidVersionTransition = 15,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -230,13 +231,21 @@ impl AidEscrow {
 
         let current_version = Self::get_version(env.clone());
 
-        // Perform version-specific migrations
+        if new_version == current_version {
+            return Ok(());
+        }
+
+        if new_version != current_version + 1 {
+            return Err(Error::InvalidVersionTransition);
+        }
+
+        // Perform version-specific migrations.
         match (current_version, new_version) {
             (1, 2) => {
-                // Future: Add migration logic for v1 -> v2
+                // Future: Add migration logic for v1 -> v2.
             }
             _ => {
-                // No-op for now, but structured for future use
+                // No-op for now, but structured for future use.
             }
         }
 
@@ -1030,20 +1039,20 @@ impl AidEscrow {
             let idx_key = (symbol_short!("pidx"), i);
             if let Some(pkg_id) = env.storage().persistent().get::<_, u64>(&idx_key) {
                 let pkg_key = (symbol_short!("pkg"), pkg_id);
-                if let Some(package) = env.storage().persistent().get::<_, Package>(&pkg_key)
-                    && package.token == token
-                {
-                    match package.status {
-                        PackageStatus::Created => {
-                            total_committed += package.amount;
-                        }
-                        PackageStatus::Claimed => {
-                            total_claimed += package.amount;
-                        }
-                        PackageStatus::Expired
-                        | PackageStatus::Cancelled
-                        | PackageStatus::Refunded => {
-                            total_expired_cancelled += package.amount;
+                if let Some(package) = env.storage().persistent().get::<_, Package>(&pkg_key) {
+                    if package.token == token {
+                        match package.status {
+                            PackageStatus::Created => {
+                                total_committed += package.amount;
+                            }
+                            PackageStatus::Claimed => {
+                                total_claimed += package.amount;
+                            }
+                            PackageStatus::Expired
+                            | PackageStatus::Cancelled
+                            | PackageStatus::Refunded => {
+                                total_expired_cancelled += package.amount;
+                            }
                         }
                     }
                 }
@@ -1067,10 +1076,10 @@ impl AidEscrow {
 
         for id in 0..count {
             let key = (symbol_short!("pkg"), id);
-            if let Some(package) = env.storage().persistent().get::<_, Package>(&key)
-                && package.recipient == recipient
-            {
-                matches += 1;
+            if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                if package.recipient == recipient {
+                    matches += 1;
+                }
             }
         }
 
