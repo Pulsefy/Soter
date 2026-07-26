@@ -3,6 +3,9 @@ import { createHash } from 'crypto';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
+import { LoggerService } from '../logger/logger.service';
+import { CORRELATION_ID_KEY } from '../common/utils/correlation-id.util';
+import { redactLogData } from '../logger/log-redaction.util';
 
 import { Prisma } from '@prisma/client';
 
@@ -12,6 +15,7 @@ export interface AuditLogParams {
   entityId: string;
   action: string;
   metadata?: Record<string, any>;
+  correlationId?: string;
 }
 
 export interface AuditQuery {
@@ -54,6 +58,7 @@ export interface AnonymizedAuditLog {
   action: string;
   timestamp: Date;
   metadata: unknown;
+  correlationId?: string | null;
 }
 
 export interface ExportAuditResult {
@@ -65,20 +70,34 @@ export interface ExportAuditResult {
 
 @Injectable()
 export class AuditService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private logger: LoggerService,
+  ) {}
 
   anonymize(value: string): string {
     return createHash('sha256').update(value).digest('hex').slice(0, 16);
   }
 
   async record(params: AuditLogParams) {
+    let correlationId = params.correlationId;
+    if (!correlationId) {
+      const store = this.logger.getAsyncLocalStorage().getStore();
+      correlationId = store?.get(CORRELATION_ID_KEY) as string | undefined;
+    }
+
+    const metadataToSave = params.metadata
+      ? redactLogData(params.metadata)
+      : {};
+
     return this.prisma.auditLog.create({
       data: {
         actorId: params.actorId,
+        correlationId,
         entity: params.entity,
         entityId: params.entityId,
         action: params.action,
-        metadata: (params.metadata as Prisma.InputJsonValue) ?? {},
+        metadata: metadataToSave as Prisma.InputJsonValue,
       },
     });
   }
@@ -155,6 +174,7 @@ export class AuditService {
       action: row.action,
       timestamp: row.timestamp,
       metadata: row.metadata,
+      correlationId: row.correlationId,
     }));
 
     return { data, total, page, limit };
@@ -166,12 +186,13 @@ export class AuditService {
       return `"${str}"`;
     };
 
-    const header = 'id,actorHash,entity,entityHash,action,timestamp,metadata';
+    const header = 'id,actorHash,correlationId,entity,entityHash,action,timestamp,metadata';
     const lines = rows.map(r => {
       const metadata = escape(JSON.stringify(r.metadata ?? ''));
       return [
         escape(r.id),
         escape(r.actorHash),
+        escape(r.correlationId ?? ''),
         escape(r.entity),
         escape(r.entityHash),
         escape(r.action),

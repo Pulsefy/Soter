@@ -1,6 +1,8 @@
 import { Controller, Get, Query, Res, Version } from '@nestjs/common';
 import { Response } from 'express';
 import { AuditService, AuditQuery, ExportAuditQuery } from './audit.service';
+import { Roles } from '../auth/roles.decorator';
+import { AppRole } from '../auth/app-role.enum';
 import {
   ApiTags,
   ApiOperation,
@@ -12,6 +14,7 @@ import {
 
 @ApiTags('Audit')
 @ApiBearerAuth('JWT-auth')
+@Roles(AppRole.admin)
 @Controller('audit')
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}

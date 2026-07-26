@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { AuditService } from './audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { LoggerService } from '../logger/logger.service';
 
 describe('AuditService', () => {
   let service: AuditService;
@@ -10,6 +11,7 @@ describe('AuditService', () => {
   const mockRow = {
     id: 'log-1',
     actorId: 'user-1',
+    correlationId: 'req-1',
     entity: 'campaign',
     entityId: 'c-1',
     action: 'create',
@@ -33,6 +35,14 @@ describe('AuditService', () => {
         {
           provide: PrismaService,
           useValue: mockPrisma,
+        },
+        {
+          provide: LoggerService,
+          useValue: {
+            getAsyncLocalStorage: jest.fn().mockReturnValue({
+              getStore: jest.fn().mockReturnValue(new Map([['correlationId', 'req-1']])),
+            }),
+          },
         },
       ],
     }).compile();
@@ -59,6 +69,7 @@ describe('AuditService', () => {
       expect(prisma.auditLog.create).toHaveBeenCalledWith({
         data: {
           actorId: 'user-1',
+          correlationId: 'req-1',
           entity: 'campaign',
           entityId: 'c-1',
           action: 'create',
@@ -144,7 +155,7 @@ describe('AuditService', () => {
     it('should include header row', () => {
       const csv = service.buildCsv([]);
       expect(csv).toBe(
-        'id,actorHash,entity,entityHash,action,timestamp,metadata',
+        'id,actorHash,correlationId,entity,entityHash,action,timestamp,metadata',
       );
     });
 
@@ -153,6 +164,7 @@ describe('AuditService', () => {
         {
           id: 'log-1',
           actorHash: 'abc123',
+          correlationId: 'req-1',
           entity: 'campaign',
           entityHash: 'def456',
           action: 'create',
@@ -169,6 +181,7 @@ describe('AuditService', () => {
         {
           id: 'log-1',
           actorHash: 'abc123',
+          correlationId: 'req-1',
           entity: 'campaign',
           entityHash: 'def456',
           action: 'create',
@@ -180,6 +193,7 @@ describe('AuditService', () => {
       const dataLine = csv.split('\r\n')[1];
       expect(dataLine).toContain('"log-1"');
       expect(dataLine).toContain('"abc123"');
+      expect(dataLine).toContain('"req-1"');
       expect(dataLine).toContain('"campaign"');
       expect(dataLine).toContain('"2024-01-01T00:00:00.000Z"');
     });
@@ -189,6 +203,7 @@ describe('AuditService', () => {
         {
           id: 'log-1',
           actorHash: 'abc123',
+          correlationId: 'req-1',
           entity: 'camp"aign',
           entityHash: 'def456',
           action: 'create',

@@ -268,18 +268,20 @@ model RetentionPolicy {
 }
 
 model AuditLog {
-  id        String    @id @default(cuid())
-  actorId   String
-  entity    String
-  entityId  String
-  action    String
-  timestamp DateTime  @default(now())
-  metadata  Json?
-  deletedAt DateTime?
+  id            String    @id @default(cuid())
+  actorId       String
+  correlationId String?
+  entity        String
+  entityId      String
+  action        String
+  timestamp     DateTime  @default(now())
+  metadata      Json?
+  deletedAt     DateTime?
 
   @@index([entity, entityId])
   @@index([timestamp])
   @@index([deletedAt])
+  @@index([correlationId])
 }
 
 model Organization {
