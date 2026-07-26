@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { ExportControls } from '@/components/dashboard/ExportControls';
+import { DeploymentBadge } from '@/components/DeploymentBadge';
 import { useNetworkGuard } from '@/hooks/useNetworkGuard';
 import { useCampaigns, useCreateCampaign } from '@/hooks/useCampaigns';
 import { useCampaignAction } from '@/hooks/useOptimisticCampaignMutations';
@@ -137,7 +138,10 @@ export default function CampaignsPage() {
       <main className="container mx-auto space-y-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-4xl font-bold">NGO Campaigns</h1>
-          <span className="text-sm text-gray-500 dark:text-gray-400">Role: {userRoleLabel}</span>
+          <div className="flex items-center gap-3">
+            <DeploymentBadge />
+            <span className="text-sm text-gray-500 dark:text-gray-400">Role: {userRoleLabel}</span>
+          </div>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">

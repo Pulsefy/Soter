@@ -49,7 +49,14 @@ interface ClaimReceiptProps {
 
 const buildExplorerUrl = (type: 'address' | 'contract' | 'tx', identifier: string) => {
   const network = config.network;
-  return `https://stellar.expert/explorer/${network}/${type}/${identifier}`;
+  const slug = (network === 'mainnet' || network === 'public') ? 'public' : 'testnet';
+  return `https://stellar.expert/explorer/${slug}/${type}/${identifier}`;
+};
+
+const networkLabel = (network: string): string => {
+  const lower = network.toLowerCase();
+  if (lower === 'mainnet' || lower === 'public') return 'Mainnet';
+  return 'Testnet';
 };
 
 function FieldCopyButton({ value, label, colors }: { value: string; label: string, colors: any }) {
@@ -112,6 +119,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compa
       `Status: ${claim.status.toUpperCase()}`,
       `Amount: ${claim.amount} tokens`,
       `Date: ${formattedDate}`,
+      `Network: ${networkLabel(config.network)}`,
     ];
     if (claim.tokenAddress) {
       lines.push(`Token Address: ${claim.tokenAddress}`);
@@ -357,6 +365,11 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compa
         <View style={styles.detailRow} accessible={true}>
           <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>Timestamp</Text>
           <Text style={styles.detailValue} maxFontSizeMultiplier={2}>{formattedDate}</Text>
+        </View>
+
+        <View style={styles.detailRow} accessible={true}>
+          <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>Network</Text>
+          <Text style={styles.detailValue} maxFontSizeMultiplier={2}>{networkLabel(config.network)}</Text>
         </View>
 
         {claim.tokenAddress && (

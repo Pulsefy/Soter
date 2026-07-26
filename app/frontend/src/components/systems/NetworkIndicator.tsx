@@ -1,16 +1,11 @@
 import React, { useState } from "react";
+import { networkLabel, truncateId, networkBadgeColor } from "@/lib/network-metadata";
 
 type Props = {
   environment: "preview" | "production";
   network: "testnet" | "mainnet";
   contractId: string;
 };
-
-function truncateId(id: string) {
-  if (!id) return "";
-  if (id.length <= 12) return id;
-  return `${id.slice(0, 6)}...${id.slice(-4)}`;
-}
 
 export default function NetworkIndicator({
   environment,
@@ -24,6 +19,8 @@ export default function NetworkIndicator({
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
+
+  const label = networkLabel(network);
 
   return (
     <div className="fixed top-3 left-3 z-50 flex flex-col sm:flex-row gap-2 sm:items-center bg-black/80 text-white px-3 py-2 rounded-xl backdrop-blur-md shadow-lg text-xs sm:text-sm">
@@ -40,13 +37,13 @@ export default function NetworkIndicator({
       </span>
 
       {/* Network */}
-      <span className="px-2 py-1 rounded-md bg-blue-600 font-medium">
-        {network.toUpperCase()}
+      <span className={`px-2 py-1 rounded-md font-medium ${networkBadgeColor(network)}`}>
+        {label}
       </span>
 
       {/* Contract */}
       <div className="flex items-center gap-2">
-        <span className="font-mono bg-white/10 px-2 py-1 rounded-md">
+        <span className="font-mono bg-white/10 px-2 py-1 rounded-md" title={contractId}>
           {truncateId(contractId)}
         </span>
 

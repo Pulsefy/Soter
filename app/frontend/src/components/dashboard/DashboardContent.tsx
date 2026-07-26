@@ -6,6 +6,7 @@ import { DashboardFilters } from './DashboardFilters';
 import { FilteredPackageList } from './FilteredPackageList';
 import { FilterPresets } from './FilterPresets';
 import { ExportControls } from './ExportControls';
+import { DeploymentBadge } from '@/components/DeploymentBadge';
 import type { AidPackageFilters } from '@/types/aid-package';
 
 export function DashboardContent() {
@@ -95,7 +96,10 @@ export function DashboardContent() {
     <div className="p-6 bg-white dark:bg-gray-900 rounded-xl shadow-lg border border-gray-100 dark:border-gray-800 space-y-5">
       {/* Header row */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <h2 className="text-lg font-semibold">Aid Packages</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold">Aid Packages</h2>
+          <DeploymentBadge />
+        </div>
         <ExportControls context="Aid Packages" filters={filters} />
       </div>
 

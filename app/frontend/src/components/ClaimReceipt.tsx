@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Share2, Download, Copy, Check, ExternalLink } from 'lucide-react';
+import { Share2, Download, Copy, Check, ExternalLink, Globe } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { format } from 'date-fns';
-import { buildExplorerUrl } from '../lib/explorer';
+import { buildExplorerUrl, networkLabel } from '../lib/network-metadata';
 
 export interface ClaimReceiptData {
   claimId: string;
@@ -22,8 +22,13 @@ export interface ClaimReceiptData {
   contractAddress?: string;
   timestamp: string;
   recipientRef?: string;
-  transactionHash?: string;
   explorerLink?: string;
+  /** Active Stellar network (testnet, mainnet, …) */
+  network?: string;
+  /** Active Soroban contract ID */
+  contractId?: string;
+  /** Explorer link for the active contract */
+  contractExplorerUrl?: string;
 }
 
 interface ClaimReceiptProps {
@@ -71,6 +76,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
     approved:  'bg-green-50 border-green-200 text-green-900 dark:bg-green-950/40 dark:border-green-800 dark:text-green-200',
     disbursed: 'bg-emerald-50 border-emerald-200 text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-200',
     archived:  'bg-gray-50 border-gray-200 text-gray-900 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200',
+    cancelled: 'bg-red-50 border-red-200 text-red-900 dark:bg-red-950/40 dark:border-red-800 dark:text-red-200',
   };
 
   const statusBadgeColors = {
@@ -79,21 +85,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
     approved:  'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200',
     disbursed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200',
     archived:  'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
-    requested: 'bg-yellow-50 border-yellow-200 text-yellow-900',
-    verified: 'bg-blue-50 border-blue-200 text-blue-900',
-    approved: 'bg-green-50 border-green-200 text-green-900',
-    disbursed: 'bg-emerald-50 border-emerald-200 text-emerald-900',
-    archived: 'bg-gray-50 border-gray-200 text-gray-900',
-    cancelled: 'bg-red-50 border-red-200 text-red-900',
-  };
-
-  const statusBadgeColors = {
-    requested: 'bg-yellow-100 text-yellow-800',
-    verified: 'bg-blue-100 text-blue-800',
-    approved: 'bg-green-100 text-green-800',
-    disbursed: 'bg-emerald-100 text-emerald-800',
-    archived: 'bg-gray-100 text-gray-800',
-    cancelled: 'bg-red-100 text-red-800',
+    cancelled: 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200',
   };
 
   const formattedDate = useMemo(() => {
@@ -105,15 +97,6 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
   }, [claim.timestamp]);
 
   const receiptText = useMemo(() => {
-    return `Claim Receipt
-Claim ID: ${claim.claimId}
-Package ID: ${claim.packageId}
-Status: ${claim.status.toUpperCase()}
-Amount: ${claim.amount} tokens
-Date: ${formattedDate}
-${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}
-${claim.contractAddress ? `Contract Address: ${claim.contractAddress}` : ''}
-${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}`.trim();
     const lines = [
       'Claim Receipt',
       `Claim ID: ${claim.claimId}`,
@@ -122,11 +105,20 @@ ${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}`.tr
       `Amount: ${claim.amount} tokens`,
       `Date: ${formattedDate}`,
     ];
+    if (claim.network) {
+      lines.push(`Network: ${networkLabel(claim.network)}`);
+    }
+    if (claim.contractId) {
+      lines.push(`Contract ID: ${claim.contractId}`);
+    }
     if (claim.tokenAddress) {
       lines.push(`Token Address: ${claim.tokenAddress}`);
     }
     if (claim.transactionHash) {
       lines.push(`Transaction Hash: ${claim.transactionHash}`);
+    }
+    if (claim.contractExplorerUrl) {
+      lines.push(`Contract Explorer: ${claim.contractExplorerUrl}`);
     }
     if (claim.explorerLink) {
       lines.push(`Explorer Link: ${claim.explorerLink}`);
@@ -229,6 +221,37 @@ ${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}`.tr
           <p className="text-xs font-semibold opacity-75 mb-1">TIMESTAMP</p>
           <p className="text-sm">{formattedDate}</p>
         </div>
+
+        {/* Network */}
+        {claim.network && (
+          <div>
+            <p className="text-xs font-semibold opacity-75 mb-1">NETWORK</p>
+            <span className="inline-flex items-center gap-1.5 text-sm font-medium">
+              <Globe size={14} className="opacity-60" />
+              {networkLabel(claim.network)}
+            </span>
+          </div>
+        )}
+
+        {/* Active Contract ID */}
+        {(claim.contractId || claim.contractAddress) && (
+          <div className="col-span-2">
+            <p className="text-xs font-semibold opacity-75 mb-1">CONTRACT</p>
+            <div className="flex items-center gap-1">
+              <a
+                href={claim.contractExplorerUrl ?? (claim.contractAddress ? buildExplorerUrl('contract', claim.contractAddress) : '#')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1"
+              >
+                {claim.contractId ?? claim.contractAddress}
+                <ExternalLink size={12} className="shrink-0" />
+              </a>
+              <FieldCopyButton value={claim.contractId ?? claim.contractAddress!} label="contract ID" />
+            </div>
+          </div>
+        )}
+
         {claim.tokenAddress && (
           <div className="col-span-2">
             <p className="text-xs font-semibold opacity-75 mb-1">TOKEN ADDRESS</p>
@@ -243,23 +266,6 @@ ${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}`.tr
                 <ExternalLink size={12} className="shrink-0" />
               </a>
               <FieldCopyButton value={claim.tokenAddress} label="token address" />
-            </div>
-          </div>
-        )}
-        {claim.contractAddress && (
-          <div className="col-span-2">
-            <p className="text-xs font-semibold opacity-75 mb-1">CONTRACT ADDRESS</p>
-            <div className="flex items-center gap-1">
-              <a
-                href={buildExplorerUrl('contract', claim.contractAddress)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1"
-              >
-                {claim.contractAddress}
-                <ExternalLink size={12} className="shrink-0" />
-              </a>
-              <FieldCopyButton value={claim.contractAddress} label="contract address" />
             </div>
           </div>
         )}
@@ -278,12 +284,6 @@ ${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}`.tr
               </a>
               <FieldCopyButton value={claim.transactionHash} label="transaction hash" />
             </div>
-          </div>
-        )}
-        {claim.transactionHash && (
-          <div className="col-span-2">
-            <p className="text-xs font-semibold opacity-75 mb-1">TRANSACTION HASH</p>
-            <p className="font-mono text-xs break-all">{claim.transactionHash}</p>
           </div>
         )}
         {claim.explorerLink && (

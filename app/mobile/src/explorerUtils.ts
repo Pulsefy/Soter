@@ -1,13 +1,21 @@
-const STELLAR_TESTNET_EXPLORER_BASE = "https://stellar.expert/explorer/testnet";
+import { config } from './config';
 
-export function getTxExplorerUrl(txHash: string): string {
-  return `${STELLAR_TESTNET_EXPLORER_BASE}/tx/${txHash}`;
+function explorerBase(network?: string): string {
+  const n = (network ?? config.network).toLowerCase();
+  if (n === 'mainnet' || n === 'public') {
+    return 'https://stellar.expert/explorer/public';
+  }
+  return 'https://stellar.expert/explorer/testnet';
 }
 
-export function getContractExplorerUrl(contractId: string): string {
-  return `${STELLAR_TESTNET_EXPLORER_BASE}/contract/${contractId}`;
+export function getTxExplorerUrl(txHash: string, network?: string): string {
+  return `${explorerBase(network)}/tx/${txHash}`;
 }
 
-export function getAccountExplorerUrl(address: string): string {
-  return `${STELLAR_TESTNET_EXPLORER_BASE}/account/${address}`;
+export function getContractExplorerUrl(contractId: string, network?: string): string {
+  return `${explorerBase(network)}/contract/${contractId}`;
+}
+
+export function getAccountExplorerUrl(address: string, network?: string): string {
+  return `${explorerBase(network)}/account/${address}`;
 }
