@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { Request } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,20 +19,11 @@ import {
   VerificationJobData,
   VerificationResult,
 } from './interfaces/verification-job.interface';
-import {
-  DEFAULT_VERIFICATION_PRIORITY,
-  EnqueueVerificationDto,
-  VerificationPriority,
-} from './dto/enqueue-verification.dto';
 import { AuditService } from '../audit/audit.service';
 import { firstValueFrom } from 'rxjs';
 import OpenAI from 'openai';
 import * as crypto from 'crypto';
 import { CircuitBreaker } from '../common/utils/circuit-breaker.util';
-import { VerificationMetadataService } from './metadata.service';
-import { VerificationResultDto } from './dto/verification-result.dto';
-import { CorrelationPropagationUtil } from '../common/utils/correlation-propagation.util';
-import { MetricsService } from '../observability/metrics/metrics.service';
 
 // ---------------------------------------------------------------------------
 // OCR service types
@@ -148,9 +138,6 @@ export class VerificationService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly httpService: HttpService,
-    private readonly verificationMetadataService: VerificationMetadataService,
-    private readonly correlationUtil: CorrelationPropagationUtil,
-    private readonly metricsService: MetricsService,
   ) {
     this.verificationMode =
       this.configService.get<string>('VERIFICATION_MODE') || 'mock';
@@ -209,10 +196,7 @@ export class VerificationService {
   // Public API
   // -------------------------------------------------------------------------
 
-  async enqueueVerification(
-    claimId: string,
-    dto?: EnqueueVerificationDto,
-  ): Promise<{ jobId: string; priority: VerificationPriority }> {
+  async enqueueVerification(claimId: string): Promise<{ jobId: string }> {
     const claim = await this.prisma.claim.findUnique({
       where: { id: claimId },
     });
@@ -223,30 +207,15 @@ export class VerificationService {
 
     if (claim.status === 'verified') {
       this.logger.warn(`Claim ${claimId} is already verified`);
-      return {
-        jobId: 'already-verified',
-        priority: DEFAULT_VERIFICATION_PRIORITY,
-      };
+      return { jobId: 'already-verified' };
     }
-
-    const priority = dto?.priority ?? DEFAULT_VERIFICATION_PRIORITY;
-    const anchorMetadata = dto?.anchorMetadata;
 
     const jobData: VerificationJobData = {
       claimId,
       timestamp: Date.now(),
-      priority,
-      anchorMetadata: anchorMetadata
-        ? {
-            campaignRef: anchorMetadata.campaignRef ?? null,
-            claimId: anchorMetadata.claimId ?? null,
-            packageId: anchorMetadata.packageId ?? null,
-          }
-        : undefined,
     };
 
     const job = await this.verificationQueue.add('verify-claim', jobData, {
-      priority,
       attempts: parseInt(
         this.configService.get<string>('QUEUE_MAX_RETRIES') || '3',
       ),
@@ -258,38 +227,26 @@ export class VerificationService {
       removeOnFail: 50,
     });
 
-    const priorityLabel = VerificationPriority[priority] ?? String(priority);
-    this.logger.log(
-      `Enqueued verification job ${job.id} for claim ${claimId} [priority=${priorityLabel}(${priority})]`,
-    );
-
-    this.metricsService.incrementVerificationJobEnqueued(priorityLabel);
+    this.logger.log(`Enqueued verification job ${job.id} for claim ${claimId}`);
 
     await this.auditService.record({
       actorId: 'system',
       entity: 'verification',
       entityId: claimId,
       action: 'enqueue',
-      metadata: {
-        jobId: job.id || 'unknown',
-        priority,
-        priorityLabel,
-        anchorMetadata,
-      },
+      metadata: { jobId: job.id || 'unknown' },
     });
 
-    return { jobId: job.id || 'unknown', priority };
+    return { jobId: job.id || 'unknown' };
   }
 
   async processVerification(
     jobData: VerificationJobData,
   ): Promise<VerificationResult> {
-    const { claimId, anchorMetadata, priority } = jobData;
-    const priorityLabel = VerificationPriority[priority] ?? String(priority);
+    const { claimId } = jobData;
 
     this.logger.log(
-      `Processing verification for claim ${claimId} in ${this.verificationMode} mode` +
-        ` [priority=${priorityLabel}(${priority})]`,
+      `Processing verification for claim ${claimId} in ${this.verificationMode} mode`,
     );
 
     const claim = await this.prisma.claim.findUnique({
@@ -310,39 +267,18 @@ export class VerificationService {
       result = await this.performAIVerification(claim);
     }
 
-    // ENHANCED: Add contract-aware metadata to result
-    const enhancedResult = await this.enhanceResultWithMetadata(
-      result,
-      claimId,
-      claim.campaignId,
-    );
+    const shouldVerify = result.score >= this.verificationThreshold;
 
-    const shouldVerify = enhancedResult.score >= this.verificationThreshold;
-
-    // Build anchor metadata to persist
-    const anchorMetadataToPersist = anchorMetadata
-      ? {
-          campaignRef: anchorMetadata.campaignRef ?? null,
-          claimId: anchorMetadata.claimId ?? null,
-          packageId: anchorMetadata.packageId ?? null,
-        }
-      : null;
-
-    // Update claim with verification result including metadata
     await this.prisma.claim.update({
       where: { id: claimId },
       data: {
         status: shouldVerify ? 'verified' : 'requested',
-        anchorMetadata:
-          anchorMetadataToPersist === null
-            ? Prisma.JsonNull
-            : (anchorMetadataToPersist as Prisma.InputJsonValue),
       },
     });
 
     this.logger.log(
-      `Claim ${claimId} verification completed – score ${enhancedResult.score} ` +
-        `(threshold: ${this.verificationThreshold}, packageId: ${enhancedResult.metadata?.packageId})`,
+      `Claim ${claimId} verification completed – score ${result.score} ` +
+        `(threshold: ${this.verificationThreshold})`,
     );
 
     await this.auditService.record({
@@ -351,15 +287,12 @@ export class VerificationService {
       entityId: claimId,
       action: 'complete',
       metadata: {
-        score: enhancedResult.score,
+        score: result.score,
         status: shouldVerify ? 'verified' : 'requested',
-        packageId: enhancedResult.metadata?.packageId,
-        network: enhancedResult.metadata?.network,
-        anchorMetadata: anchorMetadataToPersist,
       },
     });
 
-    return enhancedResult;
+    return result;
   }
 
   // -------------------------------------------------------------------------
@@ -632,16 +565,6 @@ the JSON verdict.
 
   private async callOCRService(documentUrl: string): Promise<OCRResponse> {
     try {
-      // Get correlation ID and propagate to OCR service
-      const correlationId = this.correlationUtil.getCurrentCorrelationId();
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-
-      if (correlationId) {
-        headers['x-correlation-id'] = correlationId;
-      }
-
       const response = await this.ocrCircuitBreaker.fire(() =>
         firstValueFrom(
           this.httpService.post(
@@ -649,7 +572,7 @@ the JSON verdict.
             { document_url: documentUrl },
             {
               timeout: this.aiServiceTimeout,
-              headers,
+              headers: { 'Content-Type': 'application/json' },
             },
           ),
         ),
@@ -676,10 +599,6 @@ the JSON verdict.
       }
     }
   }
-
-  // private getCorrelationIdForOutbound(): string | null {
-  //   return this.correlationUtil.getCurrentCorrelationId();
-  // }
 
   // -------------------------------------------------------------------------
   // Result builders
@@ -721,48 +640,6 @@ the JSON verdict.
       },
       processedAt: new Date(),
     };
-  }
-
-  /**
-   * Enhances a verification result with contract-aware metadata
-   */
-  private async enhanceResultWithMetadata(
-    result: VerificationResult,
-    claimId: string,
-    campaignId: string,
-  ): Promise<VerificationResult> {
-    // Convert to DTO first
-    const resultDto: VerificationResultDto = {
-      score: result.score,
-      confidence: result.confidence,
-      details: result.details,
-      processedAt: result.processedAt || new Date(),
-    };
-
-    // Enhance with contract-aware metadata
-    const enhanced = await this.verificationMetadataService.enhanceWithMetadata(
-      resultDto,
-      claimId,
-      campaignId,
-    );
-
-    // Log warnings if any
-    if (enhanced.warnings && enhanced.warnings.length > 0) {
-      this.logger.warn(
-        `Metadata warnings for claim ${claimId}: ${enhanced.warnings.join(', ')}`,
-      );
-    }
-
-    return {
-      score: enhanced.score,
-      confidence: enhanced.confidence,
-      details: enhanced.details,
-      processedAt: enhanced.processedAt,
-      // Add metadata to result
-      metadata: enhanced.metadata,
-      warnings: enhanced.warnings,
-      validationErrors: enhanced.validationErrors,
-    } as VerificationResult;
   }
 
   /** Heuristic: treat strings that start with http/https as URLs. */
@@ -1025,57 +902,12 @@ the JSON verdict.
       this.verificationQueue.getFailedCount(),
     ]);
 
-    // Build a per-priority breakdown of waiting jobs.
-    // BullMQ stores waiting jobs with their priority in the payload; we iterate
-    // the waiting set and tally by the `priority` field we embed in jobData.
-    const waitingJobs = await this.verificationQueue.getWaiting(0, -1);
-    const priorityCounts: Record<string, number> = {
-      [VerificationPriority.URGENT]: 0,
-      [VerificationPriority.HIGH]: 0,
-      [VerificationPriority.NORMAL]: 0,
-      [VerificationPriority.LOW]: 0,
-    };
-    for (const job of waitingJobs) {
-      const p =
-        (job.data as VerificationJobData).priority ??
-        DEFAULT_VERIFICATION_PRIORITY;
-      if (p in priorityCounts) {
-        priorityCounts[p]++;
-      }
-    }
-
-    const breakdown = {
-      urgent: priorityCounts[VerificationPriority.URGENT],
-      high: priorityCounts[VerificationPriority.HIGH],
-      normal: priorityCounts[VerificationPriority.NORMAL],
-      low: priorityCounts[VerificationPriority.LOW],
-    };
-
-    // Keep Prometheus gauges in sync with the current snapshot.
-    this.metricsService.setVerificationQueueWaitingByPriority(
-      'URGENT',
-      breakdown.urgent,
-    );
-    this.metricsService.setVerificationQueueWaitingByPriority(
-      'HIGH',
-      breakdown.high,
-    );
-    this.metricsService.setVerificationQueueWaitingByPriority(
-      'NORMAL',
-      breakdown.normal,
-    );
-    this.metricsService.setVerificationQueueWaitingByPriority(
-      'LOW',
-      breakdown.low,
-    );
-
     return {
       waiting,
       active,
       completed,
       failed,
       total: waiting + active + completed + failed,
-      priorityBreakdown: breakdown,
     };
   }
 

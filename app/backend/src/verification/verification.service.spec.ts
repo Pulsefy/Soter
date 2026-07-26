@@ -6,6 +6,7 @@ import { HttpService } from '@nestjs/axios';
 import { VerificationService } from './verification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 import { ClaimStatus, Prisma } from '@prisma/client';
 import { of } from 'rxjs';
 import { CorrelationPropagationUtil } from '../common/utils/correlation-propagation.util';
@@ -19,6 +20,11 @@ jest.mock('../common/utils/correlation-propagation.util');
 describe('VerificationService', () => {
   let service: VerificationService;
   let prismaService: PrismaService;
+  let mockMetricsService: {
+    incrementCounter: jest.Mock;
+    incrementGauge: jest.Mock;
+    decrementGauge: jest.Mock;
+  };
   let mockQueue: {
     add: jest.Mock;
     getWaiting: jest.Mock;
@@ -107,6 +113,12 @@ describe('VerificationService', () => {
       getFailedCount: jest.fn().mockResolvedValue(3),
     };
 
+    mockMetricsService = {
+      incrementCounter: jest.fn(),
+      incrementGauge: jest.fn(),
+      decrementGauge: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VerificationService,
@@ -145,6 +157,10 @@ describe('VerificationService', () => {
           useValue: {
             record: jest.fn().mockResolvedValue(undefined),
           },
+        },
+        {
+          provide: MetricsService,
+          useValue: mockMetricsService,
         },
         {
           provide: HttpService,
@@ -341,6 +357,14 @@ describe('VerificationService', () => {
       const updateCall = updateSpy.mock.calls[0]?.[0];
       expect(updateCall?.data).toHaveProperty('status');
       expect(updateCall?.data?.status).toBe('verified');
+      expect(mockMetricsService.incrementCounter).toHaveBeenCalledWith(
+        'claim_funnel_total',
+        { stage: 'verified' },
+      );
+      expect(mockMetricsService.incrementGauge).toHaveBeenCalledWith(
+        'claim_funnel_current',
+        { stage: 'verified' },
+      );
     });
   });
 

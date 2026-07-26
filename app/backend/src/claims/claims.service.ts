@@ -111,6 +111,8 @@ export class ClaimsService {
 
     claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
+    this.recordClaimFunnelTransition(null, claim.status);
+
     // Stub audit hook
     void this.auditLog('claim', claim.id, 'created', {
       status: claim.status,
@@ -450,7 +452,47 @@ export class ClaimsService {
       return updated;
     });
 
+    this.recordClaimFunnelTransition(fromStatus, toStatus);
+
     return updatedClaim;
+  }
+
+  private recordClaimFunnelTransition(
+    fromStatus: ClaimStatus | null,
+    toStatus: ClaimStatus,
+  ): void {
+    const toStage = this.claimStatusToFunnelStage(toStatus);
+    if (toStage) {
+      this.metricsService.incrementCounter('claim_funnel_total', {
+        stage: toStage,
+      });
+      this.metricsService.incrementGauge('claim_funnel_current', {
+        stage: toStage,
+      });
+    }
+
+    const fromStage =
+      fromStatus === null ? null : this.claimStatusToFunnelStage(fromStatus);
+    if (fromStage && fromStage !== toStage) {
+      this.metricsService.decrementGauge('claim_funnel_current', {
+        stage: fromStage,
+      });
+    }
+  }
+
+  private claimStatusToFunnelStage(status: ClaimStatus): string | null {
+    switch (status) {
+      case ClaimStatus.requested:
+        return 'created';
+      case ClaimStatus.verified:
+        return 'verified';
+      case ClaimStatus.approved:
+        return 'approved';
+      case ClaimStatus.disbursed:
+        return 'disbursed';
+      default:
+        return null;
+    }
   }
 
   private auditLog(
