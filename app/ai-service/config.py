@@ -33,6 +33,7 @@ class Settings(BaseSettings):
         BACKEND_WEBHOOK_URL: Webhook URL to notify NestJS backend when tasks complete
         PROOF_OF_LIFE_CONFIDENCE_THRESHOLD: Default threshold for liveness verification
         PROOF_OF_LIFE_MIN_FACE_SIZE: Minimum detected face size in pixels
+        CACHE_TTL_VERIFICATION: TTL for cached AI verification responses (artifact + model-version keyed)
     """
 
     # API Keys
@@ -63,6 +64,7 @@ class Settings(BaseSettings):
     # Cache TTL settings (in seconds)
     cache_ttl_task_status: int = 30  # Short TTL for responsive polling
     cache_ttl_artifact_access: int = 60  # 1 minute for artifact metadata
+    cache_ttl_verification: int = 120  # AI verification responses, keyed by claim/artifact/model version
 
     # Application settings
     app_env: Literal["development", "staging", "production", "test"] = "development"

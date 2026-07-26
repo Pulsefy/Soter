@@ -145,6 +145,21 @@ class HumanitarianVerificationService:
             for provider in providers
         )
 
+    def get_model_version(self, provider_preference: str = "auto") -> str:
+        """
+        Resolve the "provider:model" identifier for the primary provider that
+        would be attempted for a given preference, without making a request.
+
+        Used to key and invalidate the verification response cache so that
+        changing the configured model/provider naturally busts stale entries.
+        """
+        providers = self._provider_attempt_order(provider_preference)
+        if not providers:
+            return "none:none"
+        provider = providers[0]
+        model = self._get_model_for_provider(provider)
+        return f"{provider}:{model}"
+
     def _get_model_for_provider(self, provider: str) -> str:
         if provider == "test":
             return "test-provider/fixture"

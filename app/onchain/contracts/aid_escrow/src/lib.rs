@@ -1524,6 +1524,51 @@ impl AidEscrow {
         }
     }
 
+    /// Returns the number of stored packages associated with a `campaign_ref` metadata value.
+    ///
+    /// This read-only helper scans all package IDs from `0..package_counter`, treating the
+    /// counter as an upper bound over assigned IDs and skipping gaps. It never mutates
+    /// storage and is safe to use for dashboard metrics.
+    pub fn get_campaign_package_count(env: Env, campaign_ref: String) -> u64 {
+        let count: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        let campaign_key = Symbol::new(&env, "campaign_ref");
+        let mut matches = 0;
+
+        for id in 0..count {
+            let key = (symbol_short!("pkg"), id);
+            if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                if package.metadata.get(campaign_key.clone()).as_ref() == Some(&campaign_ref) {
+                    matches += 1;
+                }
+            }
+        }
+
+        matches
+    }
+
+    /// Returns the number of claimed packages associated with a `campaign_ref` metadata value.
+    ///
+    /// This helper is intentionally read-only and deterministic: it performs a full scan
+    /// over persisted package records and counts only packages whose status is `Claimed`.
+    pub fn get_campaign_claim_count(env: Env, campaign_ref: String) -> u64 {
+        let count: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        let campaign_key = Symbol::new(&env, "campaign_ref");
+        let mut matches = 0;
+
+        for id in 0..count {
+            let key = (symbol_short!("pkg"), id);
+            if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                if package.status == PackageStatus::Claimed
+                    && package.metadata.get(campaign_key.clone()).as_ref() == Some(&campaign_ref)
+                {
+                    matches += 1;
+                }
+            }
+        }
+
+        matches
+    }
+
     /// Returns the number of stored packages assigned to `recipient`.
     ///
     /// This naive helper scans all package IDs from `0..package_counter`, treating the

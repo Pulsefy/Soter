@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
-  Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -14,44 +13,62 @@ import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
 import { ClaimReceipt, ClaimReceiptData } from '../components/ClaimReceipt';
+import { config } from '../config';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ClaimReceipt'>;
+
+const PENDING_STATUSES: ClaimReceiptData['status'][] = [
+  'requested',
+  'verified',
+  'approved',
+];
+
+type LoadState =
+  | { kind: 'loading' }
+  | { kind: 'not-found' }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready'; data: ClaimReceiptData };
 
 export const ClaimReceiptScreen: React.FC<Props> = ({ route, navigation }) => {
   const { claimId } = route.params;
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
-  const [claim, setClaim] = useState<ClaimReceiptData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
-  // Mock data - replace with actual API call
   const loadClaim = useCallback(async () => {
-    setLoading(true);
+    setState({ kind: 'loading' });
     try {
-      // TODO: Replace with actual API call
-      // const response = await fetch(`/api/claims/${claimId}/receipt`);
-      // const data = await response.json();
+      const response = await fetch(
+        `${config.apiUrl}/claims/${encodeURIComponent(claimId)}/receipt`,
+      );
 
-      // Mock data
-      const mockClaim: ClaimReceiptData = {
-        claimId,
-        packageId: 'pkg-' + Math.random().toString(36).substr(2, 9),
-        status: 'disbursed',
-        amount: 150.5,
-        tokenAddress:
-          'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
-        timestamp: new Date().toISOString(),
-      };
+      if (response.status === 404) {
+        setState({ kind: 'not-found' });
+        return;
+      }
 
-      setClaim(mockClaim);
-      setError(null);
+      if (!response.ok) {
+        let msg = `Server responded with ${response.status}`;
+        try {
+          const body = (await response.json()) as
+            | { message?: string; error?: string }
+            | undefined;
+          if (body?.message) msg = body.message;
+          else if (body?.error) msg = body.error;
+        } catch {
+          /* ignore parse errors */
+        }
+        setState({ kind: 'error', message: msg });
+        return;
+      }
+
+      const data = (await response.json()) as ClaimReceiptData;
+      setState({ kind: 'ready', data });
     } catch (err) {
-      setError('Failed to load claim receipt');
-      console.error('Load claim error:', err);
-    } finally {
-      setLoading(false);
+      const message =
+        err instanceof Error ? err.message : 'Failed to load claim receipt';
+      setState({ kind: 'error', message });
     }
   }, [claimId]);
 
@@ -63,7 +80,7 @@ export const ClaimReceiptScreen: React.FC<Props> = ({ route, navigation }) => {
     navigation.goBack();
   };
 
-  if (loading) {
+  if (state.kind === 'loading') {
     return (
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color={colors.brand.primary} />
@@ -72,17 +89,20 @@ export const ClaimReceiptScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }
 
-  if (error || !claim) {
+  if (state.kind === 'not-found') {
     return (
       <View style={[styles.container, styles.centered]}>
         <MaterialCommunityIcons
-          name="alert-circle-outline"
+          name="file-question-outline"
           size={48}
-          color={colors.brand.error}
+          color={colors.brand.warning}
           style={{ marginBottom: 16 }}
         />
-        <Text style={styles.errorTitle}>Error Loading Receipt</Text>
-        <Text style={styles.errorMessage}>{error || 'Unknown error'}</Text>
+        <Text style={styles.errorTitle}>Receipt not found</Text>
+        <Text style={styles.errorMessage}>
+          We could not find a receipt for this claim. The link may be incorrect
+          or the claim may have been removed.
+        </Text>
         <TouchableOpacity
           style={[styles.button, { backgroundColor: colors.brand.primary }]}
           onPress={handleClose}
@@ -92,6 +112,30 @@ export const ClaimReceiptScreen: React.FC<Props> = ({ route, navigation }) => {
       </View>
     );
   }
+
+  if (state.kind === 'error') {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <MaterialCommunityIcons
+          name="alert-circle-outline"
+          size={48}
+          color={colors.brand.error}
+          style={{ marginBottom: 16 }}
+        />
+        <Text style={styles.errorTitle}>Unable to load receipt</Text>
+        <Text style={styles.errorMessage}>{state.message}</Text>
+        <TouchableOpacity
+          style={[styles.button, { backgroundColor: colors.brand.primary }]}
+          onPress={handleClose}
+        >
+          <Text style={styles.buttonText}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const claim = state.data;
+  const isPending = PENDING_STATUSES.includes(claim.status);
 
   return (
     <View style={styles.container}>
@@ -113,6 +157,32 @@ export const ClaimReceiptScreen: React.FC<Props> = ({ route, navigation }) => {
             Your proof of claim completion
           </Text>
         </View>
+
+        {/* Pending callout */}
+        {isPending && (
+          <View style={styles.pendingCallout}>
+            <MaterialCommunityIcons
+              name="clock-outline"
+              size={20}
+              color={colors.brand.warning}
+              style={{ marginRight: 8 }}
+            />
+            <View style={{ flex: 1 }}>
+              <Text
+                style={[
+                  styles.pendingTitle,
+                  { color: colors.brand.warning },
+                ]}
+              >
+                Claim is {claim.status}
+              </Text>
+              <Text style={styles.pendingDescription}>
+                This claim has not been disbursed yet. A transaction link will
+                appear here once the on-chain disbursement is finalized.
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Receipt Card */}
         <View style={styles.receiptContainer}>
@@ -148,19 +218,22 @@ export const ClaimReceiptScreen: React.FC<Props> = ({ route, navigation }) => {
               </Text>
             </View>
           </View>
-          <View style={styles.helpItem}>
-            <MaterialCommunityIcons
-              name="download"
-              size={20}
-              color={colors.brand.primary}
-            />
-            <View style={styles.helpText}>
-              <Text style={styles.helpItemTitle}>Save</Text>
-              <Text style={styles.helpItemDescription}>
-                Download the receipt as a text file to your device
-              </Text>
+          {claim.explorerLink && (
+            <View style={styles.helpItem}>
+              <MaterialCommunityIcons
+                name="open-in-new"
+                size={20}
+                color={colors.brand.primary}
+              />
+              <View style={styles.helpText}>
+                <Text style={styles.helpItemTitle}>Verify on-chain</Text>
+                <Text style={styles.helpItemDescription}>
+                  Open the blockchain explorer to verify the transaction
+                  independently
+                </Text>
+              </View>
             </View>
-          </View>
+          )}
         </View>
       </ScrollView>
 
@@ -192,7 +265,7 @@ const makeStyles = (colors: AppColors) =>
     scrollContent: {
       paddingVertical: 20,
       paddingHorizontal: 16,
-      paddingBottom: 100, // Space for button
+      paddingBottom: 100,
     },
     header: {
       alignItems: 'center',
@@ -218,17 +291,37 @@ const makeStyles = (colors: AppColors) =>
     errorTitle: {
       fontSize: 18,
       fontWeight: '600',
-      color: colors.brand.error,
+      color: colors.text,
       marginBottom: 8,
     },
     errorMessage: {
       fontSize: 14,
       color: colors.text,
+      opacity: 0.7,
       marginBottom: 20,
       textAlign: 'center',
     },
     receiptContainer: {
       marginBottom: 24,
+    },
+    pendingCallout: {
+      flexDirection: 'row',
+      backgroundColor: '#fffbeb',
+      padding: 14,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: '#fde68a',
+      marginBottom: 16,
+      alignItems: 'flex-start',
+    },
+    pendingTitle: {
+      fontSize: 13,
+      fontWeight: '700',
+      marginBottom: 2,
+    },
+    pendingDescription: {
+      fontSize: 12,
+      color: '#92400e',
     },
     button: {
       paddingVertical: 12,
@@ -261,7 +354,7 @@ const makeStyles = (colors: AppColors) =>
       padding: 16,
       borderWidth: 1,
       borderColor: colors.border,
-      marginTop: 16,
+      marginTop: 8,
     },
     helpTitle: {
       fontSize: 14,

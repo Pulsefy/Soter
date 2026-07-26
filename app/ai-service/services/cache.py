@@ -6,7 +6,7 @@ Provides response caching for safe read operations with configurable TTL.
 import json
 import hashlib
 import logging
-from typing import Optional, Any, Callable
+from typing import Optional, Any, Callable, Dict, List
 from functools import wraps
 import redis
 from config import Settings
@@ -45,17 +45,27 @@ class CacheService:
             self.enabled = False
             self.client = None
 
-    def _generate_key(self, prefix: str, *args: Any, **kwargs: Any) -> str:
+    def _generate_key(
+        self,
+        prefix: str,
+        *args: Any,
+        tags: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> str:
         """
         Generate a deterministic cache key from function arguments.
 
         Args:
             prefix: Namespace prefix for the key
             *args: Positional arguments
+            tags: Optional named values (e.g. artifact_id, model_version) to embed
+                literally in the key, in addition to the arguments hash, so that
+                CacheInvalidationHelper can target entries by that value via a
+                Redis glob pattern rather than needing to know the full hash.
             **kwargs: Keyword arguments
 
         Returns:
-            SHA256 hash-based cache key
+            Cache key combining any literal tags with a SHA256 hash of the inputs
         """
         # Sort kwargs for consistent key generation
         sorted_kwargs = sorted(kwargs.items())
@@ -70,7 +80,28 @@ class CacheService:
         key_str = json.dumps(key_data, sort_keys=True, default=str)
         key_hash = hashlib.sha256(key_str.encode()).hexdigest()
 
-        return f"cache:ai:{prefix}:{key_hash}"
+        tag_segment = ""
+        if tags:
+            sanitized = [
+                f"{name}={self._sanitize_tag_value(value)}"
+                for name, value in sorted(tags.items())
+                if value not in (None, "")
+            ]
+            if sanitized:
+                tag_segment = ":" + ":".join(sanitized)
+
+        return f"cache:ai:{prefix}{tag_segment}:{key_hash}"
+
+    @staticmethod
+    def _sanitize_tag_value(value: Any) -> str:
+        """
+        Strip Redis glob-special and separator characters from a tag value so it
+        remains safely matchable with SCAN MATCH patterns.
+        """
+        text = str(value)
+        for ch in ("*", "?", "[", "]", ":"):
+            text = text.replace(ch, "_")
+        return text
 
     def get(self, key: str) -> Optional[Any]:
         """
@@ -167,21 +198,39 @@ class CacheService:
             return 0
 
 
-def cached_response(prefix: str, ttl_seconds: int):
+def cached_response(prefix: str, ttl_seconds: int, key_tags: Optional[List[str]] = None):
     """
     Decorator to cache function responses based on normalized inputs.
 
     Args:
         prefix: Cache key namespace prefix
         ttl_seconds: Time-to-live for cached responses
+        key_tags: Names of keyword arguments (e.g. "artifact_id", "model_version")
+            whose values should also be embedded literally in the cache key, so
+            CacheInvalidationHelper can target them by that value instead of
+            needing the full argument hash. Values are still part of the hashed
+            inputs regardless of whether they're listed here.
 
     Example:
         @cached_response(prefix="task_status", ttl_seconds=30)
         async def get_task_status(task_id: str):
             return await fetch_task_status(task_id)
+
+        @cached_response(
+            prefix="humanitarian_verification",
+            ttl_seconds=120,
+            key_tags=["model_version", "artifact_tag"],
+        )
+        async def verify(aid_claim: str, model_version: str, artifact_tag: str):
+            ...
     """
 
     def decorator(func: Callable):
+        def _resolve_tags(kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            if not key_tags:
+                return None
+            return {name: kwargs.get(name) for name in key_tags if kwargs.get(name) is not None}
+
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
             # Get or create cache service instance
@@ -193,7 +242,7 @@ def cached_response(prefix: str, ttl_seconds: int):
                 return await func(*args, **kwargs)
 
             # Generate cache key
-            cache_key = cache._generate_key(prefix, *args, **kwargs)
+            cache_key = cache._generate_key(prefix, *args, tags=_resolve_tags(kwargs), **kwargs)
 
             # Try to retrieve from cache
             cached_value = cache.get(cache_key)
@@ -222,7 +271,7 @@ def cached_response(prefix: str, ttl_seconds: int):
                 return func(*args, **kwargs)
 
             # Generate cache key
-            cache_key = cache._generate_key(prefix, *args, **kwargs)
+            cache_key = cache._generate_key(prefix, *args, tags=_resolve_tags(kwargs), **kwargs)
 
             # Try to retrieve from cache
             cached_value = cache.get(cache_key)

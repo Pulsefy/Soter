@@ -26,7 +26,7 @@ export default function HelpPage() {
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
               Check package cards, filters, exports, and the map view. In mock mode, these views populate without a live backend.
             </p>
-            <Link href="/dashboard" className="mt-4 inline-flex text-sm font-medium text-blue-600 hover:text-blue-700">
+            <Link href="/dashboard" className="mt-4 inline-flex text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
               Open dashboard
             </Link>
           </div>
@@ -36,7 +36,7 @@ export default function HelpPage() {
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
               Create a campaign manually or load sample values to explore import and review flows end to end.
             </p>
-            <Link href="/campaigns" className="mt-4 inline-flex text-sm font-medium text-blue-600 hover:text-blue-700">
+            <Link href="/campaigns" className="mt-4 inline-flex text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
               Open campaigns
             </Link>
           </div>
@@ -46,7 +46,7 @@ export default function HelpPage() {
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
               Use sample evidence text or upload a small test image to see the verification wizard states and error handling.
             </p>
-            <Link href="/" className="mt-4 inline-flex text-sm font-medium text-blue-600 hover:text-blue-700">
+            <Link href="/" className="mt-4 inline-flex text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
               Open verification entry
             </Link>
           </div>

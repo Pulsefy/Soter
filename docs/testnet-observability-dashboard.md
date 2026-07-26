@@ -19,6 +19,13 @@ Use the backend `/metrics`, `/health`, `/api/v1/health`, and `/jobs/health` endp
 | Onchain throughput | `onchain_operations_total{operation,adapter,status}` | Existing onchain success/failure counter by adapter. |
 | Job failures | `jobs_failed_total{job_type}` | Background job failures across queues. Pair with `/jobs/health`. |
 | Webhook retries | `webhook_retries_total{webhook_type,reason}` | Retry pressure for webhook delivery paths. |
+| Claims created | `claims_created_total{campaign_id}` | Cumulative count of claims created, broken down by campaign. |
+| Claims verified | `claims_verified_total{campaign_id}` | Cumulative count of claims that passed verification. |
+| Claims approved | `claims_approved_total{campaign_id}` | Cumulative count of claims approved for disbursement. |
+| Claims disbursed | `claims_disbursed_total{campaign_id,onchain_enabled}` | Cumulative count of claims disbursed, labelled by whether on-chain execution was enabled. |
+| Claims cancelled | `claims_cancelled_total{campaign_id,from_status}` | Cumulative count of claims cancelled, labelled by the status they were in when cancelled. |
+| Claims in funnel | `claims_in_funnel{status}` | Current gauge of claims at each funnel stage (requested, verified, approved, disbursed, archived, cancelled). |
+| Claim stage duration | `claim_funnel_duration_seconds{from_status,to_status}` | Time (seconds) spent in a given funnel stage before transitioning to the next. Useful for identifying bottlenecks. |
 
 ## Incident Checklist
 
@@ -38,3 +45,6 @@ Use the backend `/metrics`, `/health`, `/api/v1/health`, and `/jobs/health` endp
 - Queue pressure: waiting, active, delayed, and failed jobs from `/jobs/status`.
 - RPC health: Testnet RPC probe status from the health endpoint.
 - Correlated request errors: HTTP 4xx/5xx rate grouped by route, then inspect logs by `correlationId`.
+- Claim funnel: bar chart or stacked area of `claims_in_funnel` by `status` to visualise pipeline flow.
+- Claim stage durations: p50/p95/p99 from `claim_funnel_duration_seconds` by `from_status`->`to_status` transition.
+- Funnel conversion rates: rate of `claims_disbursed_total` / rate of `claims_created_total` to measure end-to-end throughput.

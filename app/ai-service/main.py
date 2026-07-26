@@ -11,6 +11,7 @@ import logging
 import uuid
 from contextvars import ContextVar
 from pythonjsonlogger import jsonlogger
+from logging_redaction import RedactionFilter
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -76,6 +77,7 @@ json_formatter = jsonlogger.JsonFormatter(
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(json_formatter)
 stream_handler.addFilter(CorrelationIdFilter())
+stream_handler.addFilter(RedactionFilter())
 root_logger.addHandler(stream_handler)
 
 # Get logger for this module

@@ -291,3 +291,64 @@ def test_all_authorized_roles_have_access(client: TestClient, artifact_fixture: 
         assert response.status_code == 200, f"Role {role} should have access"
         assert "download_url" in response.json()
 
+
+def test_invalidate_cache_rejects_missing_role(client: TestClient, artifact_fixture: str):
+    """Test that invalidate-cache requires an X-User-Role header."""
+    response = client.post(f"/v1/ai/verification-artifacts/{artifact_fixture}/invalidate-cache")
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "forbidden_role"
+
+
+def test_invalidate_cache_rejects_reviewer_role(client: TestClient, artifact_fixture: str):
+    """Test that the reviewer role (read-only) cannot trigger cache invalidation."""
+    response = client.post(
+        f"/v1/ai/verification-artifacts/{artifact_fixture}/invalidate-cache",
+        headers={"X-User-Role": "reviewer"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "forbidden_role"
+
+
+def test_invalidate_cache_allows_admin_role(client: TestClient, artifact_fixture: str):
+    """Test that admin can trigger cache invalidation and gets a structured response."""
+    response = client.post(
+        f"/v1/ai/verification-artifacts/{artifact_fixture}/invalidate-cache",
+        headers={"X-User-Role": "admin"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["artifact_id"] == artifact_fixture
+    assert isinstance(body["invalidated_entries"], int)
+
+
+def test_invalidate_cache_allows_operator_role(client: TestClient, artifact_fixture: str):
+    """Test that operator can trigger cache invalidation."""
+    response = client.post(
+        f"/v1/ai/verification-artifacts/{artifact_fixture}/invalidate-cache",
+        headers={"X-User-Role": "operator"},
+    )
+    assert response.status_code == 200
+
+
+def test_invalidate_cache_calls_invalidation_helper_when_cache_enabled(
+    client: TestClient, artifact_fixture: str
+):
+    """Test that a live cache is actually queried for both artifact-access and verification entries."""
+    from unittest.mock import Mock, patch
+
+    import main
+
+    mock_cache = Mock()
+    mock_cache.enabled = True
+    mock_cache.delete_pattern.return_value = 1
+
+    with patch.object(main.app.state, "cache", mock_cache, create=True):
+        response = client.post(
+            f"/v1/ai/verification-artifacts/{artifact_fixture}/invalidate-cache",
+            headers={"X-User-Role": "admin"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["invalidated_entries"] == 2
+    assert mock_cache.delete_pattern.call_count == 2
+

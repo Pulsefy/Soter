@@ -38,6 +38,13 @@ export async function fetchClient(
       await new Promise((resolve) => setTimeout(resolve, 500));
       return handlers['/campaigns/:id'](urlString, init);
     }
+
+    // Support dynamic verification-inbox endpoints like /v1/verification-inbox/:id, .../approve, .../reject, etc.
+    if (pathWithoutQuery.startsWith('/v1/verification-inbox/') && handlers['/v1/verification-inbox/:id']) {
+      console.log(`[Mock API] Intercepting dynamic verification-inbox request to: ${urlString}`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return handlers['/v1/verification-inbox/:id'](urlString, init);
+    }
   }
 
   // Fallback to real fetch

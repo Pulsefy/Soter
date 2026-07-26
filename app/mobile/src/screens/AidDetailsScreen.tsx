@@ -390,7 +390,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         {refreshing ? (
           <ActivityIndicator
             size="small"
-            color="#FFFFFF"
+            color={colors.background}
             accessibilityElementsHidden
           />
         ) : (
@@ -536,7 +536,7 @@ const StepProgress = ({
               <Text
                 style={[
                   stylesShared.progressText,
-                  { color: isComplete ? '#FFFFFF' : colors.textSecondary },
+                  { color: isComplete ? colors.background : colors.textSecondary },
                 ]}
               >
                 {index + 1}
@@ -595,7 +595,7 @@ const statusPillStyle = (status: ClaimStatus, colors: AppColors) => {
     case 'verified':
       return { backgroundColor: colors.infoBg, textColor: colors.info };
     case 'disbursed':
-      return { backgroundColor: colors.success, textColor: '#FFFFFF' };
+      return { backgroundColor: colors.success, textColor: colors.background };
     case 'requested':
     default:
       return { backgroundColor: colors.warningBg, textColor: colors.warning };
@@ -701,7 +701,7 @@ const makeStyles = (colors: AppColors) =>
     statusText: {
       fontSize: 12,
       fontWeight: '700',
-      color: '#FFFFFF',
+      color: colors.background,
     },
     section: {
       gap: 8,
@@ -778,7 +778,7 @@ const makeStyles = (colors: AppColors) =>
       opacity: 0.7,
     },
     buttonText: {
-      color: '#FFFFFF',
+      color: colors.background,
       fontSize: 16,
       fontWeight: '700',
     },

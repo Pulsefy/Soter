@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { useInboxStats } from '@/hooks/useVerificationInbox';
 
 interface StatTileProps {
@@ -21,9 +22,17 @@ function StatTile({ label, value, colorClass }: StatTileProps) {
 }
 
 export function StatsBar() {
-  const { data, isLoading } = useInboxStats();
+  const { data, isLoading, isError } = useInboxStats();
 
   if (isLoading || !data) {
+    if (isError && !isLoading) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 text-sm text-amber-700 dark:text-amber-300">
+          <AlertTriangle size={14} />
+          <span>Stats temporarily unavailable</span>
+        </div>
+      );
+    }
     return (
       <div className="flex gap-3 flex-wrap animate-pulse">
         {[1, 2, 3, 4, 5].map(i => (
