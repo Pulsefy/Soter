@@ -1,9 +1,9 @@
 import io
 from unittest.mock import MagicMock, patch
 
+import httpx
 import metrics
 import pytest
-from fastapi.testclient import TestClient
 from PIL import Image
 
 import main
@@ -19,7 +19,13 @@ def mock_healthy_resources():
 
 @pytest.fixture()
 def client():
-    return TestClient(main.app, follow_redirects=False)
+    from starlette.testclient import TestClient
+    import api.v1.ocr as ocr_module
+    ocr_module.limiter.reset()
+    if hasattr(main.app.state, "limiter"):
+        main.app.state.limiter.reset()
+    c = TestClient(main.app, follow_redirects=False, raise_server_exceptions=False)
+    yield c
 
 
 def _png_bytes() -> bytes:
@@ -36,18 +42,52 @@ def _red_png_bytes() -> bytes:
     return buf.getvalue()
 
 
+def _multipart_post(client, url, files=None, form_fields=None):
+    """Build multipart body manually and POST via content to avoid starlette testclient bug."""
+    import uuid
+    boundary = f"----SoterBoundary{uuid.uuid4().hex[:16]}"
+    parts = []
+
+    if form_fields:
+        for name, value in form_fields:
+            parts.append(
+                (f"--{boundary}\r\n"
+                 f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                 f"{value}\r\n").encode()
+            )
+
+    if files:
+        for name, filename, content, content_type in files:
+            if isinstance(content, str):
+                content = content.encode()
+            parts.append(
+                (f"--{boundary}\r\n"
+                 f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+                 f"Content-Type: {content_type}\r\n\r\n").encode()
+            )
+            parts.append(content)
+            parts.append(b"\r\n")
+
+    parts.append(f"--{boundary}--\r\n".encode())
+
+    body = b"".join(parts)
+    content_type = f"multipart/form-data; boundary={boundary}"
+    return client.post(url, content=body, headers={"Content-Type": content_type})
+
+
 class TestBatchOCREndpoint:
     """Tests for synchronous batch OCR processing."""
 
     def test_batch_ocr_success_with_all_documents(self, client):
         """Test batch processing with all successful documents."""
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch",
             files=[
-                ("files", ("doc1.png", _png_bytes(), "image/png")),
-                ("files", ("doc2.png", _red_png_bytes(), "image/png")),
+                ("files", "doc1.png", _png_bytes(), "image/png"),
+                ("files", "doc2.png", _red_png_bytes(), "image/png"),
             ],
-            data=[
+            form_fields=[
                 ("document_ids", "doc-001"),
                 ("document_ids", "doc-002"),
             ],
@@ -69,14 +109,15 @@ class TestBatchOCREndpoint:
 
     def test_batch_ocr_mixed_success_and_failure(self, client):
         """Test batch processing with mixed success/failure documents."""
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch",
             files=[
-                ("files", ("doc1.png", _png_bytes(), "image/png")),
-                ("files", ("doc2.invalid", b"not-a-real-image", "image/png")),
-                ("files", ("doc3.png", _red_png_bytes(), "image/png")),
+                ("files", "doc1.png", _png_bytes(), "image/png"),
+                ("files", "doc2.invalid", b"not-a-real-image", "image/png"),
+                ("files", "doc3.png", _red_png_bytes(), "image/png"),
             ],
-            data=[
+            form_fields=[
                 ("document_ids", "doc-001"),
                 ("document_ids", "doc-002"),
                 ("document_ids", "doc-003"),
@@ -88,10 +129,11 @@ class TestBatchOCREndpoint:
 
     def test_batch_ocr_with_invalid_content_type(self, client):
         """Test batch processing rejects invalid content types."""
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch",
             files=[
-                ("files", ("doc1.png", _png_bytes(), "text/plain")),
+                ("files", "doc1.png", _png_bytes(), "text/plain"),
             ],
         )
 
@@ -101,10 +143,11 @@ class TestBatchOCREndpoint:
 
     def test_batch_ocr_with_empty_image(self, client):
         """Test batch processing rejects empty images."""
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch",
             files=[
-                ("files", ("doc1.png", b"", "image/png")),
+                ("files", "doc1.png", b"", "image/png"),
             ],
         )
 
@@ -122,11 +165,12 @@ class TestBatchOCREndpoint:
 
     def test_batch_ocr_auto_generates_document_ids(self, client):
         """Test batch endpoint auto-generates document IDs if not provided."""
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch",
             files=[
-                ("files", ("doc1.png", _png_bytes(), "image/png")),
-                ("files", ("doc2.png", _red_png_bytes(), "image/png")),
+                ("files", "doc1.png", _png_bytes(), "image/png"),
+                ("files", "doc2.png", _red_png_bytes(), "image/png"),
             ],
         )
 
@@ -137,12 +181,13 @@ class TestBatchOCREndpoint:
 
     def test_batch_ocr_response_structure(self, client):
         """Test batch response has correct structure and fields."""
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch",
             files=[
-                ("files", ("doc1.png", _png_bytes(), "image/png")),
+                ("files", "doc1.png", _png_bytes(), "image/png"),
             ],
-            data=[("document_ids", "doc-001")],
+            form_fields=[("document_ids", "doc-001")],
         )
 
         assert response.status_code == 200
@@ -179,13 +224,14 @@ class TestBatchOCRJobEndpoint:
 
         monkeypatch.setattr(tasks, "create_task", fake_create_task)
 
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch/jobs",
             files=[
-                ("files", ("doc1.png", _png_bytes(), "image/png")),
-                ("files", ("doc2.png", _red_png_bytes(), "image/png")),
+                ("files", "doc1.png", _png_bytes(), "image/png"),
+                ("files", "doc2.png", _red_png_bytes(), "image/png"),
             ],
-            data=[
+            form_fields=[
                 ("document_ids", "doc-001"),
                 ("document_ids", "doc-002"),
             ],
@@ -211,12 +257,13 @@ class TestBatchOCRJobEndpoint:
 
         monkeypatch.setattr(tasks, "create_task", fake_create_task)
 
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch/jobs",
             files=[
-                ("files", ("doc1.png", _png_bytes(), "image/png")),
+                ("files", "doc1.png", _png_bytes(), "image/png"),
             ],
-            data=[("document_ids", "doc-001")],
+            form_fields=[("document_ids", "doc-001")],
         )
 
         assert response.status_code == 202
@@ -244,10 +291,11 @@ class TestBatchOCRJobEndpoint:
         create_task = MagicMock()
         monkeypatch.setattr(tasks, "create_task", create_task)
 
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch/jobs",
             files=[
-                ("files", ("doc1.txt", b"not an image", "text/plain")),
+                ("files", "doc1.txt", b"not an image", "text/plain"),
             ],
         )
 
@@ -259,10 +307,11 @@ class TestBatchOCRJobEndpoint:
         create_task = MagicMock()
         monkeypatch.setattr(tasks, "create_task", create_task)
 
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch/jobs",
             files=[
-                ("files", ("doc1.png", b"not-a-real-image", "image/png")),
+                ("files", "doc1.png", b"not-a-real-image", "image/png"),
             ],
         )
 
@@ -274,10 +323,11 @@ class TestBatchOCRJobEndpoint:
         create_task = MagicMock()
         monkeypatch.setattr(tasks, "create_task", create_task)
 
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch/jobs",
             files=[
-                ("files", ("doc1.png", b"", "image/png")),
+                ("files", "doc1.png", b"", "image/png"),
             ],
         )
 
@@ -292,11 +342,12 @@ class TestBatchOCRJobEndpoint:
 
         monkeypatch.setattr(tasks, "create_task", fake_create_task)
 
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch/jobs",
             files=[
-                ("files", ("doc1.png", _png_bytes(), "image/png")),
-                ("files", ("doc2.png", _red_png_bytes(), "image/png")),
+                ("files", "doc1.png", _png_bytes(), "image/png"),
+                ("files", "doc2.png", _red_png_bytes(), "image/png"),
             ],
         )
 
@@ -322,15 +373,15 @@ class TestBatchOCRValidation:
 
     def test_batch_ocr_mismatched_document_ids_count(self, client):
         """Test batch handling when document_ids count doesn't match files."""
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch",
             files=[
-                ("files", ("doc1.png", _png_bytes(), "image/png")),
-                ("files", ("doc2.png", _red_png_bytes(), "image/png")),
+                ("files", "doc1.png", _png_bytes(), "image/png"),
+                ("files", "doc2.png", _red_png_bytes(), "image/png"),
             ],
-            data=[
+            form_fields=[
                 ("document_ids", "doc-001"),
-                # Only one ID but two files
             ],
         )
 
@@ -355,10 +406,11 @@ class TestBatchOCRValidation:
             img.save(buf, format=fmt)
             img_bytes = buf.getvalue()
 
-            response = client.post(
+            response = _multipart_post(
+                client,
                 "/v1/ai/ocr/batch",
                 files=[
-                    ("files", (f"doc.{fmt.lower()}", img_bytes, mime_type)),
+                    ("files", f"doc.{fmt.lower()}", img_bytes, mime_type),
                 ],
             )
 
@@ -368,16 +420,17 @@ class TestBatchOCRValidation:
     def test_batch_ocr_large_batch(self, client):
         """Test batch endpoint handles multiple documents efficiently."""
         files = []
-        doc_ids = []
+        form_fields = []
 
         for i in range(5):
-            files.append(("files", (f"doc{i}.png", _png_bytes(), "image/png")))
-            doc_ids.append(("document_ids", f"doc-{i:03d}"))
+            files.append(("files", f"doc{i}.png", _png_bytes(), "image/png"))
+            form_fields.append(("document_ids", f"doc-{i:03d}"))
 
-        response = client.post(
+        response = _multipart_post(
+            client,
             "/v1/ai/ocr/batch",
             files=files,
-            data=doc_ids,
+            form_fields=form_fields,
         )
 
         assert response.status_code == 200

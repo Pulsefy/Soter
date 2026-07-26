@@ -168,13 +168,21 @@ class TestOCRTestProviderStability:
 
         assert len(texts) > 1
 
-    def test_ocr_regular_service_unchanged(self):
-        """Without test_provider_mode, OCR still requires real dependencies."""
+    def test_ocr_regular_service_unchanged(self, monkeypatch):
+        """Without test_provider_mode, OCR uses the real Tesseract pipeline."""
+        from unittest.mock import MagicMock
         from PIL import Image
+
+        monkeypatch.setattr(settings, "test_provider_mode", False)
         img = Image.new("RGB", (50, 50), color="red")
 
-        with pytest.raises(Exception):
-            self.service.process_image(img)
+        mock_run = MagicMock(return_value={"text": "", "conf": []})
+        monkeypatch.setattr(self.service, "_run_tesseract", lambda *a, **kw: mock_run())
+
+        result = self.service.process_image(img)
+
+        mock_run.assert_called_once()
+        assert result.raw_text == ""
 
 
 # -----------------------------------------------------------------------

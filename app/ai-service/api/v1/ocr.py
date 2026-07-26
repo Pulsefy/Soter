@@ -227,12 +227,12 @@ async def process_batch_ocr_endpoint(
         )
 
     if len(doc_ids) != len(files):
-        doc_ids = [f"doc-{i}" for i in range(len(files))]
+        doc_ids = list(doc_ids) + [f"doc-{i}" for i in range(len(doc_ids), len(files))]
 
     for idx, file in enumerate(files):
         doc_id = doc_ids[idx] if idx < len(doc_ids) else f"doc-{idx}"
 
-        if not isinstance(file, UploadFile):
+        if not hasattr(file, "content_type") or not hasattr(file, "read"):
             continue
 
         if file.content_type not in ALLOWED_CONTENT_TYPES:
@@ -328,13 +328,13 @@ async def queue_batch_ocr_job(
         )
 
     if len(doc_ids) != len(files):
-        doc_ids = [f"doc-{i}" for i in range(len(files))]
+        doc_ids = list(doc_ids) + [f"doc-{i}" for i in range(len(doc_ids), len(files))]
 
     documents = []
     for idx, file in enumerate(files):
         doc_id = doc_ids[idx] if idx < len(doc_ids) else f"doc-{idx}"
 
-        if not isinstance(file, UploadFile):
+        if not hasattr(file, "content_type") or not hasattr(file, "read"):
             continue
 
         if file.content_type not in ALLOWED_CONTENT_TYPES:
