@@ -241,6 +241,7 @@ export class VerificationService {
             campaignRef: anchorMetadata.campaignRef ?? null,
             claimId: anchorMetadata.claimId ?? null,
             packageId: anchorMetadata.packageId ?? null,
+            contractId: anchorMetadata.contractId ?? null,
           }
         : undefined,
     };
@@ -325,6 +326,7 @@ export class VerificationService {
           campaignRef: anchorMetadata.campaignRef ?? null,
           claimId: anchorMetadata.claimId ?? null,
           packageId: anchorMetadata.packageId ?? null,
+          contractId: anchorMetadata.contractId ?? null,
         }
       : null;
 

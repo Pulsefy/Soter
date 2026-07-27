@@ -75,21 +75,28 @@ export class VerificationMetadataService {
       // Use type assertion for fields that may exist on the claim but not in the Prisma type
       const claimAny = claim as any;
 
-      // Get package ID from various sources
+      // Get package ID from various sources (but NOT from contract ID)
       let packageId: string;
+      const claimAnchor = claim.anchorMetadata as any;
       if (claimAny.packageId) {
         packageId = claimAny.packageId;
-      } else if (deploymentMetadata?.contractId) {
-        packageId = deploymentMetadata.contractId;
+      } else if (claimAnchor?.packageId) {
+        packageId = claimAnchor.packageId;
+      } else if (claimAnchor?.package_id) {
+        packageId = claimAnchor.package_id;
       } else {
         packageId = this.generatePackageId(claimId);
       }
+
+      // Explicitly get contract ID from deployment metadata
+      const contractId = deploymentMetadata?.contractId ?? undefined;
 
       // Build the metadata object
       const metadata: ContractAwareMetadata = {
         campaignId,
         claimId,
         packageId,
+        contractId,
         network: this.network,
         chainId:
           this.configService.get<string>('STELLAR_CHAIN_ID') || 'testnet',
@@ -160,6 +167,11 @@ export class VerificationMetadataService {
       metadata.packageId.length < 3
     ) {
       errors.push('packageId must be a valid string with minimum length 3');
+    } else if (
+      (metadata.contractAddress && metadata.packageId === metadata.contractAddress) ||
+      (metadata.contractId && metadata.packageId === metadata.contractId)
+    ) {
+      errors.push('packageId must not be equal to contractAddress or contractId (cannot overload contract ID as package ID)');
     }
 
     if (
@@ -347,6 +359,9 @@ export class VerificationMetadataService {
     }
     if (payload.contractAddress) {
       metadata.contractAddress = payload.contractAddress;
+    }
+    if (payload.contractId) {
+      metadata.contractId = payload.contractId;
     }
     if (payload.network) {
       metadata.network = payload.network;

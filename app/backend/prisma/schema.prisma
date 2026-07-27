@@ -809,6 +809,31 @@ model DeploymentMetadata {
   @@index([deployedAt])
 }
 
+enum ImportJobStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+model ImportJob {
+  id            String          @id @default(cuid())
+  status        ImportJobStatus @default(pending)
+  campaignId    String
+  totalRows     Int             @default(0)
+  processedRows Int             @default(0)
+  errorRows     Int             @default(0)
+  errors        String?
+  reportUrl     String?
+  fileName      String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  completedAt   DateTime?
+
+  @@index([campaignId])
+  @@index([status])
+}
+
 enum SorobanEventTopic {
   package_created
   package_claimed
