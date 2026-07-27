@@ -3,6 +3,8 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { ErrorState } from '@/components/ErrorState';
 
+const MAX_RETRIES = 3;
+
 interface ErrorBoundaryProps {
   children: ReactNode;
 }
@@ -35,6 +37,7 @@ export class ErrorBoundary extends Component<
   }
 
   handleRetry = () => {
+    if (this.state.retryCount >= MAX_RETRIES) return;
     this.setState((currentState) => ({
       error: null,
       retryCount: currentState.retryCount + 1,
@@ -50,6 +53,8 @@ export class ErrorBoundary extends Component<
         <ErrorState
           error={error}
           onTryAgain={this.handleRetry}
+          retryCount={retryCount}
+          maxRetries={MAX_RETRIES}
         />
       );
     }

@@ -10,10 +10,14 @@ import {
   Home, 
   ChevronRight,
   Info,
-  Settings2
+  Settings2,
+  ArrowLeft,
+  Copy,
+  Check
 } from 'lucide-react';
+import { useState } from 'react';
 import { ERROR_METADATA, ErrorCategory } from '@/types/error';
-import { categorizeError } from '@/lib/error-utils';
+import { categorizeError, normalizeError } from '@/lib/error-utils';
 
 interface ErrorStateProps {
   title?: string;
@@ -21,6 +25,8 @@ interface ErrorStateProps {
   error?: Error & { digest?: string };
   onTryAgain?: () => void;
   category?: ErrorCategory;
+  retryCount?: number;
+  maxRetries?: number;
 }
 
 export function ErrorState({
@@ -29,6 +35,8 @@ export function ErrorState({
   error,
   onTryAgain,
   category: manualCategory,
+  retryCount = 0,
+  maxRetries = 3,
 }: ErrorStateProps) {
   const category = manualCategory || categorizeError(error);
   const metadata = ERROR_METADATA[category];
@@ -36,6 +44,28 @@ export function ErrorState({
   const title = manualTitle || metadata.title;
   const description = manualDescription || metadata.description;
   const showDetails = process.env.NODE_ENV !== 'production';
+  const [copied, setCopied] = useState(false);
+
+  // Extract correlation ID from the error if it's a NormalizedError or ApiError
+  const normalized = error ? normalizeError(error) : null;
+  const correlationId = normalized?.correlationId || (error as any)?.correlationId || (error as any)?.traceId;
+  const retryExhausted = retryCount >= maxRetries;
+
+  const handleGoBack = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back();
+    } else {
+      window.location.href = '/';
+    }
+  };
+
+  const handleCopyCorrelationId = async () => {
+    if (correlationId) {
+      await navigator.clipboard.writeText(correlationId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   const CategoryIcon = {
     wallet: Wallet,
@@ -87,13 +117,23 @@ export function ErrorState({
             {onTryAgain && metadata.canRetry && (
               <button
                 type="button"
-                onClick={onTryAgain}
-                className="group inline-flex items-center justify-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-semibold text-slate-950 transition-all hover:bg-slate-200 hover:scale-[1.02] active:scale-[0.98]"
+                onClick={retryExhausted ? undefined : onTryAgain}
+                disabled={retryExhausted}
+                className="group inline-flex items-center justify-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-semibold text-slate-950 transition-all hover:bg-slate-200 hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
               >
-                <RefreshCcw size={18} className="transition-transform group-hover:rotate-180 duration-700" />
-                Retry action
+                <RefreshCcw size={18} className={`transition-transform duration-700 ${retryExhausted ? '' : 'group-hover:rotate-180'}`} />
+                {retryExhausted ? 'Retry limit reached' : 'Retry action'}
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={handleGoBack}
+              className="group inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-6 py-3.5 text-sm font-semibold text-white transition-all hover:bg-white/10 hover:border-white/20"
+            >
+              <ArrowLeft size={18} className="transition-transform group-hover:-translate-x-0.5" />
+              Go Back
+            </button>
 
             <Link
               href="/"
@@ -103,6 +143,14 @@ export function ErrorState({
               Return Home
             </Link>
           </div>
+
+          {retryCount > 0 && (
+            <p className="mt-3 text-xs text-slate-500">
+              {retryExhausted
+                ? `Retry limit reached (${retryCount}/${maxRetries}). Please try again later or contact support.`
+                : `Retried ${retryCount} time${retryCount > 1 ? 's' : ''} so far.`}
+            </p>
+          )}
 
           {/* Recovery Tips */}
           <div className="mt-12 space-y-6">
@@ -146,6 +194,27 @@ export function ErrorState({
                   {error.stack || error.message}
                 </code>
               </div>
+            </div>
+          )}
+
+          {/* Correlation ID (shown in all environments when available) */}
+          {correlationId && (
+            <div className="mt-4 flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Correlation ID
+                </span>
+                <span className="font-mono text-xs text-slate-400">{correlationId}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCopyCorrelationId}
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-slate-500 transition-colors hover:bg-white/5 hover:text-slate-300"
+                aria-label="Copy correlation ID"
+              >
+                {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                {copied ? 'Copied' : 'Copy'}
+              </button>
             </div>
           )}
         </div>
