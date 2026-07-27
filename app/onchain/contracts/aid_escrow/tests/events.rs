@@ -136,6 +136,8 @@ fn test_package_created_event() {
         &token_client.address,
         &expires_at,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     let data = last_event_data(&env, &contract_id, "package_created");
@@ -169,6 +171,8 @@ fn test_package_claimed_event() {
         &token_client.address,
         &(env.ledger().timestamp() + 86400),
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.claim(&0u64);
 
@@ -203,6 +207,8 @@ fn test_package_disbursed_event() {
         &token_client.address,
         &(env.ledger().timestamp() + 86400),
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.disburse(&0u64);
 
@@ -238,6 +244,8 @@ fn test_package_revoked_event() {
         &token_client.address,
         &(env.ledger().timestamp() + 86400),
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     // ACTION: Ensure this matches your contract's function name (revoke vs cancel_package)
@@ -277,6 +285,8 @@ fn test_package_refunded_event() {
         &token_client.address,
         &expires_at,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     env.ledger().set_timestamp(expires_at + 1);
@@ -315,6 +325,8 @@ fn test_extended_event_records_old_and_new_expiry() {
         &token_client.address,
         &old_expires_at,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.extend_expiry(&42u64, &new_expires_at);
 

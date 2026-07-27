@@ -103,6 +103,8 @@ impl TestSetup {
             &self.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         )
     }
 }
@@ -363,6 +365,8 @@ mod combined_boundaries {
             &t.token,
             &expires_at,
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         // The contract should reject this during creation validation
         // since claim_starts_at would default to created_at which is < expires_at
@@ -382,6 +386,8 @@ mod combined_boundaries {
             &t.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         );
         // This should succeed - zero window is allowed
         assert!(result2.is_ok());
@@ -509,6 +515,8 @@ mod edge_cases {
             &t.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         );
 
         // Advance time significantly
@@ -544,6 +552,8 @@ mod edge_cases {
             &t.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         );
         // Should fail because claim_starts_at < created_at
         assert_eq!(result, Err(Ok(Error::InvalidState)));
@@ -571,6 +581,8 @@ mod edge_cases {
             &t.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         );
         // Should fail because claim_starts_at > expires_at
         assert_eq!(result, Err(Ok(Error::InvalidState)));

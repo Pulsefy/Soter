@@ -74,6 +74,8 @@ fn test_aggregates_single_created_package() {
         &token_client.address,
         &expiry,
         &metadata,
+        &false,
+        &0u32,
     );
 
     let agg = client.get_aggregates(&token_client.address);
@@ -110,6 +112,8 @@ fn test_aggregates_mixed_statuses() {
         &token_client.address,
         &expiry,
         &metadata,
+        &false,
+        &0u32,
     );
 
     // P2: Claimed (20M)
@@ -121,6 +125,8 @@ fn test_aggregates_mixed_statuses() {
         &token_client.address,
         &expiry,
         &metadata,
+        &false,
+        &0u32,
     );
     client.claim(&2);
 
@@ -133,6 +139,8 @@ fn test_aggregates_mixed_statuses() {
         &token_client.address,
         &expiry,
         &metadata,
+        &false,
+        &0u32,
     );
     client.revoke(&3);
 
@@ -145,6 +153,8 @@ fn test_aggregates_mixed_statuses() {
         &token_client.address,
         &short_expiry,
         &metadata,
+        &false,
+        &0u32,
     );
     env.ledger().set_timestamp(short_expiry + 1);
     client.refund(&4);
@@ -174,6 +184,8 @@ fn test_aggregates_all_claimed() {
         &token_client.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.create_package(
         &admin,
@@ -183,6 +195,8 @@ fn test_aggregates_all_claimed() {
         &token_client.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     client.claim(&10);
@@ -225,6 +239,8 @@ fn test_aggregates_filters_by_token() {
         &token_a.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.create_package(
         &admin,
@@ -234,6 +250,8 @@ fn test_aggregates_filters_by_token() {
         &token_a.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.claim(&2);
 
@@ -246,6 +264,8 @@ fn test_aggregates_filters_by_token() {
         &token_b.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.revoke(&3);
 
@@ -274,6 +294,8 @@ fn test_aggregates_disburse_counts_as_claimed() {
         &token_client.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.claim(&1);
 
@@ -285,6 +307,8 @@ fn test_aggregates_disburse_counts_as_claimed() {
         &token_client.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.disburse(&2);
 
@@ -310,6 +334,8 @@ fn test_aggregates_many_packages() {
             &token_client.address,
             &expiry,
             &Map::new(&env),
+            &false,
+            &0u32,
         );
         if i % 2 == 0 {
             client.claim(&i);
@@ -340,6 +366,8 @@ fn test_aggregates_update_after_transitions() {
         &token_client.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     assert_eq!(
         client.get_aggregates(&token_client.address).total_committed,
@@ -369,6 +397,8 @@ fn test_aggregates_revoke_then_refund() {
         &token_client.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.revoke(&1);
     client.refund(&1);
@@ -394,6 +424,8 @@ fn test_aggregates_unknown_token() {
         &token_client.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     let unknown_token = Address::generate(&env);

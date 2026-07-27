@@ -54,6 +54,8 @@ fn test_core_flow_fund_create_claim() {
         &token_client.address,
         &expiry,
         &metadata,
+        &false,
+        &0u32,
     );
 
     // Check Package State
@@ -99,6 +101,8 @@ fn test_solvency_check() {
         &token_client.address,
         &0,
         &metadata,
+        &false,
+        &0u32,
     );
     assert_eq!(res, Err(Ok(Error::InsufficientFunds)));
 
@@ -111,6 +115,8 @@ fn test_solvency_check() {
         &token_client.address,
         &0,
         &metadata,
+        &false,
+        &0u32,
     );
 
     // Try creating another package (funds are locked)
@@ -122,6 +128,8 @@ fn test_solvency_check() {
         &token_client.address,
         &0,
         &metadata,
+        &false,
+        &0u32,
     );
     assert_eq!(res2, Err(Ok(Error::InsufficientFunds)));
 }
@@ -157,6 +165,8 @@ fn test_expiry_and_refund() {
         &token_client.address,
         &expiry,
         &metadata,
+        &false,
+        &0u32,
     );
 
     // Advance time past expiry
@@ -203,6 +213,8 @@ fn test_cancel_package_flow() {
         &token_client.address,
         &0,
         &metadata,
+        &false,
+        &0u32,
     );
 
     // Cancel
@@ -221,6 +233,8 @@ fn test_cancel_package_flow() {
         &token_client.address,
         &0,
         &metadata,
+        &false,
+        &0u32,
     );
 }
 
@@ -253,6 +267,8 @@ fn test_distributor_package_creation() {
         &token_client.address,
         &0,
         &metadata,
+        &false,
+        &0u32,
     );
     let pkg = client.get_package(&pkg_id);
     assert_eq!(pkg.status, PackageStatus::Created);
@@ -266,6 +282,8 @@ fn test_distributor_package_creation() {
         &token_client.address,
         &0,
         &metadata,
+        &false,
+        &0u32,
     );
     assert_eq!(res, Err(Ok(Error::NotAuthorized)));
 }

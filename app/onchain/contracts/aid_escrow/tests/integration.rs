@@ -43,6 +43,8 @@ fn test_integration_flow() {
         &token_client.address,
         &expires_at,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     let package = client.get_package(&pkg_id);
@@ -78,6 +80,8 @@ fn test_multiple_packages() {
         &token_client.address,
         &9999999,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.create_package(
         &admin,
@@ -87,6 +91,8 @@ fn test_multiple_packages() {
         &token_client.address,
         &9999999,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     assert_eq!(client.get_package(&100).amount, UNIT);
@@ -115,6 +121,8 @@ fn test_error_cases() {
         &token_client.address,
         &86400,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     assert_eq!(res1, Err(Ok(Error::InvalidAmount)));
 
@@ -178,6 +186,8 @@ fn test_config_constraints_on_create_package() {
         &token_client.address,
         &(now + 10),
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     assert_eq!(res1, Err(Ok(Error::InvalidAmount)));
 
@@ -190,6 +200,8 @@ fn test_config_constraints_on_create_package() {
         &blocked_token.address,
         &(now + 10),
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     assert_eq!(res2, Err(Ok(Error::InvalidState)));
 
@@ -202,6 +214,8 @@ fn test_config_constraints_on_create_package() {
         &token_client.address,
         &(now + 2000),
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     assert_eq!(res3, Err(Ok(Error::InvalidState)));
 }
@@ -228,6 +242,8 @@ fn test_extend_expiration_success() {
         &token_client.address,
         &expiry,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     client.extend_expiration(&1, &500);
@@ -256,6 +272,8 @@ fn test_extend_expiry_success() {
         &token_client.address,
         &initial,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     let new_exp = initial + 500;
@@ -285,6 +303,8 @@ fn test_extend_expiry_rejects_non_increasing_expiry() {
         &token_client.address,
         &initial,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     assert_eq!(
@@ -318,6 +338,8 @@ fn test_extend_expiration_zero_additional_time() {
         &token_client.address,
         &9999999,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     assert_eq!(
         client.try_extend_expiration(&1, &0),
@@ -347,6 +369,8 @@ fn test_extend_expiration_expired_package() {
         &token_client.address,
         &1100,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     env.ledger().set_timestamp(1101);
@@ -377,6 +401,8 @@ fn test_extend_expiration_claimed_package() {
         &token_client.address,
         &9999999,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.claim(&1);
     assert_eq!(
@@ -406,6 +432,8 @@ fn test_extend_expiration_cancelled_package() {
         &token_client.address,
         &9999999,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.cancel_package(&1);
     assert_eq!(
@@ -442,6 +470,8 @@ fn test_config_constraints_on_extend_expiration() {
         &token_client.address,
         &(now + 100),
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     // Total expiry (100 + 500) = 600. Max allowed from creation is 500.
@@ -488,6 +518,8 @@ fn test_get_recipient_package_count_returns_multiple_packages() {
         &token_client.address,
         &9999999,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     client.create_package(
         &admin,
@@ -497,6 +529,8 @@ fn test_get_recipient_package_count_returns_multiple_packages() {
         &token_client.address,
         &9999999,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     assert_eq!(client.get_recipient_package_count(&recipient), 2);
@@ -534,6 +568,8 @@ fn test_extend_expiration_unbounded_package() {
         &token_client.address,
         &0,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
     assert_eq!(
         client.try_extend_expiration(&1, &10),
@@ -563,6 +599,8 @@ fn test_extend_expiration_multiple_extends() {
         &token_client.address,
         &initial,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     client.extend_expiration(&1, &100);

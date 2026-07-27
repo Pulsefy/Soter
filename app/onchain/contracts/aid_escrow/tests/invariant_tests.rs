@@ -42,6 +42,8 @@ fn test_core_accounting_invariants() {
         &token_address,
         &0,
         &Map::new(&env),
+        &false,
+        &0u32,
     );
 
     let locked = client.get_total_locked(&token_address);

@@ -96,6 +96,8 @@ impl TestSetup {
             &self.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         )
     }
 }
@@ -137,6 +139,8 @@ mod create_package {
             &t.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         );
         let pkg = t.client.get_package(&id);
         assert_eq!(
@@ -161,6 +165,8 @@ mod create_package {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert_eq!(result, Err(Ok(Error::InvalidAmount)));
     }
@@ -178,6 +184,8 @@ mod create_package {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert_eq!(result, Err(Ok(Error::PackageIdExists)));
     }
@@ -194,6 +202,8 @@ mod create_package {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert_eq!(result, Err(Ok(Error::InsufficientFunds)));
     }
@@ -223,6 +233,8 @@ mod token_interactions {
             &invalid_token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
 
         assert_eq!(result, Err(Ok(Error::InvalidToken)));
@@ -309,6 +321,106 @@ mod claim {
     }
 
     #[test]
+    fn partial_claim_allows_multiple_valid_claims_and_drains_remaining_balance() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        t.fund_contract(TWO_TOKENS);
+        let expires_at = t.now() + 3_600;
+        let metadata = Map::new(&t.env);
+        let id = t.client.create_package(
+            &t.admin,
+            &101u64,
+            &recipient,
+            &TWO_TOKENS,
+            &t.token,
+            &expires_at,
+            &metadata,
+            &true,
+            &0u32,
+        );
+
+        let first_result = t.client.try_partial_claim(&id, &ONE_TOKEN);
+        assert_eq!(first_result, Ok(Ok(())));
+
+        let pkg = t.client.get_package(&id);
+        assert_eq!(pkg.status, PackageStatus::Created);
+        assert_eq!(pkg.remaining_balance, ONE_TOKEN);
+        assert_eq!(pkg.tranches_claimed, 1u32);
+
+        let token_client = TokenClient::new(&t.env, &t.token);
+        assert_eq!(token_client.balance(&recipient), ONE_TOKEN);
+
+        let second_result = t.client.try_partial_claim(&id, &ONE_TOKEN);
+        assert_eq!(second_result, Ok(Ok(())));
+
+        let pkg = t.client.get_package(&id);
+        assert_eq!(pkg.status, PackageStatus::Claimed);
+        assert_eq!(pkg.remaining_balance, 0);
+        assert_eq!(pkg.tranches_claimed, 2u32);
+        assert_eq!(token_client.balance(&recipient), TWO_TOKENS);
+    }
+
+    #[test]
+    fn partial_claim_rejects_over_claims_and_preserves_state() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        t.fund_contract(TWO_TOKENS);
+        let expires_at = t.now() + 3_600;
+        let metadata = Map::new(&t.env);
+        let id = t.client.create_package(
+            &t.admin,
+            &102u64,
+            &recipient,
+            &TWO_TOKENS,
+            &t.token,
+            &expires_at,
+            &metadata,
+            &true,
+            &0u32,
+        );
+
+        let result = t.client.try_partial_claim(&id, &(TWO_TOKENS + 1));
+        assert_eq!(result, Err(Ok(Error::TrancheAmountInvalid)));
+
+        let pkg = t.client.get_package(&id);
+        assert_eq!(pkg.status, PackageStatus::Created);
+        assert_eq!(pkg.remaining_balance, TWO_TOKENS);
+        assert_eq!(pkg.tranches_claimed, 0u32);
+
+        let token_client = TokenClient::new(&t.env, &t.token);
+        assert_eq!(token_client.balance(&recipient), 0);
+    }
+
+    #[test]
+    fn partial_claim_rejects_after_expiry_and_keeps_remaining_balance() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        t.fund_contract(ONE_TOKEN);
+        let expires_at = t.now() + 1_000;
+        let metadata = Map::new(&t.env);
+        let id = t.client.create_package(
+            &t.admin,
+            &103u64,
+            &recipient,
+            &ONE_TOKEN,
+            &t.token,
+            &expires_at,
+            &metadata,
+            &true,
+            &0u32,
+        );
+
+        t.advance_time(1_001);
+        let result = t.client.try_partial_claim(&id, &ONE_TOKEN);
+        assert_eq!(result, Err(Ok(Error::PackageExpired)));
+
+        let pkg = t.client.get_package(&id);
+        assert_eq!(pkg.status, PackageStatus::Created);
+        assert_eq!(pkg.remaining_balance, ONE_TOKEN);
+        assert_eq!(pkg.tranches_claimed, 0u32);
+    }
+
+    #[test]
     fn fails_when_package_is_expired() {
         let t = TestSetup::new();
         let id = t.create_default_package(&Address::generate(&t.env), ONE_TOKEN);
@@ -337,6 +449,8 @@ mod claim {
             &t.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         );
         // Try to claim before claim_starts_at
         let result = t.client.try_claim(&id);
@@ -368,6 +482,8 @@ mod claim {
             &t.token,
             &expires_at,
             &metadata,
+            &false,
+            &0u32,
         );
         // Try to claim before claim_starts_at
         let result = t.client.try_claim(&id);
@@ -412,6 +528,8 @@ mod claim {
             &t.token,
             &(t.now() + 3600),
             &metadata,
+            &false,
+            &0u32,
         );
 
         // Direct claim path should reject Merkle-protected package.
@@ -450,6 +568,8 @@ mod claim {
             &t.token,
             &(t.now() + 3600),
             &metadata,
+            &false,
+            &0u32,
         );
 
         let proof: Vec<soroban_sdk::String> = Vec::new(&t.env);
@@ -489,6 +609,8 @@ mod edge_cases {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
 
         // Contract balance is now fully locked. 2nd package should fail.
@@ -500,6 +622,8 @@ mod edge_cases {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert_eq!(r2, Err(Ok(Error::InsufficientFunds)));
 
@@ -514,6 +638,8 @@ mod edge_cases {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert!(r3.is_ok());
     }
@@ -538,6 +664,8 @@ mod token_decimal_normalization {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert_eq!(result, Err(Ok(Error::InvalidAmount)));
     }
@@ -554,6 +682,8 @@ mod token_decimal_normalization {
             &t.token,
             &(t.now() + 3600),
             &Map::new(&t.env),
+            &false,
+            &0u32,
         );
         assert!(result.is_ok());
     }
