@@ -24,7 +24,7 @@ def client():
     ocr_module.limiter.reset()
     if hasattr(main.app.state, "limiter"):
         main.app.state.limiter.reset()
-    c = TestClient(main.app, follow_redirects=False, raise_server_exceptions=False)
+    c = TestClient(main.app, raise_server_exceptions=False)
     yield c
 
 
@@ -42,37 +42,39 @@ def _red_png_bytes() -> bytes:
     return buf.getvalue()
 
 
+BOUNDARY = "----SoterTestBoundary"
+
+
 def _multipart_post(client, url, files=None, form_fields=None):
-    """Build multipart body manually and POST via content to avoid starlette testclient bug."""
-    import uuid
-    boundary = f"----SoterBoundary{uuid.uuid4().hex[:16]}"
-    parts = []
+    """Build a raw multipart body to bypass the starlette TestClient
+    multipart-stream bug (TypeError: sequence item 0: expected a bytes-like
+    object, tuple found) by sending the encoded bytes directly via
+    ``content=``.
+    """
+    body = b""
 
     if form_fields:
         for name, value in form_fields:
-            parts.append(
-                (f"--{boundary}\r\n"
-                 f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
-                 f"{value}\r\n").encode()
-            )
+            body += f"--{BOUNDARY}\r\n".encode()
+            body += f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode()
+            body += value.encode() if isinstance(value, str) else value
+            body += b"\r\n"
 
     if files:
         for name, filename, content, content_type in files:
-            if isinstance(content, str):
-                content = content.encode()
-            parts.append(
-                (f"--{boundary}\r\n"
-                 f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
-                 f"Content-Type: {content_type}\r\n\r\n").encode()
-            )
-            parts.append(content)
-            parts.append(b"\r\n")
+            body += f"--{BOUNDARY}\r\n".encode()
+            body += f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'.encode()
+            body += f"Content-Type: {content_type}\r\n\r\n".encode()
+            body += content
+            body += b"\r\n"
 
-    parts.append(f"--{boundary}--\r\n".encode())
+    body += f"--{BOUNDARY}--\r\n".encode()
 
-    body = b"".join(parts)
-    content_type = f"multipart/form-data; boundary={boundary}"
-    return client.post(url, content=body, headers={"Content-Type": content_type})
+    return client.post(
+        url,
+        content=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={BOUNDARY}"},
+    )
 
 
 class TestBatchOCREndpoint:
@@ -124,7 +126,6 @@ class TestBatchOCREndpoint:
             ],
         )
 
-        # Batch endpoint returns 400 when any document fails validation
         assert response.status_code == 400
 
     def test_batch_ocr_with_invalid_content_type(self, client):
@@ -193,7 +194,6 @@ class TestBatchOCREndpoint:
         assert response.status_code == 200
         data = response.json()
 
-        # Check top-level fields
         assert "success" in data
         assert "batch_id" in data
         assert "total_documents" in data
@@ -202,7 +202,6 @@ class TestBatchOCREndpoint:
         assert "results" in data
         assert "total_processing_time_ms" in data
 
-        # Check result structure
         result = data["results"][0]
         assert "document_id" in result
         assert "success" in result
@@ -354,7 +353,6 @@ class TestBatchOCRJobEndpoint:
         assert response.status_code == 202
         data = response.json()
 
-        # Check required fields
         assert "success" in data
         assert "batch_job_id" in data
         assert "document_count" in data
@@ -385,17 +383,14 @@ class TestBatchOCRValidation:
             ],
         )
 
-        # Should auto-generate IDs for remaining docs
         assert response.status_code == 200
         data = response.json()
         assert data["total_documents"] == 2
         assert data["results"][0]["document_id"] == "doc-001"
-        # Second should auto-generate
         assert data["results"][1]["document_id"] == "doc-1"
 
     def test_batch_ocr_with_supported_image_formats(self, client):
         """Test batch endpoint accepts all supported image formats."""
-        # Create images in different formats
         for fmt, mime_type in [
             ("PNG", "image/png"),
             ("JPEG", "image/jpeg"),
