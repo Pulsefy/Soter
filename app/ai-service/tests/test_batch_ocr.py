@@ -11,6 +11,20 @@ import tasks
 from config import settings
 
 
+def _mock_ocr_success(contents, anchor_metadata=None, language_hint=None):
+    """Return a successful OCR result dict matching run_ocr_from_bytes output."""
+    return {
+        "success": True,
+        "data": {
+            "fields": {"name": {"value": "Test User", "confidence": 0.9}},
+            "raw_text": "Test User",
+            "processing_time_ms": 10,
+        },
+        "processing_time_ms": 10,
+        "anchor_metadata": None,
+    }
+
+
 @pytest.fixture(autouse=True)
 def mock_healthy_resources():
     with patch.object(metrics, "check_system_resources", return_value=True):
@@ -79,6 +93,11 @@ def _multipart_post(client, url, files=None, form_fields=None):
 
 class TestBatchOCREndpoint:
     """Tests for synchronous batch OCR processing."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_ocr(self, monkeypatch):
+        import services.ocr_job as ocr_job_mod
+        monkeypatch.setattr(ocr_job_mod, "run_ocr_from_bytes", _mock_ocr_success)
 
     def test_batch_ocr_success_with_all_documents(self, client):
         """Test batch processing with all successful documents."""
@@ -368,6 +387,11 @@ class TestBatchOCRJobEndpoint:
 
 class TestBatchOCRValidation:
     """Tests for batch OCR request validation and error handling."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_ocr(self, monkeypatch):
+        import services.ocr_job as ocr_job_mod
+        monkeypatch.setattr(ocr_job_mod, "run_ocr_from_bytes", _mock_ocr_success)
 
     def test_batch_ocr_mismatched_document_ids_count(self, client):
         """Test batch handling when document_ids count doesn't match files."""
