@@ -17,14 +17,24 @@ describe('HealthService Diagnostics Export', () => {
           useValue: {
             get: jest.fn((key: string) => {
               if (key === 'NODE_ENV') return 'test';
-              if (key === 'STELLAR_RPC_URL') return 'https://soroban-testnet.stellar.org';
+              if (key === 'STELLAR_RPC_URL')
+                return 'https://soroban-testnet.stellar.org';
               return null;
             }),
           },
         },
-        { provide: LoggerService, useValue: { log: jest.fn(), error: jest.fn(), warn: jest.fn() } },
-        { provide: PrismaService, useValue: { $queryRaw: jest.fn().mockResolvedValue([{ 1: 1 }]) } },
-        { provide: ONCHAIN_ADAPTER_TOKEN, useValue: { getContractMetadata: jest.fn() } },
+        {
+          provide: LoggerService,
+          useValue: { log: jest.fn(), error: jest.fn(), warn: jest.fn() },
+        },
+        {
+          provide: PrismaService,
+          useValue: { $queryRaw: jest.fn().mockResolvedValue([{ 1: 1 }]) },
+        },
+        {
+          provide: ONCHAIN_ADAPTER_TOKEN,
+          useValue: { getContractMetadata: jest.fn() },
+        },
       ],
     }).compile();
 

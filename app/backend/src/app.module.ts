@@ -139,7 +139,8 @@ import { RecipientImportModule } from './recipient-import/recipient-import.modul
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => {
-        const redisHost = configService.get<string>('REDIS_HOST') ?? 'localhost';
+        const redisHost =
+          configService.get<string>('REDIS_HOST') ?? 'localhost';
         const redisPort = parseInt(
           configService.get<string>('REDIS_PORT') ?? '6379',
           10,

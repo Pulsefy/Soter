@@ -70,8 +70,8 @@ describe('AnalyticsService', () => {
       // Mock the four parallel count queries used by summary cards:
       // totalClaims, totalPackages, pendingReviews, totalDisbursements
       prismaMock.claim.count
-        .mockResolvedValueOnce(42)   // totalClaims
-        .mockResolvedValueOnce(15);  // totalDisbursements (disbursed claims)
+        .mockResolvedValueOnce(42) // totalClaims
+        .mockResolvedValueOnce(15); // totalDisbursements (disbursed claims)
       prismaMock.aidPackage.count.mockResolvedValue(18);
       prismaMock.verificationRequest.count.mockResolvedValue(7);
 

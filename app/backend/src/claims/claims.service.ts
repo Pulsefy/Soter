@@ -388,9 +388,11 @@ export class ClaimsService {
 
     const counts = await Promise.all(
       statuses.map(status =>
-        this.prisma.claim.count({
-          where: { status, deletedAt: null },
-        }).then(count => ({ status, count })),
+        this.prisma.claim
+          .count({
+            where: { status, deletedAt: null },
+          })
+          .then(count => ({ status, count })),
       ),
     );
 
@@ -477,8 +479,7 @@ export class ClaimsService {
       return updated;
     });
 
-    const durationSeconds =
-      (Date.now() - claim.updatedAt.getTime()) / 1000;
+    const durationSeconds = (Date.now() - claim.updatedAt.getTime()) / 1000;
 
     const campaignId = claim.campaignId;
 
@@ -602,7 +603,7 @@ export class ClaimsService {
     const txInfo = await this.findDisbursementTransaction(claim.id);
     const transactionHash = txInfo?.transactionHash;
     const explorerLink = transactionHash
-      ? this.buildExplorerLink(transactionHash) ?? undefined
+      ? (this.buildExplorerLink(transactionHash) ?? undefined)
       : undefined;
 
     return {

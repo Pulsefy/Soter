@@ -24,7 +24,9 @@ describe('RecipientImportService', () => {
           provide: PrismaService,
           useValue: {
             campaign: {
-              findUnique: jest.fn().mockResolvedValue({ id: 'campaign-1', name: 'Test Campaign' }),
+              findUnique: jest
+                .fn()
+                .mockResolvedValue({ id: 'campaign-1', name: 'Test Campaign' }),
             },
             importJob: {
               create: jest.fn().mockResolvedValue({
@@ -122,7 +124,9 @@ describe('RecipientImportService', () => {
         totalRows: 100,
         processedRows: 50,
         errorRows: 5,
-        errors: JSON.stringify([{ row: 1, field: 'amount', message: 'Invalid' }]),
+        errors: JSON.stringify([
+          { row: 1, field: 'amount', message: 'Invalid' },
+        ]),
         reportUrl: null,
         status: 'processing',
         completedAt: null,
@@ -216,9 +220,13 @@ describe('RecipientImportService', () => {
     });
 
     it('should set status to failed when there are errors', async () => {
-      await service.completeJob('import-job-1', 95, 5, [
-        { row: 1, field: 'amount', message: 'Invalid' },
-      ], '/report.csv');
+      await service.completeJob(
+        'import-job-1',
+        95,
+        5,
+        [{ row: 1, field: 'amount', message: 'Invalid' }],
+        '/report.csv',
+      );
 
       expect(prismaService.importJob.update).toHaveBeenCalledWith({
         where: { id: 'import-job-1' },
@@ -233,7 +241,8 @@ describe('RecipientImportService', () => {
 
   describe('CSV parsing', () => {
     it('should parse a well-formed CSV', () => {
-      const csv = 'recipientRef,amount,evidenceRef\nR-001,100.00,ev-1\nR-002,200.50,';
+      const csv =
+        'recipientRef,amount,evidenceRef\nR-001,100.00,ev-1\nR-002,200.50,';
       const result = service.parseCsv(csv);
 
       expect(result.headers).toEqual(['recipientRef', 'amount', 'evidenceRef']);
@@ -258,7 +267,11 @@ describe('RecipientImportService', () => {
     const headers = ['recipientRef', 'amount', 'evidenceRef'];
 
     it('should validate a correct row', () => {
-      const result = service.validateRow(['R-001', '100.00', 'ev-1'], headers, 2);
+      const result = service.validateRow(
+        ['R-001', '100.00', 'ev-1'],
+        headers,
+        2,
+      );
       expect(result.valid).toBe(true);
       expect(result.recipientRef).toBe('R-001');
       expect(result.amount).toBe(100);

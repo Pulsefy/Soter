@@ -214,9 +214,7 @@ describe('ClaimsService', () => {
           operation: SorobanOperationType.disburse_claim,
         }),
       );
-      expect(
-        mockSorobanTxScheduler.scheduleTransaction,
-      ).toHaveBeenCalled();
+      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalled();
 
       expect(result.status).toBe(ClaimStatus.disbursed);
       expect(result.campaign).toBeDefined();

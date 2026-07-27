@@ -192,7 +192,10 @@ export class VerificationController {
     description:
       'Invalid input parameters or rate limit exceeded for this identifier.',
   })
-  @ApiResponse({ status: 429, description: 'Too many requests. High-cost operation (email/SMS sending).' })
+  @ApiResponse({
+    status: 429,
+    description: 'Too many requests. High-cost operation (email/SMS sending).',
+  })
   async startVerification(@Body() dto: StartVerificationDto) {
     return this.verificationFlowService.start(dto);
   }
@@ -223,7 +226,10 @@ export class VerificationController {
   @ApiNotFoundResponse({
     description: 'The specified verification session was not found.',
   })
-  @ApiResponse({ status: 429, description: 'Too many requests. High-cost operation (email/SMS sending).' })
+  @ApiResponse({
+    status: 429,
+    description: 'Too many requests. High-cost operation (email/SMS sending).',
+  })
   async resendVerification(@Body() dto: ResendVerificationDto) {
     return this.verificationFlowService.resend(dto);
   }
@@ -253,7 +259,11 @@ export class VerificationController {
   @ApiNotFoundResponse({
     description: 'The specified verification session was not found.',
   })
-  @ApiResponse({ status: 429, description: 'Too many failed attempts or rate limit exceeded for verification.' })
+  @ApiResponse({
+    status: 429,
+    description:
+      'Too many failed attempts or rate limit exceeded for verification.',
+  })
   async completeVerification(@Body() dto: CompleteVerificationDto) {
     return this.verificationFlowService.complete(dto);
   }

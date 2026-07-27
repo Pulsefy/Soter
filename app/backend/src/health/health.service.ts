@@ -261,7 +261,9 @@ export class HealthService {
   async getDiagnosticsExport() {
     const liveness = this.getLiveness();
     const readiness = await this.getReadiness();
-    const rpcUrl = this.configService.get<string>('STELLAR_RPC_URL') ?? 'https://soroban-testnet.stellar.org';
+    const rpcUrl =
+      this.configService.get<string>('STELLAR_RPC_URL') ??
+      'https://soroban-testnet.stellar.org';
 
     const rawBundle = {
       metadata: {
@@ -296,13 +298,28 @@ export class HealthService {
     if (data === null || data === undefined) return data;
     if (typeof data === 'string') {
       let str = data.replace(/\bS[A-Z0-9]{55}\b/g, '[REDACTED]');
-      str = str.replace(/Bearer\s+[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_=]*/gi, 'Bearer [REDACTED]');
+      str = str.replace(
+        /Bearer\s+[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_=]*/gi,
+        'Bearer [REDACTED]',
+      );
       return str as T;
     }
     if (typeof data !== 'object') return data;
-    if (Array.isArray(data)) return data.map((item) => this.sanitizeDiagnostics(item)) as unknown as T;
+    if (Array.isArray(data))
+      return data.map(item => this.sanitizeDiagnostics(item)) as unknown as T;
 
-    const sensitiveKeys = new Set(['password', 'token', 'secret', 'authorization', 'apikey', 'api_key', 'privatekey', 'private_key', 'email', 'seed']);
+    const sensitiveKeys = new Set([
+      'password',
+      'token',
+      'secret',
+      'authorization',
+      'apikey',
+      'api_key',
+      'privatekey',
+      'private_key',
+      'email',
+      'seed',
+    ]);
     const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
       if (sensitiveKeys.has(k.toLowerCase())) {

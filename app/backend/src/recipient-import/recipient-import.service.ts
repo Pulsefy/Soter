@@ -194,9 +194,17 @@ export class RecipientImportService {
     row: string[],
     headers: string[],
     rowIndex: number,
-  ): { valid: boolean; recipientRef?: string; amount?: number; evidenceRef?: string; errors: ImportError[] } {
+  ): {
+    valid: boolean;
+    recipientRef?: string;
+    amount?: number;
+    evidenceRef?: string;
+    errors: ImportError[];
+  } {
     const errors: ImportError[] = [];
-    const headerMap = new Map(headers.map((h, i) => [h.toLowerCase().trim(), i]));
+    const headerMap = new Map(
+      headers.map((h, i) => [h.toLowerCase().trim(), i]),
+    );
 
     const recipientRefIdx = headerMap.get('recipientref');
     const amountIdx = headerMap.get('amount');
@@ -231,7 +239,10 @@ export class RecipientImportService {
           valid: errors.length === 0,
           recipientRef: row[recipientRefIdx!]?.trim(),
           amount,
-          evidenceRef: evidenceRefIdx !== undefined ? row[evidenceRefIdx]?.trim() : undefined,
+          evidenceRef:
+            evidenceRefIdx !== undefined
+              ? row[evidenceRefIdx]?.trim()
+              : undefined,
           errors,
         };
       }
@@ -247,8 +258,10 @@ export class RecipientImportService {
     return {
       valid: true,
       recipientRef: row[recipientRefIdx!]?.trim(),
-      amount: amountIdx !== undefined ? parseFloat(row[amountIdx]!.trim()) : undefined,
-      evidenceRef: evidenceRefIdx !== undefined ? row[evidenceRefIdx]?.trim() : undefined,
+      amount:
+        amountIdx !== undefined ? parseFloat(row[amountIdx].trim()) : undefined,
+      evidenceRef:
+        evidenceRefIdx !== undefined ? row[evidenceRefIdx]?.trim() : undefined,
       errors: [],
     };
   }
@@ -259,7 +272,7 @@ export class RecipientImportService {
     let inQuotes = false;
 
     for (let i = 0; i < line.length; i++) {
-      const char = line[i]!;
+      const char = line[i];
       if (inQuotes) {
         if (char === '"') {
           if (i + 1 < line.length && line[i + 1] === '"') {

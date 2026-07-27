@@ -90,9 +90,12 @@ describe('Verification Metadata E2E', () => {
         contractId: 'contract_123',
         network: 'testnet',
       };
-      const overloadedErrors = metadataService.validateMetadata(overloadedMetadata);
+      const overloadedErrors =
+        metadataService.validateMetadata(overloadedMetadata);
       expect(overloadedErrors.length).toBeGreaterThan(0);
-      expect(overloadedErrors.some(e => e.includes('cannot overload'))).toBe(true);
+      expect(overloadedErrors.some(e => e.includes('cannot overload'))).toBe(
+        true,
+      );
 
       const invalidMetadata = {
         campaignId: 'invalid-uuid',

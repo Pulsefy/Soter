@@ -10,7 +10,13 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiOkResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiOkResponse,
+  ApiConsumes,
+  ApiBody,
+} from '@nestjs/swagger';
 import { RecipientImportService } from './recipient-import.service';
 import {
   ImportJobResponseDto,
@@ -44,7 +50,11 @@ export class RecipientImportController {
       type: 'object',
       required: ['file', 'campaignId'],
       properties: {
-        file: { type: 'string', format: 'binary', description: 'CSV file to upload' },
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'CSV file to upload',
+        },
         campaignId: { type: 'string', description: 'Target campaign ID' },
       },
     },
@@ -63,7 +73,10 @@ export class RecipientImportController {
     }
 
     if (!file.originalname.endsWith('.csv')) {
-      throw new HttpException('Only CSV files are accepted', HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        'Only CSV files are accepted',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const uploadDir = join(tmpdir(), 'soter-imports');
@@ -100,7 +113,9 @@ export class RecipientImportController {
       'Returns the current status, progress percentages, row counts, and any errors for the specified import job.',
   })
   @ApiOkResponse({ type: ImportJobResponseDto })
-  async getStatus(@Param('jobId') jobId: string): Promise<ImportJobResponseDto> {
+  async getStatus(
+    @Param('jobId') jobId: string,
+  ): Promise<ImportJobResponseDto> {
     return this.recipientImportService.getJobStatus(jobId);
   }
 }

@@ -51,7 +51,10 @@ describe('ArtifactTokenGuard', () => {
     jest.clearAllMocks();
   });
 
-  const createContext = (headers: Record<string, string>, query: Record<string, string> = {}) => {
+  const createContext = (
+    headers: Record<string, string>,
+    query: Record<string, string> = {},
+  ) => {
     const req: Record<string, unknown> = { headers, query };
     return {
       switchToHttp: () => ({
@@ -196,31 +199,37 @@ describe('ArtifactTokenGuard', () => {
   });
 
   describe('role validation', () => {
-    it.each(['admin', 'operator', 'reviewer'])('should allow %s role', async (role) => {
-      reflector.getAllAndOverride.mockReturnValue(true);
-      tokenService.verifyToken.mockResolvedValue({
-        valid: true,
-        payload: { ...mockPayload, role },
-      });
+    it.each(['admin', 'operator', 'reviewer'])(
+      'should allow %s role',
+      async role => {
+        reflector.getAllAndOverride.mockReturnValue(true);
+        tokenService.verifyToken.mockResolvedValue({
+          valid: true,
+          payload: { ...mockPayload, role },
+        });
 
-      const context = createContext({ authorization: 'Bearer valid-token' });
-      const result = await guard.canActivate(context as any);
+        const context = createContext({ authorization: 'Bearer valid-token' });
+        const result = await guard.canActivate(context as any);
 
-      expect(result).toBe(true);
-    });
+        expect(result).toBe(true);
+      },
+    );
 
-    it.each(['client', 'unknown', 'viewer'])('should reject %s role', async (role) => {
-      reflector.getAllAndOverride.mockReturnValue(true);
-      tokenService.verifyToken.mockResolvedValue({
-        valid: true,
-        payload: { ...mockPayload, role },
-      });
+    it.each(['client', 'unknown', 'viewer'])(
+      'should reject %s role',
+      async role => {
+        reflector.getAllAndOverride.mockReturnValue(true);
+        tokenService.verifyToken.mockResolvedValue({
+          valid: true,
+          payload: { ...mockPayload, role },
+        });
 
-      const context = createContext({ authorization: 'Bearer valid-token' });
-      await expect(guard.canActivate(context as any)).rejects.toThrow(
-        ForbiddenException,
-      );
-    });
+        const context = createContext({ authorization: 'Bearer valid-token' });
+        await expect(guard.canActivate(context as any)).rejects.toThrow(
+          ForbiddenException,
+        );
+      },
+    );
   });
 
   describe('request augmentation', () => {

@@ -171,12 +171,10 @@ describe('Cost-Aware Rate Limiting (e2e)', () => {
       const agent = request(app.getHttpServer());
 
       for (let i = 0; i < 5; i++) {
-        await agent
-          .post('/api/v1/verification')
-          .send({
-            userId: 'user-123',
-            documentType: 'NATIONAL_ID',
-          });
+        await agent.post('/api/v1/verification').send({
+          userId: 'user-123',
+          documentType: 'NATIONAL_ID',
+        });
       }
 
       await agent
@@ -220,11 +218,9 @@ describe('Cost-Aware Rate Limiting (e2e)', () => {
 
       // Send many requests, all should succeed (or fail with non-429 errors)
       for (let i = 0; i < 20; i++) {
-        await agent
-          .get('/api/v1/health')
-          .expect(res => {
-            expect(res.status).not.toBe(429);
-          });
+        await agent.get('/api/v1/health').expect(res => {
+          expect(res.status).not.toBe(429);
+        });
       }
     });
 
@@ -232,11 +228,9 @@ describe('Cost-Aware Rate Limiting (e2e)', () => {
       const agent = request(app.getHttpServer());
 
       for (let i = 0; i < 20; i++) {
-        await agent
-          .get('/api/v1/health/live')
-          .expect(res => {
-            expect(res.status).not.toBe(429);
-          });
+        await agent.get('/api/v1/health/live').expect(res => {
+          expect(res.status).not.toBe(429);
+        });
       }
     });
 
@@ -244,11 +238,9 @@ describe('Cost-Aware Rate Limiting (e2e)', () => {
       const agent = request(app.getHttpServer());
 
       for (let i = 0; i < 20; i++) {
-        await agent
-          .get('/api/v1/health/ready')
-          .expect(res => {
-            expect(res.status).not.toBe(429);
-          });
+        await agent.get('/api/v1/health/ready').expect(res => {
+          expect(res.status).not.toBe(429);
+        });
       }
     });
 
@@ -256,12 +248,10 @@ describe('Cost-Aware Rate Limiting (e2e)', () => {
       const agent = request(app.getHttpServer());
 
       for (let i = 0; i < 20; i++) {
-        await agent
-          .get('/api/v1/health/error')
-          .expect(res => {
-            // Will fail with 500, not 429
-            expect(res.status).not.toBe(429);
-          });
+        await agent.get('/api/v1/health/error').expect(res => {
+          // Will fail with 500, not 429
+          expect(res.status).not.toBe(429);
+        });
       }
     });
 
@@ -269,11 +259,9 @@ describe('Cost-Aware Rate Limiting (e2e)', () => {
       const agent = request(app.getHttpServer());
 
       for (let i = 0; i < 20; i++) {
-        await agent
-          .get('/api/v1/health/onchain')
-          .expect(res => {
-            expect(res.status).not.toBe(429);
-          });
+        await agent.get('/api/v1/health/onchain').expect(res => {
+          expect(res.status).not.toBe(429);
+        });
       }
     });
   });
@@ -283,11 +271,9 @@ describe('Cost-Aware Rate Limiting (e2e)', () => {
       const agent = request(app.getHttpServer());
 
       for (let i = 0; i < 20; i++) {
-        await agent
-          .get('/api/docs')
-          .expect(res => {
-            expect(res.status).not.toBe(429);
-          });
+        await agent.get('/api/docs').expect(res => {
+          expect(res.status).not.toBe(429);
+        });
       }
     });
 
@@ -295,11 +281,9 @@ describe('Cost-Aware Rate Limiting (e2e)', () => {
       const agent = request(app.getHttpServer());
 
       for (let i = 0; i < 20; i++) {
-        await agent
-          .get('/api/swagger.json')
-          .expect(res => {
-            expect(res.status).not.toBe(429);
-          });
+        await agent.get('/api/swagger.json').expect(res => {
+          expect(res.status).not.toBe(429);
+        });
       }
     });
   });
@@ -421,12 +405,10 @@ describe('Cost-Aware Rate Limiting (e2e)', () => {
 
       // Use up verify limit
       for (let i = 0; i < 5; i++) {
-        await agent
-          .post('/api/v1/verification')
-          .send({
-            userId: 'user-123',
-            documentType: 'NATIONAL_ID',
-          });
+        await agent.post('/api/v1/verification').send({
+          userId: 'user-123',
+          documentType: 'NATIONAL_ID',
+        });
       }
 
       // 6th verify request should fail

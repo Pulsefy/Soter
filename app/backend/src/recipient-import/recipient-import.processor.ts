@@ -4,10 +4,7 @@ import { Job } from 'bullmq';
 import { readFileSync } from 'fs';
 import { RecipientImportService } from './recipient-import.service';
 import { ClaimsService } from '../claims/claims.service';
-import {
-  ImportJobData,
-  ImportError,
-} from './interfaces/import-job.interface';
+import { ImportJobData, ImportError } from './interfaces/import-job.interface';
 
 const BATCH_SIZE = 100;
 
@@ -24,9 +21,7 @@ export class RecipientImportProcessor extends WorkerHost {
     super();
   }
 
-  async process(
-    job: Job<ImportJobData, void, string>,
-  ): Promise<void> {
+  async process(job: Job<ImportJobData, void, string>): Promise<void> {
     const jobId = job.id!;
     this.logger.log(
       `Processing import job ${jobId} for campaign ${job.data.campaignId}` +
@@ -41,7 +36,8 @@ export class RecipientImportProcessor extends WorkerHost {
 
     try {
       const fileContent = readFileSync(job.data.filePath, 'utf-8');
-      const { headers, rows } = this.recipientImportService.parseCsv(fileContent);
+      const { headers, rows } =
+        this.recipientImportService.parseCsv(fileContent);
 
       for (let i = 0; i < rows.length; i += BATCH_SIZE) {
         const batch = rows.slice(i, i + BATCH_SIZE);
@@ -49,7 +45,7 @@ export class RecipientImportProcessor extends WorkerHost {
         for (let j = 0; j < batch.length; j++) {
           const rowIndex = i + j + 2; // +2 for 1-indexed + header row
           const validation = this.recipientImportService.validateRow(
-            batch[j]!,
+            batch[j],
             headers,
             rowIndex,
           );
@@ -67,7 +63,8 @@ export class RecipientImportProcessor extends WorkerHost {
               amount: validation.amount!,
               recipientRef: validation.recipientRef!,
               evidenceRef: validation.evidenceRef,
-              tokenAddress: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+              tokenAddress:
+                'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
             });
             processedRows++;
           } catch (error) {
@@ -75,7 +72,9 @@ export class RecipientImportProcessor extends WorkerHost {
               row: rowIndex,
               field: 'claim',
               message:
-                error instanceof Error ? error.message : 'Failed to create claim',
+                error instanceof Error
+                  ? error.message
+                  : 'Failed to create claim',
             });
             errorRows++;
             processedRows++;
@@ -97,9 +96,7 @@ export class RecipientImportProcessor extends WorkerHost {
       }
 
       const reportUrl =
-        allErrors.length > 0
-          ? `/recipient-import/${jobId}/report`
-          : null;
+        allErrors.length > 0 ? `/recipient-import/${jobId}/report` : null;
 
       await this.recipientImportService.completeJob(
         jobId,
@@ -138,9 +135,7 @@ export class RecipientImportProcessor extends WorkerHost {
   @OnWorkerEvent('failed')
   onFailed(job: Job<ImportJobData> | undefined, error: Error) {
     if (job) {
-      this.logger.error(
-        `Import job ${job.id} failed: ${error.message}`,
-      );
+      this.logger.error(`Import job ${job.id} failed: ${error.message}`);
     } else {
       this.logger.error(`Import job failed: ${error.message}`);
     }

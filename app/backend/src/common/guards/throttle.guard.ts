@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  ExecutionContext,
-  Inject,
-} from '@nestjs/common';
+import { Injectable, ExecutionContext, Inject } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { SKIP_THROTTLE_KEY } from '../decorators/skip-throttle.decorator';

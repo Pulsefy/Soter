@@ -168,10 +168,13 @@ export class VerificationMetadataService {
     ) {
       errors.push('packageId must be a valid string with minimum length 3');
     } else if (
-      (metadata.contractAddress && metadata.packageId === metadata.contractAddress) ||
+      (metadata.contractAddress &&
+        metadata.packageId === metadata.contractAddress) ||
       (metadata.contractId && metadata.packageId === metadata.contractId)
     ) {
-      errors.push('packageId must not be equal to contractAddress or contractId (cannot overload contract ID as package ID)');
+      errors.push(
+        'packageId must not be equal to contractAddress or contractId (cannot overload contract ID as package ID)',
+      );
     }
 
     if (
