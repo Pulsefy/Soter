@@ -96,6 +96,7 @@ _LEGACY_TO_V1: dict = {
     "/ai/proof-of-life": "/v1/ai/proof-of-life",
     "/ai/anonymize": "/v1/ai/anonymize",
     "/ai/humanitarian/verify": "/v1/ai/humanitarian/verify",
+    "/ai/metadata": "/v1/ai/metadata",
 }
 
 # Prefix-based redirects for parameterised routes (matched in order).
@@ -477,6 +478,7 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs",
         "health": "/health",
+        "metadata": "/v1/ai/metadata",
         "api_v1": "/v1",
     }
 

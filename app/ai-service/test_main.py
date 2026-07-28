@@ -233,3 +233,88 @@ def test_humanitarian_verification_failure(monkeypatch):
     data = response.json()
     assert "error" in data
     assert data["error"]["code"] == "INTERNAL_SERVER_ERROR"
+
+
+# ---------------------------------------------------------------------------
+# Model & Provider Metadata endpoint tests
+# ---------------------------------------------------------------------------
+
+
+def test_metadata_endpoint_structure(client):
+    """Test that the metadata endpoint returns the expected structure."""
+    # v1 route directly
+    response = client.get("/v1/ai/metadata")
+    assert response.status_code == 200
+    data = response.json()
+
+    # Top-level keys
+    assert "provider" in data
+    assert "models" in data
+    assert "capabilities" in data
+    assert "runtime" in data
+    assert "_links" in data
+
+    # Provider structure
+    assert "active" in data["provider"]
+    assert "configured" in data["provider"]
+
+    # Capabilities
+    assert "deterministic_mode" in data["capabilities"]
+    assert "test_provider_mode" in data["capabilities"]
+
+    # Runtime
+    assert "python_version" in data["runtime"]
+    assert "pydantic_version" in data["runtime"]
+    assert "app_env" in data["runtime"]
+
+    # Links
+    assert data["_links"]["self"] == "/v1/ai/metadata"
+    assert data["_links"]["health"] == "/health"
+    assert data["_links"]["dependencies"] == "/health/dependencies"
+
+
+def test_metadata_no_secrets_exposed(client):
+    """Verify the metadata endpoint never leaks API keys or secrets."""
+    response = client.get("/v1/ai/metadata")
+    assert response.status_code == 200
+    body = response.text.lower()
+
+    # Blacklist of sensitive substrings that must NOT appear
+    secrets_blacklist = [
+        "api_key",
+        "apikey",
+        "secret",
+        "signing_secret",
+        "token",
+        "password",
+        "credential",
+    ]
+    for secret_pattern in secrets_blacklist:
+        assert secret_pattern not in body, (
+            f"Metadata response leaked a secret-like string: '{secret_pattern}'"
+        )
+
+
+def test_metadata_legacy_redirect(client):
+    """Test the legacy /ai/metadata redirects to the v1 endpoint."""
+    response = client.get("/ai/metadata", follow_redirects=False)
+    # Expect a 308 Permanent Redirect
+    assert response.status_code == 308
+    assert response.headers["location"] == "/v1/ai/metadata"
+
+
+def test_metadata_legacy_redirect_followed(client):
+    """Test that the legacy redirect eventually returns the metadata."""
+    response = client.get("/ai/metadata", follow_redirects=True)
+    assert response.status_code == 200
+    data = response.json()
+    assert "provider" in data
+    assert "models" in data
+
+
+def test_root_includes_metadata_link(client):
+    """Root endpoint should link to the metadata endpoint."""
+    response = client.get("/")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["metadata"] == "/v1/ai/metadata"
