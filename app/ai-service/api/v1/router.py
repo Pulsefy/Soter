@@ -13,6 +13,7 @@ from api.v1 import (
     inference,
     proof_of_life,
     anonymize,
+    redaction_preview,
     humanitarian,
     fraud,
     artifacts,
@@ -26,6 +27,7 @@ v1_router.include_router(ocr.router)
 v1_router.include_router(inference.router)
 v1_router.include_router(proof_of_life.router)
 v1_router.include_router(anonymize.router)
+v1_router.include_router(redaction_preview.router)
 v1_router.include_router(humanitarian.router)
 v1_router.include_router(fraud.router)
 v1_router.include_router(artifacts.router)
