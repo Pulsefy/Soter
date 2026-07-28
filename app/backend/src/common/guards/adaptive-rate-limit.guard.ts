@@ -4,9 +4,13 @@ import {
   ExecutionContext,
   HttpException,
   HttpStatus,
+  Inject,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { RedisService } from '@liaoliaots/nestjs-redis';
+import Redis from 'ioredis';
+import rateLimitConfig from '../../config/rate-limit.config';
+import { ConfigType } from '@nestjs/config';
 import { Request } from 'express';
 import {
   RateLimitConfig,
@@ -24,9 +28,14 @@ interface RateLimitUser {
 @Injectable()
 export class AdaptiveRateLimitGuard implements CanActivate {
   constructor(
-    private readonly redisService: RedisService,
-    private readonly configService: ConfigService,
-  ) {}
+  private readonly configService: ConfigService,
+
+  @Inject(rateLimitConfig.KEY)
+  private readonly rateLimitCfg: ConfigType<typeof rateLimitConfig>,
+
+  @Optional()
+  private readonly redisClient?: Redis,
+) {}
 
   private get config(): RateLimitConfig {
     const rateLimit = this.configService.get<RateLimitConfig>('rateLimit') ?? {
@@ -48,7 +57,10 @@ export class AdaptiveRateLimitGuard implements CanActivate {
 
     let client;
     try {
-      client = this.redisService.getOrThrow();
+      if (!this.redisClient) {
+        throw new Error('Redis client not available');
+      }
+      client = this.redisClient;
     } catch (redisError) {
       return true;
     }
