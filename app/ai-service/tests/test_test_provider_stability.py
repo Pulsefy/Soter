@@ -168,13 +168,16 @@ class TestOCRTestProviderStability:
 
         assert len(texts) > 1
 
-    def test_ocr_regular_service_unchanged(self):
-        """Without test_provider_mode, OCR still requires real dependencies."""
+    def test_ocr_regular_service_unchanged(self, monkeypatch):
+        """Without test_provider_mode, OCR goes through the real dependency path."""
+        from unittest.mock import patch
         from PIL import Image
         img = Image.new("RGB", (50, 50), color="red")
 
-        with pytest.raises(Exception):
-            self.service.process_image(img)
+        monkeypatch.setattr(settings, "test_provider_mode", False)
+        with patch.object(self.service, "_run_tesseract", side_effect=RuntimeError("no tesseract")):
+            with pytest.raises(RuntimeError):
+                self.service.process_image(img)
 
 
 # -----------------------------------------------------------------------

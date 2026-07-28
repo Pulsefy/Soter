@@ -50,6 +50,8 @@ import { CacheModule } from './common/cache/cache.module';
 
 import { WebhooksModule } from 'src/webhooks.module';
 import { CorrelationModule } from './common/modules/correlation.module';
+import { RecipientImportModule } from './recipient-import/recipient-import.module';
+import { DeviceTokensModule } from './device-tokens/device-tokens.module';
 
 const isRedisEnabled = process.env.REDIS_ENABLED === 'true';
 

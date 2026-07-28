@@ -12,6 +12,10 @@ import Redis from 'ioredis';
 import rateLimitConfig from '../../config/rate-limit.config';
 import { ConfigType } from '@nestjs/config';
 import { Request } from 'express';
+import Redis from 'ioredis';
+import { Request } from 'express';
+import { REDIS_CLIENT } from '../../redis/redis.module';
+import rateLimitConfig from '../../config/rate-limit.config';
 import {
   RateLimitConfig,
   RateLimitPolicy,

@@ -617,6 +617,7 @@ describe('VerificationService', () => {
             campaignRef: 'CAMPAIGN-001',
             claimId: 'claim-ref-123',
             packageId: 'PKG-456',
+            contractId: null,
           },
         },
       });
@@ -670,6 +671,7 @@ describe('VerificationService', () => {
             campaignRef: 'CAMPAIGN-002',
             claimId: 'claim-ref-456',
             packageId: null,
+            contractId: null,
           },
         }),
         expect.any(Object),
@@ -735,6 +737,7 @@ describe('VerificationService', () => {
             campaignRef: 'CAMPAIGN-PARTIAL',
             claimId: null,
             packageId: null,
+            contractId: null,
           },
         },
       });

@@ -16,7 +16,6 @@ import { useBiometric } from '../contexts/BiometricContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { config } from '../config';
-import { useWallet } from '../contexts/WalletContext';
 
 const STELLAR_LAB_FAUCET_URL = 'https://lab.stellar.org/account/fund';
 const STELLAR_FRIENDBOT_URL = 'https://friendbot-testnet.stellar.org';
@@ -26,7 +25,6 @@ export const SettingsScreen: React.FC = () => {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { biometricEnabled, biometricSupported, toggleBiometric } = useBiometric();
   const { permissionGranted, requestPermission } = useNotification();
-  const { disconnectWallet } = useWallet();
   const {
     active: saverModeActive,
     source: saverModeSource,
@@ -61,21 +59,6 @@ export const SettingsScreen: React.FC = () => {
       return;
     }
     await toggleBiometric(value);
-  };
-
-  const handleResetWalletSession = () => {
-    Alert.alert(
-      'Reset Wallet Session',
-      'This will clear the current WalletConnect session and let you reconnect safely.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset',
-          style: 'destructive',
-          onPress: () => void disconnectWallet(),
-        },
-      ],
-    );
   };
 
   const openFaucetTool = async (url: string) => {
@@ -147,29 +130,6 @@ export const SettingsScreen: React.FC = () => {
             Biometrics are not available or not enrolled on this device.
           </Text>
         )}
-
-        <Text
-          style={styles.sectionHeader}
-          accessibilityRole="header"
-        >
-          Wallet
-        </Text>
-
-        <Pressable
-          style={styles.row}
-          accessibilityRole="button"
-          accessibilityLabel="Reset Wallet Session"
-          accessibilityHint="Clears a stale or broken WalletConnect session so you can reconnect safely"
-          onPress={handleResetWalletSession}
-        >
-          <View style={styles.rowText}>
-            <Text style={styles.rowTitle}>Reset Wallet Session</Text>
-            <Text style={styles.rowSubtitle}>
-              Clear a stale, broken, or partially restored WalletConnect session.
-            </Text>
-          </View>
-          <Text style={styles.resetButtonText}>Reset</Text>
-        </Pressable>
 
         <Text
           style={styles.sectionHeader}
@@ -417,11 +377,6 @@ const makeStyles = (colors: AppColors) =>
     },
     linkButtonText: {
       color: '#FFFFFF',
-      fontSize: 15,
-      fontWeight: '700',
-    },
-    resetButtonText: {
-      color: colors.brand.primary,
       fontSize: 15,
       fontWeight: '700',
     },

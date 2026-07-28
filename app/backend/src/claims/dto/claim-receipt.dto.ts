@@ -58,6 +58,20 @@ export class ClaimReceiptDto {
     required: false,
   })
   recipientRef?: string;
+
+  @ApiProperty({
+    description: 'On-chain transaction hash (set after disbursement)',
+    example: 'd54a7f5e7c7e0f6d9d3c9f9a5e2b1c8d4e7f0a9b8c7d6e5f4a3b2c1d0e9f8a7b',
+    required: false,
+  })
+  transactionHash?: string;
+
+  @ApiProperty({
+    description: 'Blockchain explorer link for the transaction',
+    example: 'https://stellar.expert/explorer/testnet/tx/d54a7f5e...',
+    required: false,
+  })
+  explorerLink?: string;
 }
 
 export class ClaimShareResponseDto {

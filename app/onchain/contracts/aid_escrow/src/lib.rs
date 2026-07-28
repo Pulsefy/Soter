@@ -25,6 +25,8 @@ use soroban_sdk::{
     Bytes, Env, IntoVal, Map, String, Symbol, Val, Vec,
 };
 
+mod delegate;
+
 // --- Storage Keys ---
 const KEY_ADMIN: Symbol = symbol_short!("admin");
 const KEY_TOTAL_LOCKED: Symbol = symbol_short!("locked"); // Map<Address, i128>
@@ -173,7 +175,7 @@ pub struct BatchCreatedEvent {
 
 #[contractevent]
 pub struct ExtendedEvent {
-    pub id: u64,
+    pub package_id: u64,
     pub admin: Address,
     pub old_expires_at: u64,
     pub new_expires_at: u64,
@@ -206,6 +208,41 @@ pub struct ActionPausedEvent {
 pub struct ActionUnpausedEvent {
     pub admin: Address,
     pub action: Symbol,
+}
+
+/// Emitted when a delegate is added/updated for a package.
+/// Includes package context for indexer-friendly reconstruction.
+#[contractevent]
+pub struct DelegateAdded {
+    pub package_id: u64,
+    pub recipient: Address,
+    pub delegate: Address,
+    pub actor: Address,
+    pub expires_at: u64,
+    pub timestamp: u64,
+}
+
+/// Emitted when a delegate is revoked/removed for a package.
+/// Includes package context for indexer-friendly reconstruction.
+#[contractevent]
+pub struct DelegateRevoked {
+    pub package_id: u64,
+    pub recipient: Address,
+    pub delegate: Address,
+    pub actor: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when a delegate claims a package on behalf of the recipient.
+/// Includes package context for indexer-friendly reconstruction.
+#[contractevent]
+pub struct DelegateClaimed {
+    pub package_id: u64,
+    pub recipient: Address,
+    pub delegate: Address,
+    pub amount: i128,
+    pub actor: Address,
+    pub timestamp: u64,
 }
 
 #[contract]
@@ -785,8 +822,17 @@ impl AidEscrow {
 
         package.recipient.require_auth();
         let payout_recipient = package.recipient.clone();
+        let claimant = package.recipient.clone();
 
-        Self::finalize_claim(&env, &key, &mut package, id, &payout_recipient, now)
+        Self::finalize_claim(
+            &env,
+            &key,
+            &mut package,
+            id,
+            &payout_recipient,
+            &claimant,
+            now,
+        )
     }
 
     /// Claim a package guarded by an optional Merkle allowlist.
@@ -831,13 +877,17 @@ impl AidEscrow {
                 if !Self::verify_merkle_proof_for_claimant(&env, &claimant, &proof, root) {
                     return Err(Error::InvalidProof);
                 }
-                Self::finalize_claim(&env, &key, &mut package, id, &claimant, now)
+                Self::finalize_claim(&env, &key, &mut package, id, &claimant, &claimant, now)
             }
             None => {
                 if claimant != package.recipient {
-                    return Err(Error::NotAuthorized);
+                    // Check if claimant is the registered delegate
+                    let delegate = crate::delegate::get_delegate(&env, id);
+                    if delegate.is_none() || delegate.unwrap() != claimant {
+                        return Err(Error::NotAuthorized);
+                    }
                 }
-                Self::finalize_claim(&env, &key, &mut package, id, &claimant, now)
+                Self::finalize_claim(&env, &key, &mut package, id, &claimant, &claimant, now)
             }
         }
     }
@@ -1094,7 +1144,7 @@ impl AidEscrow {
         env.storage().persistent().set(&key, &package);
 
         ExtendedEvent {
-            id,
+            package_id: id,
             admin,
             old_expires_at,
             new_expires_at,
@@ -1278,6 +1328,7 @@ impl AidEscrow {
         package: &mut Package,
         package_id: u64,
         payout_recipient: &Address,
+        claimant: &Address,
         now: u64,
     ) -> Result<(), Error> {
         Self::transfer_token(
@@ -1306,6 +1357,9 @@ impl AidEscrow {
             .instance()
             .set(&KEY_TOTAL_CLAIMED, &claimed_map);
 
+        // Check if claimant is a delegate (not the recipient)
+        let is_delegate = claimant != &package.recipient;
+
         PackageClaimed {
             package_id,
             recipient: payout_recipient.clone(),
@@ -1314,6 +1368,33 @@ impl AidEscrow {
             timestamp: now,
         }
         .publish(env);
+
+        // If claimed by delegate, emit DelegateClaimed event and clear delegate
+        if is_delegate {
+            // Emit DelegateClaimed event
+            DelegateClaimed {
+                package_id,
+                recipient: package.recipient.clone(),
+                delegate: claimant.clone(),
+                amount: package.amount,
+                actor: claimant.clone(),
+                timestamp: now,
+            }
+            .publish(env);
+
+            // Clear the delegate and emit DelegateRevoked event
+            crate::delegate::clear_delegate(env, package_id);
+
+            // Emit DelegateRevoked with claimant as actor (system-initiated on claim)
+            DelegateRevoked {
+                package_id,
+                recipient: package.recipient.clone(),
+                delegate: claimant.clone(),
+                actor: claimant.clone(), // The delegate who claimed acts as the actor for revocation
+                timestamp: now,
+            }
+            .publish(env);
+        }
 
         Ok(())
     }
@@ -1524,6 +1605,51 @@ impl AidEscrow {
         }
     }
 
+    /// Returns the number of stored packages associated with a `campaign_ref` metadata value.
+    ///
+    /// This read-only helper scans all package IDs from `0..package_counter`, treating the
+    /// counter as an upper bound over assigned IDs and skipping gaps. It never mutates
+    /// storage and is safe to use for dashboard metrics.
+    pub fn get_campaign_package_count(env: Env, campaign_ref: String) -> u64 {
+        let count: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        let campaign_key = Symbol::new(&env, "campaign_ref");
+        let mut matches = 0;
+
+        for id in 0..count {
+            let key = (symbol_short!("pkg"), id);
+            if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                if package.metadata.get(campaign_key.clone()).as_ref() == Some(&campaign_ref) {
+                    matches += 1;
+                }
+            }
+        }
+
+        matches
+    }
+
+    /// Returns the number of claimed packages associated with a `campaign_ref` metadata value.
+    ///
+    /// This helper is intentionally read-only and deterministic: it performs a full scan
+    /// over persisted package records and counts only packages whose status is `Claimed`.
+    pub fn get_campaign_claim_count(env: Env, campaign_ref: String) -> u64 {
+        let count: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        let campaign_key = Symbol::new(&env, "campaign_ref");
+        let mut matches = 0;
+
+        for id in 0..count {
+            let key = (symbol_short!("pkg"), id);
+            if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                if package.status == PackageStatus::Claimed
+                    && package.metadata.get(campaign_key.clone()).as_ref() == Some(&campaign_ref)
+                {
+                    matches += 1;
+                }
+            }
+        }
+
+        matches
+    }
+
     /// Returns the number of stored packages assigned to `recipient`.
     ///
     /// This naive helper scans all package IDs from `0..package_counter`, treating the
@@ -1581,6 +1707,198 @@ impl AidEscrow {
         }
 
         result
+    }
+
+    // --- Delegate Operations ---
+
+    /// Sets a delegate for a package. Only the admin can call this.
+    /// The delegate can claim the package on behalf of the recipient.
+    /// Emits a `DelegateAdded` event.
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must be authenticated)
+    /// * `package_id` - Package ID to set delegate for
+    /// * `delegate` - Delegate address
+    ///
+    /// # Errors
+    /// - `Error::PackageNotFound` - Package doesn't exist
+    /// - `Error::PackageNotActive` - Package already claimed
+    /// - `Error::InvalidState` - Delegate cannot be set to recipient address
+    pub fn set_delegate(
+        env: Env,
+        admin: Address,
+        package_id: u64,
+        delegate: Address,
+    ) -> Result<(), Error> {
+        admin.require_auth();
+
+        // Validate package state
+        let key = (symbol_short!("pkg"), package_id);
+        let package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        if package.status == PackageStatus::Claimed {
+            return Err(Error::PackageNotActive);
+        }
+
+        // Prevent setting delegate to the same address as recipient
+        if delegate == package.recipient {
+            return Err(Error::InvalidState);
+        }
+
+        // Use the delegate module function
+        crate::delegate::set_delegate(&env, &admin, package_id, &delegate)?;
+
+        // Emit event
+        let timestamp = env.ledger().timestamp();
+        // Get expiry if any
+        let expiry_map: Map<u64, u64> = env
+            .storage()
+            .persistent()
+            .get(&crate::delegate::KEY_DELEGATE_EXPIRY)
+            .unwrap_or(Map::new(&env));
+        let expires_at = expiry_map.get(package_id).unwrap_or(0);
+
+        DelegateAdded {
+            package_id,
+            recipient: package.recipient.clone(),
+            delegate: delegate.clone(),
+            actor: admin.clone(),
+            expires_at,
+            timestamp,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Sets a delegate for a package with an expiration time.
+    /// Only the admin can call this.
+    /// Emits a `DelegateAdded` event.
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must be authenticated)
+    /// * `package_id` - Package ID to set delegate for
+    /// * `delegate` - Delegate address
+    /// * `expires_at` - Expiration timestamp (0 = no expiration)
+    ///
+    /// # Errors
+    /// - `Error::PackageNotFound` - Package doesn't exist
+    /// - `Error::PackageNotActive` - Package already claimed
+    /// - `Error::InvalidState` - Invalid delegate address or expiration
+    pub fn set_delegate_with_expiry(
+        env: Env,
+        admin: Address,
+        package_id: u64,
+        delegate: Address,
+        expires_at: u64,
+    ) -> Result<(), Error> {
+        admin.require_auth();
+
+        // Validate expiration time
+        let now = env.ledger().timestamp();
+        if expires_at > 0 && expires_at <= now {
+            return Err(Error::InvalidState);
+        }
+
+        // Validate package state
+        let key = (symbol_short!("pkg"), package_id);
+        let package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        if package.status == PackageStatus::Claimed {
+            return Err(Error::PackageNotActive);
+        }
+
+        // Prevent setting delegate to the same address as recipient
+        if delegate == package.recipient {
+            return Err(Error::InvalidState);
+        }
+
+        // Use the delegate module function
+        crate::delegate::set_delegate_with_expiry(&env, &admin, package_id, &delegate, expires_at)?;
+
+        // Emit event
+        let timestamp = env.ledger().timestamp();
+
+        DelegateAdded {
+            package_id,
+            recipient: package.recipient.clone(),
+            delegate: delegate.clone(),
+            actor: admin.clone(),
+            expires_at,
+            timestamp,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Removes the delegate for a package. Called after a successful claim
+    /// to prevent any further reassignment. Emits a `DelegateRevoked` event.
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must be authenticated)
+    /// * `package_id` - Package ID to remove delegate for
+    ///
+    /// # Errors
+    /// - `Error::PackageNotFound` - Package doesn't exist
+    pub fn revoke_delegate(env: Env, admin: Address, package_id: u64) -> Result<(), Error> {
+        admin.require_auth();
+
+        // Check package exists
+        let key = (symbol_short!("pkg"), package_id);
+        let package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        // Get the current delegate before removing
+        let current_delegate = crate::delegate::get_delegate(&env, package_id);
+
+        // Use the delegate module function
+        crate::delegate::clear_delegate(&env, package_id);
+
+        // Emit event if there was a delegate to revoke
+        if let Some(delegate) = current_delegate {
+            let timestamp = env.ledger().timestamp();
+
+            DelegateRevoked {
+                package_id,
+                recipient: package.recipient.clone(),
+                delegate: delegate.clone(),
+                actor: admin.clone(),
+                timestamp,
+            }
+            .publish(&env);
+        }
+
+        Ok(())
+    }
+
+    /// Gets the current delegate for a package (if any and not expired).
+    pub fn get_delegate(env: Env, package_id: u64) -> Option<Address> {
+        crate::delegate::get_delegate(&env, package_id)
+    }
+
+    /// Gets delegate information including expiration.
+    pub fn get_delegate_info(env: Env, package_id: u64) -> Option<(Address, Option<u64>)> {
+        crate::delegate::get_delegate_info(&env, package_id)
+    }
+
+    /// Gets the delegate history for a package.
+    pub fn get_delegate_history(
+        env: Env,
+        package_id: u64,
+    ) -> Vec<crate::delegate::DelegateHistory> {
+        crate::delegate::get_delegate_history(&env, package_id)
     }
 }
 

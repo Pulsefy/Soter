@@ -28,6 +28,10 @@ export class ContractAwareMetadata {
 
   @IsString()
   @IsOptional()
+  contractId?: string;
+
+  @IsString()
+  @IsOptional()
   transactionHash?: string;
 
   @IsString()
@@ -105,6 +109,10 @@ export class VerificationWebhookPayload {
   @IsString()
   @IsNotEmpty()
   packageId: string;
+
+  @IsOptional()
+  @IsString()
+  contractId?: string;
 
   @IsOptional()
   @IsString()

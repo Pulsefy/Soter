@@ -41,12 +41,6 @@ jest.mock('../contexts/SaverModeContext', () => ({
   }),
 }));
 
-jest.mock('../contexts/WalletContext', () => ({
-  useWallet: () => ({
-    disconnectWallet: jest.fn(),
-  }),
-}));
-
 describe('SettingsScreen', () => {
   beforeEach(() => {
     (config as { network: 'testnet' | 'mainnet' }).network = 'testnet';

@@ -53,6 +53,22 @@ export class MetricsService {
     public verificationJobsEnqueuedCounter: Counter<string>,
     @InjectMetric('verification_queue_waiting_by_priority')
     public verificationQueueWaitingByPriorityGauge: Gauge<string>,
+
+    // Claim funnel metrics
+    @InjectMetric('claims_created_total')
+    public claimsCreatedCounter: Counter<string>,
+    @InjectMetric('claims_verified_total')
+    public claimsVerifiedCounter: Counter<string>,
+    @InjectMetric('claims_approved_total')
+    public claimsApprovedCounter: Counter<string>,
+    @InjectMetric('claims_disbursed_total')
+    public claimsDisbursedCounter: Counter<string>,
+    @InjectMetric('claims_cancelled_total')
+    public claimsCancelledCounter: Counter<string>,
+    @InjectMetric('claims_in_funnel')
+    public claimsInFunnelGauge: Gauge<string>,
+    @InjectMetric('claim_funnel_duration_seconds')
+    public claimFunnelDuration: Histogram<string>,
   ) {}
 
   /**
@@ -255,6 +271,80 @@ export class MetricsService {
    */
   incrementAnalyticsCacheInvalidation(reason: string): void {
     this.analyticsCacheInvalidationsCounter.inc({ reason });
+  }
+
+  /**
+   * Increment the counter for claims created, labelled by campaign_id.
+   */
+  incrementClaimsCreated(campaignId: string): void {
+    this.claimsCreatedCounter.inc({ campaign_id: campaignId });
+  }
+
+  /**
+   * Increment the counter for claims that transitioned to verified.
+   */
+  incrementClaimsVerified(campaignId: string): void {
+    this.claimsVerifiedCounter.inc({ campaign_id: campaignId });
+  }
+
+  /**
+   * Increment the counter for claims that transitioned to approved.
+   */
+  incrementClaimsApproved(campaignId: string): void {
+    this.claimsApprovedCounter.inc({ campaign_id: campaignId });
+  }
+
+  /**
+   * Increment the counter for claims that transitioned to disbursed.
+   */
+  incrementClaimsDisbursed(campaignId: string, onchainEnabled: boolean): void {
+    this.claimsDisbursedCounter.inc({
+      campaign_id: campaignId,
+      onchain_enabled: String(onchainEnabled),
+    });
+  }
+
+  /**
+   * Increment the counter for claims that were cancelled.
+   */
+  incrementClaimsCancelled(campaignId: string, fromStatus: string): void {
+    this.claimsCancelledCounter.inc({
+      campaign_id: campaignId,
+      from_status: fromStatus,
+    });
+  }
+
+  /**
+   * Adjust the gauge tracking the current number of claims at a given funnel stage.
+   * Increments (inc) when a claim enters the stage, decrements (dec) when it leaves.
+   */
+  adjustClaimsInFunnel(status: string, delta: 1 | -1): void {
+    this.claimsInFunnelGauge.inc({ status }, delta);
+  }
+
+  /**
+   * Set the absolute count of claims at a given funnel stage.
+   * Used for periodic gauge refresh to correct drift from incremental updates.
+   */
+  setClaimsInFunnel(status: string, count: number): void {
+    this.claimsInFunnelGauge.set({ status }, count);
+  }
+
+  /**
+   * Record the duration in seconds a claim spent within a funnel stage before transitioning.
+   */
+  recordClaimFunnelDuration(
+    fromStatus: string,
+    toStatus: string,
+    durationSeconds: number,
+  ): void {
+    this.claimFunnelDuration.observe(
+      {
+        from_status: fromStatus,
+        to_status: toStatus,
+      },
+      durationSeconds,
+    );
   }
 
   /**

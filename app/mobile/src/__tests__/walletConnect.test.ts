@@ -2,7 +2,6 @@ import {
   buildSep7TransactionUri,
   extractChainIdsFromAccounts,
   extractPublicKeyFromAccounts,
-  validateRestoredWalletSession,
 } from '../services/walletConnect';
 
 describe('walletConnect helpers', () => {
@@ -42,37 +41,5 @@ describe('walletConnect helpers', () => {
     expect(uri).toContain('callback=url%3Ahttps%3A%2F%2Fexample.com%2Fcallback');
     expect(uri).toContain('msg=Aid+claim+signature');
     expect(uri).toContain('pubkey=GABCD1234567890ABCDEFGH1234567890ABCDEFGH1234567890ABCDE');
-  });
-
-  it('accepts restored sessions that expose a valid Stellar account on Testnet', () => {
-    const restoredSession = validateRestoredWalletSession({
-      topic: 'topic-1',
-      namespaces: {
-        stellar: {
-          accounts: ['stellar:testnet:GABCD1234567890ABCDEFGH1234567890ABCDEFGH1234567890ABCDE'],
-        },
-      },
-      peer: {
-        metadata: {
-          name: 'Freighter',
-        },
-      },
-    });
-
-    expect(restoredSession.publicKey).toBe('GABCD1234567890ABCDEFGH1234567890ABCDEFGH1234567890ABCDE');
-    expect(restoredSession.chainIds).toEqual(['stellar:testnet']);
-  });
-
-  it('rejects restored sessions that are missing account state or on the wrong network', () => {
-    expect(() =>
-      validateRestoredWalletSession({
-        topic: 'topic-2',
-        namespaces: {
-          stellar: {
-            accounts: ['stellar:public:GABCD1234567890ABCDEFGH1234567890ABCDEFGH1234567890ABCDE'],
-          },
-        },
-      }),
-    ).toThrow(/Testnet/i);
   });
 });

@@ -337,8 +337,8 @@ jest.mock('../contexts/SyncContext', () => ({
   }),
 }));
 
-jest.mock('../theme/ThemeContext', () => ({
-  useTheme: () => ({
+jest.mock('../theme/useAppTheme', () => ({
+  useAppTheme: () => ({
     colors: {
       background: '#FFFFFF',
       surface: '#F9FAFB',
@@ -347,6 +347,13 @@ jest.mock('../theme/ThemeContext', () => ({
       textSecondary: '#6B7280',
       primary: '#2563EB',
       error: '#DC2626',
+      warningBg: '#FEF3C7',
+      warning: '#92400E',
+      infoBg: '#DBEAFE',
+      info: '#1E40AF',
+      successBg: '#D1FAE5',
+      success: '#065F46',
+      errorBg: '#FEE2E2',
     },
   }),
 }));
