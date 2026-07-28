@@ -49,7 +49,10 @@ export class SorobanAdapter implements OnchainAdapter {
   private sorobanLib: Record<string, any> | null = null;
 
   constructor(private configService: ConfigService) {
-    this.contractId = this.configService.get<string>('AID_ESCROW_CONTRACT_ID', '');
+    this.contractId = this.configService.get<string>(
+      'AID_ESCROW_CONTRACT_ID',
+      '',
+    );
     this.network = this.configService.get<string>('SOROBAN_NETWORK', 'testnet');
     this.rpcUrl = this.configService.get<string>(
       'STELLAR_RPC_URL',
@@ -66,7 +69,11 @@ export class SorobanAdapter implements OnchainAdapter {
    * Validates configuration at startup to fail fast on invalid setups
    */
   private validateConfig(): void {
-    if (!this.contractId || !this.contractId.startsWith('C') || this.contractId.length !== 56) {
+    if (
+      !this.contractId ||
+      !this.contractId.startsWith('C') ||
+      this.contractId.length !== 56
+    ) {
       throw new Error(
         'AID_ESCROW_CONTRACT_ID is missing or invalid. It must be a valid Soroban contract ID starting with "C" and 56 characters long. Failing fast.',
       );
@@ -424,7 +431,7 @@ export class SorobanAdapter implements OnchainAdapter {
     try {
       const _sdk = await this.loadSorobanSDK();
       const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-      
+
       // Implementation would call contract's getContractData
       return {
         version: '1.0.0',
@@ -444,7 +451,7 @@ export class SorobanAdapter implements OnchainAdapter {
     try {
       const _sdk = await this.loadSorobanSDK();
       const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-      
+
       return {
         isPaused: false,
         timestamp: new Date(),
@@ -462,7 +469,7 @@ export class SorobanAdapter implements OnchainAdapter {
     try {
       const _sdk = await this.loadSorobanSDK();
       const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-      
+
       return {
         feePercentage: '0',
         maxFee: '0',
@@ -481,7 +488,7 @@ export class SorobanAdapter implements OnchainAdapter {
     try {
       const _sdk = await this.loadSorobanSDK();
       const _client = await this.getRpcClient(); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-      
+
       return {
         packageId,
         totalAmount: '0',

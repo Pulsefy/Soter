@@ -52,7 +52,9 @@ export class WebhookHmacGuard implements CanActivate {
     const body = req.body as { timestamp?: string; deliveryId?: string };
     const ts = body?.timestamp ? new Date(body.timestamp).getTime() : NaN;
     if (isNaN(ts) || Math.abs(Date.now() - ts) > TIMESTAMP_TOLERANCE_MS) {
-      throw new UnauthorizedException('Webhook timestamp out of acceptable range');
+      throw new UnauthorizedException(
+        'Webhook timestamp out of acceptable range',
+      );
     }
 
     // Replay protection — nonce dedup

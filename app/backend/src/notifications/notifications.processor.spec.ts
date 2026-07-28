@@ -147,7 +147,7 @@ describe('NotificationProcessor', () => {
 
   describe('onFailed', () => {
     it('should update outbox record to failed with retryCount increment and lastError when outboxId is present and exhausted', async () => {
-      const job = makeJob({ outboxId: 'outbox-abc' }) as Job<any, any, string>;
+      const job = makeJob({ outboxId: 'outbox-abc' });
       job.opts = { attempts: 1 } as any;
       job.attemptsMade = 1;
       const error = new Error('Something went wrong');
@@ -165,7 +165,7 @@ describe('NotificationProcessor', () => {
     });
 
     it('should keep status enqueued while retries remain and still increment retryCount', async () => {
-      const job = makeJob({ outboxId: 'outbox-abc' }) as Job<any, any, string>;
+      const job = makeJob({ outboxId: 'outbox-abc' });
       job.opts = { attempts: 3 } as any;
       job.attemptsMade = 1;
       const error = new Error('Temporary failure');

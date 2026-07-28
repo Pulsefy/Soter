@@ -3,6 +3,7 @@ import { BadRequestException } from '@nestjs/common';
 import { AuditService } from './audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 describe('AuditService', () => {
   let service: AuditService;
@@ -40,8 +41,17 @@ describe('AuditService', () => {
           provide: LoggerService,
           useValue: {
             getAsyncLocalStorage: jest.fn().mockReturnValue({
-              getStore: jest.fn().mockReturnValue(new Map([['correlationId', 'req-1']])),
+              getStore: jest
+                .fn()
+                .mockReturnValue(new Map([['correlationId', 'req-1']])),
             }),
+            error: jest.fn(),
+          },
+        },
+        {
+          provide: MetricsService,
+          useValue: {
+            recordDbQueryDuration: jest.fn(),
           },
         },
       ],

@@ -4,6 +4,7 @@ import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 import { CORRELATION_ID_KEY } from '../common/utils/correlation-id.util';
 import { redactLogData } from '../logger/log-redaction.util';
 
@@ -73,6 +74,7 @@ export class AuditService {
   constructor(
     private prisma: PrismaService,
     private logger: LoggerService,
+    private metrics: MetricsService,
   ) {}
 
   anonymize(value: string): string {
@@ -90,16 +92,32 @@ export class AuditService {
       ? redactLogData(params.metadata)
       : {};
 
-    return this.prisma.auditLog.create({
-      data: {
-        actorId: params.actorId,
-        correlationId,
-        entity: params.entity,
-        entityId: params.entityId,
-        action: params.action,
-        metadata: metadataToSave as Prisma.InputJsonValue,
-      },
-    });
+    const startTime = Date.now();
+    try {
+      return await this.prisma.auditLog.create({
+        data: {
+          actorId: params.actorId,
+          correlationId,
+          entity: params.entity,
+          entityId: params.entityId,
+          action: params.action,
+          metadata: metadataToSave as Prisma.InputJsonValue,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        'Failed to record audit log',
+        error instanceof Error ? error.stack : undefined,
+        'AuditService',
+        { params },
+      );
+      throw error;
+    } finally {
+      this.metrics.recordDbQueryDuration(
+        'auditLog.create',
+        (Date.now() - startTime) / 1000,
+      );
+    }
   }
 
   async findLogs(query: AuditQuery) {
@@ -120,17 +138,32 @@ export class AuditService {
       if (query.endTime) where.timestamp.lte = new Date(query.endTime);
     }
 
-    const [rows, total] = await this.prisma.$transaction([
-      this.prisma.auditLog.findMany({
-        where,
-        orderBy: { timestamp: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.auditLog.count({ where }),
-    ]);
-
-    return { data: rows, total, page, limit };
+    const startTime = Date.now();
+    try {
+      const [rows, total] = await this.prisma.$transaction([
+        this.prisma.auditLog.findMany({
+          where,
+          orderBy: { timestamp: 'desc' },
+          skip,
+          take: limit,
+        }),
+        this.prisma.auditLog.count({ where }),
+      ]);
+      return { data: rows, total, page, limit };
+    } catch (error) {
+      this.logger.error(
+        'Failed to find audit logs',
+        error instanceof Error ? error.stack : undefined,
+        'AuditService',
+        { query },
+      );
+      throw error;
+    } finally {
+      this.metrics.recordDbQueryDuration(
+        'auditLog.findMany',
+        (Date.now() - startTime) / 1000,
+      );
+    }
   }
 
   async exportLogs(query: ExportAuditQuery): Promise<ExportAuditResult> {
@@ -156,15 +189,34 @@ export class AuditService {
       if (query.to) where.timestamp.lte = new Date(query.to);
     }
 
-    const [rows, total] = await this.prisma.$transaction([
-      this.prisma.auditLog.findMany({
-        where,
-        orderBy: { timestamp: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.auditLog.count({ where }),
-    ]);
+    const startTime = Date.now();
+    let rows: any[] = [];
+    let total = 0;
+
+    try {
+      [rows, total] = await this.prisma.$transaction([
+        this.prisma.auditLog.findMany({
+          where,
+          orderBy: { timestamp: 'desc' },
+          skip,
+          take: limit,
+        }),
+        this.prisma.auditLog.count({ where }),
+      ]);
+    } catch (error) {
+      this.logger.error(
+        'Failed to export audit logs',
+        error instanceof Error ? error.stack : undefined,
+        'AuditService',
+        { query },
+      );
+      throw error;
+    } finally {
+      this.metrics.recordDbQueryDuration(
+        'auditLog.export',
+        (Date.now() - startTime) / 1000,
+      );
+    }
 
     const data: AnonymizedAuditLog[] = rows.map(row => ({
       id: row.id,
@@ -186,7 +238,8 @@ export class AuditService {
       return `"${str}"`;
     };
 
-    const header = 'id,actorHash,correlationId,entity,entityHash,action,timestamp,metadata';
+    const header =
+      'id,actorHash,correlationId,entity,entityHash,action,timestamp,metadata';
     const lines = rows.map(r => {
       const metadata = escape(JSON.stringify(r.metadata ?? ''));
       return [
