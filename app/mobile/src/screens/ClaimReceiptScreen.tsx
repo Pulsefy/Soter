@@ -14,6 +14,7 @@ import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
 import { ClaimReceipt, ClaimReceiptData } from '../components/ClaimReceipt';
+import { fetchClaimReceipt } from '../services/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ClaimReceipt'>;
 
@@ -26,26 +27,11 @@ export const ClaimReceiptScreen: React.FC<Props> = ({ route, navigation }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Mock data - replace with actual API call
   const loadClaim = useCallback(async () => {
     setLoading(true);
     try {
-      // TODO: Replace with actual API call
-      // const response = await fetch(`/api/claims/${claimId}/receipt`);
-      // const data = await response.json();
-
-      // Mock data
-      const mockClaim: ClaimReceiptData = {
-        claimId,
-        packageId: 'pkg-' + Math.random().toString(36).substr(2, 9),
-        status: 'disbursed',
-        amount: 150.5,
-        tokenAddress:
-          'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
-        timestamp: new Date().toISOString(),
-      };
-
-      setClaim(mockClaim);
+      const data = await fetchClaimReceipt(claimId);
+      setClaim(data);
       setError(null);
     } catch (err) {
       setError('Failed to load claim receipt');

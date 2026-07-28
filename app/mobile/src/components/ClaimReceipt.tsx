@@ -14,7 +14,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 export interface ClaimReceiptData {
   claimId: string;
   packageId: string;
-  status: 'requested' | 'verified' | 'approved' | 'disbursed' | 'archived';
+  status: 'requested' | 'verified' | 'approved' | 'disbursed' | 'archived' | 'cancelled';
   amount: number;
   tokenAddress?: string;
   timestamp: string;

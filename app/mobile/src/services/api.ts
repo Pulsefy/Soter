@@ -48,3 +48,27 @@ export const getAidPackages = async (): Promise<AidPackage[]> => {
     throw error;
   }
 };
+
+export interface ClaimReceiptResponse {
+  claimId: string;
+  packageId: string;
+  status: 'requested' | 'verified' | 'approved' | 'disbursed' | 'archived' | 'cancelled';
+  amount: number;
+  timestamp: string;
+  tokenAddress?: string;
+  recipientRef?: string;
+}
+
+export const fetchClaimReceipt = async (claimId: string): Promise<ClaimReceiptResponse> => {
+  try {
+    const response = await fetch(`${API_URL}/claims/${claimId}/receipt`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Failed to fetch claim receipt:', error);
+    throw error;
+  }
+};
