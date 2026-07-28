@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useWalletStore } from "../../lib/walletStore";
 import { stellarNetwork } from "../../lib/env";
-import { buildExplorerUrl } from "../../lib/explorer";
+import { buildExplorerUrl } from "../../lib/network-metadata";
 import {
   Droplet,
   RefreshCw,

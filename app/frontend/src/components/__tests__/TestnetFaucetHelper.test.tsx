@@ -48,8 +48,10 @@ jest.mock("../../lib/env", () => ({
 }));
 
 // Mock explorer
-jest.mock("../../lib/explorer", () => ({
-  buildExplorerUrl: jest.fn((type, id) => `https://stellar.expert/explorer/testnet/${type}/${id}`)
+jest.mock("../../lib/network-metadata", () => ({
+  buildExplorerUrl: jest.fn((type, id) => `https://stellar.expert/explorer/testnet/${type}/${id}`),
+  networkLabel: (network: string) => network.charAt(0).toUpperCase() + network.slice(1),
+  truncateId: (id: string) => id,
 }));
 
 describe("TestnetFaucetHelper", () => {

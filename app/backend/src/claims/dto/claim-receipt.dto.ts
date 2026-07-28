@@ -72,6 +72,27 @@ export class ClaimReceiptDto {
     required: false,
   })
   explorerLink?: string;
+
+  @ApiProperty({
+    description: 'Stellar network this receipt was generated on',
+    example: 'testnet',
+    required: false,
+  })
+  network?: string;
+
+  @ApiProperty({
+    description: 'Active Soroban contract ID',
+    example: 'CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG',
+    required: false,
+  })
+  contractId?: string;
+
+  @ApiProperty({
+    description: 'Stellar explorer link for the active contract',
+    example: 'https://stellar.expert/explorer/testnet/contract/CDSBJ27...',
+    required: false,
+  })
+  contractExplorerUrl?: string;
 }
 
 export class ClaimShareResponseDto {

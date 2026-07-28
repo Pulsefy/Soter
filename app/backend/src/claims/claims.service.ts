@@ -531,6 +531,22 @@ export class ClaimsService {
   }
 
   /**
+   * Build a blockchain explorer link for a contract address.
+   */
+  private buildContractExplorerLink(contractId: string): string | null {
+    const network =
+      this.configService.get<string>('STELLAR_NETWORK')?.toLowerCase() ??
+      'testnet';
+    const explorerBase =
+      this.configService.get<string>('STELLAR_EXPLORER_URL') ??
+      'https://stellar.expert/explorer';
+    if (network === 'mainnet' || network === 'pubnet') {
+      return `${explorerBase}/public/contract/${contractId}`;
+    }
+    return `${explorerBase}/testnet/contract/${contractId}`;
+  }
+
+  /**
    * Resolve a claim from either a claim ID or a package (campaign) identifier.
    * When given a package ID, returns the most recent claim for that package.
    */
@@ -606,6 +622,18 @@ export class ClaimsService {
       ? (this.buildExplorerLink(transactionHash) ?? undefined)
       : undefined;
 
+    const network =
+      this.configService.get<string>('STELLAR_NETWORK')?.toLowerCase() ??
+      'testnet';
+    const activeContractId =
+      this.configService.get<string>('AID_ESCROW_CONTRACT_ID') ??
+      this.configService.get<string>('SOROBAN_CONTRACT_ID') ??
+      null;
+    const contractExplorerUrl =
+      activeContractId
+        ? this.buildContractExplorerLink(activeContractId)
+        : undefined;
+
     return {
       claimId: claim.id,
       packageId: claim.campaignId,
@@ -616,6 +644,9 @@ export class ClaimsService {
       recipientRef: claim.recipientRef,
       transactionHash,
       explorerLink,
+      network,
+      contractId: activeContractId ?? undefined,
+      contractExplorerUrl,
     };
   }
 
@@ -684,6 +715,14 @@ export class ClaimsService {
       `Date:            ${receipt.timestamp}`,
     ];
 
+    if (receipt.network) {
+      lines.push(`Network:         ${receipt.network}`);
+    }
+
+    if (receipt.contractId) {
+      lines.push(`Contract ID:     ${receipt.contractId}`);
+    }
+
     if (receipt.tokenAddress) {
       lines.push(`Token Address:   ${receipt.tokenAddress}`);
     }
@@ -694,6 +733,10 @@ export class ClaimsService {
 
     if (receipt.transactionHash) {
       lines.push(`Transaction:     ${receipt.transactionHash}`);
+    }
+
+    if (receipt.contractExplorerUrl) {
+      lines.push(`Contract:        ${receipt.contractExplorerUrl}`);
     }
 
     if (receipt.explorerLink) {

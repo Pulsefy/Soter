@@ -6,7 +6,7 @@ import { useWalletStore } from "../lib/walletStore";
 import { useToast } from "./ToastProvider";
 import { ErrorInline } from "./ErrorInline";
 import { useNetworkGuard } from "../hooks/useNetworkGuard";
-import { buildExplorerUrl } from "../lib/explorer";
+import { buildExplorerUrl } from "../lib/network-metadata";
 import { ExternalLink } from "lucide-react";
 
 export const WalletConnect: React.FC = () => {

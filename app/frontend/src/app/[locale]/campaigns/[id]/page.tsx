@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { use } from 'react';
 import { AlertCircle, CheckCircle2, Clock, ExternalLink, Loader2 } from 'lucide-react';
 import { useCampaign, useCampaignTimeline } from '@/hooks/useCampaigns';
+import { DeploymentBadge } from '@/components/DeploymentBadge';
 import type { CampaignTimelineMilestone } from '@/types/campaign';
 
 const statusStyles: Record<CampaignTimelineMilestone['status'], string> = {
@@ -80,12 +81,15 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             <section className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-xl font-semibold">Onchain Milestones</h2>
-                <Link
-                  href={`/campaigns/${campaign.id}/import-recipients`}
-                  className="rounded-md border border-blue-300 px-3 py-1 text-sm text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/30"
-                >
-                  Import recipients
-                </Link>
+                <div className="flex items-center gap-3">
+                  <DeploymentBadge />
+                  <Link
+                    href={`/campaigns/${campaign.id}/import-recipients`}
+                    className="rounded-md border border-blue-300 px-3 py-1 text-sm text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                  >
+                    Import recipients
+                  </Link>
+                </div>
               </div>
 
               {timelineQuery.isLoading && <p className="text-slate-500">Loading timeline...</p>}

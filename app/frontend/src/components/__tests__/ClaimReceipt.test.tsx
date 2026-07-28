@@ -9,9 +9,11 @@ jest.mock('next-themes', () => ({
   useTheme: () => ({ theme: 'light' }),
 }));
 
-jest.mock('@/lib/explorer', () => ({
+jest.mock('@/lib/network-metadata', () => ({
   buildExplorerUrl: (type: string, id: string) =>
     `https://stellar.expert/explorer/testnet/${type}/${id}`,
+  networkLabel: (network: string) => network.charAt(0).toUpperCase() + network.slice(1),
+  truncateId: (id: string) => id,
 }));
 
 const baseClaim: ClaimReceiptData = {
@@ -99,7 +101,7 @@ describe('ClaimReceipt', () => {
 
     it('does not render contract address section when contractAddress is absent', () => {
       render(<ClaimReceipt claim={baseClaim} />);
-      expect(screen.queryByText(/CONTRACT ADDRESS/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/CONTRACT$/i)).not.toBeInTheDocument();
     });
   });
 
@@ -114,7 +116,7 @@ describe('ClaimReceipt', () => {
     it('renders copy button for contract address', () => {
       render(<ClaimReceipt claim={fullClaim} />);
       expect(
-        screen.getByRole('button', { name: /copy contract address/i })
+        screen.getByRole('button', { name: /copy contract/i })
       ).toBeInTheDocument();
     });
 
@@ -136,7 +138,7 @@ describe('ClaimReceipt', () => {
 
     it('copies contract address to clipboard on click', async () => {
       render(<ClaimReceipt claim={fullClaim} />);
-      const btn = screen.getByRole('button', { name: /copy contract address/i });
+      const btn = screen.getByRole('button', { name: /copy contract/i });
       fireEvent.click(btn);
       await waitFor(() =>
         expect(navigator.clipboard.writeText).toHaveBeenCalledWith('CCONTRACTADDRESS')

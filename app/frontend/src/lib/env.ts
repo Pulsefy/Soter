@@ -28,6 +28,10 @@ export const EXPECTED_NETWORK = stellarNetwork;
 export const envName: string | null =
   process.env.NEXT_PUBLIC_ENV_NAME?.trim() ?? null;
 
+/** Active Soroban contract ID (browser-safe). */
+export const contractId: string | null =
+  process.env.NEXT_PUBLIC_CONTRACT_ID?.trim() || null;
+
 /** Backend API base URL (browser-safe, no secret). */
 export const apiUrl: string =
   process.env.NEXT_PUBLIC_API_URL ?? (isProd ? '' : 'http://localhost:4000');
