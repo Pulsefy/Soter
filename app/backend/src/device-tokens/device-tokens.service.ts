@@ -170,6 +170,46 @@ export class DeviceTokensService {
   }
 
   /**
+   * Revoke a device token using the push token string itself.
+   */
+  async revokeByToken(tokenStr: string, reason: string | undefined, actor?: Actor) {
+    const { userId } = actor || {};
+
+    if (!userId) {
+      throw new BadRequestException('userId is required');
+    }
+
+    const existing = await this.prisma.deviceNotificationToken.findFirst({
+      where: { token: tokenStr, userId },
+      select: { id: true, revokedAt: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Device token not found');
+    }
+
+    if (existing.revokedAt) {
+      return await this.prisma.deviceNotificationToken.findFirst({
+        where: { id: existing.id },
+        select: selectFields,
+      });
+    }
+
+    const updated = await this.prisma.deviceNotificationToken.update({
+      where: { id: existing.id },
+      data: {
+        isActive: false,
+        revokedAt: new Date(),
+        revokedBy: this.actorId(actor),
+        revokedReason: reason ?? 'revoked',
+      },
+      select: selectFields,
+    });
+
+    return updated;
+  }
+
+  /**
    * Delete a device token permanently.
    */
   async delete(id: string, userId: string) {

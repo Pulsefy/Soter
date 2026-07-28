@@ -24,7 +24,7 @@ export const SettingsScreen: React.FC = () => {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { biometricEnabled, biometricSupported, toggleBiometric } = useBiometric();
-  const { permissionGranted, requestPermission } = useNotification();
+  const { permissionGranted, requestPermission, syncError } = useNotification();
   const {
     active: saverModeActive,
     source: saverModeSource,
@@ -163,6 +163,12 @@ export const SettingsScreen: React.FC = () => {
             accessibilityElementsHidden
           />
         </View>
+
+        {syncError && (
+          <Text style={styles.errorHint} accessibilityRole="alert">
+            Failed to sync push token: {syncError}. Notifications may not work properly.
+          </Text>
+        )}
 
         <Text
           style={styles.sectionHeader}
@@ -334,6 +340,12 @@ const makeStyles = (colors: AppColors) =>
       marginTop: 12,
       fontSize: 13,
       color: colors.textSecondary,
+      paddingHorizontal: 4,
+    },
+    errorHint: {
+      marginTop: 12,
+      fontSize: 13,
+      color: colors.error || '#D32F2F',
       paddingHorizontal: 4,
     },
     faucetPanel: {
