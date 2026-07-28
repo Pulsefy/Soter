@@ -152,7 +152,7 @@ class PIIScrubberService:
             for span in spans:
                 if span.start > cursor:
                     segments.append({
-                        "type": "text",
+                        "kind": "text",
                         "content": text[cursor:span.start],
                         "start": cursor,
                         "end": span.start,
@@ -160,7 +160,7 @@ class PIIScrubberService:
 
                 token_base = self.TOKEN_BASE_BY_LABEL.get(span.label, "REDACTED")
                 segments.append({
-                    "type": "redaction",
+                    "kind": "redaction",
                     "content": text[span.start:span.end],
                     "start": span.start,
                     "end": span.end,
@@ -171,10 +171,10 @@ class PIIScrubberService:
 
             if cursor < len(text):
                 segments.append({
-                    "type": "text",
-                    "content": text[cursor:],
-                    "start": cursor,
-                    "end": len(text),
+                        "kind": "text",
+                        "content": text[cursor:],
+                        "start": cursor,
+                        "end": len(text),
                 })
 
             redacted_text, _ = self._mask_spans(text, spans)

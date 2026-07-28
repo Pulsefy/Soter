@@ -58,7 +58,7 @@ class TestPreviewSegments:
 
         assert len(result["segments"]) == 1
         seg = result["segments"][0]
-        assert seg["type"] == "text"
+        assert seg["kind"] == "text"
         assert seg["content"] == text
         assert seg["start"] == 0
         assert seg["end"] == len(text)
@@ -73,7 +73,7 @@ class TestPreviewSegments:
         text = "On 15 Jan 2025, Mary Johnson received aid in Maiduguri Camp."
         result = scrubber.preview(text)
 
-        redaction_segments = [s for s in result["segments"] if s["type"] == "redaction"]
+        redaction_segments = [s for s in result["segments"] if s["kind"] == "redaction"]
         assert len(redaction_segments) >= 2
         pii_types = {s["pii_type"] for s in redaction_segments}
         assert "PERSON" in pii_types
@@ -115,7 +115,7 @@ class TestPreviewSegments:
         text = "Contact Jane at jane@example.com for aid."
         result = scrubber.preview(text)
 
-        redactions = [s for s in result["segments"] if s["type"] == "redaction"]
+        redactions = [s for s in result["segments"] if s["kind"] == "redaction"]
         assert any(s["pii_type"] == "EMAIL" for s in redactions)
         assert result["pii_summary"]["emails"] >= 1
 
@@ -123,7 +123,7 @@ class TestPreviewSegments:
         text = "Call +234 803 123 4567 for information."
         result = scrubber.preview(text)
 
-        redactions = [s for s in result["segments"] if s["type"] == "redaction"]
+        redactions = [s for s in result["segments"] if s["kind"] == "redaction"]
         assert any(s["pii_type"] == "PHONE" for s in redactions)
         assert result["pii_summary"]["phones"] >= 1
 
@@ -132,7 +132,7 @@ class TestPreviewSegments:
         result = scrubber.preview(text)
 
         for seg in result["segments"]:
-            if seg["type"] == "redaction":
+            if seg["kind"] == "redaction":
                 assert seg["replacement"] is not None
                 assert seg["replacement"].startswith("[")
                 assert seg["replacement"].endswith("]")
@@ -206,14 +206,14 @@ class TestRedactionPreviewEndpoint:
             json={"text": "John Doe received aid in Maiduguri."},
         )
         for seg in response.json()["result"]["segments"]:
-            assert "type" in seg
-            assert seg["type"] in ("text", "redaction")
+            assert "kind" in seg
+            assert seg["kind"] in ("text", "redaction")
             assert "content" in seg
             assert "start" in seg
             assert "end" in seg
             assert seg["start"] >= 0
             assert seg["end"] >= seg["start"]
-            if seg["type"] == "redaction":
+            if seg["kind"] == "redaction":
                 assert "replacement" in seg
                 assert "pii_type" in seg
 
@@ -232,7 +232,7 @@ class TestRedactionPreviewEndpoint:
         )
         data = response.json()
         assert len(data["result"]["segments"]) == 1
-        assert data["result"]["segments"][0]["type"] == "text"
+        assert data["result"]["segments"][0]["kind"] == "text"
         assert data["result"]["pii_summary"]["total"] == 0
 
     def test_reasons_reflect_pii_detection(self, client):
@@ -268,7 +268,7 @@ class TestRedactionPreviewEndpoint:
         )
         result = response.json()["result"]
         redaction_count = sum(
-            1 for s in result["segments"] if s["type"] == "redaction"
+            1 for s in result["segments"] if s["kind"] == "redaction"
         )
         assert redaction_count == result["pii_summary"]["total"]
 
@@ -305,7 +305,7 @@ class TestPreviewEdgeCases:
         text = "Reported by Dr. Alice Brown."
         result = scrubber.preview(text)
 
-        redactions = [s for s in result["segments"] if s["type"] == "redaction"]
+        redactions = [s for s in result["segments"] if s["kind"] == "redaction"]
         assert len(redactions) >= 1
         assert redactions[0]["pii_type"] == "PERSON"
 
@@ -313,7 +313,7 @@ class TestPreviewEdgeCases:
         text = "John Doe email jane@test.com in Lagos on 2024-01-01."
         result = scrubber.preview(text)
 
-        pii_types = {s["pii_type"] for s in result["segments"] if s["type"] == "redaction"}
+        pii_types = {s["pii_type"] for s in result["segments"] if s["kind"] == "redaction"}
         assert len(pii_types) >= 2
 
     def test_long_text_performance(self, scrubber):

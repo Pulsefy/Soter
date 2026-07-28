@@ -141,14 +141,14 @@ class RedactionPreviewRequest(BaseModel):
 class RedactionDiffSegment(BaseModel):
     """A single segment in the redaction preview diff.
 
-    ``type`` is ``"text"`` for safe passages that would be kept as-is, or
+    ``kind`` is ``"text"`` for safe passages that would be kept as-is, or
     ``"redaction"`` for spans that would be replaced by a token.  The
     ``content`` field always holds the *original* text so the caller can
     reconstruct the full input.  ``replacement`` and ``pii_type`` are only
     populated for redaction segments.
     """
 
-    type: Literal["text", "redaction"] = Field(
+    kind: Literal["text", "redaction"] = Field(
         description="Segment kind: 'text' for safe passages, 'redaction' for PII spans.",
     )
     content: str = Field(
@@ -177,13 +177,13 @@ class RedactionDiffSegment(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "type": "text",
+                    "kind": "text",
                     "content": "On 15 Jan 2025, ",
                     "start": 0,
                     "end": 17,
                 },
                 {
-                    "type": "redaction",
+                    "kind": "redaction",
                     "content": "Mary Johnson",
                     "start": 17,
                     "end": 29,
@@ -221,10 +221,10 @@ class RedactionPreviewResult(BaseModel):
             "examples": [
                 {
                     "segments": [
-                        {"type": "text", "content": "On 15 Jan 2025, ", "start": 0, "end": 17},
-                        {"type": "redaction", "content": "Mary Johnson", "start": 17, "end": 29, "replacement": "[RECIPIENT_NAME]", "pii_type": "PERSON"},
-                        {"type": "text", "content": " received aid in ", "start": 29, "end": 45},
-                        {"type": "redaction", "content": "Maiduguri Camp", "start": 45, "end": 59, "replacement": "[LOCATION]", "pii_type": "LOCATION"},
+                        {"kind": "text", "content": "On 15 Jan 2025, ", "start": 0, "end": 17},
+                        {"kind": "redaction", "content": "Mary Johnson", "start": 17, "end": 29, "replacement": "[RECIPIENT_NAME]", "pii_type": "PERSON"},
+                        {"kind": "text", "content": " received aid in ", "start": 29, "end": 45},
+                        {"kind": "redaction", "content": "Maiduguri Camp", "start": 45, "end": 59, "replacement": "[LOCATION]", "pii_type": "LOCATION"},
                     ],
                     "original_length": 60,
                     "redacted_text": "On 15 Jan 2025, [RECIPIENT_NAME] received aid in [LOCATION].",
