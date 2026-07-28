@@ -8,6 +8,8 @@ import {
   openWalletConnectPairingUri,
   restoreWalletSession,
 } from '../services/walletConnect';
+import { NetworkStatus, useNetworkStatus } from '../hooks/useNetworkStatus';
+import { detectWalletNetwork, WalletNetworkInfo, STELLAR_NETWORKS } from '../services/networkGuard';
 
 interface WalletContextValue {
   connectWallet: () => Promise<void>;
@@ -19,6 +21,11 @@ interface WalletContextValue {
   reopenWallet: () => Promise<void>;
   status: WalletConnectionStatus;
   walletName: string | null;
+  // NEW: Network-related properties
+  chainIds: string[];
+  walletNetworkInfo: WalletNetworkInfo | null;
+  isOnCorrectNetwork: boolean;
+  checkNetwork: () => void;
 }
 
 const WalletContext = createContext<WalletContextValue | undefined>(undefined);
@@ -47,6 +54,14 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
   const [pairingUri, setPairingUri] = useState<string | null>(null);
   const [lastDeepLinkUrl, setLastDeepLinkUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // NEW: Network state
+  const [chainIds, setChainIds] = useState<string[]>([]);
+  const [walletNetworkInfo, setWalletNetworkInfo] = useState<WalletNetworkInfo | null>(null);
+  const [isOnCorrectNetwork, setIsOnCorrectNetwork] = useState<boolean>(false);
+
+  // Get network status from the network hook
+  const networkStatus = useNetworkStatus();
 
   useEffect(() => {
     let isMounted = true;
@@ -62,6 +77,21 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
       setPairingUri(null);
       setError(null);
       setStatus('connected');
+      
+      // NEW: Store chain IDs from the session
+      const sessionChainIds = session.chainIds || [];
+      setChainIds(sessionChainIds);
+      
+      // NEW: Detect and validate network
+      const networkInfo = detectWalletNetwork(sessionChainIds);
+      setWalletNetworkInfo(networkInfo);
+      
+      // Check if on correct network (Testnet)
+      const isCorrect = networkInfo.isKnown && networkInfo.isTestnet;
+      setIsOnCorrectNetwork(isCorrect);
+
+      // Store chain IDs globally for network guard access
+      (global as any).__walletChainIds = sessionChainIds;
     };
 
     const bootstrap = async () => {
@@ -98,6 +128,19 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
     };
   }, []);
 
+  // NEW: Monitor network changes and re-validate
+  useEffect(() => {
+    if (status === 'connected' && chainIds.length > 0) {
+      const networkInfo = detectWalletNetwork(chainIds);
+      setWalletNetworkInfo(networkInfo);
+      const isCorrect = networkInfo.isKnown && networkInfo.isTestnet;
+      setIsOnCorrectNetwork(isCorrect);
+      
+      // Update global reference
+      (global as any).__walletChainIds = chainIds;
+    }
+  }, [chainIds, status, networkStatus]);
+
   const resetWalletState = () => {
     setTopic(null);
     setPublicKey(idleState.publicKey);
@@ -105,6 +148,11 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
     setPairingUri(idleState.pairingUri);
     setError(idleState.error);
     setStatus(idleState.status);
+    // NEW: Reset network state
+    setChainIds([]);
+    setWalletNetworkInfo(null);
+    setIsOnCorrectNetwork(false);
+    (global as any).__walletChainIds = [];
   };
 
   const connectWallet = async () => {
@@ -130,6 +178,18 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
         setPairingUri(null);
         setError(null);
         setStatus('connected');
+        
+        // NEW: Store chain IDs from the session
+        const sessionChainIds = session.chainIds || [];
+        setChainIds(sessionChainIds);
+        
+        // NEW: Detect and validate network
+        const networkInfo = detectWalletNetwork(sessionChainIds);
+        setWalletNetworkInfo(networkInfo);
+        const isCorrect = networkInfo.isKnown && networkInfo.isTestnet;
+        setIsOnCorrectNetwork(isCorrect);
+        
+        (global as any).__walletChainIds = sessionChainIds;
       } catch (approvalError) {
         setError(getErrorMessage(approvalError));
         setStatus('error');
@@ -170,6 +230,17 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
     }
   };
 
+  // NEW: Check network function
+  const checkNetwork = () => {
+    if (status === 'connected' && chainIds.length > 0) {
+      const networkInfo = detectWalletNetwork(chainIds);
+      setWalletNetworkInfo(networkInfo);
+      const isCorrect = networkInfo.isKnown && networkInfo.isTestnet;
+      setIsOnCorrectNetwork(isCorrect);
+      (global as any).__walletChainIds = chainIds;
+    }
+  };
+
   return (
     <WalletContext.Provider
       value={{
@@ -182,6 +253,11 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
         reopenWallet,
         status,
         walletName,
+        // NEW: Network properties
+        chainIds,
+        walletNetworkInfo,
+        isOnCorrectNetwork,
+        checkNetwork,
       }}
     >
       {children}

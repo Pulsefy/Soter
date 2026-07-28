@@ -9,6 +9,11 @@ import {
 import { Request, Response } from 'express';
 import { ValidationError } from 'class-validator';
 import { LoggerService } from '../../logger/logger.service';
+import {
+  ErrorResponseDto,
+  ERROR_CODES,
+  getErrorCodeFromStatus,
+} from '../dto/error-response.dto';
 
 export interface ErrorResponse {
   code: number;
@@ -17,6 +22,8 @@ export interface ErrorResponse {
   traceId?: string;
   timestamp: string;
   path: string;
+  errorCode?: string;
+  correlationId?: string;
 }
 
 @Injectable()
@@ -29,10 +36,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
     const traceId = request.headers['x-request-id'] as string | undefined;
+    const correlationId = (request as any).correlationId || traceId;
 
     // Log the error
     this.logger.error(
-      `Trace ID: ${traceId ?? 'N/A'} | ${exception.constructor?.name ?? 'UnknownError'} | Status: ${
+      `[${traceId ?? 'N/A'}] ${exception.constructor?.name ?? 'UnknownError'} | Status: ${
         exception.status || HttpStatus.INTERNAL_SERVER_ERROR
       } | Message: ${exception.message} | Path: ${request.url}`,
       exception.stack,
@@ -42,25 +50,59 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let errorResponse: ErrorResponse;
 
     if (exception instanceof HttpException) {
-      errorResponse = this.handleHttpException(exception, request, traceId);
+      errorResponse = this.handleHttpException(
+        exception,
+        request,
+        traceId,
+        correlationId,
+      );
     } else if (this.isPrismaError(exception)) {
-      errorResponse = this.handlePrismaError(exception, request, traceId);
+      errorResponse = this.handlePrismaError(
+        exception,
+        request,
+        traceId,
+        correlationId,
+      );
     } else if (
       Array.isArray(exception) &&
       exception.some(e => e instanceof ValidationError)
     ) {
-      errorResponse = this.handleValidationErrors(exception, request, traceId);
+      errorResponse = this.handleValidationErrors(
+        exception,
+        request,
+        traceId,
+        correlationId,
+      );
     } else {
-      errorResponse = this.handleGenericError(exception, request, traceId);
+      errorResponse = this.handleGenericError(
+        exception,
+        request,
+        traceId,
+        correlationId,
+      );
     }
 
-    response.status(errorResponse.code).json(errorResponse);
+    // Ensure response uses standardized error envelope
+    const finalResponse: ErrorResponseDto = {
+      code: errorResponse.code,
+      message: errorResponse.message,
+      traceId: errorResponse.traceId,
+      timestamp: errorResponse.timestamp || new Date().toISOString(),
+      path: errorResponse.path || request.url,
+      details: errorResponse.details,
+      errorCode:
+        errorResponse.errorCode || getErrorCodeFromStatus(errorResponse.code),
+      correlationId: errorResponse.correlationId,
+    };
+
+    response.status(finalResponse.code).json(finalResponse);
   }
 
   private handleHttpException(
     exception: HttpException,
     request: Request,
     traceId?: string,
+    correlationId?: string,
   ): ErrorResponse {
     const status = exception.getStatus();
     const exceptionResponse = exception.getResponse();
@@ -77,6 +119,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       traceId,
       timestamp: new Date().toISOString(),
       path: request.url,
+      errorCode: getErrorCodeFromStatus(status),
+      correlationId,
     };
   }
 
@@ -84,7 +128,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     return (
       exception?.constructor?.name?.includes('Prisma') ||
       exception?.clientVersion ||
-      exception?.meta?.target
+      exception?.meta?.target ||
+      exception?.code?.startsWith('P')
     );
   }
 
@@ -92,16 +137,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
     exception: any,
     request: Request,
     traceId?: string,
+    correlationId?: string,
   ): ErrorResponse {
     let code = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Database error occurred';
     let details: any = null;
+    let errorCode: string = ERROR_CODES.DATABASE_ERROR;
 
     // Map common Prisma errors
     if (exception.code === 'P2002') {
       // Unique constraint failed
       code = HttpStatus.CONFLICT;
       message = 'Unique constraint violation';
+      errorCode = ERROR_CODES.UNIQUE_CONSTRAINT_VIOLATION;
       details = {
         target: exception.meta?.target,
         field: Array.isArray(exception.meta?.target)
@@ -112,6 +160,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // Record not found
       code = HttpStatus.NOT_FOUND;
       message = 'Record not found';
+      errorCode = ERROR_CODES.RECORD_NOT_FOUND;
       details = {
         cause: exception.meta?.cause,
       };
@@ -119,6 +168,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // Foreign key constraint failed
       code = HttpStatus.BAD_REQUEST;
       message = 'Foreign key constraint violation';
+      errorCode = ERROR_CODES.FOREIGN_KEY_VIOLATION;
       details = {
         field_name: exception.meta?.field_name,
       };
@@ -126,6 +176,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // Value too long for column
       code = HttpStatus.BAD_REQUEST;
       message = 'Value too long for column';
+      errorCode = ERROR_CODES.VALUE_TOO_LONG;
       details = {
         column_name: exception.meta?.column_name,
       };
@@ -143,6 +194,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       traceId,
       timestamp: new Date().toISOString(),
       path: request.url,
+      errorCode,
+      correlationId,
     };
   }
 
@@ -150,6 +203,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     exceptions: ValidationError[],
     request: Request,
     traceId?: string,
+    correlationId?: string,
   ): ErrorResponse {
     const validationErrors = exceptions.map(error => ({
       property: error.property,
@@ -169,6 +223,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       traceId,
       timestamp: new Date().toISOString(),
       path: request.url,
+      errorCode: ERROR_CODES.VALIDATION_ERROR,
+      correlationId,
     };
   }
 
@@ -187,6 +243,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     exception: any,
     request: Request,
     traceId?: string,
+    correlationId?: string,
   ): ErrorResponse {
     return {
       code: HttpStatus.INTERNAL_SERVER_ERROR,
@@ -201,6 +258,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       traceId,
       timestamp: new Date().toISOString(),
       path: request.url,
+      errorCode: ERROR_CODES.INTERNAL_SERVER_ERROR,
+      correlationId,
     };
   }
 }

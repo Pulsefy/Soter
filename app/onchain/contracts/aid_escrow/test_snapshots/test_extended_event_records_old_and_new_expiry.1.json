@@ -935,7 +935,7 @@
                 },
                 {
                   "key": {
-                    "symbol": "id"
+                    "symbol": "package_id"
                   },
                   "val": {
                     "u64": "42"

@@ -29,6 +29,9 @@ import {
   PauseState,
   FeeConfig,
   PackageSummary,
+  GetTransactionStatusParams,
+  GetTransactionStatusResult,
+  TxStatus,
 } from './onchain.adapter';
 
 /** Calls the Soroban RPC endpoint and returns the result value. */
@@ -316,6 +319,44 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       status: result.status,
       amountDisbursed: result.amountDisbursed,
     };
+  }
+
+  async getTransactionStatus(
+    params: GetTransactionStatusParams,
+  ): Promise<GetTransactionStatusResult> {
+    const hash = params.hash.toUpperCase();
+    try {
+      const result = await rpcCall(this.http, this.rpcUrl, 'getTransaction', {
+        hash,
+      });
+      const r = result as any;
+      let status: TxStatus;
+      switch (r?.status) {
+        case 'SUCCESS':
+          status = 'succeeded';
+          break;
+        case 'FAILED':
+          status = 'failed';
+          break;
+        case 'NOT_FOUND':
+          status = 'pending';
+          break;
+        default:
+          status = 'unknown';
+      }
+      return {
+        hash,
+        status,
+        timestamp: new Date(),
+        ledger: typeof r?.ledger === 'number' ? r.ledger : undefined,
+        errorMessage:
+          status === 'failed'
+            ? (r?.resultXdr ?? 'Transaction failed')
+            : undefined,
+      };
+    } catch {
+      return { hash, status: 'unknown', timestamp: new Date() };
+    }
   }
 }
 

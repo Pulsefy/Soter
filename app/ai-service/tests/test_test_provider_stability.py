@@ -41,6 +41,22 @@ class TestTestProviderDeterminism:
         pol_resp = self.provider.get_response("proof_of_life", {"dummy": True})
         assert ocr_resp != pol_resp
 
+    def test_proof_of_life_borderline_fixture_is_selected_deterministically(self):
+        first = self.provider.get_response(
+            "proof_of_life",
+            {"has_burst": True, "confidence_threshold": 0.70, "scenario": "borderline"},
+        )
+        second = self.provider.get_response(
+            "proof_of_life",
+            {"has_burst": True, "confidence_threshold": 0.70, "scenario": "borderline"},
+        )
+
+        assert first == second
+        assert first["is_real_person"] is False
+        assert first["confidence"] == pytest.approx(0.68)
+        assert "borderline" in first["reason"].lower()
+        assert "threshold" in first["reason"].lower()
+
     def test_provider_cache_works(self):
         assert "humanitarian" not in self.provider._cache
         self.provider.get_response("humanitarian", {"x": 1})
@@ -152,13 +168,16 @@ class TestOCRTestProviderStability:
 
         assert len(texts) > 1
 
-    def test_ocr_regular_service_unchanged(self):
-        """Without test_provider_mode, OCR still requires real dependencies."""
+    def test_ocr_regular_service_unchanged(self, monkeypatch):
+        """Without test_provider_mode, OCR goes through the real dependency path."""
+        from unittest.mock import patch
         from PIL import Image
         img = Image.new("RGB", (50, 50), color="red")
 
-        with pytest.raises(Exception):
-            self.service.process_image(img)
+        monkeypatch.setattr(settings, "test_provider_mode", False)
+        with patch.object(self.service, "_run_tesseract", side_effect=RuntimeError("no tesseract")):
+            with pytest.raises(RuntimeError):
+                self.service.process_image(img)
 
 
 # -----------------------------------------------------------------------

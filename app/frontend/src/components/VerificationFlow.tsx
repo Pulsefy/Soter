@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
 import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
+import { useToast } from '@/components/ToastProvider';
+import { normalizeError } from '@/lib/error-utils';
 import type {
     PiiDetectionResult,
     ValidationErrors,
@@ -13,6 +15,9 @@ import type {
     VerificationStep,
 } from '@/types/verification';
 import { useActivity } from '@/hooks/useActivity';
+import { useNetworkGuard } from '@/hooks/useNetworkGuard';
+import { NetworkMismatchBanner } from '@/components/NetworkMismatchBanner';
+
 
 /* ─── Accepted image MIME types ─────────────────────────────────────────── */
 
@@ -290,6 +295,8 @@ function readVerificationDraftFromStorage(): VerificationDraft | null {
 export const VerificationFlow: React.FC = () => {
     const uid = useId();
     const { trackJob } = useActivity();
+    const { isMismatch } = useNetworkGuard();
+    const { toast } = useToast();
     const [restoredDraft] = useState<VerificationDraft | null>(() =>
         readVerificationDraftFromStorage(),
     );
@@ -306,15 +313,34 @@ export const VerificationFlow: React.FC = () => {
         restoredDraft?.locationData ?? null,
     );
     const [errors, setErrors] = useState<ValidationErrors>({});
-    const [apiError, setApiError] = useState<string | null>(null);
+    const [apiError, setApiError] = useState<Error | string | null>(null);
+
     const [result, setResult] = useState<VerificationResult | null>(null);
     const [draftRestored, setDraftRestored] = useState(restoredDraft !== null);
+
+    /** Refs for focus management across step transitions. */
+    const firstInputRef = useRef<HTMLInputElement>(null);
+    const analysingRef = useRef<HTMLDivElement>(null);
+    const resultHeadingRef = useRef<HTMLHeadingElement>(null);
 
     /**
      * Payload ref: stores the validated, PII-clean FormData to be sent when
      * the component transitions to the "analysing" step.
      */
     const pendingPayload = useRef<FormData | null>(null);
+
+    /* ── Focus management on step transitions ──────────────────────────────── */
+
+    useEffect(() => {
+        if (step === 'analysing') {
+            analysingRef.current?.focus();
+        } else if (step === 'result') {
+            resultHeadingRef.current?.focus();
+        } else if (step === 'upload') {
+            // Focus returns to the first input when the wizard resets or returns to upload.
+            firstInputRef.current?.focus();
+        }
+    }, [step]);
 
     /* ── Reset ─────────────────────────────────────────────────────────────── */
 
@@ -477,13 +503,18 @@ export const VerificationFlow: React.FC = () => {
             setStep('result');
           } catch (err) {
             if (cancelled) return;
-            if (err instanceof VerificationApiError) {
-              setApiError(err.message);
-            } else {
-              setApiError(
-                'An unexpected error occurred. Please try again.',
-              );
-            }
+            
+            const normalized = normalizeError(err);
+            setApiError(err as any);
+            
+            toast(
+              'Verification Failed',
+              normalized.correlationId
+                ? `${normalized.message} (Correlation ID: ${normalized.correlationId})`
+                : normalized.message,
+              'error'
+            );
+
             pendingPayload.current = null;
             setStep('upload');
           }
@@ -504,7 +535,7 @@ export const VerificationFlow: React.FC = () => {
 
     /* ── Submit button disabled state ───────────────────────────────────────── */
 
-    const canSubmit = imageFile !== null || textInput.trim().length > 0;
+    const canSubmit = (imageFile !== null || textInput.trim().length > 0) && !isMismatch;
 
     /* ── Render ──────────────────────────────────────────────────────────────── */
 
@@ -522,6 +553,7 @@ export const VerificationFlow: React.FC = () => {
                     textInputId={textInputId}
                     textErrorId={textErrorId}
                     formErrorId={formErrorId}
+                    firstInputRef={firstInputRef}
                     onImageChange={setImageFile}
                     onTextChange={setTextInput}
                     onClearApiError={() => setApiError(null)}
@@ -536,10 +568,10 @@ export const VerificationFlow: React.FC = () => {
                 />
             )}
 
-            {step === 'analysing' && <StepAnalysing />}
+            {step === 'analysing' && <StepAnalysing analysingRef={analysingRef} />}
 
             {step === 'result' && result !== null && (
-                <StepResult result={result} onReset={resetFlow} />
+                <StepResult result={result} onReset={resetFlow} resultHeadingRef={resultHeadingRef} />
             )}
         </div>
     );
@@ -551,13 +583,14 @@ interface StepUploadProps {
     imageFile: File | null;
     textInput: string;
     errors: ValidationErrors;
-    apiError: string | null;
+    apiError: Error | string | null;
     canSubmit: boolean;
     imageInputId: string;
     imageErrorId: string;
     textInputId: string;
     textErrorId: string;
     formErrorId: string;
+    firstInputRef: React.RefObject<HTMLInputElement | null>;
     onImageChange: (file: File | null) => void;
     onTextChange: (text: string) => void;
     onClearApiError: () => void;
@@ -587,6 +620,7 @@ function StepUpload({
     textInputId,
     textErrorId,
     formErrorId,
+    firstInputRef,
     onImageChange,
     onTextChange,
     onClearApiError,
@@ -606,8 +640,17 @@ function StepUpload({
     };
 
     return (
-        <form onSubmit={onSubmit} noValidate aria-label="Evidence upload form">
+        <form
+            onSubmit={onSubmit}
+            noValidate
+            aria-label="Evidence upload form"
+            aria-describedby={errors.form ? formErrorId : undefined}
+        >
             <h2 className="text-lg font-semibold mb-4">Submit Evidence for Verification</h2>
+
+            <div className="mb-6">
+                <NetworkMismatchBanner />
+            </div>
 
             {!imageFile && textInput.trim().length === 0 && (
                 <div className="mb-6">
@@ -677,6 +720,7 @@ function StepUpload({
                     </span>
                 </label>
                 <input
+                    ref={firstInputRef}
                     id={imageInputId}
                     type="file"
                     accept="image/png,image/jpeg,image/webp"
@@ -816,18 +860,24 @@ function StepUpload({
  * Shows an indeterminate progress bar while the API call is in flight.
  * No interactive elements are rendered — the user cannot navigate back.
  */
-function StepAnalysing() {
+function StepAnalysing({ analysingRef }: { analysingRef: React.RefObject<HTMLDivElement | null> }) {
     return (
         <div className="flex flex-col items-center justify-center py-12 space-y-6">
+            {/* Visually hidden live region announces step to screen readers */}
+            <div role="status" className="sr-only">
+                Analysing evidence, please wait
+            </div>
             <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
                 Analysing...
             </p>
             <div
+                ref={analysingRef}
+                tabIndex={-1}
                 role="progressbar"
                 aria-label="Analysing evidence…"
                 aria-valuemin={0}
                 aria-valuemax={100}
-                className="w-full max-w-sm h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden"
+                className="w-full max-w-sm h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden focus:outline-none"
             >
                 <div className="h-full w-1/2 rounded-full bg-blue-500 animate-[slide_1.4s_ease-in-out_infinite]" />
             </div>
@@ -852,6 +902,7 @@ function StepAnalysing() {
 interface StepResultProps {
     result: VerificationResult;
     onReset: () => void;
+    resultHeadingRef: React.RefObject<HTMLHeadingElement | null>;
 }
 
 /**
@@ -859,10 +910,16 @@ interface StepResultProps {
  * Renders the score and risk_level from the API response without transformation.
  * Provides a reset button to start a new verification.
  */
-function StepResult({ result, onReset }: StepResultProps) {
+function StepResult({ result, onReset, resultHeadingRef }: StepResultProps) {
     return (
         <div className="space-y-6">
-            <h2 className="text-lg font-semibold">Verification Result</h2>
+            <h2
+                ref={resultHeadingRef}
+                tabIndex={-1}
+                className="text-lg font-semibold focus:outline-none"
+            >
+                Verification Result
+            </h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Score */}

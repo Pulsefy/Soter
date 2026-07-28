@@ -1,11 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
+import {
+  OnchainAdapter,
+  ONCHAIN_ADAPTER_TOKEN,
+} from '../onchain/onchain.adapter';
 
-type CheckStatus = 'up' | 'down' | 'skipped';
+export type CheckStatus = 'up' | 'down' | 'skipped';
 
-interface HealthCheckResult {
+export interface HealthCheckResult {
   status: CheckStatus;
   details?: Record<string, unknown>;
 }
@@ -38,6 +42,8 @@ export class HealthService {
     private readonly configService: ConfigService,
     private readonly logger: LoggerService,
     private readonly prisma: PrismaService,
+    @Inject(ONCHAIN_ADAPTER_TOKEN)
+    private readonly onchainAdapter: OnchainAdapter,
   ) {}
 
   check() {
@@ -215,5 +221,113 @@ export class HealthService {
     }
 
     return value.trim().toLowerCase() === 'true';
+  }
+
+  async checkOnchainContract(): Promise<{
+    status: 'up' | 'down';
+    latencyMs: number;
+    metadata?: { version: string; name: string };
+    error?: string;
+  }> {
+    const startTime = Date.now();
+    try {
+      const contractMetadata = await this.onchainAdapter.getContractMetadata();
+      const latency = Date.now() - startTime;
+      return {
+        status: 'up',
+        latencyMs: latency,
+        metadata: {
+          version: contractMetadata.version,
+          name: contractMetadata.name,
+        },
+      };
+    } catch (error) {
+      const latency = Date.now() - startTime;
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(
+        'On-chain contract health check failed',
+        undefined,
+        'HealthService',
+        { error: errorMsg },
+      );
+      return {
+        status: 'down',
+        latencyMs: latency,
+        error: errorMsg,
+      };
+    }
+  }
+
+  async getDiagnosticsExport() {
+    const liveness = this.getLiveness();
+    const readiness = await this.getReadiness();
+    const rpcUrl =
+      this.configService.get<string>('STELLAR_RPC_URL') ??
+      'https://soroban-testnet.stellar.org';
+
+    const rawBundle = {
+      metadata: {
+        timestamp: new Date().toISOString(),
+        appVersion: liveness.version,
+        environment: liveness.environment,
+        service: 'soter-backend',
+        uptimeSeconds: Math.floor(process.uptime()),
+        platform: process.platform,
+        nodeVersion: process.version,
+      },
+      appState: {
+        database: readiness.checks.database,
+        memory: liveness.checks.process.details,
+      },
+      queueHealth: {
+        status: 'active',
+        queueType: 'BullMQ',
+      },
+      walletNetworkStatus: {
+        stellarRpc: readiness.checks.stellarRpc,
+        network: rpcUrl.includes('testnet') ? 'testnet' : 'mainnet',
+      },
+      recentErrors: [],
+      sanitized: true,
+    };
+
+    return this.sanitizeDiagnostics(rawBundle);
+  }
+
+  private sanitizeDiagnostics<T>(data: T): T {
+    if (data === null || data === undefined) return data;
+    if (typeof data === 'string') {
+      let str = data.replace(/\bS[A-Z0-9]{55}\b/g, '[REDACTED]');
+      str = str.replace(
+        /Bearer\s+[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_=]*/gi,
+        'Bearer [REDACTED]',
+      );
+      return str as T;
+    }
+    if (typeof data !== 'object') return data;
+    if (Array.isArray(data))
+      return data.map(item => this.sanitizeDiagnostics(item)) as unknown as T;
+
+    const sensitiveKeys = new Set([
+      'password',
+      'token',
+      'secret',
+      'authorization',
+      'apikey',
+      'api_key',
+      'privatekey',
+      'private_key',
+      'email',
+      'seed',
+    ]);
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+      if (sensitiveKeys.has(k.toLowerCase())) {
+        result[k] = '[REDACTED]';
+      } else {
+        result[k] = this.sanitizeDiagnostics(v);
+      }
+    }
+    return result as T;
   }
 }

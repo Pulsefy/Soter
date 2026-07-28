@@ -14,10 +14,6 @@ interface ApiResponse<T> {
   error?: unknown;
 }
 
-/**
- * Campaign action types that can be performed optimistically.
- * These are "safe" mutations where we can predict the outcome.
- */
 export type CampaignAction = 
   | { type: 'pause'; targetStatus: 'paused' }
   | { type: 'resume'; targetStatus: 'active' }
@@ -25,9 +21,6 @@ export type CampaignAction =
   | { type: 'complete'; targetStatus: 'completed' }
   | { type: 'activate'; targetStatus: 'active' };
 
-/**
- * Maps action types to their target statuses and display names.
- */
 const ACTION_CONFIG: Record<CampaignAction['type'], { targetStatus: CampaignStatus; pastTense: string; presentTense: string }> = {
   pause: { targetStatus: 'paused', pastTense: 'paused', presentTense: 'pausing' },
   resume: { targetStatus: 'active', pastTense: 'resumed', presentTense: 'resuming' },
@@ -36,9 +29,6 @@ const ACTION_CONFIG: Record<CampaignAction['type'], { targetStatus: CampaignStat
   activate: { targetStatus: 'active', pastTense: 'activated', presentTense: 'activating' },
 };
 
-/**
- * Performs the actual API call to update campaign status.
- */
 async function updateCampaignStatus(
   id: string, 
   status: CampaignStatus
@@ -62,25 +52,18 @@ async function updateCampaignStatus(
   return body.data as Campaign;
 }
 
-/**
- * Custom hook for performing optimistic campaign mutations.
- * 
- * Features:
- * - Immediate UI update (optimistic)
- * - Automatic rollback on failure
- * - Standardized toast feedback
- * - Query invalidation on success
- * 
- * @example
- * ```typescript
- * const { mutate: pauseCampaign } = useOptimisticCampaignAction({
- *   onSuccess: () => toast('Campaign paused successfully', 'info'),
- * });
- * 
- * // Usage
- * pauseCampaign({ id: 'campaign-123', action: { type: 'pause', targetStatus: 'paused' } });
- * ```
- */
+interface MutationVariables {
+  id: string;
+  campaignName: string;
+  action: CampaignAction;
+}
+
+interface MutationContext {
+  previousCampaigns: Campaign[] | undefined;
+  campaignName: string;
+  action: CampaignAction;
+}
+
 export function useOptimisticCampaignAction({
   onSuccess,
   onError,
@@ -91,32 +74,20 @@ export function useOptimisticCampaignAction({
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  return useMutation({
+  return useMutation<Campaign, Error, MutationVariables, MutationContext>({
     mutationKey: ['campaigns', 'optimistic-action'],
-    mutationFn: async ({
-      id,
-      name,
-      action,
-    }: {
-      id: string;
-      name: string;
-      action: CampaignAction;
-    }) => {
+    mutationFn: async ({ id, action }: MutationVariables) => {
       const config = ACTION_CONFIG[action.type];
       return updateCampaignStatus(id, config.targetStatus);
     },
 
-    // 🚀 Optimistic Update: Called immediately when mutation is triggered
-    onMutate: async ({ id, name, action }) => {
+    onMutate: async ({ id, campaignName, action }: MutationVariables) => {
       const config = ACTION_CONFIG[action.type];
 
-      // Cancel any outgoing refetches to avoid overwriting our optimistic update
       await queryClient.cancelQueries({ queryKey: ['campaigns'] });
 
-      // Snapshot the previous campaign data for rollback
       const previousCampaigns = queryClient.getQueryData<Campaign[]>(['campaigns']);
 
-      // Optimistically update the campaign status in the cache
       queryClient.setQueryData<Campaign[]>(['campaigns'], (old) => {
         if (!old) return old;
         return old.map((campaign) =>
@@ -126,26 +97,21 @@ export function useOptimisticCampaignAction({
         );
       });
 
-      // Return context for rollback
       return {
         previousCampaigns,
-        campaignName: name,
+        campaignName,
         action,
       };
     },
 
-    // ✅ Success: Invalidate queries to ensure sync with server
-    onSuccess: (_data, variables) => {
+    onSuccess: (_data, variables: MutationVariables) => {
       const { campaignName, action } = variables;
       const config = ACTION_CONFIG[action.type];
 
-      // Invalidate to ensure we have latest server state
       queryClient.invalidateQueries({ queryKey: ['campaigns'] });
 
-      // Call custom success handler
       onSuccess?.(action, campaignName);
 
-      // Standardized toast feedback
       toast(
         `Campaign ${config.pastTense}`,
         `"${campaignName}" has been ${config.pastTense}.`,
@@ -153,12 +119,10 @@ export function useOptimisticCampaignAction({
       );
     },
 
-    // ❌ Error: Rollback UI state and show error toast
-    onError: (error, variables, context) => {
+    onError: (error, variables: MutationVariables, context: MutationContext | undefined) => {
       const { campaignName, action } = variables;
       const config = ACTION_CONFIG[action.type];
 
-      // Rollback to previous state
       if (context?.previousCampaigns) {
         queryClient.setQueryData<Campaign[]>(
           ['campaigns'],
@@ -166,10 +130,8 @@ export function useOptimisticCampaignAction({
         );
       }
 
-      // Call custom error handler
-      onError?.(action, campaignName, error as Error);
+      onError?.(action, campaignName, error);
 
-      // Standardized error toast
       toast(
         `Failed to ${action.type} campaign`,
         error instanceof Error ? error.message : `Could not ${config.presentTense} "${campaignName}". Please try again.`,
@@ -177,26 +139,13 @@ export function useOptimisticCampaignAction({
       );
     },
 
-    // Always refetch after mutation settles to ensure consistency
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['campaigns'] });
     },
   });
 }
 
-/**
- * Hook for pausing a campaign.
- * Convenience wrapper around useOptimisticCampaignAction.
- * 
- * @example
- * ```typescript
- * const { mutate: pauseCampaign, isPending } = usePauseCampaign();
- * pauseCampaign({ id: '123', name: 'Emergency Fund' });
- * ```
- */
 export function usePauseCampaign() {
-  const { toast } = useToast();
-  
   return useOptimisticCampaignAction({
     onSuccess: (action, name) => {
       console.log(`[Campaign] Paused: ${name}`);
@@ -207,13 +156,7 @@ export function usePauseCampaign() {
   });
 }
 
-/**
- * Hook for resuming a paused campaign.
- * Convenience wrapper around useOptimisticCampaignAction.
- */
 export function useResumeCampaign() {
-  const { toast } = useToast();
-  
   return useOptimisticCampaignAction({
     onSuccess: (action, name) => {
       console.log(`[Campaign] Resumed: ${name}`);
@@ -224,13 +167,7 @@ export function useResumeCampaign() {
   });
 }
 
-/**
- * Hook for archiving a campaign.
- * Convenience wrapper around useOptimisticCampaignAction.
- */
 export function useArchiveCampaign() {
-  const { toast } = useToast();
-  
   return useOptimisticCampaignAction({
     onSuccess: (action, name) => {
       console.log(`[Campaign] Archived: ${name}`);
@@ -241,37 +178,10 @@ export function useArchiveCampaign() {
   });
 }
 
-/**
- * Unified hook for all campaign actions.
- * Provides a single interface for pause, resume, archive, and other actions.
- * 
- * @example
- * ```typescript
- * const { mutate: performCampaignAction } = useCampaignAction();
- * 
- * // Pause
- * performCampaignAction({ id: '123', name: 'Campaign', action: { type: 'pause', targetStatus: 'paused' } });
- * 
- * // Resume
- * performCampaignAction({ id: '123', name: 'Campaign', action: { type: 'resume', targetStatus: 'active' } });
- * 
- * // Archive
- * performCampaignAction({ id: '123', name: 'Campaign', action: { type: 'archive', targetStatus: 'archived' } });
- * ```
- */
 export function useCampaignAction() {
   return useOptimisticCampaignAction();
 }
 
-/**
- * Hook for checking if a campaign action is available based on current status.
- * 
- * @example
- * ```typescript
- * const { canPause, canResume, canArchive } = useCampaignActions('active');
- * // canPause: true, canResume: false, canArchive: true
- * ```
- */
 export function useCampaignActions(currentStatus: CampaignStatus) {
   return {
     canPause: currentStatus === 'active',

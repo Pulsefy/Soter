@@ -89,7 +89,7 @@ export class EvidenceService {
       this.logger.warn(
         `Near-duplicate upload detected for fingerprint ${fingerprint} in org ${orgId}`,
       );
-      
+
       // Create a near-duplicate record that references the original
       const nearDuplicateItem = await this.prisma.evidenceQueueItem.create({
         data: {

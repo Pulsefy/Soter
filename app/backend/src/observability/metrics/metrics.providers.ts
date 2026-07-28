@@ -60,6 +60,17 @@ export const metricsProviders = [
     labelNames: ['operation', 'adapter'],
     buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
   }),
+  makeHistogramProvider({
+    name: 'contract_call_latency_seconds',
+    help: 'Latency of Testnet contract calls grouped by operation and status',
+    labelNames: ['operation', 'status'],
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120],
+  }),
+  makeCounterProvider({
+    name: 'tx_submission_failures_total',
+    help: 'Total number of Testnet transaction submission failures',
+    labelNames: ['operation', 'reason'],
+  }),
 
   // Ingestion Metrics
   makeGaugeProvider({
@@ -79,6 +90,11 @@ export const metricsProviders = [
     help: 'Duration of webhook delivery attempts in seconds',
     labelNames: ['webhook_type'],
     buckets: [0.1, 0.5, 1, 2, 5, 10, 30],
+  }),
+  makeCounterProvider({
+    name: 'callback_failures_total',
+    help: 'Total number of callback or async processing failures',
+    labelNames: ['callback_type', 'reason'],
   }),
 
   // Error Rate Metrics
@@ -111,5 +127,55 @@ export const metricsProviders = [
     name: 'analytics_cache_invalidations_total',
     help: 'Total number of analytics cache invalidations',
     labelNames: ['reason'],
+  }),
+
+  // Verification Priority Metrics
+  makeCounterProvider({
+    name: 'verification_jobs_enqueued_total',
+    help: 'Total number of verification jobs enqueued, labelled by priority tier',
+    labelNames: ['priority'],
+  }),
+  makeGaugeProvider({
+    name: 'verification_queue_waiting_by_priority',
+    help: 'Current number of waiting verification jobs by priority tier',
+    labelNames: ['priority'],
+  }),
+
+  // Claim Funnel Metrics
+  makeCounterProvider({
+    name: 'claims_created_total',
+    help: 'Total number of claims created',
+    labelNames: ['campaign_id'],
+  }),
+  makeCounterProvider({
+    name: 'claims_verified_total',
+    help: 'Total number of claims verified',
+    labelNames: ['campaign_id'],
+  }),
+  makeCounterProvider({
+    name: 'claims_approved_total',
+    help: 'Total number of claims approved',
+    labelNames: ['campaign_id'],
+  }),
+  makeCounterProvider({
+    name: 'claims_disbursed_total',
+    help: 'Total number of claims disbursed',
+    labelNames: ['campaign_id', 'onchain_enabled'],
+  }),
+  makeCounterProvider({
+    name: 'claims_cancelled_total',
+    help: 'Total number of claims cancelled',
+    labelNames: ['campaign_id', 'from_status'],
+  }),
+  makeGaugeProvider({
+    name: 'claims_in_funnel',
+    help: 'Current number of claims at each funnel stage',
+    labelNames: ['status'],
+  }),
+  makeHistogramProvider({
+    name: 'claim_funnel_duration_seconds',
+    help: 'Time spent within each claim funnel stage before transitioning',
+    labelNames: ['from_status', 'to_status'],
+    buckets: [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 86400],
   }),
 ];

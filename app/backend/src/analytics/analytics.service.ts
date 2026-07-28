@@ -114,7 +114,7 @@ export class AnalyticsService {
    */
   async getGlobalStats(query: GlobalStatsQuery = {}): Promise<GlobalStatsDto> {
     const cacheKey = this.buildCacheKey(
-      'global-stats',
+      'global-stats-v2',
       query as Record<string, unknown>,
     );
 
@@ -236,13 +236,34 @@ export class AnalyticsService {
       },
     });
 
-    // Count active campaigns (optionally filtered by region / token).
-    const activeCampaigns = await this.prisma.campaign.count({
-      where: {
-        status: 'active',
-        ...(region || token ? this.buildMetadataFilter(region, token) : {}),
-      },
-    });
+    // These totals are intentionally independent of the distribution filters.
+    // They power the dashboard summary cards, which should describe the
+    // complete operational workload rather than only the selected map slice.
+    const [
+      activeCampaigns,
+      totalClaims,
+      totalPackages,
+      pendingReviews,
+      totalDisbursements,
+    ] = await Promise.all([
+      this.prisma.campaign.count({
+        where: {
+          status: 'active',
+          ...(region || token ? this.buildMetadataFilter(region, token) : {}),
+        },
+      }),
+      this.prisma.claim.count({ where: { deletedAt: null } }),
+      this.prisma.aidPackage.count(),
+      this.prisma.verificationRequest.count({
+        where: {
+          deletedAt: null,
+          status: { in: ['pending', 'pending_review'] },
+        },
+      }),
+      this.prisma.claim.count({
+        where: { deletedAt: null, status: ClaimStatus.disbursed },
+      }),
+    ]);
 
     //  Aggregate in JS (avoids complex Prisma JSON path queries)
 
@@ -307,6 +328,10 @@ export class AnalyticsService {
       }));
 
     return {
+      totalClaims,
+      totalPackages,
+      pendingReviews,
+      totalDisbursements,
       totalAidDisbursed: Math.round(totalAidDisbursed * 100) / 100,
       totalRecipients: uniqueRecipients.size,
       activeCampaigns,

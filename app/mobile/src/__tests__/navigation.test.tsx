@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Integration tests: navigation flow Home -> AidOverview -> AidDetails
  */
 import React from 'react';
@@ -10,6 +10,7 @@ import { AidOverviewScreen } from '../screens/AidOverviewScreen';
 import { AidDetailsScreen } from '../screens/AidDetailsScreen';
 import { ClaimReceiptScreen } from '../screens/ClaimReceiptScreen';
 import type { RootStackParamList } from '../navigation/types';
+import { ThemeProvider } from '../theme/ThemeContext';
 
 const mockQueueClaimConfirmation = jest.fn().mockResolvedValue({ status: 'completed', result: {} });
 
@@ -63,6 +64,8 @@ jest.mock('../services/aidApi', () => ({
     status: 'verified',
     claimId: 'claim-aid-1',
     createdAt: '2026-01-01T00:00:00Z',
+    verifiedAt: '2026-01-01T01:00:00Z',
+    approvalTransactionHash: 'a'.repeat(64),
   }),
   getMockAidDetails: jest.fn(),
 }));
@@ -109,17 +112,19 @@ function TestNavigator({
   initialParams?: any;
 }) {
   return (
-    <NavigationContainer>
-      <Stack.Navigator initialRouteName={initialRoute as any}>
-        <Stack.Screen name="Home" component={HomeScreen} />
-        <Stack.Screen name="AidOverview" component={AidOverviewScreen} />
-        <Stack.Screen name="AidDetails" component={AidDetailsScreen} initialParams={initialParams} />
-        <Stack.Screen name="ClaimReceipt" component={ClaimReceiptScreen} />
-        <Stack.Screen name="Settings" component={() => null} />
-        <Stack.Screen name="Health" component={() => null} />
-        <Stack.Screen name="Scanner" component={() => null} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <ThemeProvider>
+      <NavigationContainer>
+        <Stack.Navigator initialRouteName={initialRoute as any}>
+          <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen name="AidOverview" component={AidOverviewScreen} />
+          <Stack.Screen name="AidDetails" component={AidDetailsScreen} initialParams={initialParams} />
+          <Stack.Screen name="ClaimReceipt" component={ClaimReceiptScreen} />
+          <Stack.Screen name="Settings" component={() => null} />
+          <Stack.Screen name="Health" component={() => null} />
+          <Stack.Screen name="Scanner" component={() => null} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </ThemeProvider>
   );
 }
 
@@ -156,7 +161,23 @@ describe('Navigation: Home -> AidOverview -> AidDetails', () => {
     fireEvent.press(getByText(/Confirm Claim/i));
 
     await waitFor(() => {
-      expect(getByText(/Claim Receipt/i)).toBeTruthy();
+      expect(getByText(/Your proof of claim completion/i)).toBeTruthy();
     });
+  });
+
+  it('shows claim status timeline with pending onchain milestones and hash actions', async () => {
+    const { getByText } = render(
+      <TestNavigator initialRoute="AidDetails" initialParams={{ aidId: 'aid-1' }} />,
+    );
+
+    await waitFor(() => expect(getByText('Status Timeline')).toBeTruthy());
+
+    expect(getByText('Verification')).toBeTruthy();
+    expect(getByText('Approval')).toBeTruthy();
+    expect(getByText('Claim')).toBeTruthy();
+    expect(getByText('Disbursement')).toBeTruthy();
+    expect(getByText(/Explorer aaaaaaaa...aaaaaa/i)).toBeTruthy();
+    expect(getByText('Copy hash')).toBeTruthy();
+    expect(getByText('Pending onchain update')).toBeTruthy();
   });
 });

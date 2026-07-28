@@ -8,6 +8,7 @@ import type {
   VerificationStatus,
   RiskLevel,
 } from '@/types/verification-review';
+import { useCampaigns } from '@/hooks/useCampaigns';
 
 const STATUS_OPTIONS: { value: VerificationStatus; label: string }[] = [
   { value: 'pending_review', label: 'Pending Review' },
@@ -27,6 +28,7 @@ interface FilterSelectProps {
   onValueChange: (v: string) => void;
   placeholder: string;
   options: { value: string; label: string }[];
+  disabled?: boolean;
 }
 
 function FilterSelect({
@@ -34,13 +36,15 @@ function FilterSelect({
   onValueChange,
   placeholder,
   options,
+  disabled,
 }: FilterSelectProps) {
   return (
     <SelectPrimitive.Root
       value={value || undefined}
       onValueChange={onValueChange}
+      disabled={disabled}
     >
-      <SelectPrimitive.Trigger className="flex items-center gap-2 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-colors min-w-40">
+      <SelectPrimitive.Trigger className="flex items-center gap-2 h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-colors min-w-40 disabled:opacity-50 disabled:cursor-not-allowed">
         <SelectPrimitive.Value placeholder={placeholder} />
         <SelectPrimitive.Icon className="ml-auto text-gray-400">
           <ChevronDown size={13} />
@@ -82,11 +86,20 @@ interface ReviewFiltersBarProps {
 }
 
 export function ReviewFiltersBar({ filters, onChange }: ReviewFiltersBarProps) {
+  const { data: campaigns = [], isLoading: campaignsLoading } = useCampaigns();
+
+  const campaignOptions = campaigns.map(c => ({ value: c.id, label: c.name }));
+
   const hasActive =
-    filters.status || filters.riskLevel || filters.dateFrom || filters.dateTo;
+    filters.status ||
+    filters.riskLevel ||
+    filters.campaignId ||
+    filters.dateFrom ||
+    filters.dateTo;
 
   return (
     <div className="flex flex-wrap gap-3 items-center">
+      {/* Status */}
       <FilterSelect
         value={filters.status}
         onValueChange={v =>
@@ -99,6 +112,7 @@ export function ReviewFiltersBar({ filters, onChange }: ReviewFiltersBarProps) {
         options={STATUS_OPTIONS}
       />
 
+      {/* Risk level */}
       <FilterSelect
         value={filters.riskLevel}
         onValueChange={v =>
@@ -111,6 +125,18 @@ export function ReviewFiltersBar({ filters, onChange }: ReviewFiltersBarProps) {
         options={RISK_OPTIONS}
       />
 
+      {/* Campaign */}
+      <FilterSelect
+        value={filters.campaignId}
+        onValueChange={v =>
+          onChange({ campaignId: v === '__all__' ? '' : v, page: 1 })
+        }
+        placeholder="All Campaigns"
+        options={campaignOptions}
+        disabled={campaignsLoading}
+      />
+
+      {/* Date from */}
       <div className="flex items-center gap-2">
         <label className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
           From
@@ -123,6 +149,7 @@ export function ReviewFiltersBar({ filters, onChange }: ReviewFiltersBarProps) {
         />
       </div>
 
+      {/* Date to */}
       <div className="flex items-center gap-2">
         <label className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
           To
@@ -135,12 +162,14 @@ export function ReviewFiltersBar({ filters, onChange }: ReviewFiltersBarProps) {
         />
       </div>
 
+      {/* Clear all */}
       {hasActive && (
         <button
           onClick={() =>
             onChange({
               status: '',
               riskLevel: '',
+              campaignId: '',
               dateFrom: '',
               dateTo: '',
               page: 1,

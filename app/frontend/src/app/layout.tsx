@@ -2,16 +2,17 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import type { Metadata } from 'next';
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages } from 'next-intl/server';
-import { notFound } from 'next/navigation';
 import './globals.css';
 import { QueryProvider } from '@/lib/query-provider';
 import { Navbar } from '@/components/Navbar';
 import { ToastProvider } from '@/components/ToastProvider';
+import TestnetFaucetHelper from '@/components/systems/TestnetFaucetHelper';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MisconfiguredPage } from '@/components/MisconfiguredPage';
+import { EnvWarningBanner } from '@/components/EnvWarningBanner';
+import { VersionProvider } from '@/components/VersionProvider';
 import { validateEnv } from '@/lib/env';
-import { locales } from '@/i18n';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -37,7 +38,9 @@ export default async function RootLayout({
   // Fail fast: validate required environment variables before rendering anything.
   // This runs server-side only; no secret values are forwarded to the client.
   const envResult = validateEnv();
-  if (!envResult.ok) {
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (!envResult.ok && isProduction) {
     return (
       <MisconfiguredPage
         missing={envResult.missing}
@@ -53,17 +56,20 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen bg-white text-blue-900 dark:bg-slate-950 dark:text-slate-50`}
+        className={`${geistSans.variable} ${geistMono.variable} flex min-h-screen flex-col bg-background text-foreground antialiased`}
       >
         <NextIntlClientProvider messages={messages}>
           <ThemeProvider>
             <ErrorBoundary>
-              <QueryProvider>
-                <ToastProvider>
-                  <Navbar />
-                  {children}
-                </ToastProvider>
-              </QueryProvider>
+              <VersionProvider>
+                <QueryProvider>
+                  <ToastProvider>
+                    {!envResult.ok && <EnvWarningBanner missing={envResult.missing} invalid={envResult.invalid} />}
+                    <Navbar />
+                    {children}
+                  </ToastProvider>
+                </QueryProvider>
+              </VersionProvider>
             </ErrorBoundary>
           </ThemeProvider>
         </NextIntlClientProvider>

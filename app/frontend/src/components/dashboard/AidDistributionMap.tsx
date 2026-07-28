@@ -9,7 +9,7 @@ import { getAppUserRole, isOperationsRole } from '@/lib/app-role';
 
 const DEFAULT_CENTER: [number, number] = [20, 0];
 const DEFAULT_ZOOM = 2;
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 const STATUS_STYLES: Record<string, string> = {
   delivered: 'aid-marker--delivered',
@@ -130,7 +130,7 @@ function ZoomWatcher({ onZoom }: { onZoom: (zoom: number) => void }) {
   return null;
 }
 
-export default function AidDistributionMap() {
+const AidDistributionMap = React.memo(function AidDistributionMap() {
   const role = getAppUserRole();
   const [points, setPoints] = useState<AidPackagePoint[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -322,4 +322,6 @@ export default function AidDistributionMap() {
       </div>
     </div>
   );
-}
+});
+
+export default AidDistributionMap;

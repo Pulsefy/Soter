@@ -4,8 +4,10 @@ export async function fetchClient(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<Response> {
-  const useMocks = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+  const useMocks =
+    process.env.NEXT_PUBLIC_USE_MOCKS === "true" ||
+    !process.env.NEXT_PUBLIC_API_URL;
 
   const urlString = input.toString();
   
@@ -35,6 +37,13 @@ export async function fetchClient(
       console.log(`[Mock API] Intercepting dynamic campaign request to: ${urlString}`);
       await new Promise((resolve) => setTimeout(resolve, 500));
       return handlers['/campaigns/:id'](urlString, init);
+    }
+
+    // Support dynamic verification-inbox endpoints like /v1/verification-inbox/:id, .../approve, .../reject, etc.
+    if (pathWithoutQuery.startsWith('/v1/verification-inbox/') && handlers['/v1/verification-inbox/:id']) {
+      console.log(`[Mock API] Intercepting dynamic verification-inbox request to: ${urlString}`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return handlers['/v1/verification-inbox/:id'](urlString, init);
     }
   }
 

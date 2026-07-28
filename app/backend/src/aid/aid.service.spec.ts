@@ -3,6 +3,7 @@ import { AidService } from './aid.service';
 import { AuditService } from '../audit/audit.service';
 import { RedisService } from '../../cache/redis.service';
 import { AiTaskWebhookDto, TaskStatus } from './dto/ai-task-webhook.dto';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 describe('AidService - Webhook Reliability Checks', () => {
   let service: AidService;
@@ -11,8 +12,13 @@ describe('AidService - Webhook Reliability Checks', () => {
   let redisGetSpy: jest.SpyInstance;
   let redisSetSpy: jest.SpyInstance;
   let auditRecordSpy: jest.SpyInstance;
+  let metricsService: { incrementCallbackFailure: jest.Mock };
 
   beforeEach(async () => {
+    metricsService = {
+      incrementCallbackFailure: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AidService,
@@ -23,6 +29,10 @@ describe('AidService - Webhook Reliability Checks', () => {
         {
           provide: RedisService,
           useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() },
+        },
+        {
+          provide: MetricsService,
+          useValue: metricsService,
         },
       ],
     }).compile();
@@ -132,5 +142,25 @@ describe('AidService - Webhook Reliability Checks', () => {
 
     expect(result.status).toEqual('completed');
     expect(auditRecordSpy).toHaveBeenCalled();
+  });
+
+  it('5. should record callback failures for failed AI tasks', async () => {
+    const failedPayload: AiTaskWebhookDto = {
+      taskId: 'task-1',
+      deliveryId: 'del-4',
+      timestamp: '2024-03-24T12:00:00Z',
+      status: TaskStatus.FAILED,
+      error: 'model_timeout',
+    };
+
+    redisGetSpy.mockResolvedValueOnce(null);
+    redisGetSpy.mockResolvedValueOnce(null);
+
+    await service.handleTaskWebhook(failedPayload);
+
+    expect(metricsService.incrementCallbackFailure).toHaveBeenCalledWith(
+      'ai_task_webhook',
+      'model_timeout',
+    );
   });
 });

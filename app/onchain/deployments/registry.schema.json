@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Pulsefy/Soter/app/onchain/deployments/registry.schema.json",
+  "title": "AidEscrow Deployment Registry",
+  "description": "Machine-readable source of truth for on-chain AidEscrow deployments (contract IDs and initialization configuration). One entry per deployment, ordered oldest to newest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract", "deployments"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional relative path to this schema so editors can validate the registry."
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version of this registry file format."
+    },
+    "contract": {
+      "type": "string",
+      "description": "Contract crate name, e.g. \"aid_escrow\"."
+    },
+    "deployments": {
+      "type": "array",
+      "description": "Deployment records, ordered oldest to newest.",
+      "items": { "$ref": "#/$defs/deployment" }
+    }
+  },
+  "$defs": {
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "network",
+        "version",
+        "contract_id",
+        "wasm_hash",
+        "deployer",
+        "init_args",
+        "deployed_at",
+        "git_commit",
+        "version_tag",
+        "record"
+      ],
+      "properties": {
+        "network": {
+          "type": "string",
+          "enum": ["testnet", "futurenet", "mainnet"],
+          "description": "Stellar network the contract was deployed to."
+        },
+        "version": {
+          "type": "string",
+          "description": "Contract crate version, e.g. \"0.1.0\"."
+        },
+        "contract_id": {
+          "type": "string",
+          "pattern": "^C[A-Z2-7]{55}$",
+          "description": "Deployed contract ID (56-character C... strkey)."
+        },
+        "wasm_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 hash of the uploaded WASM (64 hex characters)."
+        },
+        "deployer": {
+          "type": "string",
+          "pattern": "^G[A-Z2-7]{55}$",
+          "description": "Public key of the deploying account (56-character G... strkey)."
+        },
+        "init_args": {
+          "type": "object",
+          "description": "Arguments passed to init() at deployment time.",
+          "required": ["admin"],
+          "additionalProperties": true,
+          "properties": {
+            "admin": {
+              "type": "string",
+              "pattern": "^G[A-Z2-7]{55}$",
+              "description": "Admin address set at initialization."
+            }
+          }
+        },
+        "deployed_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ].*)?$",
+          "description": "Deployment date (YYYY-MM-DD) or ISO-8601 timestamp."
+        },
+        "git_commit": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{7,40}$",
+          "description": "Git commit SHA of the source build. Null for legacy entries recorded before commit tracking."
+        },
+        "version_tag": {
+          "type": "string",
+          "description": "Git tag for the release, e.g. \"v0.1.0-testnet\"."
+        },
+        "record": {
+          "type": "string",
+          "description": "Path (relative to app/onchain) to the human-readable deployment record markdown."
+        }
+      }
+    }
+  }
+}

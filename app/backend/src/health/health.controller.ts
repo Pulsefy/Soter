@@ -12,7 +12,7 @@ import { HealthService } from './health.service';
 import { LivenessResponse, ReadinessResponse } from './health.service';
 import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { Public } from '../common/decorators/public.decorator';
-import { Throttle } from '@nestjs/throttler';
+import { SkipThrottle } from '../common/decorators/skip-throttle.decorator';
 
 @ApiTags('Health')
 @Controller('health')
@@ -20,8 +20,8 @@ export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
   @Public()
+  @SkipThrottle()
   @Get()
-  @Throttle({ default: { ttl: 60, limit: 100 } }) // Limit to 100 requests per minute for this endpoint
   @Version(API_VERSIONS.V1)
   @ApiOperation({
     summary: 'Check system liveness and basic service metadata',
@@ -46,6 +46,7 @@ export class HealthController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get('live')
   @Version(API_VERSIONS.V1)
   @ApiOperation({
@@ -67,6 +68,7 @@ export class HealthController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get('ready')
   @Version(API_VERSIONS.V1)
   @ApiOperation({
@@ -111,6 +113,7 @@ export class HealthController {
   }
 
   @Get('error')
+  @SkipThrottle()
   @Version(API_VERSIONS.V1)
   @ApiOperation({ summary: 'Trigger an error for testing' })
   @ApiInternalServerErrorResponse({
@@ -124,5 +127,39 @@ export class HealthController {
 
     // Throw an error to test exception handling
     throw new Error('This is a test error for logging demonstration');
+  }
+
+  @Get('onchain')
+  @SkipThrottle()
+  @Version(API_VERSIONS.V1)
+  @ApiOperation({
+    summary: 'On-chain contract health probe (internal use)',
+    description:
+      'Performs a read-only contract call to verify connectivity to Soroban RPC and contract functionality. Requires authentication.',
+  })
+  @ApiOkResponse({
+    description: 'On-chain health check completed successfully',
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'On-chain health check failed',
+  })
+  async onchainHealth(@Res({ passthrough: true }) res: Response) {
+    const result = await this.healthService.checkOnchainContract();
+    if (result.status === 'down') {
+      res.status(HttpStatus.SERVICE_UNAVAILABLE);
+    }
+    return result;
+  }
+
+  @Public()
+  @Get('diagnostics')
+  @Version(API_VERSIONS.V1)
+  @ApiOperation({
+    summary: 'Export support diagnostics bundle',
+    description:
+      'Returns a support-friendly diagnostics export containing sanitized application state, queue health, wallet/network status, error logs, timestamps, and app version metadata.',
+  })
+  async exportDiagnostics() {
+    return this.healthService.getDiagnosticsExport();
   }
 }

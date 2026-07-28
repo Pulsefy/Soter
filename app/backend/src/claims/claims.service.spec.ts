@@ -8,12 +8,13 @@ import {
   OnchainAdapter,
   ONCHAIN_ADAPTER_TOKEN,
 } from '../onchain/onchain.adapter';
-import type { DisburseParams } from '../onchain/onchain.adapter';
 import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
-import { ClaimStatus, Prisma } from '@prisma/client';
+import { ClaimStatus, Prisma, SorobanOperationType } from '@prisma/client';
+import { SorobanTransactionLifecycleService } from '../onchain/soroban-transaction-lifecycle.service';
+import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
 
 describe('ClaimsService', () => {
   let service: ClaimsService;
@@ -23,7 +24,8 @@ describe('ClaimsService', () => {
   let _auditService: AuditService;
   let configService: ConfigService;
 
-  const mockClaim = {
+  // Typed as any to bypass strict checks on newer structural fields like expiresAt, cancelledAt, etc.
+  const mockClaim: any = {
     id: 'claim-123',
     campaignId: 'campaign-1',
     status: ClaimStatus.approved,
@@ -73,6 +75,19 @@ describe('ClaimsService', () => {
   const mockMetricsService = {
     incrementOnchainOperation: jest.fn(),
     recordOnchainDuration: jest.fn(),
+    incrementCounter: jest.fn(),
+    incrementClaimsDisbursed: jest.fn(),
+    incrementClaimsVerified: jest.fn(),
+    incrementClaimsApproved: jest.fn(),
+    recordClaimFunnelDuration: jest.fn(),
+    adjustClaimsInFunnel: jest.fn(),
+  };
+
+  const mockSorobanTxLifecycleService = {
+    createTransaction: jest.fn().mockResolvedValue({ id: 'tx-123' }),
+  };
+  const mockSorobanTxScheduler = {
+    scheduleTransaction: jest.fn().mockResolvedValue(undefined),
   };
 
   const mockAuditService = {
@@ -97,6 +112,9 @@ describe('ClaimsService', () => {
               findUnique: jest.fn(),
               update: jest.fn(),
               findMany: jest.fn(),
+              create: jest.fn(),
+            },
+            sorobanTransaction: {
               create: jest.fn(),
             },
             $transaction: jest.fn(),
@@ -144,6 +162,14 @@ describe('ClaimsService', () => {
             decryptDeterministic: jest.fn((v: string) => v),
           },
         },
+        {
+          provide: SorobanTransactionLifecycleService,
+          useValue: mockSorobanTxLifecycleService,
+        },
+        {
+          provide: SorobanTransactionScheduler,
+          useValue: mockSorobanTxScheduler,
+        },
       ],
     }).compile();
 
@@ -158,103 +184,90 @@ describe('ClaimsService', () => {
   });
 
   describe('disburse', () => {
-    it('should call on-chain adapter when enabled', async () => {
+    it('should create and schedule a Soroban transaction when onchain is enabled', async () => {
+      const expectedClaim = {
+        ...mockClaim,
+        status: ClaimStatus.disbursed,
+      };
+
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
+
       jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          await Promise.resolve();
           return callback({
             claim: {
-              update: jest.fn().mockResolvedValue({
-                ...mockClaim,
-                status: ClaimStatus.disbursed,
-              }),
+              update: jest.fn().mockResolvedValue(expectedClaim),
             },
           });
         });
 
-      await service.disburse('claim-123');
+      const result = await service.disburse('claim-123');
 
-      expect(mockDisburse).toHaveBeenCalledWith(
-        expect.objectContaining<Partial<DisburseParams>>({
-          claimId: 'claim-123',
-          recipientAddress: 'recipient-123',
-          amount: '100',
-        }),
-      );
-    });
-
-    it('should record metrics when adapter is called', async () => {
-      jest
-        .spyOn(prismaService.claim, 'findUnique')
-        .mockResolvedValue(mockClaim);
-      jest
-        .spyOn(prismaService, '$transaction')
-        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          await Promise.resolve();
-          return callback({
-            claim: {
-              update: jest.fn().mockResolvedValue({
-                ...mockClaim,
-                status: ClaimStatus.disbursed,
-              }),
-            },
-          });
-        });
-
-      await service.disburse('claim-123');
-
-      expect(mockMetricsService.incrementOnchainOperation).toHaveBeenCalledWith(
-        'disburse',
-        'mock',
-        'success',
-      );
-      expect(mockMetricsService.recordOnchainDuration).toHaveBeenCalledWith(
-        'disburse',
-        'mock',
-        expect.any(Number),
-      );
-    });
-
-    it('should record audit log when adapter is called', async () => {
-      jest
-        .spyOn(prismaService.claim, 'findUnique')
-        .mockResolvedValue(mockClaim);
-      jest
-        .spyOn(prismaService, '$transaction')
-        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          await Promise.resolve();
-          return callback({
-            claim: {
-              update: jest.fn().mockResolvedValue({
-                ...mockClaim,
-                status: ClaimStatus.disbursed,
-              }),
-            },
-          });
-        });
-
-      await service.disburse('claim-123');
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
+      expect(
+        mockSorobanTxLifecycleService.createTransaction,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
-          actorId: 'system',
-          entity: 'onchain',
-          entityId: 'claim-123',
-          action: 'disburse',
-          metadata: expect.objectContaining({
-            transactionHash: 'mock-tx-hash-123',
-            status: 'success',
-            adapter: 'mock',
-          }),
+          claimId: 'claim-123',
+          operation: SorobanOperationType.disburse_claim,
         }),
       );
+      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalled();
+
+      expect(result.status).toBe(ClaimStatus.disbursed);
+      expect(result.campaign).toBeDefined();
     });
 
-    it('should not call adapter when ONCHAIN_ENABLED is false', async () => {
+    it('should record metrics when Soroban transaction is scheduled', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+          return callback({
+            claim: {
+              update: jest.fn().mockResolvedValue({
+                ...mockClaim,
+                status: ClaimStatus.disbursed,
+                campaign: mockClaim.campaign,
+              }),
+            },
+          });
+        });
+
+      await service.disburse('claim-123');
+
+      expect(mockMetricsService.incrementCounter).toHaveBeenCalled();
+    });
+
+    it('should transition claim status to disbursed', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+      const transactionMock = jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+          return callback({
+            claim: {
+              update: jest.fn().mockResolvedValue({
+                ...mockClaim,
+                status: ClaimStatus.disbursed,
+                campaign: mockClaim.campaign,
+              }),
+            },
+          });
+        });
+
+      const result = await service.disburse('claim-123');
+
+      expect(transactionMock).toHaveBeenCalled();
+      expect(result.status).toEqual(ClaimStatus.disbursed);
+    });
+
+    it('should not schedule Soroban transaction when ONCHAIN_ENABLED is false', async () => {
       jest
         .spyOn(configService, 'get')
         .mockImplementation((key: string): string | undefined => {
@@ -263,7 +276,6 @@ describe('ClaimsService', () => {
           return undefined;
         });
 
-      // Recreate service with new config
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           ClaimsService,
@@ -285,12 +297,12 @@ describe('ClaimsService', () => {
                 .fn()
                 .mockImplementation(
                   async (callback: (tx: any) => Promise<unknown>) => {
-                    await Promise.resolve();
                     return callback({
                       claim: {
                         update: jest.fn().mockResolvedValue({
                           ...mockClaim,
                           status: ClaimStatus.disbursed,
+                          campaign: mockClaim.campaign,
                         }),
                       },
                     });
@@ -338,19 +350,35 @@ describe('ClaimsService', () => {
               decryptDeterministic: jest.fn((v: string) => v),
             },
           },
+          {
+            provide: SorobanTransactionLifecycleService,
+            useValue: mockSorobanTxLifecycleService,
+          },
+          {
+            provide: SorobanTransactionScheduler,
+            useValue: mockSorobanTxScheduler,
+          },
         ],
       }).compile();
 
       const disabledService = module.get(ClaimsService);
-      const disburseSpy = jest.spyOn(mockOnchainAdapter, 'disburse');
+      const createTxSpy = jest.spyOn(
+        mockSorobanTxLifecycleService,
+        'createTransaction',
+      );
+      const scheduleTxSpy = jest.spyOn(
+        mockSorobanTxScheduler,
+        'scheduleTransaction',
+      );
 
       await disabledService.disburse('claim-123');
 
-      expect(disburseSpy).not.toHaveBeenCalled();
+      expect(createTxSpy).not.toHaveBeenCalled();
+      expect(scheduleTxSpy).not.toHaveBeenCalled();
     });
 
-    it('should handle adapter errors gracefully', async () => {
-      const error = new Error('On-chain error');
+    it('should transition claim status even if onchain processing is handled separately', async () => {
+      const error = new Error('Onchain error');
       jest.spyOn(mockOnchainAdapter, 'disburse').mockRejectedValue(error);
       jest
         .spyOn(prismaService.claim, 'findUnique')
@@ -358,12 +386,12 @@ describe('ClaimsService', () => {
       const transactionSpy = jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          await Promise.resolve();
           return callback({
             claim: {
               update: jest.fn().mockResolvedValue({
                 ...mockClaim,
                 status: ClaimStatus.disbursed,
+                campaign: mockClaim.campaign,
               }),
             },
           });
@@ -371,20 +399,7 @@ describe('ClaimsService', () => {
 
       await service.disburse('claim-123');
 
-      // Should still proceed with disbursement
       expect(transactionSpy).toHaveBeenCalled();
-      // Should record failed metric
-      expect(mockMetricsService.incrementOnchainOperation).toHaveBeenCalledWith(
-        'disburse',
-        'mock',
-        'failed',
-      );
-      // Should record failed audit
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        expect.objectContaining<{ action: string }>({
-          action: 'disburse_failed',
-        }),
-      );
     });
 
     it('should throw NotFoundException if claim does not exist', async () => {

@@ -3,6 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import request from 'supertest';
+import { Prisma } from '@prisma/client';
 
 // Mock external services
 jest.mock('@stellar/stellar-sdk', () => ({
@@ -84,7 +85,7 @@ describe('Verification Lifecycle E2E', () => {
           where: { entityId: claimId, entity: 'Claim' },
         });
         await prismaService.verificationSession.deleteMany({
-          where: { claimId },
+          where: { claimId } as unknown as Prisma.VerificationSessionWhereInput,
         });
         await prismaService.claim.delete({ where: { id: claimId } });
       } catch (_error) {
