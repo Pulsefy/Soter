@@ -4,11 +4,15 @@ import { AppService } from './app.service';
 import { API_VERSIONS } from './common/constants/api-version.constants';
 import { Public } from './common/decorators/public.decorator';
 import { Deprecated } from './common/decorators/deprecated.decorator';
+import { VersionConfigService } from './version-config/version-config.service';
 
 @ApiTags('App')
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  constructor(
+    private readonly appService: AppService,
+    private readonly versionConfigService: VersionConfigService,
+  ) {}
 
   @Get()
   @Version(API_VERSIONS.V1)
@@ -64,45 +68,7 @@ export class AppController {
     description:
       'Returns version info, release notes, and force-upgrade requirements for the given platform.',
   })
-  getConfigVersion(@Query('platform') platform = 'web') {
-    const storeUrl =
-      platform === 'ios'
-        ? { ios: 'https://apps.apple.com/app/soter', android: '' }
-        : platform === 'android'
-          ? {
-              ios: '',
-              android:
-                'https://play.google.com/store/apps/details?id=org.pulsefy.soter.mobile',
-            }
-          : {
-              ios: 'https://apps.apple.com/app/soter',
-              android:
-                'https://play.google.com/store/apps/details?id=org.pulsefy.soter.mobile',
-            };
-
-    return {
-      platform,
-      currentVersion: '1.4.0',
-      latestVersion: '1.5.0',
-      minRequiredVersion: '1.4.0',
-      forceUpgrade: false,
-      releaseNotes: {
-        version: '1.5.0',
-        title: "What's New",
-        changes: [
-          'Improved beneficiary verification',
-          'Faster voucher loading',
-          'Offline sync improvements',
-          'Enhanced security measures',
-        ],
-      },
-      releaseNotesArray: [
-        'Improved beneficiary verification',
-        'Faster voucher loading',
-        'Offline sync improvements',
-        'Enhanced security measures',
-      ],
-      storeUrl,
-    };
+  async getConfigVersion(@Query('platform') platform = 'web') {
+    return this.versionConfigService.findPublicByPlatform(platform);
   }
 }
