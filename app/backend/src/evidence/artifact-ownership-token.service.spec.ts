@@ -26,7 +26,9 @@ describe('ArtifactOwnershipTokenService', () => {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       evidenceQueueItem: {
-        findUnique: jest.fn().mockResolvedValue({ id: mockArtifactId, orgId: mockOrgId }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: mockArtifactId, orgId: mockOrgId }),
       },
     } as any;
 
@@ -220,7 +222,7 @@ describe('ArtifactOwnershipTokenService', () => {
       });
 
       // Wait for expiration
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      await new Promise(resolve => setTimeout(resolve, 1100));
 
       const result = await service.verifyToken(token);
 
@@ -314,9 +316,9 @@ describe('ArtifactOwnershipTokenService', () => {
         revokedAt: new Date(),
       } as any);
 
-      await expect(
-        service.revokeToken('hash', 'admin-user'),
-      ).rejects.toThrow('Token already revoked');
+      await expect(service.revokeToken('hash', 'admin-user')).rejects.toThrow(
+        'Token already revoked',
+      );
     });
   });
 
@@ -376,12 +378,14 @@ describe('ArtifactOwnershipTokenService', () => {
       const count = await service.cleanupExpiredTokens();
 
       expect(count).toBe(5);
-      expect(prismaService.artifactAccessToken.deleteMany).toHaveBeenCalledWith({
-        where: {
-          expiresAt: { lt: expect.any(Date) },
-          revokedAt: null,
+      expect(prismaService.artifactAccessToken.deleteMany).toHaveBeenCalledWith(
+        {
+          where: {
+            expiresAt: { lt: expect.any(Date) },
+            revokedAt: null,
+          },
         },
-      });
+      );
     });
 
     it('should not delete revoked tokens', async () => {
@@ -391,12 +395,14 @@ describe('ArtifactOwnershipTokenService', () => {
 
       await service.cleanupExpiredTokens();
 
-      expect(prismaService.artifactAccessToken.deleteMany).toHaveBeenCalledWith({
-        where: {
-          expiresAt: { lt: expect.any(Date) },
-          revokedAt: null,
+      expect(prismaService.artifactAccessToken.deleteMany).toHaveBeenCalledWith(
+        {
+          where: {
+            expiresAt: { lt: expect.any(Date) },
+            revokedAt: null,
+          },
         },
-      });
+      );
     });
   });
 });

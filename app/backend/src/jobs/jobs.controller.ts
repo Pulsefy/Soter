@@ -1,4 +1,4 @@
-import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, HttpException, HttpStatus, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { ApiTags, ApiOperation, ApiOkResponse } from '@nestjs/swagger';
@@ -8,11 +8,21 @@ import { RETENTION_PURGE_QUEUE } from '../retention-policy/retention-purge.proce
 @Controller('jobs')
 export class JobsController {
   constructor(
-    @InjectQueue('verification') private verificationQueue: Queue,
-    @InjectQueue('notifications') private notificationsQueue: Queue,
-    @InjectQueue('onchain') private onchainQueue: Queue,
-    @InjectQueue(RETENTION_PURGE_QUEUE) private retentionPurgeQueue: Queue,
-    @InjectQueue('dead-letter') private deadLetterQueue: Queue,
+    @Optional()
+    @InjectQueue('verification')
+    private verificationQueue?: Queue,
+    @Optional()
+    @InjectQueue('notifications')
+    private notificationsQueue?: Queue,
+    @Optional()
+    @InjectQueue('onchain')
+    private onchainQueue?: Queue,
+    @Optional()
+    @InjectQueue(RETENTION_PURGE_QUEUE)
+    private retentionPurgeQueue?: Queue,
+    @Optional()
+    @InjectQueue('dead-letter')
+    private deadLetterQueue?: Queue,
   ) {}
 
   @ApiOperation({
@@ -93,7 +103,17 @@ export class JobsController {
     return result;
   }
 
-  private async getQueueStatus(queue: Queue) {
+  private async getQueueStatus(queue?: Queue) {
+    if (!queue) {
+      return {
+        name: 'disabled',
+        waiting: 0,
+        active: 0,
+        completed: 0,
+        failed: 0,
+        delayed: 0,
+      };
+    }
     const [waiting, active, completed, failed, delayed] = await Promise.all([
       queue.getWaitingCount(),
       queue.getActiveCount(),

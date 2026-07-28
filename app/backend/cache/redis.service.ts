@@ -9,18 +9,24 @@ import Redis from 'ioredis';
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
-  private client: Redis;
+  private client: Redis | undefined;
 
   onModuleInit() {
-    this.client = new Redis({
-      host: process.env.REDIS_HOST ?? 'localhost',
-      port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
-      maxRetriesPerRequest: 3,
-      retryStrategy: times => (times <= 3 ? 200 : null),
-    });
+    if (process.env.REDIS_ENABLED === 'true') {
+      this.client = new Redis({
+        host: process.env.REDIS_HOST ?? 'localhost',
+        port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
+        maxRetriesPerRequest: 3,
+        retryStrategy: times => (times <= 3 ? 200 : null),
+      });
 
-    this.client.on('connect', () => this.logger.log('Redis connected'));
-    this.client.on('error', err => this.logger.error('Redis error', err));
+      this.client.on('connect', () => this.logger.log('Redis connected'));
+      this.client.on('error', err => this.logger.error('Redis error', err));
+    } else {
+      this.logger.warn(
+        'REDIS_ENABLED is not "true" — custom Redis client disabled. Cache operations will silently no-op.',
+      );
+    }
   }
 
   onModuleDestroy() {
@@ -32,6 +38,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Returns `null` on cache miss or if Redis is unavailable.
    */
   async get<T>(key: string): Promise<T | null> {
+    if (!this.client) return null;
     try {
       const raw = await this.client.get(key);
       return raw ? (JSON.parse(raw) as T) : null;
@@ -49,6 +56,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * @param ttlSeconds - Expiry in seconds (e.g. 300 = 5 minutes)
    */
   async set(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+    if (!this.client) return;
     try {
       await this.client.set(key, JSON.stringify(value), 'EX', ttlSeconds);
     } catch (err) {
@@ -64,6 +72,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     value: Buffer,
     ttlSeconds: number,
   ): Promise<void> {
+    if (!this.client) return;
     try {
       await this.client.set(key, value, 'EX', ttlSeconds);
     } catch (err) {
@@ -77,6 +86,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Retrieve raw binary data. Returns `null` on miss or error.
    */
   async getBuffer(key: string): Promise<Buffer | null> {
+    if (!this.client) return null;
     try {
       const raw = await this.client.getBuffer(key);
       return raw ?? null;
@@ -92,6 +102,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Add one or more members to a Redis Set.
    */
   async sadd(key: string, ...members: string[]): Promise<number> {
+    if (!this.client) return 0;
     try {
       return await this.client.sadd(key, ...members);
     } catch (err) {
@@ -104,6 +115,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Return all members of a Redis Set.
    */
   async smembers(key: string): Promise<string[]> {
+    if (!this.client) return [];
     try {
       return await this.client.smembers(key);
     } catch (err) {
@@ -118,6 +130,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Check if a value is a member of a Redis Set.
    */
   async sismember(key: string, member: string): Promise<boolean> {
+    if (!this.client) return false;
     try {
       const result = await this.client.sismember(key, member);
       return result === 1;
@@ -133,6 +146,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Set a TTL on an existing key.
    */
   async expire(key: string, ttlSeconds: number): Promise<void> {
+    if (!this.client) return;
     try {
       await this.client.expire(key, ttlSeconds);
     } catch (err) {
@@ -141,6 +155,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async del(key: string): Promise<void> {
+    if (!this.client) return;
     try {
       await this.client.del(key);
     } catch (err) {
@@ -153,6 +168,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Returns the number of keys deleted.
    */
   async delByPattern(pattern: string): Promise<number> {
+    if (!this.client) return 0;
     try {
       const keys: string[] = [];
       let cursor = '0';

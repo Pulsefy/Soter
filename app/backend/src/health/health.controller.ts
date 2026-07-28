@@ -1,4 +1,4 @@
-import { Controller, Get, Req, Res, Version, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Req, Res, Version, HttpStatus, VERSION_NEUTRAL } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -18,6 +18,17 @@ import { SkipThrottle } from '../common/decorators/skip-throttle.decorator';
 @Controller('health')
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}
+
+  @Public()
+  @SkipThrottle()
+  @Get()
+  @Version(VERSION_NEUTRAL)
+  getHealth() {
+    return {
+      status: 'ok',
+      service: 'backend',
+    };
+  }
 
   @Public()
   @SkipThrottle()

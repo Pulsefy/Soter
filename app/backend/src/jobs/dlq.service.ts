@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue, Job } from 'bullmq';
 
@@ -6,7 +6,11 @@ import { Queue, Job } from 'bullmq';
 export class DlqService {
   private readonly logger = new Logger(DlqService.name);
 
-  constructor(@InjectQueue('dead-letter') private readonly dlqQueue: Queue) {}
+  constructor(
+    @Optional()
+    @InjectQueue('dead-letter')
+    private readonly dlqQueue?: Queue,
+  ) {}
 
   /**
    * Move a failed job to the dead-letter queue if it has exhausted all attempts.
@@ -18,6 +22,9 @@ export class DlqService {
   ): Promise<void> {
     const maxAttempts = job.opts.attempts || 1;
     if (job.attemptsMade >= maxAttempts) {
+      if (!this.dlqQueue) {
+        return;
+      }
       try {
         this.logger.warn(
           `Moving job ${job.id} from queue ${originalQueue} to dead-letter queue after ${job.attemptsMade} attempts.`,

@@ -1,13 +1,56 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../../cache/redis.service';
-import { UploadSession, UploadSessionStatus } from '@prisma/client';
+import { UploadSession, UploadSessionStatus, Prisma } from '@prisma/client';
 
 const PREFIX = 'upload';
 const sessionKey = (id: string) => `${PREFIX}:session:${id}`;
 const chunkKey = (sessionId: string, index: number) =>
   `${PREFIX}:chunk:${sessionId}:${index}`;
 const receivedKey = (sessionId: string) => `${PREFIX}:received:${sessionId}`;
+
+export type UploadSessionStoreCreateInput = {
+  id?: string;
+  ownerId: string;
+  orgId?: string | null;
+  fileName: string;
+  mimeType: string;
+  totalSize: number;
+  chunkSize: number;
+  totalChunks: number;
+  uploadedBytes?: number;
+  fileChecksum?: string | null;
+  status?: UploadSessionStatus;
+  retryCount?: number;
+  maxAttempts?: number;
+  lastError?: string | null;
+  lastAttemptAt?: Date | null;
+  expiresAt: Date;
+  completedAt?: Date | null;
+  failedAt?: Date | null;
+  metadata?: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue | null;
+};
+
+export type UploadSessionStoreUpdateInput = {
+  ownerId?: string;
+  orgId?: string | null;
+  fileName?: string;
+  mimeType?: string;
+  totalSize?: number;
+  chunkSize?: number;
+  totalChunks?: number;
+  uploadedBytes?: number | Prisma.IntFieldUpdateOperationsInput;
+  fileChecksum?: string | null;
+  status?: UploadSessionStatus;
+  retryCount?: number | Prisma.IntFieldUpdateOperationsInput;
+  maxAttempts?: number;
+  lastError?: string | null;
+  lastAttemptAt?: Date | null;
+  expiresAt?: Date;
+  completedAt?: Date | null;
+  failedAt?: Date | null;
+  metadata?: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue | null;
+};
 
 @Injectable()
 export class UploadSessionStore {
@@ -44,13 +87,35 @@ export class UploadSessionStore {
    * Write session metadata to both Redis and Prisma.
    */
   async createSession(
-    data: Omit<UploadSession, 'id' | 'createdAt' | 'updatedAt'> & {
-      id?: string;
-    },
+    data: UploadSessionStoreCreateInput,
     ttlSeconds: number,
   ): Promise<UploadSession> {
+    const createData: Prisma.UploadSessionCreateInput = {
+      id: data.id,
+      ownerId: data.ownerId,
+      orgId: data.orgId,
+      fileName: data.fileName,
+      mimeType: data.mimeType,
+      totalSize: data.totalSize,
+      chunkSize: data.chunkSize,
+      totalChunks: data.totalChunks,
+      uploadedBytes: data.uploadedBytes ?? 0,
+      fileChecksum: data.fileChecksum ?? null,
+      status: data.status ?? UploadSessionStatus.pending,
+      retryCount: data.retryCount ?? 0,
+      maxAttempts: data.maxAttempts ?? 5,
+      lastError: data.lastError ?? null,
+      lastAttemptAt: data.lastAttemptAt ?? null,
+      expiresAt: data.expiresAt,
+      completedAt: data.completedAt ?? null,
+      failedAt: data.failedAt ?? null,
+      metadata:
+        data.metadata === null
+          ? Prisma.JsonNull
+          : (data.metadata ?? Prisma.JsonNull),
+    };
     const session = await this.prisma.uploadSession.create({
-      data: data as any,
+      data: createData,
     });
     if (ttlSeconds > 0) {
       await this.redis.set(sessionKey(session.id), session, ttlSeconds);
@@ -68,6 +133,51 @@ export class UploadSessionStore {
     await this.prisma.uploadSession.update({
       where: { id },
       data: { status },
+    });
+    await this.redis.del(sessionKey(id));
+  }
+
+  /**
+   * Generic update of session fields in Prisma and invalidate Redis cache.
+   */
+  async updateSession(
+    id: string,
+    data: UploadSessionStoreUpdateInput,
+  ): Promise<void> {
+    const updateData: Prisma.UploadSessionUpdateInput = {};
+    if (data.ownerId !== undefined) updateData.ownerId = data.ownerId;
+    if (data.orgId !== undefined) updateData.orgId = data.orgId;
+    if (data.fileName !== undefined) updateData.fileName = data.fileName;
+    if (data.mimeType !== undefined) updateData.mimeType = data.mimeType;
+    if (data.totalSize !== undefined) updateData.totalSize = data.totalSize;
+    if (data.chunkSize !== undefined) updateData.chunkSize = data.chunkSize;
+    if (data.totalChunks !== undefined)
+      updateData.totalChunks = data.totalChunks;
+    if (data.uploadedBytes !== undefined) {
+      updateData.uploadedBytes = data.uploadedBytes;
+    }
+    if (data.fileChecksum !== undefined) {
+      updateData.fileChecksum = data.fileChecksum;
+    }
+    if (data.status !== undefined) updateData.status = data.status;
+    if (data.retryCount !== undefined) updateData.retryCount = data.retryCount;
+    if (data.maxAttempts !== undefined)
+      updateData.maxAttempts = data.maxAttempts;
+    if (data.lastError !== undefined) updateData.lastError = data.lastError;
+    if (data.lastAttemptAt !== undefined) {
+      updateData.lastAttemptAt = data.lastAttemptAt;
+    }
+    if (data.expiresAt !== undefined) updateData.expiresAt = data.expiresAt;
+    if (data.completedAt !== undefined)
+      updateData.completedAt = data.completedAt;
+    if (data.failedAt !== undefined) updateData.failedAt = data.failedAt;
+    if (data.metadata !== undefined) {
+      updateData.metadata =
+        data.metadata === null ? Prisma.JsonNull : data.metadata;
+    }
+    await this.prisma.uploadSession.update({
+      where: { id },
+      data: updateData,
     });
     await this.redis.del(sessionKey(id));
   }

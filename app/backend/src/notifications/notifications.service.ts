@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { AuditLog, NotificationOutbox } from '@prisma/client';
@@ -28,9 +28,11 @@ export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
   constructor(
-    @InjectQueue('notifications') private readonly notificationsQueue: Queue,
     private readonly prisma: PrismaService,
     private readonly loggerService: LoggerService,
+    @Optional()
+    @InjectQueue('notifications')
+    private readonly notificationsQueue?: Queue,
   ) {}
 
   async sendEmail(
@@ -63,6 +65,10 @@ export class NotificationsService {
       outboxId: outbox.id,
       correlationId: propagatedCorrelationId,
     };
+
+    if (!this.notificationsQueue) {
+      return { outboxId: outbox.id, jobId: 'queue-disabled' };
+    }
 
     const job = await this.notificationsQueue.add('send-email', data, {
       attempts: 3,
@@ -117,6 +123,10 @@ export class NotificationsService {
       outboxId: outbox.id,
       correlationId: propagatedCorrelationId,
     };
+
+    if (!this.notificationsQueue) {
+      return { outboxId: outbox.id, jobId: 'queue-disabled' };
+    }
 
     const job = await this.notificationsQueue.add('send-sms', data, {
       attempts: 3,

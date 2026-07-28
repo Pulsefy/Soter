@@ -22,6 +22,8 @@ import { SorobanEventCorrelationScheduler } from './soroban-event-correlation.sc
 import { PrismaModule } from '../prisma/prisma.module';
 import { CommonServicesModule } from '../common/services/common-services.module';
 
+const isRedisEnabled = process.env.REDIS_ENABLED === 'true';
+
 /**
  * Factory function to create the appropriate adapter based on configuration
  */
@@ -53,28 +55,32 @@ const onchainAdapterProvider: Provider = {
   imports: [
     ConfigModule,
     PrismaModule,
-    BullModule.registerQueueAsync({
-      name: 'onchain',
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST') || 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
-    BullModule.registerQueueAsync({
-      name: 'soroban-transactions',
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST') || 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
+    ...(isRedisEnabled
+      ? [
+          BullModule.registerQueueAsync({
+            name: 'onchain',
+            imports: [ConfigModule],
+            useFactory: (configService: ConfigService) => ({
+              connection: {
+                host: configService.get<string>('REDIS_HOST') || 'localhost',
+                port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+              },
+            }),
+            inject: [ConfigService],
+          }),
+          BullModule.registerQueueAsync({
+            name: 'soroban-transactions',
+            imports: [ConfigModule],
+            useFactory: (configService: ConfigService) => ({
+              connection: {
+                host: configService.get<string>('REDIS_HOST') || 'localhost',
+                port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+              },
+            }),
+            inject: [ConfigService],
+          }),
+        ]
+      : []),
     ScheduleModule.forRoot(),
     JobsModule,
     LoggerModule,

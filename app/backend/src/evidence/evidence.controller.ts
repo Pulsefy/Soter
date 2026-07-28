@@ -28,7 +28,10 @@ import {
 } from '@nestjs/swagger';
 import { EvidenceService } from './evidence.service';
 import { ArtifactOwnershipTokenService } from './artifact-ownership-token.service';
-import { ArtifactTokenGuard, RequireArtifactToken } from '../common/guards/artifact-token.guard';
+import {
+  ArtifactTokenGuard,
+  RequireArtifactToken,
+} from '../common/guards/artifact-token.guard';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 import {
@@ -240,7 +243,10 @@ export class EvidenceController {
       },
     },
   })
-  async accessArtifact(@Param('id') id: string, @Request() req: ExpressRequest) {
+  async accessArtifact(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ) {
     const tokenPayload = req['artifactToken'];
 
     // Additional validation: ensure token artifact ID matches URL
@@ -250,7 +256,7 @@ export class EvidenceController {
 
     // Get artifact details from evidence service
     const artifact = await this.evidenceService.findQueue(tokenPayload.userId);
-    const artifactItem = artifact.find((item) => item.id === id);
+    const artifactItem = artifact.find(item => item.id === id);
 
     if (!artifactItem) {
       throw new UnauthorizedException('Artifact not found');

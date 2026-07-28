@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import {
   HealthIndicator,
   HealthIndicatorResult,
@@ -13,8 +13,10 @@ import { RedisService } from '@liaoliaots/nestjs-redis';
 @Injectable()
 export class HealthService extends HealthIndicator {
   constructor(
-    @InjectQueue('default') private readonly queue: Queue,
     private readonly redisService: RedisService,
+    @Optional()
+    @InjectQueue('default')
+    private readonly queue?: Queue,
   ) {
     super();
   }
@@ -23,6 +25,16 @@ export class HealthService extends HealthIndicator {
    * Check queue connectivity and status
    */
   async checkQueue(key: string): Promise<HealthIndicatorResult> {
+    if (!this.queue) {
+      return this.getStatus(key, true, {
+        isReady: false,
+        waiting: 0,
+        active: 0,
+        completed: 0,
+        failed: 0,
+        delayed: 0,
+      });
+    }
     try {
       const isReady = await this.queue.isReady();
       const jobCounts = await this.queue.getJobCounts();

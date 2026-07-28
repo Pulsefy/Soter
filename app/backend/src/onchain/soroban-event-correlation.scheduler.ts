@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -19,10 +19,11 @@ export class SorobanEventCorrelationScheduler {
   private lastProcessedLedger: number | null = null;
 
   constructor(
-    @InjectQueue('onchain')
-    private readonly onchainQueue: Queue<EventCorrelationJobData>,
     private readonly eventCorrelationService: SorobanEventCorrelationService,
     private readonly metricsService: MetricsService,
+    @Optional()
+    @InjectQueue('onchain')
+    private readonly onchainQueue?: Queue<EventCorrelationJobData>,
   ) {}
 
   /**
@@ -36,6 +37,10 @@ export class SorobanEventCorrelationScheduler {
   async scheduledCorrelation() {
     if (this.isProcessing) {
       this.logger.debug('Event correlation already in progress, skipping');
+      return;
+    }
+
+    if (!this.onchainQueue) {
       return;
     }
 
@@ -131,6 +136,10 @@ export class SorobanEventCorrelationScheduler {
       correlationSource: params.correlationSource || 'on_demand',
     };
 
+    if (!this.onchainQueue) {
+      return undefined;
+    }
+
     const job = await this.onchainQueue.add('event-correlation', jobData, {
       attempts: 3,
       backoff: {
@@ -160,6 +169,10 @@ export class SorobanEventCorrelationScheduler {
 
     // We pass the txHash in the job data for the processor to use
     (jobData as any).txHash = txHash;
+
+    if (!this.onchainQueue) {
+      return undefined;
+    }
 
     const job = await this.onchainQueue.add(
       'event-correlation-transaction',

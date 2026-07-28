@@ -38,8 +38,13 @@ export class UploadSessionController {
   @ApiOperation({ summary: 'Create a chunked upload session' })
   @ApiCreatedResponse({ description: 'Session created.' })
   create(@Body() dto: CreateUploadSessionDto, @Request() req: ExpressRequest) {
-    const ownerId = req.user?.apiKeyId ?? req.user?.authType ?? 'system';
-    const orgId = (req.headers['x-org-id'] as string) || undefined;
+    const user = req.user;
+    const ownerId = user?.apiKeyId ?? user?.sub ?? 'system';
+    const orgHeader = req.headers['x-org-id'];
+    const orgId =
+      typeof orgHeader === 'string' && orgHeader.length > 0
+        ? orgHeader
+        : undefined;
     return this.uploadSessionService.create(dto, ownerId, orgId);
   }
 
@@ -59,7 +64,8 @@ export class UploadSessionController {
     if (!file?.buffer?.length) {
       throw new BadRequestException('No chunk data uploaded');
     }
-    const ownerId = req.user?.apiKeyId ?? req.user?.authType ?? 'system';
+    const user = req.user;
+    const ownerId = user?.apiKeyId ?? user?.sub ?? 'system';
     const index = Number(dto.index);
     if (!Number.isInteger(index) || index < 0) {
       throw new BadRequestException('index must be a non-negative integer');
@@ -79,7 +85,8 @@ export class UploadSessionController {
   @ApiOperation({ summary: 'Finalize session and assemble evidence file' })
   @ApiOkResponse({ description: 'Evidence queued.' })
   finalize(@Param('id') id: string, @Request() req: ExpressRequest) {
-    const ownerId = req.user?.apiKeyId ?? req.user?.authType ?? 'system';
+    const user = req.user;
+    const ownerId = user?.apiKeyId ?? user?.sub ?? 'system';
     return this.uploadSessionService.finalize(id, ownerId);
   }
 
@@ -88,7 +95,8 @@ export class UploadSessionController {
   @ApiOperation({ summary: 'Get received chunks (for resume)' })
   @ApiOkResponse({ description: 'Session status.' })
   status(@Param('id') id: string, @Request() req: ExpressRequest) {
-    const ownerId = req.user?.apiKeyId ?? req.user?.authType ?? 'system';
+    const user = req.user;
+    const ownerId = user?.apiKeyId ?? user?.sub ?? 'system';
     return this.uploadSessionService.getStatus(id, ownerId);
   }
 }

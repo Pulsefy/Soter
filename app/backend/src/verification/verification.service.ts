@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -143,7 +144,6 @@ export class VerificationService {
   private readonly llmCircuitBreaker: CircuitBreaker;
 
   constructor(
-    @InjectQueue('verification') private verificationQueue: Queue,
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
@@ -151,6 +151,9 @@ export class VerificationService {
     private readonly verificationMetadataService: VerificationMetadataService,
     private readonly correlationUtil: CorrelationPropagationUtil,
     private readonly metricsService: MetricsService,
+    @Optional()
+    @InjectQueue('verification')
+    private verificationQueue?: Queue,
   ) {
     this.verificationMode =
       this.configService.get<string>('VERIFICATION_MODE') || 'mock';
@@ -244,6 +247,10 @@ export class VerificationService {
           }
         : undefined,
     };
+
+    if (!this.verificationQueue) {
+      return { jobId: 'queue-disabled', priority };
+    }
 
     const job = await this.verificationQueue.add('verify-claim', jobData, {
       priority,
@@ -1018,6 +1025,17 @@ the JSON verdict.
   }
 
   async getQueueMetrics() {
+    if (!this.verificationQueue) {
+      return {
+        waiting: 0,
+        active: 0,
+        completed: 0,
+        failed: 0,
+        total: 0,
+        priorityBreakdown: { urgent: 0, high: 0, normal: 0, low: 0 },
+      };
+    }
+
     const [waiting, active, completed, failed] = await Promise.all([
       this.verificationQueue.getWaitingCount(),
       this.verificationQueue.getActiveCount(),

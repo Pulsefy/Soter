@@ -152,9 +152,7 @@ export class ArtifactOwnershipTokenService {
       }
 
       // Decode payload
-      const payloadStr = Buffer.from(payloadB64, 'base64url').toString(
-        'utf-8',
-      );
+      const payloadStr = Buffer.from(payloadB64, 'base64url').toString('utf-8');
       const payload = JSON.parse(payloadStr) as ArtifactAccessTokenPayload;
 
       // Check expiration
@@ -164,10 +162,7 @@ export class ArtifactOwnershipTokenService {
       }
 
       // Check revocation
-      const tokenHash = crypto
-        .createHash('sha256')
-        .update(token)
-        .digest('hex');
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
       const revokedToken = await this.prisma.artifactAccessToken.findUnique({
         where: { tokenHash },
       });

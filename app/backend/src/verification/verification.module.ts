@@ -17,6 +17,9 @@ import { EncryptionModule } from '../common/encryption/encryption.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { DeploymentMetadataModule } from '../deployment-metadata/deployment-metadata.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
+import { SessionModule } from '../session/session.module';
+
+const isRedisEnabled = process.env.REDIS_ENABLED === 'true';
 
 @Module({
   imports: [
@@ -26,20 +29,25 @@ import { MetricsModule } from '../observability/metrics/metrics.module';
     AuditModule,
     NotificationsModule,
     EncryptionModule,
-    BullModule.registerQueueAsync({
-      name: 'verification',
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST') || 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
+    SessionModule,
+    ...(isRedisEnabled
+      ? [
+          BullModule.registerQueueAsync({
+            name: 'verification',
+            imports: [ConfigModule],
+            useFactory: (configService: ConfigService) => ({
+              connection: {
+                host: configService.get<string>('REDIS_HOST') || 'localhost',
+                port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+              },
+            }),
+            inject: [ConfigService],
+          }),
+        ]
+      : []),
     JobsModule,
-    DeploymentMetadataModule, // Added for contract-aware metadata
-    MetricsModule, // Added for verification priority metrics
+    DeploymentMetadataModule,
+    MetricsModule,
   ],
   controllers: [VerificationController, VerificationInboxController],
   providers: [
@@ -47,14 +55,14 @@ import { MetricsModule } from '../observability/metrics/metrics.module';
     VerificationFlowService,
     VerificationProcessor,
     VerificationInboxService,
-    EnhancedVerificationFlowService, // Added enhanced flow service
-    VerificationMetadataService, // Added metadata service
+    EnhancedVerificationFlowService,
+    VerificationMetadataService,
   ],
   exports: [
     VerificationService,
     VerificationFlowService,
     VerificationInboxService,
-    VerificationMetadataService, // Export for use in other modules
+    VerificationMetadataService,
   ],
 })
 export class VerificationModule {}

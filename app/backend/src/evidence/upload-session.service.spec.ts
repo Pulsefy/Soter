@@ -29,7 +29,7 @@ function baseSession() {
     totalSize: 300,
     chunkSize: 100,
     totalChunks: 3,
-    status: UploadSessionStatus.active,
+    status: UploadSessionStatus.uploading,
     expiresAt: new Date(Date.now() + 60_000),
     createdAt: new Date(),
     updatedAt: new Date(),

@@ -542,43 +542,65 @@ model EvidenceQueueItem {
 }
 
 enum UploadSessionStatus {
-  active
+  pending
+  uploading
+  paused
   completed
+  failed
   expired
   aborted
 }
 
-model UploadSession {
-  id          String              @id @default(cuid())
-  ownerId     String
-  orgId       String?
-  fileName    String
-  mimeType    String
-  totalSize   Int
-  chunkSize   Int
-  totalChunks Int
-  status      UploadSessionStatus @default(active)
-  expiresAt   DateTime
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+enum ChunkStorageBackend {
+  disk
+  redis
+}
 
-  chunks      UploadChunk[]
+model UploadSession {
+  id             String              @id @default(cuid())
+  ownerId        String
+  orgId          String?
+  fileName       String
+  mimeType       String
+  totalSize      Int
+  chunkSize      Int
+  totalChunks    Int
+  uploadedBytes  Int                 @default(0)
+  fileChecksum   String?
+  status         UploadSessionStatus @default(pending)
+  retryCount     Int                 @default(0)
+  maxAttempts    Int                 @default(5)
+  lastError      String?
+  lastAttemptAt  DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  completedAt    DateTime?
+  failedAt       DateTime?
+  metadata       Json?               // Additional info (e.g., associated claimId)
+
+  chunks         UploadChunk[]
 
   @@index([ownerId])
   @@index([status])
   @@index([expiresAt])
+  @@index([status, ownerId])
 }
 
 model UploadChunk {
-  id        String   @id @default(cuid())
-  sessionId String
-  index     Int
-  size      Int
-  checksum  String
-  filePath  String
-  createdAt DateTime @default(now())
+  id             String               @id @default(cuid())
+  sessionId      String
+  index          Int
+  size           Int
+  checksum       String
+  filePath       String
+  storageBackend ChunkStorageBackend  @default(disk)
+  attemptCount   Int                  @default(0)
+  lastError      String?
+  uploadedAt     DateTime?
+  createdAt      DateTime             @default(now())
 
-  session   UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session        UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, index])
   @@index([sessionId])

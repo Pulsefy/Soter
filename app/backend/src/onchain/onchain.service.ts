@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
@@ -34,8 +34,10 @@ export class OnchainService {
   private readonly logger = new Logger(OnchainService.name);
 
   constructor(
-    @InjectQueue('onchain') private readonly onchainQueue: Queue,
     private readonly loggerService: LoggerService,
+    @Optional()
+    @InjectQueue('onchain')
+    private readonly onchainQueue?: Queue,
   ) {}
 
   async enqueueInitEscrow(params: InitEscrowJobParams) {
@@ -59,6 +61,9 @@ export class OnchainService {
   }
 
   private async enqueue(type: OnchainOperationType, params: unknown) {
+    if (!this.onchainQueue) {
+      return undefined;
+    }
     const data: OnchainJobData = {
       type,
       params,

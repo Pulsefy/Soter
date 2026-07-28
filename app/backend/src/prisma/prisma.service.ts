@@ -28,7 +28,11 @@ export class PrismaService
       this.connected = true;
     } catch (err) {
       this.connected = false;
-      this.logger.error('Failed to connect on startup', err as Error);
+      if (err instanceof Error) {
+        this.logger.error('Failed to connect on startup', err);
+      } else {
+        this.logger.error('Failed to connect on startup', String(err));
+      }
     }
   }
 

@@ -61,17 +61,24 @@ export class AppController {
   @Version(API_VERSIONS.V1)
   @ApiOperation({
     summary: 'Get platform-specific release configuration',
-    description: 'Returns version info, release notes, and force-upgrade requirements for the given platform.',
+    description:
+      'Returns version info, release notes, and force-upgrade requirements for the given platform.',
   })
   getConfigVersion(@Query('platform') platform = 'web') {
-    const storeUrl = platform === 'ios'
-      ? { ios: 'https://apps.apple.com/app/soter', android: '' }
-      : platform === 'android'
-      ? { ios: '', android: 'https://play.google.com/store/apps/details?id=org.pulsefy.soter.mobile' }
-      : {
-          ios: 'https://apps.apple.com/app/soter',
-          android: 'https://play.google.com/store/apps/details?id=org.pulsefy.soter.mobile',
-        };
+    const storeUrl =
+      platform === 'ios'
+        ? { ios: 'https://apps.apple.com/app/soter', android: '' }
+        : platform === 'android'
+          ? {
+              ios: '',
+              android:
+                'https://play.google.com/store/apps/details?id=org.pulsefy.soter.mobile',
+            }
+          : {
+              ios: 'https://apps.apple.com/app/soter',
+              android:
+                'https://play.google.com/store/apps/details?id=org.pulsefy.soter.mobile',
+            };
 
     return {
       platform,

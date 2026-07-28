@@ -9,11 +9,15 @@ import {
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuditModule } from '../audit/audit.module';
 
+const isRedisEnabled = process.env.REDIS_ENABLED === 'true';
+
 @Module({
   imports: [
     PrismaModule,
     AuditModule,
-    BullModule.registerQueue({ name: RETENTION_PURGE_QUEUE }),
+    ...(isRedisEnabled
+      ? [BullModule.registerQueue({ name: RETENTION_PURGE_QUEUE })]
+      : []),
   ],
   controllers: [RetentionPolicyController],
   providers: [RetentionPolicyService, RetentionPurgeProcessor],

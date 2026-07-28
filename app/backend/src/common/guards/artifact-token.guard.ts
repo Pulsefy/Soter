@@ -71,9 +71,7 @@ export class ArtifactTokenGuard implements CanActivate {
     );
 
     if (!ownsArtifact) {
-      throw new ForbiddenException(
-        'Cross-organization artifact access denied',
-      );
+      throw new ForbiddenException('Cross-organization artifact access denied');
     }
 
     // Validate role permissions

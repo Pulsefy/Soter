@@ -1,10 +1,12 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
-import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { ThrottlerModule, ThrottlerStorageService } from '@nestjs/throttler';
+import { RedisModule } from '@liaoliaots/nestjs-redis';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -20,7 +22,6 @@ import { JobsModule } from './jobs/jobs.module';
 import { RequestCorrelationMiddleware } from './middleware/request-correlation.middleware';
 import { SecurityModule } from './common/security/security.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
-import { APP_GUARD } from '@nestjs/core';
 import { ApiKeyGuard } from './common/guards/api-key.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { ScopesGuard } from './api-keys/scopes.guard';
@@ -30,7 +31,6 @@ import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { LoggerService } from './logger/logger.service';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { AnalyticsModule } from './analytics/analytics.module';
-import { ThrottlerModule, ThrottlerStorageService } from '@nestjs/throttler';
 import { AidEscrowModule } from './onchain/aid-escrow.module';
 import { CostAwareThrottlerGuard } from './common/guards/throttle.guard';
 import { getThrottlerConfig } from './common/config/rate-limit.config';
@@ -43,15 +43,15 @@ import { InvitesModule } from './orgs/invites.module';
 import { AdminSearchModule } from './search/admin-search.module';
 import { EntityLinkingModule } from './entity-linking/entity-linking.module';
 import { DeploymentMetadataModule } from './deployment-metadata/deployment-metadata.module';
-import { RedisModule } from '@liaoliaots/nestjs-redis';
 import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guard';
 import { DeprecationInterceptor } from './common/interceptors/deprecation.interceptor';
 import { SandboxModule } from './sandbox/sandbox.module';
 import { CacheModule } from './common/cache/cache.module';
-import { CacheResponseInterceptor } from './common/interceptors/cache-response.interceptor';
 
 import { WebhooksModule } from 'src/webhooks.module';
 import { CorrelationModule } from './common/modules/correlation.module';
+
+const isRedisEnabled = process.env.REDIS_ENABLED === 'true';
 
 @Module({
   imports: [
@@ -63,88 +63,65 @@ import { CorrelationModule } from './common/modules/correlation.module';
           join(process.cwd(), '.env'),
           join(process.cwd(), 'app', 'backend', '.env'),
         ];
-
-        const existing = candidates.filter(p => existsSync(p));
+const existing = candidates.filter(p => existsSync(p));
         return existing.length > 0 ? existing : candidates;
       })(),
     }),
 
-    BullModule.forRootAsync({
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST') ?? 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') ?? '6379', 10),
-        },
-        defaultJobOptions: {
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 5000,
-          },
-          removeOnComplete: {
-            age: 3600, // keep for 1 hour
-            count: 1000,
-          },
-          removeOnFail: {
-            age: 24 * 3600, // keep for 24 hours
-            count: 5000,
-          },
-        },
-      }),
-      inject: [ConfigService],
-    }),
-    ScheduleModule.forRoot(),
+    ...(isRedisEnabled
+      ? [
+          BullModule.forRoot({
+            connection: {
+              host: process.env.REDIS_HOST ?? 'localhost',
+              port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
+            },
+            defaultJobOptions: {
+              attempts: 3,
+              backoff: {
+                type: 'exponential',
+                delay: 5000,
+              },
+              removeOnComplete: {
+                age: 3600,
+                count: 1000,
+              },
+              removeOnFail: {
+                age: 24 * 3600,
+                count: 5000,
+              },
+            },
+          }),
+        ]
+      : []),
+      HealthModule,
 
+    ScheduleModule.forRoot(),
     LoggerModule,
     PrismaModule,
     CacheModule,
     HealthModule,
     AidModule,
     VerificationModule,
-    AuditModule,
-    SecurityModule,
-    TestErrorModule,
-    CampaignsModule,
-    ObservabilityModule,
-    ClaimsModule,
     NotificationsModule,
+    AuditModule,
     JobsModule,
-    AnalyticsModule,
-    AidEscrowModule,
     ApiKeysModule,
     SessionModule,
-    CommonServicesModule,
     EvidenceModule,
-    RetentionPolicyModule,
-    InvitesModule,
-    AdminSearchModule,
-    EntityLinkingModule,
-    DeploymentMetadataModule,
-    SandboxModule,
-    WebhooksModule,
-    CorrelationModule,
-    RedisModule.forRootAsync({
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        config: {
-          host: configService.get<string>('REDIS_HOST') ?? 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') ?? '6379', 10),
-        },
-      }),
-      inject: [ConfigService],
-    }),
     ThrottlerModule.forRootAsync({
-      imports: [ConfigModule],
+      imports: [HealthModule],
       useFactory: async (configService: ConfigService) => {
-        const redisHost = configService.get<string>('REDIS_HOST') ?? 'localhost';
+        if (process.env.REDIS_ENABLED !== 'true') {
+          return {
+            throttlers: getThrottlerConfig(),
+          };
+        }
+        const redisHost =
+          configService.get<string>('REDIS_HOST') ?? 'localhost';
         const redisPort = parseInt(
           configService.get<string>('REDIS_PORT') ?? '6379',
           10,
         );
-
-        // Try to use Redis storage for multi-instance compatibility
-        // Falls back to in-memory storage if Redis is unavailable
         try {
           const { createClient } = await import('redis');
           const client = createClient({
@@ -164,9 +141,7 @@ import { CorrelationModule } from './common/modules/correlation.module';
               },
             },
           });
-
           await client.connect();
-
           return {
             throttlers: getThrottlerConfig(),
             storage: new ThrottlerStorageService(),
@@ -176,7 +151,6 @@ import { CorrelationModule } from './common/modules/correlation.module';
             'ThrottlerModule: Redis unavailable, using in-memory storage',
             error instanceof Error ? error.message : error,
           );
-          // Fall back to in-memory storage for local development
           return {
             throttlers: getThrottlerConfig(),
           };
@@ -184,34 +158,52 @@ import { CorrelationModule } from './common/modules/correlation.module';
       },
       inject: [ConfigService],
     }),
+    AnalyticsModule,
+    ClaimsModule,
+    CampaignsModule,
+    ObservabilityModule,
+    SecurityModule,
+    RedisModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => {
+        if (process.env.REDIS_ENABLED === 'true') {
+          return {
+            config: {
+              host: configService.get<string>('REDIS_HOST') ?? 'localhost',
+              port: parseInt(configService.get<string>('REDIS_PORT') ?? '6379', 10),
+            },
+          };
+        }
+        return {
+          config: {
+            lazyConnect: true,
+            retryStrategy: () => null,
+            enableOfflineQueue: false,
+            maxRetriesPerRequest: 0,
+            connectTimeout: 1,
+          },
+        };
+      },
+      inject: [ConfigService],
+    }),
+    RetentionPolicyModule,
+    InvitesModule,
+    AdminSearchModule,
+    EntityLinkingModule,
+    DeploymentMetadataModule,
+    SandboxModule,
+    CorrelationModule,
+    CommonServicesModule,
+    WebhooksModule,
+    TestErrorModule,
+    AidEscrowModule,
   ],
-
   controllers: [AppController],
   providers: [
     AppService,
     {
       provide: APP_FILTER,
       useClass: AllExceptionsFilter,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: ApiKeyGuard, // runs first — authenticates and sets request.user
-    },
-    {
-      provide: APP_GUARD,
-      useClass: RolesGuard, // runs second — checks request.user.role against @Roles()
-    },
-    {
-      provide: APP_GUARD,
-      useClass: ScopesGuard, // runs third — checks request.user.scopes against @Scopes()
-    },
-    {
-      provide: APP_GUARD,
-      useClass: AdaptiveRateLimitGuard, // Adaptive rate limiting using Redis
-    },
-    {
-      provide: APP_GUARD,
-      useClass: CostAwareThrottlerGuard, // NestJS Throttler with cost-aware per-endpoint limits
     },
     {
       provide: APP_INTERCEPTOR,
@@ -222,25 +214,30 @@ import { CorrelationModule } from './common/modules/correlation.module';
       useClass: DeprecationInterceptor,
     },
     {
-      provide: APP_INTERCEPTOR,
-      useClass: CacheResponseInterceptor,
+      provide: APP_GUARD,
+      useClass: ApiKeyGuard,
     },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ScopesGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: AdaptiveRateLimitGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: CostAwareThrottlerGuard,
+    },
+    LoggerService,
   ],
 })
 export class AppModule implements NestModule {
-  constructor(
-    private readonly configService: ConfigService,
-    private readonly loggerService: LoggerService,
-  ) {}
-
-  configure(consumer: MiddlewareConsumer): void {
-    // Request correlation middleware
+  configure(consumer: MiddlewareConsumer) {
     consumer.apply(RequestCorrelationMiddleware).forRoutes('*');
-
-    // Startup log
-    this.loggerService.log(
-      'AppModule initialized with structured logging, correlation IDs, and rate limiting',
-      'AppModule',
-    );
   }
 }

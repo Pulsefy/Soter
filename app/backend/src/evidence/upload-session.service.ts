@@ -13,7 +13,7 @@ import * as fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { UploadSessionStatus } from '@prisma/client';
+import { UploadSessionStatus, EvidenceStatus } from '@prisma/client';
 import { CreateUploadSessionDto } from './upload-session.dto';
 import { UploadSessionStore } from './upload-session.store';
 import {
@@ -69,7 +69,7 @@ export class UploadSessionService {
         totalSize: dto.totalSize,
         chunkSize: dto.chunkSize,
         totalChunks,
-        status: UploadSessionStatus.active,
+        status: UploadSessionStatus.uploading,
         expiresAt: new Date(Date.now() + SESSION_TTL_MS),
       },
       SESSION_TTL_SECONDS,
@@ -210,7 +210,7 @@ export class UploadSessionService {
         size: assembled.length,
         ownerId,
         orgId: session.orgId ?? undefined,
-        status: 'pending',
+        status: EvidenceStatus.pending,
       },
     });
 
@@ -248,7 +248,12 @@ export class UploadSessionService {
     const session = await this.store.getSession(sessionId);
     if (!session) throw new NotFoundException('Upload session not found');
     if (session.ownerId !== ownerId) throw new ForbiddenException();
-    if (session.status !== UploadSessionStatus.active) {
+    const writable: UploadSessionStatus[] = [
+      UploadSessionStatus.pending,
+      UploadSessionStatus.uploading,
+      UploadSessionStatus.paused,
+    ];
+    if (!writable.includes(session.status)) {
       throw new BadRequestException(`Session is ${session.status}`);
     }
     if (session.expiresAt < new Date()) {

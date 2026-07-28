@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -18,10 +18,11 @@ export class SorobanTransactionScheduler {
   private isProcessingCleanup = false;
 
   constructor(
-    @InjectQueue('soroban-transactions')
-    private readonly sorobanQueue: Queue<SorobanTransactionJobData>,
     private readonly sorobanTransactionService: SorobanTransactionLifecycleService,
     private readonly metricsService: MetricsService,
+    @Optional()
+    @InjectQueue('soroban-transactions')
+    private readonly sorobanQueue?: Queue<SorobanTransactionJobData>,
   ) {}
 
   /**
@@ -34,6 +35,10 @@ export class SorobanTransactionScheduler {
   async scheduleRetryableTransactions() {
     if (this.isProcessingRetries) {
       this.logger.debug('Retry processing already in progress, skipping');
+      return;
+    }
+
+    if (!this.sorobanQueue) {
       return;
     }
 
@@ -69,6 +74,7 @@ export class SorobanTransactionScheduler {
             )
           : 0;
 
+        if (!this.sorobanQueue) return;
         return this.sorobanQueue.add(`retry-${transaction.id}`, jobData, {
           delay,
           attempts: 3, // Job-level retries for the scheduler itself
@@ -132,6 +138,10 @@ export class SorobanTransactionScheduler {
       return;
     }
 
+    if (!this.sorobanQueue) {
+      return;
+    }
+
     this.isProcessingCleanup = true;
     const startTime = Date.now();
 
@@ -186,6 +196,9 @@ export class SorobanTransactionScheduler {
     timeZone: 'UTC',
   })
   async healthCheck() {
+    if (!this.sorobanQueue) {
+      return;
+    }
     try {
       const waiting = await this.sorobanQueue.getWaiting();
       const active = await this.sorobanQueue.getActive();
@@ -238,6 +251,10 @@ export class SorobanTransactionScheduler {
       correlationId: options.correlationId,
     };
 
+    if (!this.sorobanQueue) {
+      return undefined;
+    }
+
     const job = await this.sorobanQueue.add(
       `execute-${transactionId}`,
       jobData,
@@ -270,6 +287,15 @@ export class SorobanTransactionScheduler {
    * Get queue statistics for monitoring
    */
   async getQueueStats() {
+    if (!this.sorobanQueue) {
+      return {
+        waiting: 0,
+        active: 0,
+        completed: 0,
+        failed: 0,
+        delayed: 0,
+      };
+    }
     return {
       waiting: (await this.sorobanQueue.getWaiting()).length,
       active: (await this.sorobanQueue.getActive()).length,

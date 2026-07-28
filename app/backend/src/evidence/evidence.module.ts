@@ -11,9 +11,16 @@ import { EncryptionModule } from '../common/encryption/encryption.module';
 import { AuditModule } from '../audit/audit.module';
 import { CacheModule } from '../common/cache/cache.module';
 import { FingerprintService } from './fingerprint.service';
+import { ResumableUploadModule } from './resumable-upload/resumable-upload.module';
 
 @Module({
-  imports: [PrismaModule, EncryptionModule, AuditModule, CacheModule],
+  imports: [
+    PrismaModule,
+    EncryptionModule,
+    AuditModule,
+    CacheModule,
+    ResumableUploadModule,
+  ],
   controllers: [EvidenceController, UploadSessionController],
   providers: [
     EvidenceService,

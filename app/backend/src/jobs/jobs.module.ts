@@ -4,13 +4,21 @@ import { JobsController } from './jobs.controller';
 import { RETENTION_PURGE_QUEUE } from '../retention-policy/retention-purge.processor';
 import { DlqService } from './dlq.service';
 
+const isRedisEnabled = process.env.REDIS_ENABLED === 'true';
+
 @Module({
   imports: [
-    BullModule.registerQueue({ name: 'verification' }),
-    BullModule.registerQueue({ name: 'notifications' }),
-    BullModule.registerQueue({ name: 'onchain' }),
-    BullModule.registerQueue({ name: RETENTION_PURGE_QUEUE }),
-    BullModule.registerQueue({ name: 'dead-letter' }),
+    ...(isRedisEnabled
+      ? [
+          BullModule.registerQueue(
+            { name: 'verification' },
+            { name: 'notifications' },
+            { name: 'onchain' },
+            { name: RETENTION_PURGE_QUEUE },
+            { name: 'dead-letter' },
+          ),
+        ]
+      : []),
   ],
   controllers: [JobsController],
   providers: [DlqService],

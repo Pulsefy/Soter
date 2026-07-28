@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -25,7 +25,9 @@ export class LedgerBackfillService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue('onchain') private readonly onchainQueue: Queue,
+    @Optional()
+    @InjectQueue('onchain')
+    private readonly onchainQueue?: Queue,
   ) {}
 
   async triggerBackfill(
@@ -39,6 +41,17 @@ export class LedgerBackfillService {
     );
 
     const totalCount = endLedger - startLedger + 1;
+
+    if (!this.onchainQueue) {
+      return {
+        jobId: 'queue-disabled',
+        startLedger,
+        endLedger,
+        status: 'queued' as const,
+        processedCount: 0,
+        totalCount,
+      };
+    }
 
     const job = await this.onchainQueue.add(
       'ledger-backfill',
@@ -169,6 +182,9 @@ export class LedgerBackfillService {
   }
 
   async getBackfillStatus(jobId: string): Promise<BackfillResult | null> {
+    if (!this.onchainQueue) {
+      return null;
+    }
     const job = await this.onchainQueue.getJob(jobId);
 
     if (!job) {
@@ -176,7 +192,10 @@ export class LedgerBackfillService {
     }
 
     const state = await job.getState();
-    const progress = job.progress as any;
+    const progress = job.progress as BackfillJobData & {
+      processed?: number;
+      total?: number;
+    };
 
     return {
       jobId: job.id || 'unknown',

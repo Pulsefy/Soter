@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -44,7 +44,9 @@ export class LedgerReconciliationService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue('onchain') private readonly onchainQueue: Queue,
+    @Optional()
+    @InjectQueue('onchain')
+    private readonly onchainQueue?: Queue,
   ) {}
 
   async triggerReconciliation(
@@ -58,6 +60,24 @@ export class LedgerReconciliationService {
     );
 
     const totalLedgers = endLedger - startLedger + 1;
+
+    if (!this.onchainQueue) {
+      return {
+        jobId: 'queue-disabled',
+        startLedger,
+        endLedger,
+        status: 'queued' as const,
+        totalLedgers,
+        checkedLedgers: 0,
+        discrepancies: [],
+        summary: {
+          totalDiscrepancies: 0,
+          bySeverity: { low: 0, medium: 0, high: 0 },
+          byType: { missing: 0, amount_mismatch: 0, count_mismatch: 0 },
+        },
+        actionable: false,
+      };
+    }
 
     const job = await this.onchainQueue.add(
       'ledger-reconciliation',
@@ -224,6 +244,9 @@ export class LedgerReconciliationService {
   async getReconciliationStatus(
     jobId: string,
   ): Promise<ReconciliationReport | null> {
+    if (!this.onchainQueue) {
+      return null;
+    }
     const job = await this.onchainQueue.getJob(jobId);
 
     if (!job) {
@@ -231,7 +254,13 @@ export class LedgerReconciliationService {
     }
 
     const state = await job.getState();
-    const progress = job.progress as any;
+    const progress = job.progress as ReconciliationJobData & {
+      totalLedgers?: number;
+      checkedLedgers?: number;
+      discrepancies?: ReconciliationDiscrepancy[];
+      summary?: ReconciliationReport['summary'];
+      actionable?: boolean;
+    };
 
     return {
       jobId: job.id || 'unknown',
