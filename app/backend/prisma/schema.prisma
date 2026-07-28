@@ -379,6 +379,7 @@ model Organization {
   verificationSessions VerificationSession[]
   verificationRequests VerificationRequest[]
   evidenceQueueItems EvidenceQueueItem[] @relation("OrganizationEvidenceQueueItems")
+  deviceNotificationTokens DeviceNotificationToken[]
 
   @@index([deletedAt])
 }
@@ -391,6 +392,8 @@ model User {
   organization Organization? @relation(fields: [orgId], references: [id])
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  deviceNotificationTokens DeviceNotificationToken[]
 
   @@index([orgId])
 }
@@ -893,6 +896,47 @@ model SorobanEventCorrelation {
   @@unique([txHash, eventIndex]) // Each event in a transaction is unique
 }
 
+enum DevicePlatform {
+  ios
+  android
+}
+
+model DeviceNotificationToken {
+  id          String          @id @default(cuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  orgId       String?
+  organization Organization?  @relation(fields: [orgId], references: [id])
+
+  // Device identification
+  platform    DevicePlatform
+  deviceId    String          // Unique device identifier (e.g., UUID from mobile app)
+
+  // Push notification token
+  token       String          // The actual push notification token from APNS/FCM
+
+  // Metadata
+  deviceName  String?         // Optional human-readable device name
+  appVersion  String?         // App version when token was registered
+
+  // Lifecycle
+  isActive    Boolean         @default(true)
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  revokedBy   String?
+  revokedReason String?
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([userId, deviceId, platform])
+  @@index([userId])
+  @@index([orgId])
+  @@index([token])
+  @@index([isActive])
+  @@index([revokedAt])
+}
+
 // ============================================================================
 // VERSION CONFIG & RELEASE NOTES
 // ============================================================================
@@ -908,22 +952,22 @@ enum VersionPlatform {
 model VersionConfig {
   id                String          @id @default(cuid())
   platform          VersionPlatform  @unique
-  
+
   // Version information
   currentVersion    String          // Currently deployed version
   latestVersion     String          // Latest available version
   minRequiredVersion String         // Minimum version required to function
-  
+
   // Force upgrade flag
   forceUpgrade      Boolean         @default(false)
-  
+
   // Release notes (JSON for flexibility)
   releaseNotes      Json?           // { version: string, title: string, changes: string[] }
-  
+
   // Store URLs
   iosStoreUrl       String?         // App Store URL for iOS
   androidStoreUrl   String?         // Play Store URL for Android
-  
+
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 

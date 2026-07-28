@@ -24,6 +24,7 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
+    "@nestjs/event-emitter": "^3.1.0",
     "@nestjs/swagger": "^11.2.6",
     "body-parser": "^2.2.2",
     "dotenv": "^17.4.2",
