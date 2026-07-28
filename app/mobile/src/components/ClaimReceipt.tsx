@@ -16,13 +16,7 @@ import { config } from '../config';
 export interface ClaimReceiptData {
   claimId: string;
   packageId: string;
-  status:
-    | 'requested'
-    | 'verified'
-    | 'approved'
-    | 'disbursed'
-    | 'archived'
-    | 'cancelled';
+
   amount: number;
   tokenAddress?: string;
   transactionHash?: string;

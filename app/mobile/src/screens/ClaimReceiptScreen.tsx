@@ -13,7 +13,7 @@ import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
 import { ClaimReceipt, ClaimReceiptData } from '../components/ClaimReceipt';
-import { config } from '../config';
+
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ClaimReceipt'>;
 
@@ -39,32 +39,7 @@ export const ClaimReceiptScreen: React.FC<Props> = ({ route, navigation }) => {
   const loadClaim = useCallback(async () => {
     setState({ kind: 'loading' });
     try {
-      const response = await fetch(
-        `${config.apiUrl}/claims/${encodeURIComponent(claimId)}/receipt`,
-      );
 
-      if (response.status === 404) {
-        setState({ kind: 'not-found' });
-        return;
-      }
-
-      if (!response.ok) {
-        let msg = `Server responded with ${response.status}`;
-        try {
-          const body = (await response.json()) as
-            | { message?: string; error?: string }
-            | undefined;
-          if (body?.message) msg = body.message;
-          else if (body?.error) msg = body.error;
-        } catch {
-          /* ignore parse errors */
-        }
-        setState({ kind: 'error', message: msg });
-        return;
-      }
-
-      const data = (await response.json()) as ClaimReceiptData;
-      setState({ kind: 'ready', data });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to load claim receipt';

@@ -38,6 +38,14 @@ jest.mock('../services/api', () => ({
     { id: 'aid-1', title: 'Food Aid', amount: 500, status: 'active', date: '2026-01-01' },
     { id: 'aid-2', title: 'Medical Aid', amount: 1200, status: 'pending', date: '2026-01-02' },
   ]),
+  fetchClaimReceipt: jest.fn().mockResolvedValue({
+    claimId: 'claim-aid-1',
+    packageId: 'aid-1',
+    status: 'disbursed',
+    amount: 500,
+    timestamp: '2026-01-01T00:00:00Z',
+    tokenAddress: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+  }),
 }));
 
 jest.mock('../services/aidApi', () => ({
