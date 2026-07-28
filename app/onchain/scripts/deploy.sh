@@ -69,14 +69,27 @@ fi
 SECRET_KEY="${SECRET_KEY:-$DEPLOYER_SECRET_KEY}"
 
 # Check if contract is built
-WASM_FILE="target/wasm32-unknown-unknown/release/${CONTRACT_NAME}.wasm"
+WASM_FILE="target/wasm32v1-none/release/${CONTRACT_NAME}.wasm"
 if [ ! -f "$WASM_FILE" ]; then
-    echo "❌ Contract not built: $WASM_FILE"
-    echo "   Run ./scripts/build.sh first"
-    exit 1
+    # Fallback: try legacy target path built by older toolchain versions
+    LEGACY_WASM="target/wasm32-unknown-unknown/release/${CONTRACT_NAME}.wasm"
+    if [ -f "$LEGACY_WASM" ]; then
+        WASM_FILE="$LEGACY_WASM"
+        echo "⚠️  Using legacy wasm32-unknown-unknown artifact. Consider rebuilding with Stellar CLI 26+."
+    else
+        echo "❌ Contract not built: $WASM_FILE"
+        echo "   Run 'stellar contract build' or './scripts/build.sh' first"
+        exit 1
+    fi
 fi
 
-echo "📦 Contract: $CONTRACT_NAME"
+# Extract contract version
+CONTRACT_VERSION=$(grep '^version =' "contracts/${CONTRACT_NAME}/Cargo.toml" | head -1 | awk -F'"' '{print $2}')
+if [ -z "$CONTRACT_VERSION" ]; then
+    CONTRACT_VERSION="unknown"
+fi
+
+echo "📦 Contract: $CONTRACT_NAME (v$CONTRACT_VERSION)"
 echo "📄 WASM file: $WASM_FILE"
 echo "🔑 Using key: ${SECRET_KEY:0:10}..."
 
@@ -84,11 +97,10 @@ echo "🔑 Using key: ${SECRET_KEY:0:10}..."
 echo ""
 echo "📡 Deploying to $NETWORK..."
 
-DEPLOY_OUTPUT=$(soroban contract deploy \
+DEPLOY_OUTPUT=$(stellar contract deploy \
     --wasm "$WASM_FILE" \
     --source "$SECRET_KEY" \
     --network "$NETWORK" \
-    --rpc-url "$RPC_URL" \
     2>&1 || true)
 
 if echo "$DEPLOY_OUTPUT" | grep -q "error"; then
@@ -104,6 +116,7 @@ if [ -n "$CONTRACT_ID" ]; then
     echo ""
     echo "✅ Deployment successful!"
     echo "📋 Contract ID: $CONTRACT_ID"
+    echo "🏷️  Contract Version: $CONTRACT_VERSION"
     echo ""
     echo "💡 Save this ID for future interactions:"
     echo "export CONTRACT_ID=\"$CONTRACT_ID\""
@@ -115,7 +128,47 @@ if [ -n "$CONTRACT_ID" ]; then
         else
             echo "CONTRACT_ID=$CONTRACT_ID" >> "$PROJECT_DIR/.env"
         fi
-        echo "📝 Updated .env with contract ID"
+        
+        # Log contract version to .env
+        if grep -q "CONTRACT_VERSION=" "$PROJECT_DIR/.env"; then
+            sed -i.bak "s|CONTRACT_VERSION=.*|CONTRACT_VERSION=$CONTRACT_VERSION|" "$PROJECT_DIR/.env"
+        else
+            echo "CONTRACT_VERSION=$CONTRACT_VERSION" >> "$PROJECT_DIR/.env"
+        fi
+        
+        echo "📝 Updated .env with contract ID and version"
+    fi
+
+    # Register in deployments/registry.json and write markdown record
+    if command -v python3 >/dev/null 2>&1; then
+        REGISTER_OUT=$(python3 "$SCRIPT_DIR/register-deployment.py" \
+            --project-dir "$PROJECT_DIR" \
+            --contract-name "$CONTRACT_NAME" \
+            --contract-id "$CONTRACT_ID" \
+            --version "$CONTRACT_VERSION" \
+            --network "$NETWORK" \
+            --wasm "$WASM_FILE" \
+            --deployer "${PUBLIC_KEY:-}" 2>&1) || {
+            echo "⚠️  Registry update failed:"
+            echo "$REGISTER_OUT"
+        }
+
+        if [ -n "$REGISTER_OUT" ]; then
+            echo "$REGISTER_OUT" | while IFS= read -r line; do
+                case "$line" in
+                    VERSION_TAG=*)
+                        TAG="${line#VERSION_TAG=}"
+                        echo "🏷️  Version tag: $TAG"
+                        echo "   git tag -a '$TAG' -m '$CONTRACT_NAME $CONTRACT_VERSION $NETWORK deploy ($CONTRACT_ID)'"
+                        ;;
+                    RECORD=*)
+                        echo "📄 Deployment record: ${line#RECORD=}"
+                        ;;
+                esac
+            done
+        fi
+    else
+        echo "⚠️  python3 not found; skipped registry update (run scripts/register-deployment.py manually)"
     fi
 else
     echo "⚠️  Could not extract contract ID from output:"

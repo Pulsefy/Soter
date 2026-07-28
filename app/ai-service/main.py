@@ -8,15 +8,20 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 import logging
+import uuid
+from contextvars import ContextVar
+from pythonjsonlogger import jsonlogger
+from logging_redaction import RedactionFilter
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.responses import JSONResponse, RedirectResponse, Response
-from exceptions import AIServiceError
+from fastapi.responses import JSONResponse, RedirectResponse
+from exceptions import AIServiceError, LoadShedError
 from schemas.errors import ErrorDetail, ErrorEnvelope
 import time
 import metrics
+import re
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -38,12 +43,45 @@ from schemas.humanitarian import (
     HumanitarianVerificationResponse,
 )
 from services.humanitarian_verification import HumanitarianVerificationService
+from services.evidence_access_control import EvidenceAccessControl
+
+# Context variable for correlation ID
+correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
+
+
+class CorrelationIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.correlationId = correlation_id_var.get()
+        return True
+
 
 limiter = Limiter(key_func=get_remote_address)
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# Set up structured logging with correlation ID
+log_level_name = settings.log_level.upper() if hasattr(settings, "log_level") else "INFO"
+log_level = getattr(logging, log_level_name, logging.INFO)
+
+# Configure root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(log_level)
+
+# Remove default handlers
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+
+# Create JSON formatter
+json_formatter = jsonlogger.JsonFormatter(
+    "%(asctime)s %(levelname)s %(name)s %(message)s %(correlationId)s"
 )
+
+# Create stream handler with JSON formatter
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(json_formatter)
+stream_handler.addFilter(CorrelationIdFilter())
+stream_handler.addFilter(RedactionFilter())
+root_logger.addHandler(stream_handler)
+
+# Get logger for this module
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +101,7 @@ _LEGACY_TO_V1: dict = {
 # Prefix-based redirects for parameterised routes (matched in order).
 _LEGACY_PREFIX_MAP: list = [
     ("/ai/status/", "/v1/ai/status/"),
+    ("/ai/jobs/", "/v1/ai/jobs/"),
     ("/ai/task/", "/v1/ai/task/"),
 ]
 
@@ -78,6 +117,21 @@ async def lifespan(app: FastAPI):
 
     logger.info(f"Redis configured: {settings.redis_url}")
     logger.info(f"Backend webhook URL: {settings.backend_webhook_url}")
+
+    # Initialize cache service
+    from services.cache import CacheService
+    app.state.cache = CacheService(settings)
+    if app.state.cache.enabled:
+        logger.info("Response caching enabled with Redis")
+    else:
+        logger.warning("Response caching disabled (Redis unavailable)")
+
+    # Expose the long-lived collaboration/AIService collaborators on app state
+    # so versioned routers can resolve them via ``request.app.state`` instead of
+    # importing private globals from this module.  Tests inject Mocks onto the
+    # same keys via TestClient.app.state.
+    app.state.artifact_access_control = evidence_access_control
+    app.state.humanitarian_verification_service = humanitarian_verification_service
 
     yield
     logger.info("Shutting down Soter AI Service...")
@@ -98,6 +152,26 @@ proof_of_life_analyzer = ProofOfLifeAnalyzer(
 )
 pii_scrubber_service = PIIScrubberService()
 humanitarian_verification_service = HumanitarianVerificationService()
+
+# Initialize evidence access control service
+from services.artifact_access import ArtifactAccessService
+from services.evidence_access_control import EvidenceAccessControl
+
+# Create artifact access service and wrap with evidence access control
+artifact_access_service_instance = ArtifactAccessService(
+    artifacts_dir=settings.verification_artifacts_dir,
+    signing_secret=settings.artifact_signing_secret,
+    ttl_seconds=settings.verification_artifact_url_ttl_seconds,
+)
+evidence_access_control = EvidenceAccessControl(artifact_access_service_instance)
+
+# Wire the long-lived collaborators onto ``app.state`` at module-init time so
+# the production app *and* ``TestClient(app)`` (which does not enter lifespan
+# unless used as a context manager) both have these resolvable.  ``lifespan``
+# re-asserts the same references on startup so hot-reload / re-import
+# scenarios stay consistent.
+app.state.humanitarian_verification_service = humanitarian_verification_service
+app.state.artifact_access_control = evidence_access_control
 
 
 class InferenceRequest(BaseModel):
@@ -142,6 +216,75 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    """
+    Custom CORS middleware with allowlist-based origin validation.
+
+    - Validates origins against configured allowlist
+    - Supports Vercel preview deployments via wildcard patterns
+    - Protects sensitive endpoints by disallowing CORS entirely
+    - Handles preflight OPTIONS requests
+    """
+    origin = request.headers.get("origin")
+    path = request.url.path
+
+    # Sensitive endpoints that should NEVER allow CORS
+    # These require direct server-to-server communication or same-origin
+    SENSITIVE_ENDPOINTS = {
+        "/v1/ai/verification-artifacts",
+        "/ai/verification-artifacts",
+    }
+
+    is_sensitive = any(path.startswith(endpoint) for endpoint in SENSITIVE_ENDPOINTS)
+
+    # For sensitive endpoints, reject CORS entirely
+    if is_sensitive and origin:
+        logger.warning(
+            "cors_rejected_sensitive_endpoint",
+            extra={
+                "event": "cors_rejected",
+                "origin": origin,
+                "path": path,
+                "reason": "sensitive_endpoint",
+            },
+        )
+        return JSONResponse(
+            status_code=403,
+            content={"error": {"code": "CORS_NOT_ALLOWED", "message": "CORS not allowed for sensitive endpoints"}},
+        )
+
+    # Check if origin is allowed
+    is_allowed = False
+    if origin:
+        is_allowed = settings.is_origin_allowed(origin)
+
+    # Handle preflight requests
+    if request.method == "OPTIONS":
+        if is_allowed:
+            response = Response()
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-Role, X-Org-Id, X-User-Id, X-Correlation-Id, X-Request-Id"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Max-Age"] = "86400"
+            return response
+        else:
+            # Reject preflight for disallowed origins
+            return Response(status_code=204)
+
+    # Process the request
+    response = await call_next(request)
+
+    # Add CORS headers for allowed origins on non-sensitive endpoints
+    if is_allowed and not is_sensitive:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Expose-Headers"] = "X-Correlation-Id, X-Request-Id, Trace-Id"
+
+    return response
+
+
+@app.middleware("http")
 async def legacy_redirect_middleware(request: Request, call_next):
     """
     Transparently redirect un-versioned /ai/* paths to their /v1
@@ -178,6 +321,29 @@ async def legacy_redirect_middleware(request: Request, call_next):
 
 
 @app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    correlation_id = request.headers.get("x-correlation-id") or request.headers.get("x-request-id") or str(uuid.uuid4())
+    
+    # Attach correlation ID to request state
+    request.state.correlation_id = correlation_id
+    
+    # Set context variable for logging
+    correlation_id_token = correlation_id_var.set(correlation_id)
+    
+    try:
+        response = await call_next(request)
+    finally:
+        correlation_id_var.reset(correlation_id_token)
+    
+    # Set correlation ID headers in response
+    response.headers["x-correlation-id"] = correlation_id
+    response.headers["x-request-id"] = correlation_id
+    response.headers["trace_id"] = correlation_id
+    
+    return response
+
+
+@app.middleware("http")
 async def monitor_requests(request: Request, call_next):
     path = request.url.path
 
@@ -205,22 +371,11 @@ async def monitor_requests(request: Request, call_next):
     if path in _NEVER_THROTTLE or is_redirect_path:
         return await call_next(request)
 
-    # Gracefully throttle if memory pressure is critical.
-    if not metrics.check_system_resources(memory_threshold_percent=90.0):
-        metrics.REQUEST_COUNT.labels(
-            method=request.method,
-            endpoint=path,
-            http_status=503,
-        ).inc()
-        return JSONResponse(
-            status_code=503,
-            content={
-                "detail": (
-                    "Service unavailable: System resources (RAM/VRAM) exhausted, "
-                    "gracefully throttling."
-                )
-            },
-        )
+    from services.load_shedder import evaluate_load_shed
+
+    shed_response = evaluate_load_shed(request)
+    if shed_response is not None:
+        return shed_response
 
     start_time = time.time()
     try:
@@ -271,6 +426,50 @@ async def health_check():
     return {"status": "healthy", "service": "soter-ai-service", "version": "1.0.0"}
 
 
+@app.get("/health/dependencies")
+async def health_dependencies():
+    """Lightweight dependency probe for staging and CI.
+
+    Checks Redis connectivity, provider configuration readiness, and
+    filesystem/temp access.  Never exposes secrets or PII.
+    """
+    import tempfile
+    import os
+
+    checks: Dict[str, Any] = {}
+
+    # --- Redis ---
+    try:
+        import redis as redis_lib
+
+        r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=2)
+        r.ping()
+        checks["redis"] = {"ok": True}
+    except Exception as exc:
+        checks["redis"] = {"ok": False, "error": type(exc).__name__}
+
+    # --- Provider config ---
+    provider = settings.get_active_provider()
+    checks["provider_config"] = {
+        "ok": provider is not None,
+        "provider": provider or "none",
+    }
+
+    # --- Filesystem / temp ---
+    try:
+        with tempfile.NamedTemporaryFile(delete=True) as tmp:
+            tmp.write(b"probe")
+        checks["filesystem"] = {"ok": True}
+    except Exception as exc:
+        checks["filesystem"] = {"ok": False, "error": type(exc).__name__}
+
+    overall_ok = all(v["ok"] for v in checks.values())
+    return {
+        "status": "ok" if overall_ok else "degraded",
+        "checks": checks,
+    }
+
+
 @app.get("/")
 async def root():
     return {
@@ -307,6 +506,8 @@ async def _legacy_create_inference_task(
             "message": "Task queued for processing",
             "status_url": f"/v1/ai/status/{task_id}",
         }
+    except LoadShedError:
+        raise
     except Exception as e:
         logger.error(f"Failed to create inference task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")
@@ -476,6 +677,20 @@ async def validation_exception_handler(request, exc: RequestValidationError):
                 details=exc.errors(),
             )
         ).model_dump(),
+    )
+
+
+@app.exception_handler(LoadShedError)
+async def load_shed_exception_handler(request, exc: LoadShedError):
+    from services.load_shedder import build_shed_response
+
+    path = request.url.path
+    logger.warning("Load shedding request to %s due to %s", path, exc.reason)
+    return build_shed_response(
+        exc.reason,
+        request.method,
+        path,
+        details=exc.details,
     )
 
 

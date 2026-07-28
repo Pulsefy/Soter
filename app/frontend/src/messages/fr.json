@@ -124,7 +124,10 @@
     "balance": "Solde",
     "send": "Envoyer",
     "receive": "Recevoir",
-    "transactionHistory": "Historique des Transactions"
+    "transactionHistory": "Historique des Transactions",
+    "networkMismatch": "Incompatibilité de réseau — votre portefeuille est sur {walletNetwork} mais cette application nécessite {expectedNetwork}. Ouvrez Freighter et passez au réseau correct pour continuer.",
+    "networkMismatchShort": "Mauvais réseau — passez à {expectedNetwork} dans Freighter.",
+    "submitBlocked": "Impossible de soumettre : le portefeuille est sur le mauvais réseau."
   },
   "errors": {
     "generic": "Une erreur inattendue s'est produite. Veuillez réessayer.",
@@ -192,5 +195,23 @@
     "dashboardPage": "Tableau de Bord",
     "verificationReviewPage": "Révision de Vérification",
     "resetChecklist": "Réinitialiser la progression"
+  },
+  "faucet": {
+    "title": "Assistant de Faucet Testnet",
+    "subtitle": "Outil de Développement Stellar / Soroban",
+    "connectWallet": "Veuillez connecter votre portefeuille dans la barre de navigation pour voir le solde et demander des fonds.",
+    "unfundedAccount": "Compte non créé (nécessite activation/financement)",
+    "lastUpdated": "Dernière mise à jour: {time}",
+    "refresh": "Actualiser le Solde",
+    "requestFunds": "Demander 10 000 XLM",
+    "requesting": "Demande en cours...",
+    "success": "Compte financé avec succès !",
+    "error": "Échec du financement du compte. Veuillez réessayer.",
+    "instructionsTitle": "Instructions étape par étape",
+    "step1": "Connectez votre portefeuille Freighter configuré sur Stellar Testnet.",
+    "step2": "Cliquez sur 'Demander 10 000 XLM' ou utilisez les liens officiels du faucet Stellar.",
+    "step3": "Vérifiez que votre solde est mis à jour pour effectuer des actions on-chain.",
+    "linksTitle": "Faucets Officiels Stellar",
+    "faucetNote": "Visible uniquement dans les environnements testnet."
   }
 }

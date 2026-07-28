@@ -5,17 +5,21 @@ Extracted from the legacy flat router so the route logic lives in a
 single place and is referenced by both the /v1 and the legacy /ai mounts.
 """
 
+import base64
 import io
 import time
-from typing import Annotated
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-import metrics
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
+from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from schemas.ocr import OCRData, OCRFieldResult, OCRResponse
-from services.ocr import OCRService
+import tasks
+from schemas.ocr import OCRData, LanguageHint
+from schemas.common import ResultEnvelope
+from services.ocr_job import run_ocr_from_bytes
+from config import settings
 
 router = APIRouter(tags=["ocr"])
 limiter = Limiter(key_func=get_remote_address)
@@ -29,15 +33,22 @@ ALLOWED_CONTENT_TYPES = {
     "image/webp",
 }
 
-ocr_service = OCRService()
+class QueuedOCRResponse(BaseModel):
+    success: bool
+    task_id: str
+    status: str
+    message: str
+    status_url: str
 
 
 @router.post("/ai/ocr")
-@limiter.limit("10/minute")
+@limiter.limit(settings.request_rate_limit)
 async def process_ocr(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
-) -> OCRResponse:
+    anchor_metadata: Annotated[Optional[str], Form(description="JSON encoded AnchorMetadata")] = None,
+    language_hint: Annotated[Optional[LanguageHint], Form(description="Language hint for OCR")] = None,
+) -> ResultEnvelope[OCRData]:
     """Extract text fields from an uploaded document image."""
     start_time = time.time()
 
@@ -65,50 +76,111 @@ async def process_ocr(
                 },
             )
 
-        from PIL import Image
+        _validate_image_bytes(contents)
+        raw = run_ocr_from_bytes(
+            contents,
+            anchor_metadata,
+            language_hint=language_hint.value if language_hint else None
+        )
 
-        try:
-            img = Image.open(io.BytesIO(contents))
-        except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "code": "invalid_image",
-                    "message": f"Could not decode image: {str(e)}",
-                },
-            )
+        from main import correlation_id_var
+        ocr_data = OCRData(**raw["data"]) if isinstance(raw["data"], dict) else raw["data"]
+        fields = ocr_data.fields
+        avg_confidence: Optional[float] = (
+            round(sum(f.confidence for f in fields.values()) / len(fields), 4)
+            if fields
+            else None
+        )
 
-        start_inference = time.time()
-        result = ocr_service.process_image(img)
-        inference_latency = time.time() - start_inference
-
-        metrics.INFERENCE_LATENCY.labels(task_type="ocr").observe(inference_latency)
-        metrics.logger.info(f"OCR Inference completed in {inference_latency:.4f}s")
-
-        processing_time_ms = int((time.time() - start_time) * 1000)
-
-        return OCRResponse(
-            success=True,
-            data=OCRData(
-                fields={
-                    name: OCRFieldResult(value=field.value, confidence=field.confidence)
-                    for name, field in result.fields.items()
-                },
-                raw_text=result.raw_text,
-                processing_time_ms=processing_time_ms,
-            ),
-            processing_time_ms=processing_time_ms,
+        return ResultEnvelope[OCRData](
+            result=ocr_data,
+            confidence=avg_confidence,
+            reasons=None,
+            anchor_metadata=raw.get("anchor_metadata"),
+            trace_id=correlation_id_var.get() or None,
         )
 
     except HTTPException:
         raise
     except Exception as e:
         processing_time_ms = int((time.time() - start_time) * 1000)
-        return OCRResponse(
-            success=False,
-            error={
+        # Surface as a structured HTTP error rather than returning a partial envelope
+        raise HTTPException(
+            status_code=500,
+            detail={
                 "code": "processing_error",
                 "message": str(e),
             },
-            processing_time_ms=processing_time_ms,
+        )
+
+
+@router.post(
+    "/ai/ocr/jobs",
+    response_model=QueuedOCRResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+@limiter.limit(settings.request_rate_limit)
+async def queue_ocr_job(
+    request: Request,
+    image: Annotated[UploadFile, File(description="Image file to process")],
+    anchor_metadata: Annotated[Optional[str], Form(description="JSON encoded AnchorMetadata")] = None,
+    language_hint: Annotated[Optional[LanguageHint], Form(description="Language hint for OCR")] = None,
+) -> QueuedOCRResponse:
+    """Queue OCR processing and return immediately with a pollable job URL."""
+    if image.content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_content_type",
+                "message": (
+                    f"Invalid content type: {image.content_type}. "
+                    f"Allowed: {', '.join(ALLOWED_CONTENT_TYPES)}"
+                ),
+            },
+        )
+
+    contents = await image.read()
+    if len(contents) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "empty_image",
+                "message": "Uploaded image is empty",
+            },
+        )
+
+    _validate_image_bytes(contents)
+
+    task_id = tasks.create_task(
+        task_type="ocr",
+        payload={
+            "image_base64": base64.b64encode(contents).decode("ascii"),
+            "content_type": image.content_type,
+            "filename": image.filename,
+            "anchor_metadata": anchor_metadata,
+            "language_hint": language_hint.value if language_hint else None,
+        },
+    )
+
+    return QueuedOCRResponse(
+        success=True,
+        task_id=task_id,
+        status="pending",
+        message="OCR job queued for processing",
+        status_url=f"/v1/ai/jobs/{task_id}",
+    )
+
+
+def _validate_image_bytes(contents: bytes) -> None:
+    from PIL import Image
+
+    try:
+        Image.open(io.BytesIO(contents)).verify()
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_image",
+                "message": f"Could not decode image: {str(e)}",
+            },
         )

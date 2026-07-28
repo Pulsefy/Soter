@@ -1,5 +1,19 @@
 export const ONCHAIN_ADAPTER_TOKEN = 'ONCHAIN_ADAPTER';
 
+export type TxStatus = 'pending' | 'succeeded' | 'failed' | 'unknown';
+
+export interface GetTransactionStatusParams {
+  hash: string;
+}
+
+export interface GetTransactionStatusResult {
+  hash: string;
+  status: TxStatus;
+  timestamp: Date;
+  ledger?: number;
+  errorMessage?: string;
+}
+
 /**
  * On-chain adapter interface for Soroban AidEscrow contract interactions
  */
@@ -17,12 +31,13 @@ export interface InitEscrowResult {
 }
 
 export interface CreateAidPackageParams {
-  operatorAddress: string; // Admin or authorized distributor
+  operatorAddress: string;
   packageId: string;
   recipientAddress: string;
-  amount: string; // Amount as string to preserve precision (i128)
+  amount: string;
   tokenAddress: string;
-  expiresAt: number; // Unix timestamp
+  expiresAt: number;
+  metadata?: Record<string, string>;
 }
 
 export interface CreateAidPackageResult {
@@ -248,6 +263,13 @@ export interface OnchainAdapter {
   getPauseState(): Promise<PauseState>;
   getFeeConfig(): Promise<FeeConfig>;
   getPackageSummary(packageId: string): Promise<PackageSummary>;
+
+  /**
+   * Get the status of a transaction by hash
+   */
+  getTransactionStatus(
+    params: GetTransactionStatusParams,
+  ): Promise<GetTransactionStatusResult>;
 
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;

@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { AuditService } from '../audit/audit.service';
+import { FingerprintService } from './fingerprint.service';
 import * as fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import * as path from 'path';
@@ -22,6 +23,7 @@ export class EvidenceService {
     private readonly prisma: PrismaService,
     private readonly encryptionService: EncryptionService,
     private readonly auditService: AuditService,
+    private readonly fingerprintService: FingerprintService,
   ) {
     // Ensure upload directory exists
     if (!existsSync(this.uploadDir)) {
@@ -29,20 +31,99 @@ export class EvidenceService {
     }
   }
 
-  async queueEvidence(file: Express.Multer.File, ownerId: string) {
+  async queueEvidence(
+    file: Express.Multer.File,
+    ownerId: string,
+    orgId?: string,
+  ) {
     const fileHash = crypto
       .createHash('sha256')
       .update(file.buffer)
       .digest('hex');
 
-    // Check for duplicate upload
-    const existing = await this.prisma.evidenceQueueItem.findUnique({
-      where: { fileHash },
+    // Generate stable fingerprint for near-duplicate detection
+    const fingerprint = this.fingerprintService.generateFileFingerprint(
+      file.buffer,
+    );
+
+    // Check for exact duplicate within org scope
+    const orgScopeFilter = orgId ? { orgId } : {};
+    const existingExact = await this.prisma.evidenceQueueItem.findFirst({
+      where: {
+        fileHash,
+        ...orgScopeFilter,
+      },
     });
 
-    if (existing) {
-      this.logger.warn(`Duplicate upload detected for hash ${fileHash}`);
-      throw new BadRequestException('File already exists in queue');
+    if (existingExact) {
+      this.logger.warn(
+        `Exact duplicate upload detected for hash ${fileHash} in org ${orgId}`,
+      );
+      await this.auditService.record({
+        actorId: ownerId,
+        entity: 'evidence_queue',
+        entityId: existingExact.id,
+        action: 'duplicate_upload_rejected',
+        metadata: {
+          fileName: file.originalname,
+          size: file.size,
+          duplicateOf: existingExact.id,
+          orgId,
+        },
+      });
+      throw new BadRequestException(
+        'File already exists in queue for this organization',
+      );
+    }
+
+    // Check for near-duplicates within org scope
+    const existingNear = await this.prisma.evidenceQueueItem.findFirst({
+      where: {
+        fingerprint,
+        ...orgScopeFilter,
+        nearDuplicateOf: null, // Only check against original items
+      },
+    });
+
+    if (existingNear) {
+      this.logger.warn(
+        `Near-duplicate upload detected for fingerprint ${fingerprint} in org ${orgId}`,
+      );
+
+      // Create a near-duplicate record that references the original
+      const nearDuplicateItem = await this.prisma.evidenceQueueItem.create({
+        data: {
+          fileName: file.originalname,
+          filePath: null, // Don't store duplicate files
+          fileHash,
+          fingerprint,
+          mimeType: file.mimetype,
+          size: file.size,
+          ownerId,
+          orgId,
+          status: EvidenceStatus.completed, // Mark as completed since it's a duplicate
+          nearDuplicateOf: existingNear.id,
+          metadata: {
+            isNearDuplicate: true,
+            originalId: existingNear.id,
+          },
+        },
+      });
+
+      await this.auditService.record({
+        actorId: ownerId,
+        entity: 'evidence_queue',
+        entityId: nearDuplicateItem.id,
+        action: 'near_duplicate_upload',
+        metadata: {
+          fileName: file.originalname,
+          size: file.size,
+          nearDuplicateOf: existingNear.id,
+          orgId,
+        },
+      });
+
+      return nearDuplicateItem;
     }
 
     // Encrypt file buffer
@@ -59,9 +140,11 @@ export class EvidenceService {
         fileName: file.originalname,
         filePath,
         fileHash,
+        fingerprint,
         mimeType: file.mimetype,
         size: file.size,
         ownerId,
+        orgId,
         status: EvidenceStatus.pending,
       },
     });
@@ -71,7 +154,7 @@ export class EvidenceService {
       entity: 'evidence_queue',
       entityId: item.id,
       action: 'queue_upload',
-      metadata: { fileName: file.originalname, size: file.size },
+      metadata: { fileName: file.originalname, size: file.size, orgId },
     });
 
     // Start upload process asynchronously

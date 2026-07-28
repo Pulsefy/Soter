@@ -6,6 +6,7 @@ import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
+import { ONCHAIN_ADAPTER_TOKEN } from '../onchain/onchain.adapter';
 
 describe('HealthController', () => {
   let app: INestApplication;
@@ -28,6 +29,14 @@ describe('HealthController', () => {
     error: jest.fn(),
   };
 
+  const onchainAdapterMock = {
+    getContractMetadata: jest.fn().mockResolvedValue({
+      version: '1.0.0',
+      name: 'Soroban AidEscrow Contract',
+      timestamp: new Date(),
+    }),
+  };
+
   const originalFetch = global.fetch;
 
   beforeAll(async () => {
@@ -38,6 +47,7 @@ describe('HealthController', () => {
         { provide: ConfigService, useValue: configMock },
         { provide: PrismaService, useValue: prismaMock },
         { provide: LoggerService, useValue: loggerMock },
+        { provide: ONCHAIN_ADAPTER_TOKEN, useValue: onchainAdapterMock },
       ],
     }).compile();
 

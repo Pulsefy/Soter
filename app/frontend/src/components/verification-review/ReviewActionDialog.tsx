@@ -1,13 +1,17 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X, AlertCircle } from 'lucide-react';
+import { useTranslations } from 'next-intl';
+import { useNetworkGuard } from '@/hooks/useNetworkGuard';
 import {
   useApproveVerification,
   useRejectVerification,
   useRequestResubmission,
 } from '@/hooks/useVerificationInbox';
+import { useToast } from '@/components/ToastProvider';
+import { normalizeError } from '@/lib/error-utils';
 
 type ActionType = 'approve' | 'reject' | 'resubmission';
 
@@ -57,14 +61,23 @@ export function ReviewActionDialog({
 }: ReviewActionDialogProps) {
   const cfg = ACTION_CONFIG[action];
 
+  const titleId = useId();
+  const reasonId = useId();
+  const nextStepId = useId();
+  const internalNoteId = useId();
+
   const [reason, setReason] = useState('');
   const [nextStep, setNextStep] = useState('');
   const [internalNote, setInternalNote] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  const { isMismatch, expectedNetwork } = useNetworkGuard();
+  const t = useTranslations();
+
   const approve = useApproveVerification();
   const reject = useRejectVerification();
   const resubmit = useRequestResubmission();
+  const { toast } = useToast();
 
   const isPending = approve.isPending || reject.isPending || resubmit.isPending;
 
@@ -77,6 +90,11 @@ export function ReviewActionDialog({
 
   async function handleConfirm() {
     setError(null);
+
+    if (isMismatch) {
+      setError(t('wallet.submitBlocked'));
+      return;
+    }
 
     if (cfg.needsReason && !reason.trim()) {
       setError('A reason is required.');
@@ -115,9 +133,13 @@ export function ReviewActionDialog({
       reset();
       onOpenChange(false);
     } catch (err) {
-      setError(
-        (err as Error).message ?? 'Something went wrong. Please try again.',
-      );
+      const normalized = normalizeError(err);
+      const inlineMsg = normalized.message ?? 'Something went wrong. Please try again.';
+      const toastMsg = normalized.correlationId
+        ? `${inlineMsg} (Correlation ID: ${normalized.correlationId})`
+        : inlineMsg;
+      setError(inlineMsg);
+      toast('Action failed', toastMsg, 'error');
     }
   }
 
@@ -133,26 +155,38 @@ export function ReviewActionDialog({
     >
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4 focus:outline-none">
+        <Dialog.Content
+          aria-labelledby={titleId}
+          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4 focus:outline-none"
+        >
           <div className="flex items-center justify-between">
-            <Dialog.Title className="text-base font-semibold text-gray-900 dark:text-gray-100">
+            <Dialog.Title
+              id={titleId}
+              className="text-base font-semibold text-gray-900 dark:text-gray-100"
+            >
               {cfg.title}
             </Dialog.Title>
             <Dialog.Close
               disabled={isPending}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors disabled:opacity-50"
+              aria-label="Close dialog"
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
             >
-              <X size={18} />
+              <X size={18} aria-hidden="true" />
             </Dialog.Close>
           </div>
 
           <div className="space-y-3">
             {cfg.needsReason && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Reason <span className="text-red-500">*</span>
+                <label
+                  htmlFor={reasonId}
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                >
+                  Reason <span className="text-red-500" aria-hidden="true">*</span>
+                  <span className="sr-only">(required)</span>
                 </label>
                 <textarea
+                  id={reasonId}
                   value={reason}
                   onChange={e => setReason(e.target.value)}
                   rows={3}
@@ -167,11 +201,15 @@ export function ReviewActionDialog({
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label
+                htmlFor={nextStepId}
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
                 Next step message{' '}
                 <span className="text-gray-400 font-normal">(optional)</span>
               </label>
               <input
+                id={nextStepId}
                 type="text"
                 value={nextStep}
                 onChange={e => setNextStep(e.target.value)}
@@ -181,11 +219,15 @@ export function ReviewActionDialog({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label
+                htmlFor={internalNoteId}
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
                 Internal note{' '}
                 <span className="text-gray-400 font-normal">(staff only)</span>
               </label>
               <textarea
+                id={internalNoteId}
                 value={internalNote}
                 onChange={e => setInternalNote(e.target.value)}
                 rows={2}
@@ -196,8 +238,11 @@ export function ReviewActionDialog({
           </div>
 
           {error && (
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300">
-              <AlertCircle size={15} className="mt-0.5 shrink-0" />
+            <div
+              role="alert"
+              className="flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300"
+            >
+              <AlertCircle size={15} aria-hidden="true" className="mt-0.5 shrink-0" />
               {error}
             </div>
           )}
@@ -205,13 +250,15 @@ export function ReviewActionDialog({
           <div className="flex gap-3 justify-end pt-1">
             <Dialog.Close
               disabled={isPending}
-              className="px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+              aria-label="Cancel and close dialog"
+              className="px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             >
               Cancel
             </Dialog.Close>
             <button
               onClick={handleConfirm}
-              disabled={isPending}
+              disabled={isPending || isMismatch}
+              title={isMismatch ? t('wallet.networkMismatchShort', { expectedNetwork: expectedNetwork.toUpperCase() }) : undefined}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed ${cfg.confirmClass}`}
             >
               {isPending ? 'Saving…' : cfg.confirmLabel}

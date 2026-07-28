@@ -1,18 +1,3 @@
-/**
- * Inline Feedback Component for Campaign Actions
- * 
- * Provides visual feedback directly on campaign cards during mutations.
- * Used alongside toast notifications for mutation-heavy screens.
- * 
- * @example
- * ```tsx
- * <InlineFeedback
- *   isPending={campaignAction.isPending}
- *   action="pausing"
- * />
- * ```
- */
-
 'use client';
 
 import { cn } from '@/lib/utils';
@@ -20,13 +5,9 @@ import { cn } from '@/lib/utils';
 type ActionType = 'pausing' | 'resuming' | 'archiving' | 'completing' | 'activating';
 
 interface InlineFeedbackProps {
-  /** Whether the mutation is currently pending */
   isPending: boolean;
-  /** The action being performed */
   action: ActionType;
-  /** Optional custom message */
   message?: string;
-  /** CSS className for custom styling */
   className?: string;
 }
 
@@ -38,10 +19,6 @@ const actionMessages: Record<ActionType, string> = {
   activating: 'Activating campaign...',
 };
 
-/**
- * Inline feedback spinner/indicator for campaign actions.
- * Displays a subtle loading state directly on the campaign card.
- */
 export function InlineFeedback({
   isPending,
   action,
@@ -53,7 +30,7 @@ export function InlineFeedback({
   return (
     <div
       className={cn(
-        'inline-flex items-center gap-2 text-sm text-gray-500',
+        'inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400',
         className
       )}
       role="status"
@@ -68,16 +45,6 @@ export function InlineFeedback({
   );
 }
 
-/**
- * Compact inline feedback for button loading states.
- * 
- * @example
- * ```tsx
- * <Button disabled={isPending}>
- *   {isPending ? <InlineFeedbackButton action="pausing" /> : 'Pause'}
- * </Button>
- * ```
- */
 export function InlineFeedbackButton({ action }: { action: ActionType }) {
   return (
     <span className="inline-flex items-center gap-2">
@@ -87,17 +54,6 @@ export function InlineFeedbackButton({ action }: { action: ActionType }) {
   );
 }
 
-/**
- * Status badge that shows optimistic state with visual indicator.
- * 
- * @example
- * ```tsx
- * <OptimisticStatusBadge
- *   status={campaign.status}
- *   isOptimistic={isPending}
- * />
- * ```
- */
 export function OptimisticStatusBadge({
   status,
   isOptimistic,
@@ -106,11 +62,11 @@ export function OptimisticStatusBadge({
   isOptimistic?: boolean;
 }) {
   const statusStyles: Record<string, string> = {
-    draft: 'bg-gray-100 text-gray-800',
-    active: 'bg-green-100 text-green-800',
-    paused: 'bg-yellow-100 text-yellow-800',
-    completed: 'bg-blue-100 text-blue-800',
-    archived: 'bg-red-100 text-red-800',
+    draft: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200',
+    active: 'bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-300',
+    paused: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300',
+    completed: 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300',
+    archived: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300',
   };
 
   return (
@@ -131,5 +87,3 @@ export function OptimisticStatusBadge({
     </span>
   );
 }
-
-export { InlineFeedback, InlineFeedbackButton, OptimisticStatusBadge };

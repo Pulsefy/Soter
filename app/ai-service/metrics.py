@@ -11,11 +11,39 @@ VRAM_USAGE_PERCENT = Gauge('system_vram_usage_percent', 'System VRAM usage perce
 # API metrics
 REQUEST_COUNT = Counter('api_request_count', 'Total API request count', ['method', 'endpoint', 'http_status'])
 REQUEST_LATENCY = Histogram('api_request_latency_seconds', 'API request latency', ['method', 'endpoint'])
+REQUESTS_SHED_TOTAL = Counter(
+    'requests_shed_total',
+    'Requests rejected due to overload (load shedding)',
+    ['reason', 'method', 'endpoint'],
+)
+CELERY_QUEUE_DEPTH = Gauge('celery_queue_depth', 'Pending tasks in the Celery default queue')
+
+# Dead-letter queue metrics
+DEAD_LETTER_ITEMS_TOTAL = Counter(
+    'dead_letter_items_total',
+    'Items added to the dead-letter queue',
+    ['kind'],
+)
+DEAD_LETTER_REPLAY_ATTEMPTS_TOTAL = Counter(
+    'dead_letter_replay_attempts_total',
+    'Dead-letter replay attempts',
+    ['kind', 'outcome'],
+)
 
 # AI Model metrics
 MODEL_LOAD_TIME = Histogram('model_load_time_seconds', 'Model load time in seconds', ['model_name'])
 INFERENCE_LATENCY = Histogram('inference_latency_seconds', 'Inference latency in seconds', ['task_type'])
 PIPELINE_STEP_LATENCY = Histogram('pipeline_step_latency_seconds', 'Pipeline step latency in seconds', ['step_name'])
+
+JOB_CANCELLED_TOTAL = Counter('job_cancelled_total', 'Total jobs cancelled', ['task_type'])
+JOB_EXPIRED_TOTAL = Counter('job_expired_total', 'Total jobs expired', ['task_type'])
+
+# Cache invalidation metrics
+CACHE_INVALIDATION_TOTAL = Counter(
+    'cache_invalidation_total',
+    'Cache invalidation operations performed',
+    ['reason'],
+)
 
 def check_system_resources(memory_threshold_percent: float = 90.0) -> bool:
     """

@@ -2,6 +2,20 @@
 
 Soroban smart contract for managing aid-package escrow on Stellar.
 
+## Deployed Contract (Testnet)
+
+| Field           | Value                                                              |
+| :-------------- | :----------------------------------------------------------------- |
+| **Contract ID** | `CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG`        |
+| **WASM Hash**   | `24328e15b7c11c7ff07caeaf0328da591b3b63e84af57fa03623c10126eabc8d` |
+| **Network**     | Testnet                                                            |
+| **Version**     | `0.1.0`                                                            |
+| **Deployed**    | 2026-06-03                                                         |
+
+Explorer: [Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG) · [Stellar Lab](https://lab.stellar.org/r/testnet/contract/CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG)
+
+Full deployment record with transaction hashes and verification steps: [deployments/testnet-2026-06-03.md](../../deployments/testnet-2026-06-03.md)
+
 ## What It Does
 
 This contract allows an admin (and optionally designated distributors) to create

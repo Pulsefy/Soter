@@ -157,6 +157,11 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
               <Text style={styles.resultText}>{lastScanResult.message}</Text>
             </View>
           )}
+          {lastScanResult && lastScanResult.status === 'error' && (
+            <TouchableOpacity style={styles.retryButton} onPress={() => { setLastScanResult(null); setIsProcessing(false); }}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          )}
 
           {!isProcessing && !lastScanResult && (
             <Text style={styles.instructionText}>Align QR code to scan</Text>
@@ -291,6 +296,20 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  retryButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    marginTop: 10,
+  },
+  retryButtonText: {
+    color: 'white',
     fontSize: 16,
     fontWeight: '700',
   },

@@ -3,6 +3,13 @@ node_modules/
 .pnp
 .pnp.js
 
+# Python
+__pycache__/
+*.pyc
+
+# Kiro
+.kiro/
+
 # Compiled output
 dist/
 build/
@@ -41,6 +48,18 @@ expo-env.d.ts
 
 # TypeScript
 *.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local dumps
+output.txt
 
 # IDE
 .idea/
@@ -87,3 +106,49 @@ reports/*
 .trae/
 .env.test
 .env
+# ---------------------------------------------------------------------------
+# AI assistant / coding-agent artifacts
+# Keep tool-specific config, history and caches out of the repo so the project
+# does not advertise which AI tooling (if any) was used.
+# ---------------------------------------------------------------------------
+# Anthropic Claude / Claude Code
+.claude/
+.claude.json
+.claude.local.json
+CLAUDE.md
+CLAUDE.local.md
+.anthropic/
+# Model Context Protocol
+.mcp.json
+# Cursor
+.cursor/
+.cursorrules
+.cursorignore
+# GitHub Copilot
+.github/copilot-instructions.md
+.github/instructions/
+.copilot/
+# Aider
+.aider*
+# Continue
+.continue/
+# Codeium / Windsurf
+.codeium/
+.windsurf/
+.windsurfrules
+# Cline / Roo Code
+.clinerules
+.cline/
+.roo/
+.roomodes
+# Tabnine
+.tabnine/
+# Google Gemini CLI
+.gemini/
+GEMINI.md
+# OpenCode
+AGENTS.md
+# Sourcegraph Cody
+.cody/
+# SpecStory
+.specstory/

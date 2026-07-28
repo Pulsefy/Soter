@@ -50,6 +50,7 @@ export function StatusBadge({ status }: { status: VerificationStatus }) {
   const cfg = STATUS_CONFIG[status];
   return (
     <span
+      role="status"
       className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cfg.className}`}
     >
       {cfg.label}
@@ -61,6 +62,7 @@ export function RiskBadge({ level }: { level: RiskLevel }) {
   const cfg = RISK_CONFIG[level];
   return (
     <span
+      role="status"
       className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cfg.className}`}
     >
       {cfg.label}

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ActivityItem, ActivityStore } from '@/types/activity';
+import { buildExplorerUrl } from './explorer';
 
 export const useActivityStore = create<ActivityStore>()(
   persist(
@@ -13,6 +14,15 @@ export const useActivityStore = create<ActivityStore>()(
           id: crypto.randomUUID(),
           timestamp: new Date(),
         };
+
+        if (
+          newActivity.type === 'transaction' &&
+          newActivity.transactionHash &&
+          !newActivity.explorerUrl
+        ) {
+          newActivity.explorerUrl = buildExplorerUrl('tx', newActivity.transactionHash);
+        }
+
         set((state) => ({
           activities: [newActivity, ...state.activities],
         }));
@@ -22,9 +32,20 @@ export const useActivityStore = create<ActivityStore>()(
 
       updateActivity: (id, updates) => {
         set((state) => ({
-          activities: state.activities.map((activity) =>
-            activity.id === id ? { ...activity, ...updates } : activity
-          ),
+          activities: state.activities.map((activity) => {
+            if (activity.id === id) {
+              const merged = { ...activity, ...updates };
+              if (
+                merged.type === 'transaction' &&
+                merged.transactionHash &&
+                !updates.explorerUrl
+              ) {
+                merged.explorerUrl = buildExplorerUrl('tx', merged.transactionHash);
+              }
+              return merged;
+            }
+            return activity;
+          }),
         }));
       },
 

@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationType } from './interfaces/notification-job.interface';
 import { Job } from 'bullmq';
 import { DlqService } from '../jobs/dlq.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 describe('NotificationProcessor', () => {
   let processor: NotificationProcessor;
@@ -12,6 +13,7 @@ describe('NotificationProcessor', () => {
       update: jest.Mock;
     };
   };
+  let metricsMock: { incrementCallbackFailure: jest.Mock };
 
   const makeJob = (
     overrides: Partial<{
@@ -40,6 +42,7 @@ describe('NotificationProcessor', () => {
         update: jest.fn().mockResolvedValue({}),
       },
     };
+    metricsMock = { incrementCallbackFailure: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -53,6 +56,10 @@ describe('NotificationProcessor', () => {
           useValue: {
             moveToDlq: jest.fn(),
           },
+        },
+        {
+          provide: MetricsService,
+          useValue: metricsMock,
         },
       ],
     }).compile();
@@ -153,6 +160,11 @@ describe('NotificationProcessor', () => {
       const error = new Error('Something went wrong');
 
       await processor.onFailed(job, error);
+
+      expect(metricsMock.incrementCallbackFailure).toHaveBeenCalledWith(
+        'notification_job',
+        'Something went wrong',
+      );
 
       expect(prismaMock.notificationOutbox.update).toHaveBeenCalledWith({
         where: { id: 'outbox-abc' },

@@ -1,0 +1,51 @@
+[
+  {
+    "fields": {
+      "name": {"value": "John Doe", "confidence": 0.92},
+      "date_of_birth": {"value": "15/03/1988", "confidence": 0.95},
+      "id_number": {"value": "A1B2C3D4E5", "confidence": 0.97}
+    },
+    "raw_text": "Full Name: John Doe\nDate of Birth: 15/03/1988\nID Number: A1B2C3D4E5\nNationality: Sample",
+    "processing_time_ms": 145
+  },
+  {
+    "fields": {
+      "name": {"value": "Jane Smith", "confidence": 0.88},
+      "date_of_birth": {"value": "22/11/1992", "confidence": 0.91},
+      "id_number": {"value": "F6G7H8I9J0", "confidence": 0.94}
+    },
+    "raw_text": "Name: Jane Smith\nDOB: 22/11/1992\nID: F6G7H8I9J0\nAddress: 123 Main Street",
+    "processing_time_ms": 132
+  },
+  {
+    "fields": {
+      "name": {"value": "Ahmed Hassan", "confidence": 0.85},
+      "date_of_birth": {"value": "03/07/1975", "confidence": 0.89}
+    },
+    "raw_text": "Full Name: Ahmed Hassan\nDate of Birth: 03/07/1975\nPlace of Birth: Cairo\nOccupation: Engineer",
+    "processing_time_ms": 158
+  },
+  {
+    "fields": {
+      "name": {"value": "Maria Garcia", "confidence": 0.90},
+      "date_of_birth": {"value": "11/02/1983", "confidence": 0.93},
+      "id_number": {"value": "K1L2M3N4P5", "confidence": 0.96}
+    },
+    "raw_text": "Name: Maria Garcia\nDOB: 11/02/1983\nID No: K1L2M3N4P5\nNationality: Colombian",
+    "processing_time_ms": 140
+  },
+  {
+    "fields": {},
+    "raw_text": "Unable to parse document. Image quality too low.",
+    "processing_time_ms": 95
+  },
+  {
+    "fields": {
+      "name": {"value": "Samuel Johnson", "confidence": 0.76},
+      "date_of_birth": {"value": "08/09/1965", "confidence": 0.82},
+      "id_number": {"value": "Q2R3S4T5U6", "confidence": 0.79}
+    },
+    "raw_text": "Full Name: Samuel Johnson\nDate of Birth: 08/09/1965\nID Number: Q2R3S4T5U6\nRegion: Kaduna State",
+    "processing_time_ms": 165
+  }
+]

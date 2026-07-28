@@ -23,14 +23,17 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { APP_GUARD } from '@nestjs/core';
 import { ApiKeyGuard } from './common/guards/api-key.guard';
 import { RolesGuard } from './auth/roles.guard';
+import { ScopesGuard } from './api-keys/scopes.guard';
 import { ObservabilityModule } from './observability/observability.module';
 import { ClaimsModule } from './claims/claims.module';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { LoggerService } from './logger/logger.service';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { AnalyticsModule } from './analytics/analytics.module';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerStorageService } from '@nestjs/throttler';
 import { AidEscrowModule } from './onchain/aid-escrow.module';
+import { CostAwareThrottlerGuard } from './common/guards/throttle.guard';
+import { getThrottlerConfig } from './common/config/rate-limit.config';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { SessionModule } from './session/session.module';
 import { CommonServicesModule } from './common/services/common-services.module';
@@ -38,9 +41,19 @@ import { EvidenceModule } from './evidence/evidence.module';
 import { RetentionPolicyModule } from './retention-policy/retention-policy.module';
 import { InvitesModule } from './orgs/invites.module';
 import { AdminSearchModule } from './search/admin-search.module';
+import { EntityLinkingModule } from './entity-linking/entity-linking.module';
+import { DeploymentMetadataModule } from './deployment-metadata/deployment-metadata.module';
 import { RedisModule } from '@liaoliaots/nestjs-redis';
 import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guard';
 import { DeprecationInterceptor } from './common/interceptors/deprecation.interceptor';
+import { SandboxModule } from './sandbox/sandbox.module';
+import { CacheModule } from './common/cache/cache.module';
+import { CacheResponseInterceptor } from './common/interceptors/cache-response.interceptor';
+
+import { WebhooksModule } from 'src/webhooks.module';
+import { CorrelationModule } from './common/modules/correlation.module';
+import { RecipientImportModule } from './recipient-import/recipient-import.module';
+import { DeviceTokensModule } from './device-tokens/device-tokens.module';
 
 @Module({
   imports: [
@@ -87,6 +100,7 @@ import { DeprecationInterceptor } from './common/interceptors/deprecation.interc
 
     LoggerModule,
     PrismaModule,
+    CacheModule,
     HealthModule,
     AidModule,
     VerificationModule,
@@ -107,6 +121,13 @@ import { DeprecationInterceptor } from './common/interceptors/deprecation.interc
     RetentionPolicyModule,
     InvitesModule,
     AdminSearchModule,
+    EntityLinkingModule,
+    DeploymentMetadataModule,
+    SandboxModule,
+    WebhooksModule,
+    CorrelationModule,
+    RecipientImportModule,
+    DeviceTokensModule,
     RedisModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
@@ -117,12 +138,57 @@ import { DeprecationInterceptor } from './common/interceptors/deprecation.interc
       }),
       inject: [ConfigService],
     }),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000, // 60 seconds window
-        limit: 20, // default: 20 req/min
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => {
+        const redisHost =
+          configService.get<string>('REDIS_HOST') ?? 'localhost';
+        const redisPort = parseInt(
+          configService.get<string>('REDIS_PORT') ?? '6379',
+          10,
+        );
+
+        // Try to use Redis storage for multi-instance compatibility
+        // Falls back to in-memory storage if Redis is unavailable
+        try {
+          const { createClient } = await import('redis');
+          const client = createClient({
+            socket: {
+              host: redisHost,
+              port: redisPort,
+              reconnectStrategy: (retries: number) => {
+                if (retries > 10) {
+                  console.warn(
+                    'ThrottlerModule: Failed to connect to Redis after 10 retries, falling back to in-memory storage',
+                  );
+                  return new Error(
+                    'Max retries exceeded for ThrottlerModule Redis',
+                  );
+                }
+                return retries * 50;
+              },
+            },
+          });
+
+          await client.connect();
+
+          return {
+            throttlers: getThrottlerConfig(),
+            storage: new ThrottlerStorageService(),
+          };
+        } catch (error) {
+          console.warn(
+            'ThrottlerModule: Redis unavailable, using in-memory storage',
+            error instanceof Error ? error.message : error,
+          );
+          // Fall back to in-memory storage for local development
+          return {
+            throttlers: getThrottlerConfig(),
+          };
+        }
       },
-    ]),
+      inject: [ConfigService],
+    }),
   ],
 
   controllers: [AppController],
@@ -142,7 +208,15 @@ import { DeprecationInterceptor } from './common/interceptors/deprecation.interc
     },
     {
       provide: APP_GUARD,
+      useClass: ScopesGuard, // runs third — checks request.user.scopes against @Scopes()
+    },
+    {
+      provide: APP_GUARD,
       useClass: AdaptiveRateLimitGuard, // Adaptive rate limiting using Redis
+    },
+    {
+      provide: APP_GUARD,
+      useClass: CostAwareThrottlerGuard, // NestJS Throttler with cost-aware per-endpoint limits
     },
     {
       provide: APP_INTERCEPTOR,
@@ -151,6 +225,10 @@ import { DeprecationInterceptor } from './common/interceptors/deprecation.interc
     {
       provide: APP_INTERCEPTOR,
       useClass: DeprecationInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: CacheResponseInterceptor,
     },
   ],
 })

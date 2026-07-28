@@ -11,13 +11,17 @@ import {
   ApiUnauthorizedResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { MetricsService } from 'src/audit/metrics.service';
 
 @ApiTags('Audit')
 @ApiBearerAuth('JWT-auth')
 @Roles(AppRole.admin)
 @Controller('audit')
 export class AuditController {
-  constructor(private readonly auditService: AuditService) {}
+  constructor(
+    private readonly auditService: AuditService,
+    private metricsService: MetricsService,
+  ) {}
 
   @Get()
   @Version('1')
@@ -132,5 +136,14 @@ export class AuditController {
     }
 
     return result;
+  }
+
+  @Get('metrics')
+  @ApiOperation({ summary: 'Get service metrics' })
+  @ApiOkResponse({ description: 'Prometheus metrics exported successfully.' })
+  async getMetrics(@Res() res: Response) {
+    res.set('Content-Type', 'text/plain');
+    const metrics = await this.metricsService.getMetrics();
+    res.send(metrics);
   }
 }

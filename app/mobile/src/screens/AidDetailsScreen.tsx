@@ -6,7 +6,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
+  Linking,
+  Alert,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
@@ -14,6 +17,7 @@ import { AppColors } from '../theme/useAppTheme';
 import { useBiometric } from '../contexts/BiometricContext';
 import {
   AidDetails,
+  ClaimTimelineStatus,
   ClaimStatus,
   fetchAidDetails,
   getMockAidDetails,
@@ -21,6 +25,7 @@ import {
 import { useSync } from '../contexts/SyncContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { SaverModeBanner } from '../components/SaverModeBanner';
+import { getTxExplorerUrl } from '../explorerUtils';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidDetails'>;
 
@@ -363,6 +368,8 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         </Text>
       </View>
 
+      <ClaimStatusTimeline details={details} colors={colors} styles={styles} />
+
       {details.status === 'disbursed' ? (
         <View style={styles.claimCompleteCard} accessibilityRole="status">
           <Text style={styles.claimCompleteTitle}>Claim completed</Text>
@@ -390,7 +397,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         {refreshing ? (
           <ActivityIndicator
             size="small"
-            color="#FFFFFF"
+            color={colors.background}
             accessibilityElementsHidden
           />
         ) : (
@@ -489,6 +496,156 @@ const InfoRow = ({
   </View>
 );
 
+type TimelineMilestone = {
+  key: ClaimTimelineStatus;
+  title: string;
+  description: string;
+  timestamp?: string;
+  transactionHash?: string;
+  explorerUrl?: string;
+  completed: boolean;
+};
+
+const ClaimStatusTimeline = ({
+  details,
+  colors,
+  styles,
+}: {
+  details: AidDetails;
+  colors: AppColors;
+  styles: ReturnType<typeof makeStyles>;
+}) => {
+  const milestones = useMemo(() => buildTimelineMilestones(details), [details]);
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle} accessibilityRole="header">
+        Status Timeline
+      </Text>
+      <View style={styles.timelineCard}>
+        {milestones.map((milestone, index) => (
+          <TimelineMilestoneRow
+            key={milestone.key}
+            milestone={milestone}
+            colors={colors}
+            styles={styles}
+            isLast={index === milestones.length - 1}
+          />
+        ))}
+      </View>
+    </View>
+  );
+};
+
+const TimelineMilestoneRow = ({
+  milestone,
+  colors,
+  styles,
+  isLast,
+}: {
+  milestone: TimelineMilestone;
+  colors: AppColors;
+  styles: ReturnType<typeof makeStyles>;
+  isLast: boolean;
+}) => {
+  const dateLabel = milestone.timestamp
+    ? formatDateTime(milestone.timestamp)
+    : milestone.completed
+    ? 'Confirmed, waiting for onchain timestamp'
+    : 'Pending onchain update';
+  const hashPreview = milestone.transactionHash
+    ? shortenHash(milestone.transactionHash)
+    : null;
+
+  const handleOpenExplorer = async () => {
+    if (!milestone.transactionHash) return;
+    await Linking.openURL(milestone.explorerUrl ?? getTxExplorerUrl(milestone.transactionHash));
+  };
+
+  const handleCopyHash = async () => {
+    if (!milestone.transactionHash) return;
+    try {
+      await Clipboard.setStringAsync(milestone.transactionHash);
+    } catch {
+      Alert.alert('Error', 'Failed to copy transaction hash');
+    }
+  };
+
+  return (
+    <View
+      style={styles.timelineRow}
+      accessible
+      accessibilityLabel={`${milestone.title}: ${dateLabel}`}
+    >
+      <View style={styles.timelineMarkerColumn} accessibilityElementsHidden>
+        <View
+          style={[
+            styles.timelineMarker,
+            {
+              backgroundColor: milestone.completed ? colors.brand.primary : colors.surface,
+              borderColor: milestone.completed ? colors.brand.primary : colors.border,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.timelineMarkerText,
+              { color: milestone.completed ? '#FFFFFF' : colors.textSecondary },
+            ]}
+          >
+            {milestone.completed ? 'OK' : '--'}
+          </Text>
+        </View>
+        {!isLast ? (
+          <View
+            style={[
+              styles.timelineConnector,
+              { backgroundColor: milestone.completed ? colors.brand.primary : colors.border },
+            ]}
+          />
+        ) : null}
+      </View>
+      <View style={styles.timelineContent}>
+        <View style={styles.timelineHeaderRow}>
+          <Text style={styles.timelineTitle}>{milestone.title}</Text>
+          <Text
+            style={[
+              styles.timelineState,
+              { color: milestone.completed ? colors.success : colors.textMuted },
+            ]}
+          >
+            {milestone.completed ? 'Done' : 'Waiting'}
+          </Text>
+        </View>
+        <Text style={styles.timelineDescription}>{milestone.description}</Text>
+        <Text style={styles.timelineDate}>{dateLabel}</Text>
+        {hashPreview ? (
+          <View style={styles.timelineActions}>
+            <TouchableOpacity
+              accessibilityRole="link"
+              accessibilityLabel={`Open explorer for ${milestone.title} transaction`}
+              style={styles.timelineActionButton}
+              onPress={handleOpenExplorer}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.timelineActionText}>Explorer {hashPreview}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Copy ${milestone.title} transaction hash`}
+              style={styles.timelineActionButton}
+              onPress={handleCopyHash}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.timelineActionText}>Copy hash</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+};
+
 const StepProgress = ({
   status,
   colors,
@@ -499,6 +656,7 @@ const StepProgress = ({
   const steps: Array<{ key: ClaimStatus; label: string }> = [
     { key: 'requested', label: 'Requested' },
     { key: 'verified', label: 'Verified' },
+    { key: 'approved', label: 'Approved' },
     { key: 'disbursed', label: 'Disbursed' },
   ];
   const activeIndex = steps.findIndex((step) => step.key === status);
@@ -536,7 +694,7 @@ const StepProgress = ({
               <Text
                 style={[
                   stylesShared.progressText,
-                  { color: isComplete ? '#FFFFFF' : colors.textSecondary },
+                  { color: isComplete ? colors.background : colors.textSecondary },
                 ]}
               >
                 {index + 1}
@@ -569,6 +727,96 @@ const StepProgress = ({
 const formatStatus = (status: ClaimStatus) =>
   status.charAt(0).toUpperCase() + status.slice(1);
 
+const timelineDefinitions: Array<{
+  key: ClaimTimelineStatus;
+  title: string;
+  description: string;
+}> = [
+  {
+    key: 'verification',
+    title: 'Verification',
+    description: 'Recipient and package details were checked.',
+  },
+  {
+    key: 'approval',
+    title: 'Approval',
+    description: 'The aid package was approved for claiming.',
+  },
+  {
+    key: 'claim',
+    title: 'Claim',
+    description: 'The beneficiary claim was submitted.',
+  },
+  {
+    key: 'disbursement',
+    title: 'Disbursement',
+    description: 'Funds were released to the recipient.',
+  },
+];
+
+const statusRank: Record<ClaimStatus, number> = {
+  requested: 0,
+  verified: 1,
+  approved: 2,
+  disbursed: 3,
+};
+
+const buildTimelineMilestones = (details: AidDetails): TimelineMilestone[] => {
+  const timelineByStatus = new Map(
+    (details.timeline ?? []).map((event) => [event.status, event]),
+  );
+  const currentRank = statusRank[details.status] ?? 0;
+
+  return timelineDefinitions.map((definition, index) => {
+    const event = timelineByStatus.get(definition.key);
+    const fallbackTimestamp = getTimelineTimestamp(details, definition.key);
+    const transactionHash = event?.transactionHash ?? getTimelineHash(details, definition.key);
+
+    return {
+      key: definition.key,
+      title: event?.label ?? definition.title,
+      description: definition.description,
+      timestamp: event?.timestamp ?? fallbackTimestamp,
+      transactionHash,
+      explorerUrl: event?.explorerUrl,
+      completed: Boolean(event?.timestamp || transactionHash) || currentRank >= index,
+    };
+  });
+};
+
+const getTimelineTimestamp = (details: AidDetails, key: ClaimTimelineStatus) => {
+  switch (key) {
+    case 'verification':
+      return details.verifiedAt;
+    case 'approval':
+      return details.approvedAt;
+    case 'claim':
+      return details.claimedAt ?? details.createdAt;
+    case 'disbursement':
+      return details.disbursedAt;
+    default:
+      return undefined;
+  }
+};
+
+const getTimelineHash = (details: AidDetails, key: ClaimTimelineStatus) => {
+  switch (key) {
+    case 'verification':
+      return details.verificationTransactionHash;
+    case 'approval':
+      return details.approvalTransactionHash;
+    case 'claim':
+      return details.claimTransactionHash;
+    case 'disbursement':
+      return details.disbursementTransactionHash;
+    default:
+      return undefined;
+  }
+};
+
+const shortenHash = (value: string) =>
+  value.length > 16 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
+
 const formatDate = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -594,8 +842,10 @@ const statusPillStyle = (status: ClaimStatus, colors: AppColors) => {
   switch (status) {
     case 'verified':
       return { backgroundColor: colors.infoBg, textColor: colors.info };
+    case 'approved':
+      return { backgroundColor: colors.successBg, textColor: colors.success };
     case 'disbursed':
-      return { backgroundColor: colors.success, textColor: '#FFFFFF' };
+      return { backgroundColor: colors.success, textColor: colors.background };
     case 'requested':
     default:
       return { backgroundColor: colors.warningBg, textColor: colors.warning };
@@ -701,7 +951,7 @@ const makeStyles = (colors: AppColors) =>
     statusText: {
       fontSize: 12,
       fontWeight: '700',
-      color: '#FFFFFF',
+      color: colors.background,
     },
     section: {
       gap: 8,
@@ -728,6 +978,90 @@ const makeStyles = (colors: AppColors) =>
       fontSize: 13,
       color: colors.textSecondary,
       marginTop: 4,
+    },
+    timelineCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 0,
+    },
+    timelineRow: {
+      flexDirection: 'row',
+      alignItems: 'stretch',
+    },
+    timelineMarkerColumn: {
+      alignItems: 'center',
+      marginRight: 12,
+    },
+    timelineMarker: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      borderWidth: 2,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    timelineMarkerText: {
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    timelineConnector: {
+      width: 2,
+      flex: 1,
+      minHeight: 42,
+      marginVertical: 4,
+    },
+    timelineContent: {
+      flex: 1,
+      paddingBottom: 18,
+    },
+    timelineHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 12,
+    },
+    timelineTitle: {
+      flex: 1,
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    timelineState: {
+      fontSize: 12,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+    },
+    timelineDescription: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      lineHeight: 18,
+      marginTop: 3,
+    },
+    timelineDate: {
+      fontSize: 12,
+      color: colors.textMuted,
+      marginTop: 5,
+    },
+    timelineActions: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 10,
+    },
+    timelineActionButton: {
+      borderWidth: 1,
+      borderColor: colors.brand.primary,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+    },
+    timelineActionText: {
+      color: colors.brand.primary,
+      fontSize: 12,
+      fontWeight: '700',
     },
     notice: {
       backgroundColor: colors.warningBg,
@@ -778,7 +1112,7 @@ const makeStyles = (colors: AppColors) =>
       opacity: 0.7,
     },
     buttonText: {
-      color: '#FFFFFF',
+      color: colors.background,
       fontSize: 16,
       fontWeight: '700',
     },

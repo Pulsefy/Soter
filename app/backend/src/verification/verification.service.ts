@@ -1,17 +1,39 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { Request } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
+import { ClaimStatus, Prisma } from '@prisma/client';
 import { CreateVerificationDto } from './dto/create-verification.dto';
+import {
+  ReviewQueuePaginationMode,
+  ReviewQueueQueryDto,
+} from './dto/review-queue-query.dto';
 import {
   VerificationJobData,
   VerificationResult,
 } from './interfaces/verification-job.interface';
+import {
+  DEFAULT_VERIFICATION_PRIORITY,
+  EnqueueVerificationDto,
+  VerificationPriority,
+} from './dto/enqueue-verification.dto';
 import { AuditService } from '../audit/audit.service';
 import { firstValueFrom } from 'rxjs';
 import OpenAI from 'openai';
+import * as crypto from 'crypto';
+import { CircuitBreaker } from '../common/utils/circuit-breaker.util';
+import { VerificationMetadataService } from './metadata.service';
+import { VerificationResultDto } from './dto/verification-result.dto';
+import { CorrelationPropagationUtil } from '../common/utils/correlation-propagation.util';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 // ---------------------------------------------------------------------------
 // OCR service types
@@ -63,6 +85,51 @@ interface AIVerificationResponse {
 // Service
 // ---------------------------------------------------------------------------
 
+type ReviewQueueCursorPayload = {
+  createdAt: string;
+  id: string;
+};
+
+const reviewQueueClaimArgs = {
+  include: {
+    campaign: {
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        archivedAt: true,
+      },
+    },
+  },
+} satisfies Prisma.ClaimDefaultArgs;
+
+type ReviewQueueItem = Prisma.ClaimGetPayload<typeof reviewQueueClaimArgs>;
+
+type ReviewQueueResponse = {
+  items: ReviewQueueItem[];
+  pagination:
+    | {
+        mode: 'page';
+        page: number;
+        limit: number;
+        totalItems: number;
+        totalPages: number;
+        hasNextPage: boolean;
+      }
+    | {
+        mode: 'cursor';
+        limit: number;
+        nextCursor: string | null;
+        hasNextPage: boolean;
+      };
+  filters: {
+    status?: ClaimStatus[];
+    campaignId?: string;
+    fromDate?: string;
+    toDate?: string;
+  };
+};
+
 @Injectable()
 export class VerificationService {
   private readonly logger = new Logger(VerificationService.name);
@@ -72,6 +139,8 @@ export class VerificationService {
   private readonly aiServiceTimeout: number;
   private readonly openaiModel: string;
   private readonly openai: OpenAI | null;
+  private readonly ocrCircuitBreaker: CircuitBreaker;
+  private readonly llmCircuitBreaker: CircuitBreaker;
 
   constructor(
     @InjectQueue('verification') private verificationQueue: Queue,
@@ -79,6 +148,9 @@ export class VerificationService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly httpService: HttpService,
+    private readonly verificationMetadataService: VerificationMetadataService,
+    private readonly correlationUtil: CorrelationPropagationUtil,
+    private readonly metricsService: MetricsService,
   ) {
     this.verificationMode =
       this.configService.get<string>('VERIFICATION_MODE') || 'mock';
@@ -108,13 +180,39 @@ export class VerificationService {
         'OPENAI_API_KEY not set – AI verification will fall back to mock scoring',
       );
     }
+
+    this.ocrCircuitBreaker = new CircuitBreaker({
+      failureThreshold: parseInt(
+        this.configService.get<string>('OCR_CIRCUIT_BREAKER_THRESHOLD') || '3',
+        10,
+      ),
+      resetTimeout: parseInt(
+        this.configService.get<string>('OCR_CIRCUIT_BREAKER_RESET_TIMEOUT') ||
+          '30000',
+        10,
+      ),
+    });
+    this.llmCircuitBreaker = new CircuitBreaker({
+      failureThreshold: parseInt(
+        this.configService.get<string>('LLM_CIRCUIT_BREAKER_THRESHOLD') || '3',
+        10,
+      ),
+      resetTimeout: parseInt(
+        this.configService.get<string>('LLM_CIRCUIT_BREAKER_RESET_TIMEOUT') ||
+          '30000',
+        10,
+      ),
+    });
   }
 
   // -------------------------------------------------------------------------
   // Public API
   // -------------------------------------------------------------------------
 
-  async enqueueVerification(claimId: string): Promise<{ jobId: string }> {
+  async enqueueVerification(
+    claimId: string,
+    dto?: EnqueueVerificationDto,
+  ): Promise<{ jobId: string; priority: VerificationPriority }> {
     const claim = await this.prisma.claim.findUnique({
       where: { id: claimId },
     });
@@ -125,15 +223,31 @@ export class VerificationService {
 
     if (claim.status === 'verified') {
       this.logger.warn(`Claim ${claimId} is already verified`);
-      return { jobId: 'already-verified' };
+      return {
+        jobId: 'already-verified',
+        priority: DEFAULT_VERIFICATION_PRIORITY,
+      };
     }
+
+    const priority = dto?.priority ?? DEFAULT_VERIFICATION_PRIORITY;
+    const anchorMetadata = dto?.anchorMetadata;
 
     const jobData: VerificationJobData = {
       claimId,
       timestamp: Date.now(),
+      priority,
+      anchorMetadata: anchorMetadata
+        ? {
+            campaignRef: anchorMetadata.campaignRef ?? null,
+            claimId: anchorMetadata.claimId ?? null,
+            packageId: anchorMetadata.packageId ?? null,
+            contractId: anchorMetadata.contractId ?? null,
+          }
+        : undefined,
     };
 
     const job = await this.verificationQueue.add('verify-claim', jobData, {
+      priority,
       attempts: parseInt(
         this.configService.get<string>('QUEUE_MAX_RETRIES') || '3',
       ),
@@ -145,26 +259,38 @@ export class VerificationService {
       removeOnFail: 50,
     });
 
-    this.logger.log(`Enqueued verification job ${job.id} for claim ${claimId}`);
+    const priorityLabel = VerificationPriority[priority] ?? String(priority);
+    this.logger.log(
+      `Enqueued verification job ${job.id} for claim ${claimId} [priority=${priorityLabel}(${priority})]`,
+    );
+
+    this.metricsService.incrementVerificationJobEnqueued(priorityLabel);
 
     await this.auditService.record({
       actorId: 'system',
       entity: 'verification',
       entityId: claimId,
       action: 'enqueue',
-      metadata: { jobId: job.id || 'unknown' },
+      metadata: {
+        jobId: job.id || 'unknown',
+        priority,
+        priorityLabel,
+        anchorMetadata,
+      },
     });
 
-    return { jobId: job.id || 'unknown' };
+    return { jobId: job.id || 'unknown', priority };
   }
 
   async processVerification(
     jobData: VerificationJobData,
   ): Promise<VerificationResult> {
-    const { claimId } = jobData;
+    const { claimId, anchorMetadata, priority } = jobData;
+    const priorityLabel = VerificationPriority[priority] ?? String(priority);
 
     this.logger.log(
-      `Processing verification for claim ${claimId} in ${this.verificationMode} mode`,
+      `Processing verification for claim ${claimId} in ${this.verificationMode} mode` +
+        ` [priority=${priorityLabel}(${priority})]`,
     );
 
     const claim = await this.prisma.claim.findUnique({
@@ -177,24 +303,48 @@ export class VerificationService {
 
     let result: VerificationResult;
 
-    if (this.verificationMode === 'mock') {
+    if (this.verificationMode === 'test') {
+      result = this.generateTestVerification(claim);
+    } else if (this.verificationMode === 'mock') {
       result = this.generateMockVerification(claim);
     } else {
       result = await this.performAIVerification(claim);
     }
 
-    const shouldVerify = result.score >= this.verificationThreshold;
+    // ENHANCED: Add contract-aware metadata to result
+    const enhancedResult = await this.enhanceResultWithMetadata(
+      result,
+      claimId,
+      claim.campaignId,
+    );
 
+    const shouldVerify = enhancedResult.score >= this.verificationThreshold;
+
+    // Build anchor metadata to persist
+    const anchorMetadataToPersist = anchorMetadata
+      ? {
+          campaignRef: anchorMetadata.campaignRef ?? null,
+          claimId: anchorMetadata.claimId ?? null,
+          packageId: anchorMetadata.packageId ?? null,
+          contractId: anchorMetadata.contractId ?? null,
+        }
+      : null;
+
+    // Update claim with verification result including metadata
     await this.prisma.claim.update({
       where: { id: claimId },
       data: {
         status: shouldVerify ? 'verified' : 'requested',
+        anchorMetadata:
+          anchorMetadataToPersist === null
+            ? Prisma.JsonNull
+            : (anchorMetadataToPersist as Prisma.InputJsonValue),
       },
     });
 
     this.logger.log(
-      `Claim ${claimId} verification completed – score ${result.score} ` +
-        `(threshold: ${this.verificationThreshold})`,
+      `Claim ${claimId} verification completed – score ${enhancedResult.score} ` +
+        `(threshold: ${this.verificationThreshold}, packageId: ${enhancedResult.metadata?.packageId})`,
     );
 
     await this.auditService.record({
@@ -203,12 +353,15 @@ export class VerificationService {
       entityId: claimId,
       action: 'complete',
       metadata: {
-        score: result.score,
+        score: enhancedResult.score,
         status: shouldVerify ? 'verified' : 'requested',
+        packageId: enhancedResult.metadata?.packageId,
+        network: enhancedResult.metadata?.network,
+        anchorMetadata: anchorMetadataToPersist,
       },
     });
 
-    return result;
+    return enhancedResult;
   }
 
   // -------------------------------------------------------------------------
@@ -351,16 +504,21 @@ the JSON verdict.
       `Calling OpenAI (${this.openaiModel}) for claim ${claim.id}`,
     );
 
-    const response = await this.openai!.chat.completions.create({
-      model: this.openaiModel,
-      temperature: 0, // deterministic scoring
-      max_tokens: 512,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-    });
+    const response = await this.llmCircuitBreaker.fire(() =>
+      this.openai!.chat.completions.create(
+        {
+          model: this.openaiModel,
+          temperature: 0, // deterministic scoring
+          max_tokens: 512,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+        },
+        { timeout: this.aiServiceTimeout },
+      ),
+    );
 
     const rawContent = response.choices[0]?.message?.content ?? '';
 
@@ -476,14 +634,26 @@ the JSON verdict.
 
   private async callOCRService(documentUrl: string): Promise<OCRResponse> {
     try {
-      const response = await firstValueFrom(
-        this.httpService.post(
-          `${this.aiServiceUrl}/ai/ocr`,
-          { document_url: documentUrl },
-          {
-            timeout: this.aiServiceTimeout,
-            headers: { 'Content-Type': 'application/json' },
-          },
+      // Get correlation ID and propagate to OCR service
+      const correlationId = this.correlationUtil.getCurrentCorrelationId();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (correlationId) {
+        headers['x-correlation-id'] = correlationId;
+      }
+
+      const response = await this.ocrCircuitBreaker.fire(() =>
+        firstValueFrom(
+          this.httpService.post(
+            `${this.aiServiceUrl}/ai/ocr`,
+            { document_url: documentUrl },
+            {
+              timeout: this.aiServiceTimeout,
+              headers,
+            },
+          ),
         ),
       );
       return response.data as OCRResponse;
@@ -508,6 +678,10 @@ the JSON verdict.
       }
     }
   }
+
+  // private getCorrelationIdForOutbound(): string | null {
+  //   return this.correlationUtil.getCurrentCorrelationId();
+  // }
 
   // -------------------------------------------------------------------------
   // Result builders
@@ -549,6 +723,48 @@ the JSON verdict.
       },
       processedAt: new Date(),
     };
+  }
+
+  /**
+   * Enhances a verification result with contract-aware metadata
+   */
+  private async enhanceResultWithMetadata(
+    result: VerificationResult,
+    claimId: string,
+    campaignId: string,
+  ): Promise<VerificationResult> {
+    // Convert to DTO first
+    const resultDto: VerificationResultDto = {
+      score: result.score,
+      confidence: result.confidence,
+      details: result.details,
+      processedAt: result.processedAt || new Date(),
+    };
+
+    // Enhance with contract-aware metadata
+    const enhanced = await this.verificationMetadataService.enhanceWithMetadata(
+      resultDto,
+      claimId,
+      campaignId,
+    );
+
+    // Log warnings if any
+    if (enhanced.warnings && enhanced.warnings.length > 0) {
+      this.logger.warn(
+        `Metadata warnings for claim ${claimId}: ${enhanced.warnings.join(', ')}`,
+      );
+    }
+
+    return {
+      score: enhanced.score,
+      confidence: enhanced.confidence,
+      details: enhanced.details,
+      processedAt: enhanced.processedAt,
+      // Add metadata to result
+      metadata: enhanced.metadata,
+      warnings: enhanced.warnings,
+      validationErrors: enhanced.validationErrors,
+    } as VerificationResult;
   }
 
   /** Heuristic: treat strings that start with http/https as URLs. */
@@ -593,6 +809,111 @@ the JSON verdict.
   }
 
   // -------------------------------------------------------------------------
+  // Test (deterministic fixture-driven)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Deterministic verification for staging/testnet.
+   *
+   * Uses a SHA-256 hash of the claim ID to select from a set of fixture
+   * responses, so identical inputs always produce the same output.
+   */
+  private _fixtures: VerificationResult[] = [
+    {
+      score: 0.88,
+      confidence: 0.92,
+      details: {
+        factors: [
+          'All verification criteria met',
+          'Document authenticity confirmed',
+        ],
+        riskLevel: 'low',
+      },
+      processedAt: new Date(),
+    },
+    {
+      score: 0.76,
+      confidence: 0.84,
+      details: {
+        factors: [
+          'Identity cross-reference passed',
+          'No fraud indicators detected',
+        ],
+        riskLevel: 'low',
+      },
+      processedAt: new Date(),
+    },
+    {
+      score: 0.62,
+      confidence: 0.71,
+      details: {
+        factors: [
+          'Partial evidence provided',
+          'Additional documentation may strengthen claim',
+        ],
+        riskLevel: 'medium',
+        recommendations: [
+          'Manual review recommended',
+          'Request supplementary evidence',
+        ],
+      },
+      processedAt: new Date(),
+    },
+    {
+      score: 0.45,
+      confidence: 0.65,
+      details: {
+        factors: [
+          'Inconsistent information detected',
+          'Claim requires further investigation',
+        ],
+        riskLevel: 'high',
+        recommendations: [
+          'Manual review required',
+          'Verify applicant identity independently',
+        ],
+      },
+      processedAt: new Date(),
+    },
+    {
+      score: 0.93,
+      confidence: 0.95,
+      details: {
+        factors: [
+          'Strong corroborating evidence from multiple sources',
+          'Aid amount proportionate to documented need',
+        ],
+        riskLevel: 'low',
+      },
+      processedAt: new Date(),
+    },
+    {
+      score: 0.55,
+      confidence: 0.68,
+      details: {
+        factors: [
+          'Insufficient evidence to reach full confidence',
+          'Standard review triggered',
+        ],
+        riskLevel: 'medium',
+        recommendations: ['Manual review recommended'],
+      },
+      processedAt: new Date(),
+    },
+  ];
+
+  private generateTestVerification(claim: Claim): VerificationResult {
+    const hash = crypto.createHash('sha256').update(claim.id).digest('hex');
+    const idx = parseInt(hash.slice(0, 8), 16) % this._fixtures.length;
+    const fixture = this._fixtures[idx];
+    return {
+      ...fixture,
+      processedAt: new Date(),
+      details: { ...fixture.details },
+    };
+  }
+
+  // -------------------------------------------------------------------------
   // CRUD / queue utilities (unchanged)
   // -------------------------------------------------------------------------
 
@@ -614,6 +935,73 @@ the JSON verdict.
 
   async findByUser(_userId: string) {
     return Promise.resolve([]);
+  }
+
+  async getReviewQueue(
+    query: ReviewQueueQueryDto,
+  ): Promise<ReviewQueueResponse> {
+    const limit = query.limit ?? 20;
+    const filters = this.buildReviewQueueFilters(query);
+    const paginationMode = query.getPaginationMode();
+
+    if (paginationMode === ReviewQueuePaginationMode.CURSOR) {
+      const cursorFilter = query.cursor
+        ? [this.buildCursorFilter(this.decodeReviewQueueCursor(query.cursor))]
+        : [];
+      const where = [...filters, ...cursorFilter];
+      const items = await this.prisma.claim.findMany({
+        where: where.length > 0 ? { AND: where } : undefined,
+        ...reviewQueueClaimArgs,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1,
+      });
+
+      const hasNextPage = items.length > limit;
+      const pageItems: ReviewQueueItem[] = items.slice(0, limit);
+      const nextCursor =
+        hasNextPage && pageItems.length > 0
+          ? this.encodeReviewQueueCursor(pageItems[pageItems.length - 1])
+          : null;
+
+      return {
+        items: pageItems,
+        pagination: {
+          mode: 'cursor',
+          limit,
+          nextCursor,
+          hasNextPage,
+        },
+        filters: this.buildAppliedFilters(query),
+      };
+    }
+
+    const page = query.page ?? 1;
+    const skip = (page - 1) * limit;
+    const where = filters.length > 0 ? { AND: filters } : undefined;
+
+    const [items, totalItems] = await Promise.all([
+      this.prisma.claim.findMany({
+        where,
+        ...reviewQueueClaimArgs,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+      }),
+      this.prisma.claim.count({ where }),
+    ]);
+
+    return {
+      items,
+      pagination: {
+        mode: 'page',
+        page,
+        limit,
+        totalItems,
+        totalPages: totalItems === 0 ? 0 : Math.ceil(totalItems / limit),
+        hasNextPage: skip + items.length < totalItems,
+      },
+      filters: this.buildAppliedFilters(query),
+    };
   }
 
   async update(id: string, updateVerificationDto: Record<string, unknown>) {
@@ -639,12 +1027,163 @@ the JSON verdict.
       this.verificationQueue.getFailedCount(),
     ]);
 
+    // Build a per-priority breakdown of waiting jobs.
+    // BullMQ stores waiting jobs with their priority in the payload; we iterate
+    // the waiting set and tally by the `priority` field we embed in jobData.
+    const waitingJobs = await this.verificationQueue.getWaiting(0, -1);
+    const priorityCounts: Record<string, number> = {
+      [VerificationPriority.URGENT]: 0,
+      [VerificationPriority.HIGH]: 0,
+      [VerificationPriority.NORMAL]: 0,
+      [VerificationPriority.LOW]: 0,
+    };
+    for (const job of waitingJobs) {
+      const p =
+        (job.data as VerificationJobData).priority ??
+        DEFAULT_VERIFICATION_PRIORITY;
+      if (p in priorityCounts) {
+        priorityCounts[p]++;
+      }
+    }
+
+    const breakdown = {
+      urgent: priorityCounts[VerificationPriority.URGENT],
+      high: priorityCounts[VerificationPriority.HIGH],
+      normal: priorityCounts[VerificationPriority.NORMAL],
+      low: priorityCounts[VerificationPriority.LOW],
+    };
+
+    // Keep Prometheus gauges in sync with the current snapshot.
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'URGENT',
+      breakdown.urgent,
+    );
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'HIGH',
+      breakdown.high,
+    );
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'NORMAL',
+      breakdown.normal,
+    );
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'LOW',
+      breakdown.low,
+    );
+
     return {
       waiting,
       active,
       completed,
       failed,
       total: waiting + active + completed + failed,
+      priorityBreakdown: breakdown,
     };
+  }
+
+  private buildReviewQueueFilters(
+    query: ReviewQueueQueryDto,
+  ): Prisma.ClaimWhereInput[] {
+    const filters: Prisma.ClaimWhereInput[] = [];
+
+    if (query.status?.length) {
+      filters.push({
+        status: {
+          in: query.status,
+        },
+      });
+    }
+
+    if (query.campaignId) {
+      filters.push({ campaignId: query.campaignId });
+    }
+
+    if (query.fromDate || query.toDate) {
+      filters.push({
+        createdAt: {
+          ...(query.fromDate ? { gte: new Date(query.fromDate) } : {}),
+          ...(query.toDate ? { lte: new Date(query.toDate) } : {}),
+        },
+      });
+    }
+
+    return filters;
+  }
+
+  private buildAppliedFilters(query: ReviewQueueQueryDto) {
+    return {
+      ...(query.status?.length ? { status: query.status } : {}),
+      ...(query.campaignId ? { campaignId: query.campaignId } : {}),
+      ...(query.fromDate ? { fromDate: query.fromDate } : {}),
+      ...(query.toDate ? { toDate: query.toDate } : {}),
+    };
+  }
+
+  private buildCursorFilter(
+    cursor: ReviewQueueCursorPayload,
+  ): Prisma.ClaimWhereInput {
+    const cursorCreatedAt = new Date(cursor.createdAt);
+
+    return {
+      OR: [
+        {
+          createdAt: {
+            lt: cursorCreatedAt,
+          },
+        },
+        {
+          createdAt: cursorCreatedAt,
+          id: {
+            lt: cursor.id,
+          },
+        },
+      ],
+    };
+  }
+
+  private encodeReviewQueueCursor(
+    item: Pick<ReviewQueueItem, 'createdAt' | 'id'>,
+  ) {
+    return Buffer.from(
+      JSON.stringify({
+        createdAt: item.createdAt.toISOString(),
+        id: item.id,
+      }),
+      'utf8',
+    ).toString('base64url');
+  }
+
+  private decodeReviewQueueCursor(cursor: string): ReviewQueueCursorPayload {
+    try {
+      const parsed = JSON.parse(
+        Buffer.from(cursor, 'base64url').toString('utf8'),
+      ) as {
+        createdAt?: unknown;
+        id?: unknown;
+      };
+
+      if (
+        typeof parsed.createdAt !== 'string' ||
+        typeof parsed.id !== 'string'
+      ) {
+        throw new BadRequestException('Invalid review queue cursor');
+      }
+
+      const createdAt = new Date(parsed.createdAt);
+      if (Number.isNaN(createdAt.getTime())) {
+        throw new BadRequestException('Invalid review queue cursor');
+      }
+
+      return {
+        createdAt: createdAt.toISOString(),
+        id: parsed.id,
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
+      throw new BadRequestException('Invalid review queue cursor');
+    }
   }
 }

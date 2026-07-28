@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { VerificationChannel } from '@prisma/client';
+import type { VerificationChannel } from '@prisma/client';
 import {
   StartVerificationDto,
   VerificationChannelDto,

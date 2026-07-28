@@ -70,6 +70,16 @@ export function resolveDeepLink(
       const claimId = data.claimId as string | undefined;
       return claimId ? { screen: 'ClaimReceipt', params: { claimId } } : null;
     }
+    case 'EvidenceUpload': {
+      const aidId = data.aidId as string | undefined;
+      return aidId ? { screen: 'EvidenceUpload', params: { aidId } } : null;
+    }
+    case 'TaskList':
+      return { screen: 'TaskList' };
+    case 'SubmissionQueue':
+      return { screen: 'SubmissionQueue' };
+    case 'Health':
+      return { screen: 'Health' };
     case 'Settings':
       return { screen: 'Settings' };
     case 'AidOverview':

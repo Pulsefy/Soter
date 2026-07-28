@@ -1,0 +1,18 @@
+[
+  {
+    "name": "email test",
+    "expected": "Contact me at [REDACTED_EMAIL]"
+  },
+  {
+    "name": "phone test",
+    "expected": "Call me on [REDACTED_PHONE]"
+  },
+  {
+    "name": "id test",
+    "expected": "My ID is [REDACTED_ID]"
+  },
+  {
+    "name": "safe text",
+    "expected": "The sky is blue"
+  }
+]

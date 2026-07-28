@@ -9,6 +9,7 @@ import { CORRELATION_ID_KEY } from '../common/utils/correlation-id.util';
 import { redactLogData } from '../logger/log-redaction.util';
 
 import { Prisma } from '@prisma/client';
+import { MetricsService } from 'src/audit/metrics.service';
 
 export interface AuditLogParams {
   actorId: string;
@@ -117,6 +118,29 @@ export class AuditService {
         'auditLog.create',
         (Date.now() - startTime) / 1000,
       );
+    const end = this.metrics.dbQueryDuration.startTimer({
+      operation: 'create',
+      entity: 'AuditLog',
+    });
+    try {
+      const result = await this.prisma.auditLog.create({
+        data: {
+          actorId: params.actorId,
+          entity: params.entity,
+          entityId: params.entityId,
+          action: params.action,
+          metadata: (params.metadata as Prisma.InputJsonValue) ?? {},
+        },
+      });
+      end();
+      return result;
+    } catch (error) {
+      this.metrics.dbErrorsTotal.inc({
+        operation: 'create',
+        entity: 'AuditLog',
+      });
+      end();
+      throw error;
     }
   }
 
@@ -139,6 +163,10 @@ export class AuditService {
     }
 
     const startTime = Date.now();
+    const end = this.metrics.dbQueryDuration.startTimer({
+      operation: 'findMany',
+      entity: 'AuditLog',
+    });
     try {
       const [rows, total] = await this.prisma.$transaction([
         this.prisma.auditLog.findMany({
@@ -163,6 +191,15 @@ export class AuditService {
         'auditLog.findMany',
         (Date.now() - startTime) / 1000,
       );
+      end();
+      return { data: rows, total, page, limit };
+    } catch (error) {
+      this.metrics.dbErrorsTotal.inc({
+        operation: 'findMany',
+        entity: 'AuditLog',
+      });
+      end();
+      throw error;
     }
   }
 
@@ -195,6 +232,12 @@ export class AuditService {
 
     try {
       [rows, total] = await this.prisma.$transaction([
+    const end = this.metrics.dbQueryDuration.startTimer({
+      operation: 'export',
+      entity: 'AuditLog',
+    });
+    try {
+      const [rows, total] = await this.prisma.$transaction([
         this.prisma.auditLog.findMany({
           where,
           orderBy: { timestamp: 'desc' },
@@ -230,6 +273,27 @@ export class AuditService {
     }));
 
     return { data, total, page, limit };
+      end();
+
+      const data: AnonymizedAuditLog[] = rows.map(row => ({
+        id: row.id,
+        actorHash: this.anonymize(row.actorId),
+        entity: row.entity,
+        entityHash: this.anonymize(row.entityId),
+        action: row.action,
+        timestamp: row.timestamp,
+        metadata: row.metadata,
+      }));
+
+      return { data, total, page, limit };
+    } catch (error) {
+      this.metrics.dbErrorsTotal.inc({
+        operation: 'export',
+        entity: 'AuditLog',
+      });
+      end();
+      throw error;
+    }
   }
 
   buildCsv(rows: AnonymizedAuditLog[]): string {

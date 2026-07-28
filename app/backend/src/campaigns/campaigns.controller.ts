@@ -107,6 +107,22 @@ export class CampaignsController {
     return ApiResponseDto.ok(campaign, 'Campaign fetched successfully');
   }
 
+  @Get(':id/timeline')
+  @ApiOperation({
+    summary: 'Get campaign milestone timeline',
+    description:
+      'Returns issuance, verification, claim, and disbursement milestones derived from backend and onchain state.',
+  })
+  @ApiOkResponse({ description: 'Campaign timeline retrieved successfully.' })
+  @ApiNotFoundResponse({ description: 'The specified campaign was not found.' })
+  async getTimeline(@Param('id') id: string) {
+    const timeline = await this.campaigns.getTimeline(id);
+    return ApiResponseDto.ok(
+      timeline,
+      'Campaign timeline fetched successfully',
+    );
+  }
+
   @Patch(':id')
   @UseGuards(OrgOwnershipGuard)
   @ApiOperation({

@@ -4,6 +4,7 @@ import { AuditService } from './audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import { MetricsService } from './metrics.service';
 
 describe('AuditService', () => {
   let service: AuditService;
@@ -27,6 +28,15 @@ describe('AuditService', () => {
       count: jest.fn().mockResolvedValue(0),
     },
     $transaction: jest.fn().mockResolvedValue([[mockRow], 1]),
+  };
+
+  const mockMetricsService = {
+    dbQueryDuration: {
+      startTimer: jest.fn(() => jest.fn()),
+    },
+    dbErrorsTotal: {
+      inc: jest.fn(),
+    },
   };
 
   beforeEach(async () => {
@@ -53,6 +63,8 @@ describe('AuditService', () => {
           useValue: {
             recordDbQueryDuration: jest.fn(),
           },
+          provide: MetricsService,
+          useValue: mockMetricsService,
         },
       ],
     }).compile();

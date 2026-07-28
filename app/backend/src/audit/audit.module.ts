@@ -7,6 +7,11 @@ import { MetricsModule } from '../observability/metrics/metrics.module';
 @Global()
 @Module({
   imports: [LoggerModule, MetricsModule],
+import { MetricsModule } from './metrics.module';
+
+@Global()
+@Module({
+  imports: [MetricsModule],
   providers: [AuditService],
   controllers: [AuditController],
   exports: [AuditService],
