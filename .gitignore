@@ -152,3 +152,8 @@ AGENTS.md
 .cody/
 # SpecStory
 .specstory/
+node_modules/
+.next/
+dist/
+.pnpm-home/
+npm_install_log.txt
