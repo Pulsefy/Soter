@@ -1,4 +1,4 @@
-.PHONY: all build test fmt clippy clean deploy help
+.PHONY: all build test fmt clippy clean deploy registry help
 
 all: test build
 
@@ -59,6 +59,10 @@ audit:
 	@echo "🔒 Auditing dependencies..."
 	@cargo audit
 
+registry:
+	@echo "📋 Generating contract registry..."
+	@python3 scripts/generate-registry.py
+
 docs:
 	@echo "📚 Generating documentation..."
 	@cargo doc --open
@@ -73,9 +77,11 @@ help:
 	@echo "  deploy    - Deploy contract to configured network"
 	@echo "  invoke    - Invoke contract function (set FUNCTION and ARGS)"
 	@echo "  audit     - Security audit of dependencies"
+	@echo "  registry  - Generate contract registry JSON for backend/frontend consumption"
 	@echo "  docs      - Generate and open documentation"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build"
 	@echo "  make deploy"
+	@echo "  make registry"
 	@echo "  make invoke FUNCTION=create_package ARGS=\"GB... 1000 USD...\""

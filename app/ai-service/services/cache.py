@@ -198,7 +198,9 @@ class CacheService:
             return 0
 
 
-def cached_response(prefix: str, ttl_seconds: int, key_tags: Optional[List[str]] = None):
+def cached_response(
+    prefix: str, ttl_seconds: int, key_tags: Optional[List[str]] = None
+):
     """
     Decorator to cache function responses based on normalized inputs.
 
@@ -229,7 +231,11 @@ def cached_response(prefix: str, ttl_seconds: int, key_tags: Optional[List[str]]
         def _resolve_tags(kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             if not key_tags:
                 return None
-            return {name: kwargs.get(name) for name in key_tags if kwargs.get(name) is not None}
+            return {
+                name: kwargs.get(name)
+                for name in key_tags
+                if kwargs.get(name) is not None
+            }
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -242,7 +248,9 @@ def cached_response(prefix: str, ttl_seconds: int, key_tags: Optional[List[str]]
                 return await func(*args, **kwargs)
 
             # Generate cache key
-            cache_key = cache._generate_key(prefix, *args, tags=_resolve_tags(kwargs), **kwargs)
+            cache_key = cache._generate_key(
+                prefix, *args, tags=_resolve_tags(kwargs), **kwargs
+            )
 
             # Try to retrieve from cache
             cached_value = cache.get(cache_key)
@@ -271,7 +279,9 @@ def cached_response(prefix: str, ttl_seconds: int, key_tags: Optional[List[str]]
                 return func(*args, **kwargs)
 
             # Generate cache key
-            cache_key = cache._generate_key(prefix, *args, tags=_resolve_tags(kwargs), **kwargs)
+            cache_key = cache._generate_key(
+                prefix, *args, tags=_resolve_tags(kwargs), **kwargs
+            )
 
             # Try to retrieve from cache
             cached_value = cache.get(cache_key)

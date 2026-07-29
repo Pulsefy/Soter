@@ -6,29 +6,28 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { WebhooksService } from './webhooks.service';
-import { HmacAuthGuard } from './hmac-auth.guard';
-import { AiVerificationPayloadDto } from 'src/ai-verification.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiHeader } from '@nestjs/swagger';
+import { AidService } from './aid/aid.service';
+import { WebhookHmacGuard } from './common/guards/webhook-hmac.guard';
+import { AiVerificationWebhookDto } from './webhooks/dto/ai-verification-webhook.dto';
 
 @ApiTags('Webhooks')
 @Controller('webhooks')
 export class WebhooksController {
-  constructor(private readonly webhooksService: WebhooksService) {}
+  constructor(private readonly aidService: AidService) {}
 
   @Post('ai-verification')
-  @UseGuards(HmacAuthGuard) // Correctly typed guard
+  @UseGuards(WebhookHmacGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Receive AI verification results' })
   @ApiHeader({
     name: 'X-Signature-256',
-    description: 'HMAC SHA256 signature of the request body.',
+    description: 'Hex HMAC-SHA256 signature of the raw request body.',
     required: true,
   })
   @ApiResponse({ status: 200, description: 'Webhook processed successfully.' })
   @ApiResponse({ status: 401, description: 'Invalid signature.' })
-  @ApiResponse({ status: 409, description: 'Event already processed.' })
-  async handleAiVerification(@Body() payload: AiVerificationPayloadDto) {
-    return this.webhooksService.processAiVerification(payload);
+  async handleAiVerification(@Body() payload: AiVerificationWebhookDto) {
+    return this.aidService.handleTaskWebhook(payload);
   }
 }

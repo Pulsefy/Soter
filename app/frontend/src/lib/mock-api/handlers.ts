@@ -1,10 +1,229 @@
 import type { BackendHealthResponse } from '@/types/health';
 import type { AidPackage } from '@/types/aid-package';
+import type {
+  VerificationInboxItem,
+  VerificationInboxResponse,
+  VerificationStats,
+  InternalNote,
+  VerificationStatus,
+} from '@/types/verification-review';
+import type { ContractRegistryResponse } from '@/types/contract-registry';
+import type { RunbookResponse } from '@/types/runbook';
 
 export type MockHandler = (
   url: string,
   options?: RequestInit,
 ) => Promise<Response>;
+
+function base64UrlEncode(buf: ArrayBuffer | Uint8Array): string {
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function randomBytes(length: number): Uint8Array {
+  const arr = new Uint8Array(length);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(arr);
+  } else {
+    for (let i = 0; i < length; i++) {
+      arr[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  return arr;
+}
+
+interface StoredCredential {
+  id: string;
+  publicKey: string;
+  transports: string[];
+  counter: number;
+}
+
+const registeredCredentials: StoredCredential[] = [];
+
+const webauthnRegisterOptionsHandler: MockHandler = async (url) => {
+  const urlObj = new URL(url, 'http://localhost');
+  const username = urlObj.searchParams.get('username') ?? 'demo-user';
+  const displayName = urlObj.searchParams.get('displayName') ?? 'Demo User';
+  const userId = urlObj.searchParams.get('userId') ?? 'user-123';
+
+  const challenge = base64UrlEncode(randomBytes(32));
+  const userHandle = base64UrlEncode(new TextEncoder().encode(userId));
+
+  const options = {
+    challenge,
+    rp: {
+      name: 'Soter',
+      id: 'localhost',
+    },
+    user: {
+      id: userHandle,
+      name: username,
+      displayName,
+    },
+    pubKeyCredParams: [
+      { alg: -7, type: 'public-key' as const },
+      { alg: -257, type: 'public-key' as const },
+    ],
+    timeout: 60000,
+    attestation: 'none' as const,
+    authenticatorSelection: {
+      authenticatorAttachment: 'platform' as const,
+      requireResidentKey: false,
+      userVerification: 'required' as const,
+    },
+    excludeCredentials: registeredCredentials.map((cred) => ({
+      id: cred.id,
+      type: 'public-key' as const,
+      transports: cred.transports as AuthenticatorTransport[],
+    })),
+  };
+
+  return new Response(JSON.stringify(options), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+const webauthnRegisterVerifyHandler: MockHandler = async (_url, options) => {
+  if (!options?.body) {
+    return new Response(JSON.stringify({ verified: false, message: 'Request body missing' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let payload: {
+    id?: string;
+    rawId?: string;
+    response?: { attestationObject?: string; clientDataJSON?: string };
+  };
+  try {
+    payload = JSON.parse(options.body.toString());
+  } catch {
+    return new Response(JSON.stringify({ verified: false, message: 'Invalid JSON' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (!payload.id) {
+    return new Response(JSON.stringify({ verified: false, message: 'Credential ID missing' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const existing = registeredCredentials.find((c) => c.id === payload.id);
+  if (existing) {
+    return new Response(JSON.stringify({ verified: false, message: 'Credential already registered' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const newCred: StoredCredential = {
+    id: payload.id,
+    publicKey: payload.response?.attestationObject ?? 'mock-pub-key',
+    transports: ['internal'],
+    counter: 0,
+  };
+  registeredCredentials.push(newCred);
+
+  return new Response(
+    JSON.stringify({
+      verified: true,
+      credentialId: newCred.id,
+      message: 'Registration successful',
+    }),
+    {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }
+  );
+};
+
+const webauthnAuthOptionsHandler: MockHandler = async (url) => {
+  const urlObj = new URL(url, 'http://localhost');
+  const userId = urlObj.searchParams.get('userId');
+
+  const challenge = base64UrlEncode(randomBytes(32));
+
+  const allowCredentials = registeredCredentials.map((cred) => ({
+    id: cred.id,
+    type: 'public-key' as const,
+    transports: cred.transports as AuthenticatorTransport[],
+  }));
+
+  const options = {
+    challenge,
+    timeout: 60000,
+    rpId: 'localhost',
+    allowCredentials,
+    userVerification: 'required' as const,
+    extensions: {
+      uvm: true,
+    },
+  };
+
+  return new Response(JSON.stringify(options), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+const webauthnAuthVerifyHandler: MockHandler = async (_url, options) => {
+  if (!options?.body) {
+    return new Response(JSON.stringify({ verified: false, message: 'Request body missing' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let payload: { id?: string; response?: { authenticatorData?: string; clientDataJSON?: string; signature?: string } };
+  try {
+    payload = JSON.parse(options.body.toString());
+  } catch {
+    return new Response(JSON.stringify({ verified: false, message: 'Invalid JSON' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (!payload.id) {
+    return new Response(JSON.stringify({ verified: false, message: 'Credential ID missing' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const cred = registeredCredentials.find((c) => c.id === payload.id);
+  if (!cred) {
+    return new Response(JSON.stringify({ verified: false, message: 'Credential not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  cred.counter += 1;
+
+  return new Response(
+    JSON.stringify({
+      verified: true,
+      credentialId: cred.id,
+      counter: cred.counter,
+      message: 'Authentication successful',
+    }),
+    {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }
+  );
+};
 
 const healthHandler: MockHandler = async () => {
   const mockResponse: BackendHealthResponse = {
@@ -437,12 +656,822 @@ const recipientsImportConfirmHandler: MockHandler = async (_url, options) => {
   });
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Verification Inbox Mock Data & Handlers
+// ═══════════════════════════════════════════════════════════════════════════
+
+let inboxNoteCounter = 5;
+
+const inboxItems: VerificationInboxItem[] = [
+  {
+    id: 'vfy-001',
+    status: 'pending_review',
+    createdAt: new Date('2026-07-20T10:00:00.000Z').toISOString(),
+    reviewedAt: null,
+    reviewedBy: null,
+    rejectionReason: null,
+    nextStepMessage: 'Review identity documents for authenticity',
+    deepLink: '/verification/vfy-001',
+    aiScore: 0.42,
+    riskLevel: 'medium',
+    documentType: 'national_id',
+  },
+  {
+    id: 'vfy-002',
+    status: 'pending_review',
+    createdAt: new Date('2026-07-19T15:30:00.000Z').toISOString(),
+    reviewedAt: null,
+    reviewedBy: null,
+    rejectionReason: null,
+    nextStepMessage: 'Cross-reference proof-of-life with recipient registry',
+    deepLink: '/verification/vfy-002',
+    aiScore: 0.88,
+    riskLevel: 'high',
+    documentType: 'proof_of_life',
+  },
+  {
+    id: 'vfy-003',
+    status: 'approved',
+    createdAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
+    reviewedAt: new Date('2026-07-16T14:00:00.000Z').toISOString(),
+    reviewedBy: 'reviewer-demo',
+    rejectionReason: null,
+    nextStepMessage: 'Verification approved. Proceed to disbursement.',
+    deepLink: '/verification/vfy-003',
+    aiScore: 0.15,
+    riskLevel: 'low',
+    documentType: 'national_id',
+  },
+  {
+    id: 'vfy-004',
+    status: 'rejected',
+    createdAt: new Date('2026-07-14T12:00:00.000Z').toISOString(),
+    reviewedAt: new Date('2026-07-16T10:00:00.000Z').toISOString(),
+    reviewedBy: 'reviewer-demo',
+    rejectionReason: 'Document appears fraudulent',
+    nextStepMessage: 'Please resubmit with valid documentation',
+    deepLink: '/verification/vfy-004',
+    aiScore: 0.95,
+    riskLevel: 'high',
+    documentType: 'national_id',
+  },
+  {
+    id: 'vfy-005',
+    status: 'needs_resubmission',
+    createdAt: new Date('2026-07-13T09:00:00.000Z').toISOString(),
+    reviewedAt: new Date('2026-07-17T11:00:00.000Z').toISOString(),
+    reviewedBy: 'reviewer-demo',
+    rejectionReason: 'Document expired',
+    nextStepMessage: 'Please submit a current government-issued ID',
+    deepLink: '/verification/vfy-005',
+    aiScore: 0.55,
+    riskLevel: 'medium',
+    documentType: 'national_id',
+  },
+  {
+    id: 'vfy-006',
+    status: 'pending_review',
+    createdAt: new Date('2026-07-18T14:00:00.000Z').toISOString(),
+    reviewedAt: null,
+    reviewedBy: null,
+    rejectionReason: null,
+    nextStepMessage: 'Verify biometric match score against threshold',
+    deepLink: '/verification/vfy-006',
+    aiScore: 0.62,
+    riskLevel: 'medium',
+    documentType: 'biometric',
+  },
+  {
+    id: 'vfy-007',
+    status: 'approved',
+    createdAt: new Date('2026-07-10T11:00:00.000Z').toISOString(),
+    reviewedAt: new Date('2026-07-12T16:00:00.000Z').toISOString(),
+    reviewedBy: 'reviewer-demo',
+    rejectionReason: null,
+    nextStepMessage: 'Verification approved. Ready for claim.',
+    deepLink: '/verification/vfy-007',
+    aiScore: 0.08,
+    riskLevel: 'low',
+    documentType: 'proof_of_life',
+  },
+  {
+    id: 'vfy-008',
+    status: 'pending_review',
+    createdAt: new Date('2026-07-17T16:00:00.000Z').toISOString(),
+    reviewedAt: null,
+    reviewedBy: null,
+    rejectionReason: null,
+    nextStepMessage: 'Validate document expiry and issuer authority',
+    deepLink: '/verification/vfy-008',
+    aiScore: 0.73,
+    riskLevel: 'high',
+    documentType: 'national_id',
+  },
+];
+
+const inboxNotes: InternalNote[] = [
+  {
+    id: 'note-1',
+    entityType: 'verification',
+    entityId: 'vfy-001',
+    content: 'Document looks legitimate but need to verify issuer registry.',
+    authorId: 'reviewer-demo',
+    category: 'review',
+    createdAt: new Date('2026-07-21T11:00:00.000Z').toISOString(),
+    updatedAt: new Date('2026-07-21T11:00:00.000Z').toISOString(),
+  },
+  {
+    id: 'note-2',
+    entityType: 'verification',
+    entityId: 'vfy-002',
+    content: 'Cross-referenced with UNHCR registry — awaiting confirmation.',
+    authorId: 'reviewer-demo',
+    category: 'follow_up',
+    createdAt: new Date('2026-07-20T09:00:00.000Z').toISOString(),
+    updatedAt: new Date('2026-07-20T09:00:00.000Z').toISOString(),
+  },
+  {
+    id: 'note-3',
+    entityType: 'verification',
+    entityId: 'vfy-002',
+    content: 'Elevating to senior reviewer due to high AI risk score.',
+    authorId: 'reviewer-demo',
+    category: 'escalation',
+    createdAt: new Date('2026-07-21T08:00:00.000Z').toISOString(),
+    updatedAt: new Date('2026-07-21T08:00:00.000Z').toISOString(),
+  },
+  {
+    id: 'note-4',
+    entityType: 'verification',
+    entityId: 'vfy-003',
+    content: 'All documents verified — approved by consensus.',
+    authorId: 'reviewer-demo',
+    category: 'review_approved',
+    createdAt: new Date('2026-07-16T14:30:00.000Z').toISOString(),
+    updatedAt: new Date('2026-07-16T14:30:00.000Z').toISOString(),
+  },
+];
+
+function getInboxStats(): VerificationStats {
+  const stats: VerificationStats = {
+    pending_review: 0,
+    approved: 0,
+    rejected: 0,
+    needs_resubmission: 0,
+    total: inboxItems.length,
+  };
+  for (const item of inboxItems) {
+    stats[item.status] += 1;
+  }
+  return stats;
+}
+
+// GET /v1/verification-inbox
+const inboxListHandler: MockHandler = async (url) => {
+  let urlObj: URL;
+  try {
+    urlObj = new URL(url);
+  } catch {
+    urlObj = new URL(url, 'http://localhost');
+  }
+
+  const status = urlObj.searchParams.get('status') ?? '';
+  const riskLevel = urlObj.searchParams.get('riskLevel') ?? '';
+  const campaignId = urlObj.searchParams.get('campaignId') ?? '';
+  const dateFrom = urlObj.searchParams.get('dateFrom') ?? '';
+  const dateTo = urlObj.searchParams.get('dateTo') ?? '';
+  const page = parseInt(urlObj.searchParams.get('page') ?? '1', 10) || 1;
+  const limit = parseInt(urlObj.searchParams.get('limit') ?? '20', 10) || 20;
+
+  let results = [...inboxItems];
+
+  if (status) {
+    results = results.filter(item => item.status === status);
+  }
+  if (riskLevel) {
+    results = results.filter(item => item.riskLevel === riskLevel);
+  }
+  if (campaignId) {
+    // In mock, ignore campaign filter since items don't have campaignId yet
+    // This prevents empty results when filtering by campaign
+  }
+  if (dateFrom) {
+    const from = new Date(dateFrom).getTime();
+    results = results.filter(item => new Date(item.createdAt).getTime() >= from);
+  }
+  if (dateTo) {
+    const to = new Date(dateTo).getTime();
+    results = results.filter(item => new Date(item.createdAt).getTime() <= to);
+  }
+
+  const total = results.length;
+  const totalPages = Math.ceil(total / limit) || 1;
+  const start = (page - 1) * limit;
+  const paged = results.slice(start, start + limit);
+
+  const body: VerificationInboxResponse = {
+    items: paged,
+    total,
+    page,
+    limit,
+    totalPages,
+  };
+
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// GET /v1/verification-inbox/stats
+const inboxStatsHandler: MockHandler = async () => {
+  const stats = getInboxStats();
+  return new Response(JSON.stringify(stats), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// GET /v1/verification-inbox/:id
+const inboxDetailHandler: MockHandler = async (url) => {
+  const parts = url.split('?')[0].split('/');
+  const id = parts[parts.length - 1];
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  return new Response(JSON.stringify(item), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// POST /v1/verification-inbox/:id/approve
+const inboxApproveHandler: MockHandler = async (url, options) => {
+  const parts = url.split('?')[0].split('/');
+  // path: .../v1/verification-inbox/:id/approve
+  const id = parts[parts.length - 2];
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (item.status === 'approved' || item.status === 'rejected') {
+    return new Response(JSON.stringify({ message: 'Verification already processed' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let payload: { nextStepMessage?: string; internalNote?: string } = {};
+  if (options?.body) {
+    try {
+      payload = JSON.parse(options.body.toString());
+    } catch { /* ignore */ }
+  }
+
+  const now = new Date().toISOString();
+  item.status = 'approved';
+  item.reviewedAt = now;
+  item.reviewedBy = 'reviewer-demo';
+  if (payload.nextStepMessage) {
+    item.nextStepMessage = payload.nextStepMessage;
+  }
+
+  if (payload.internalNote) {
+    inboxNotes.push({
+      id: `note-${++inboxNoteCounter}`,
+      entityType: 'verification',
+      entityId: id,
+      content: payload.internalNote,
+      authorId: 'reviewer-demo',
+      category: 'review_approved',
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return new Response(JSON.stringify(item), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// POST /v1/verification-inbox/:id/reject
+const inboxRejectHandler: MockHandler = async (url, options) => {
+  const parts = url.split('?')[0].split('/');
+  const id = parts[parts.length - 2];
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (item.status === 'approved' || item.status === 'rejected') {
+    return new Response(JSON.stringify({ message: 'Verification already processed' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let payload: { rejectionReason?: string; nextStepMessage?: string; internalNote?: string } = {};
+  if (options?.body) {
+    try {
+      payload = JSON.parse(options.body.toString());
+    } catch { /* ignore */ }
+  }
+
+  const now = new Date().toISOString();
+  item.status = 'rejected';
+  item.reviewedAt = now;
+  item.reviewedBy = 'reviewer-demo';
+  item.rejectionReason = payload.rejectionReason ?? null;
+  if (payload.nextStepMessage) {
+    item.nextStepMessage = payload.nextStepMessage;
+  }
+
+  if (payload.internalNote) {
+    inboxNotes.push({
+      id: `note-${++inboxNoteCounter}`,
+      entityType: 'verification',
+      entityId: id,
+      content: payload.internalNote,
+      authorId: 'reviewer-demo',
+      category: 'review_rejected',
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return new Response(JSON.stringify(item), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// POST /v1/verification-inbox/:id/request-resubmission
+const inboxResubmitHandler: MockHandler = async (url, options) => {
+  const parts = url.split('?')[0].split('/');
+  const id = parts[parts.length - 2];
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (item.status === 'approved' || item.status === 'rejected') {
+    return new Response(JSON.stringify({ message: 'Verification already processed' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let payload: { rejectionReason?: string; nextStepMessage?: string; internalNote?: string } = {};
+  if (options?.body) {
+    try {
+      payload = JSON.parse(options.body.toString());
+    } catch { /* ignore */ }
+  }
+
+  const now = new Date().toISOString();
+  item.status = 'needs_resubmission';
+  item.reviewedAt = now;
+  item.reviewedBy = 'reviewer-demo';
+  item.rejectionReason = payload.rejectionReason ?? null;
+  if (payload.nextStepMessage) {
+    item.nextStepMessage = payload.nextStepMessage;
+  }
+
+  if (payload.internalNote) {
+    inboxNotes.push({
+      id: `note-${++inboxNoteCounter}`,
+      entityType: 'verification',
+      entityId: id,
+      content: payload.internalNote,
+      authorId: 'reviewer-demo',
+      category: 'review_needs_resubmission',
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return new Response(JSON.stringify(item), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// GET /v1/verification-inbox/:id/notes
+const inboxGetNotesHandler: MockHandler = async (url) => {
+  const parts = url.split('?')[0].split('/');
+  // path: .../v1/verification-inbox/:id/notes
+  const id = parts[parts.length - 2];
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const notes = inboxNotes.filter(n => n.entityId === id);
+  return new Response(JSON.stringify(notes), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// POST /v1/verification-inbox/:id/notes
+const inboxAddNoteHandler: MockHandler = async (url, options) => {
+  const parts = url.split('?')[0].split('/');
+  const id = parts[parts.length - 2];
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let payload: { content?: string; category?: string } = {};
+  if (options?.body) {
+    try {
+      payload = JSON.parse(options.body.toString());
+    } catch { /* ignore */ }
+  }
+
+  const now = new Date().toISOString();
+  const note: InternalNote = {
+    id: `note-${++inboxNoteCounter}`,
+    entityType: 'verification',
+    entityId: id,
+    content: payload.content ?? '',
+    authorId: 'reviewer-demo',
+    category: payload.category ?? null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  inboxNotes.push(note);
+
+  return new Response(JSON.stringify(note), {
+    status: 201,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+const dashboardSummaryHandler: MockHandler = async () => {
+  // Derive live totals from the in-memory mock data instead of returning
+  // hard-coded zeros so that the dashboard cards display meaningful metrics.
+  const totalClaims = inboxItems.length;
+  const totalPackages = ALL_PACKAGES.length;
+  const pendingReviews = inboxItems.filter(
+    i => i.status === 'pending_review',
+  ).length;
+  const totalDisbursements = ALL_PACKAGES.filter(
+    p => p.status === 'Claimed',
+  ).length;
+
+  return new Response(
+    JSON.stringify({
+      totalClaims,
+      totalPackages,
+      pendingReviews,
+      totalDisbursements,
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  );
+};
+
+const contractRegistryHandler: MockHandler = async () => {
+  const registry: ContractRegistryResponse = {
+    schema_version: 2,
+    generated_at: new Date().toISOString(),
+    contracts: {
+      aid_escrow: {
+        version: '0.2.0',
+        networks: {
+          testnet: {
+            contract_id: 'CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG',
+            version: '0.1.0',
+            deployed_at: '2026-06-03',
+          },
+        },
+      },
+    },
+    source: {
+      canonical_path: 'app/onchain/deployments/contract-registry.json',
+      generator_script: 'app/onchain/scripts/generate-registry.py',
+      deployment_registry: 'app/onchain/deployments/registry.json',
+    },
+  };
+
+  return new Response(JSON.stringify(registry), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+const runbookHandler: MockHandler = async () => {
+  const runbook: RunbookResponse = {
+    schema_version: 1,
+    generated_at: new Date().toISOString(),
+    sections: {
+      preDemo: {
+        id: 'pre-demo',
+        titleKey: 'preDemoTitle',
+        subtitleKey: 'preDemoSubtitle',
+        items: [
+          {
+            id: 'pre-system-health',
+            titleKey: 'preSystemHealth',
+            descriptionKey: 'preSystemHealthDesc',
+            icon: 'Server',
+            autoVerify: 'health',
+          },
+          {
+            id: 'pre-network-config',
+            titleKey: 'preNetworkConfig',
+            descriptionKey: 'preNetworkConfigDesc',
+            icon: 'Globe',
+            autoVerify: 'never',
+          },
+          {
+            id: 'pre-contract-registry',
+            titleKey: 'preContractRegistry',
+            descriptionKey: 'preContractRegistryDesc',
+            href: '/demo-checklist#contract-registry',
+            linkLabelKey: 'openContractRegistry',
+            icon: 'FileCode',
+            autoVerify: 'never',
+          },
+          {
+            id: 'pre-wallet-connect',
+            titleKey: 'preWalletConnect',
+            descriptionKey: 'preWalletConnectDesc',
+            href: '/',
+            linkLabelKey: 'goHome',
+            icon: 'Wallet',
+            autoVerify: 'wallet',
+          },
+          {
+            id: 'pre-faucet-funding',
+            titleKey: 'preFaucetFunding',
+            descriptionKey: 'preFaucetFundingDesc',
+            icon: 'Droplet',
+            autoVerify: 'never',
+          },
+          {
+            id: 'pre-backend-smoke',
+            titleKey: 'preBackendSmoke',
+            descriptionKey: 'preBackendSmokeDesc',
+            href: '/dashboard',
+            linkLabelKey: 'openDashboard',
+            icon: 'Activity',
+            autoVerify: 'never',
+          },
+        ],
+      },
+      liveDemo: {
+        id: 'live-demo',
+        titleKey: 'liveDemoTitle',
+        subtitleKey: 'liveDemoSubtitle',
+        items: [
+          {
+            id: 'live-campaign-browse',
+            titleKey: 'liveCampaignBrowse',
+            descriptionKey: 'liveCampaignBrowseDesc',
+            href: '/campaigns',
+            linkLabelKey: 'openCampaigns',
+            icon: 'Megaphone',
+            autoVerify: 'never',
+          },
+          {
+            id: 'live-claim-submit',
+            titleKey: 'liveClaimSubmit',
+            descriptionKey: 'liveClaimSubmitDesc',
+            href: '/claim-receipt?claimId=demo-test',
+            linkLabelKey: 'openClaimFlow',
+            icon: 'FileText',
+            autoVerify: 'never',
+          },
+          {
+            id: 'live-verification-review',
+            titleKey: 'liveVerificationReview',
+            descriptionKey: 'liveVerificationReviewDesc',
+            href: '/verification-review',
+            linkLabelKey: 'openVerificationReview',
+            icon: 'CheckSquare',
+            autoVerify: 'never',
+          },
+          {
+            id: 'live-onchain-receipt',
+            titleKey: 'liveOnchainReceipt',
+            descriptionKey: 'liveOnchainReceiptDesc',
+            href: '/claim-receipt?claimId=demo-verify',
+            linkLabelKey: 'openReceiptPage',
+            icon: 'Receipt',
+            autoVerify: 'never',
+          },
+          {
+            id: 'live-dashboard-metrics',
+            titleKey: 'liveDashboardMetrics',
+            descriptionKey: 'liveDashboardMetricsDesc',
+            href: '/dashboard',
+            linkLabelKey: 'openDashboard',
+            icon: 'BarChart3',
+            autoVerify: 'never',
+          },
+        ],
+      },
+      postDemo: {
+        id: 'post-demo',
+        titleKey: 'postDemoTitle',
+        subtitleKey: 'postDemoSubtitle',
+        items: [
+          {
+            id: 'post-data-cleanup',
+            titleKey: 'postDataCleanup',
+            descriptionKey: 'postDataCleanupDesc',
+            icon: 'Trash2',
+            autoVerify: 'never',
+          },
+          {
+            id: 'post-ledger-reconcile',
+            titleKey: 'postLedgerReconcile',
+            descriptionKey: 'postLedgerReconcileDesc',
+            icon: 'Database',
+            autoVerify: 'never',
+          },
+          {
+            id: 'post-state-export',
+            titleKey: 'postStateExport',
+            descriptionKey: 'postStateExportDesc',
+            icon: 'Download',
+            autoVerify: 'never',
+          },
+          {
+            id: 'post-debrief-notes',
+            titleKey: 'postDebriefNotes',
+            descriptionKey: 'postDebriefNotesDesc',
+            icon: 'Edit3',
+            autoVerify: 'never',
+          },
+        ],
+      },
+    },
+    failureRecovery: {
+      titleKey: 'recoveryTitle',
+      subtitleKey: 'recoverySubtitle',
+      issues: [
+        {
+          id: 'rpc-timeout',
+          symptomKey: 'issueRpcTimeoutSymptom',
+          causeKey: 'issueRpcTimeoutCause',
+          severity: 'medium',
+          actions: [
+            { id: 'rpc-1', description: 'Verify RPC endpoint URL matches canonical network config', command: 'curl -I https://soroban-testnet.stellar.org:443' },
+            { id: 'rpc-2', description: 'Check network connectivity and firewall rules' },
+            { id: 'rpc-3', description: 'Switch to alternative RPC endpoint if available' },
+            { id: 'rpc-4', description: 'Retry request with exponential backoff' },
+          ],
+          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §9.1'],
+        },
+        {
+          id: 'rate-limiting',
+          symptomKey: 'issueRateLimitSymptom',
+          causeKey: 'issueRateLimitCause',
+          severity: 'low',
+          actions: [
+            { id: 'rl-1', description: 'Wait 2-5 minutes before retrying', command: 'Start-Sleep -Seconds 120' },
+            { id: 'rl-2', description: 'Use dedicated RPC provider if public endpoint is throttled' },
+            { id: 'rl-3', description: 'Batch requests to reduce call frequency' },
+          ],
+          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §9.5'],
+        },
+        {
+          id: 'insufficient-xlm',
+          symptomKey: 'issueXlmSymptom',
+          causeKey: 'issueXlmCause',
+          severity: 'high',
+          actions: [
+            { id: 'xlm-1', description: 'Request testnet XLM via Friendbot', command: 'curl "https://friendbot.stellar.org/?addr=YOUR_ADDRESS"' },
+            { id: 'xlm-2', description: 'Check balance with Stellar Laboratory' },
+            { id: 'xlm-3', description: 'Allow 5-10 seconds for ledger confirmation' },
+            { id: 'xlm-4', description: 'Ensure base reserve (1 XLM) plus fees are covered' },
+          ],
+        },
+        {
+          id: 'stale-ledger',
+          symptomKey: 'issueStaleLedgerSymptom',
+          causeKey: 'issueStaleLedgerCause',
+          severity: 'medium',
+          actions: [
+            { id: 'sl-1', description: 'Wait for ledger sync (typically 5-30 seconds)' },
+            { id: 'sl-2', description: 'Verify RPC provider is fully synced' },
+            { id: 'sl-3', description: 'Retry query with fresh RPC connection' },
+            { id: 'sl-4', description: 'Run ledger reconciliation if off-chain state drifts' },
+          ],
+          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §9.3'],
+        },
+        {
+          id: 'contract-id-mismatch',
+          symptomKey: 'issueContractMismatchSymptom',
+          causeKey: 'issueContractMismatchCause',
+          severity: 'high',
+          actions: [
+            { id: 'cm-1', description: 'Check canonical contract registry for correct Contract ID' },
+            { id: 'cm-2', description: 'Update CONTRACT_ID in backend .env file' },
+            { id: 'cm-3', description: 'Restart backend service to pick up new config' },
+            { id: 'cm-4', description: 'Clear browser localStorage cached package IDs' },
+            { id: 'cm-5', description: 'Run redeployment checklist if fresh deploy needed' },
+          ],
+          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §12', 'testnet-deployment-plan.md §5'],
+        },
+        {
+          id: 'wallet-network-mismatch',
+          symptomKey: 'issueWalletMismatchSymptom',
+          causeKey: 'issueWalletMismatchCause',
+          severity: 'medium',
+          actions: [
+            { id: 'wm-1', description: 'Open Freighter wallet settings' },
+            { id: 'wm-2', description: 'Switch network to Testnet (not Mainnet or Futurenet)' },
+            { id: 'wm-3', description: 'Refresh page and re-connect wallet' },
+            { id: 'wm-4', description: 'Confirm network indicator shows Testnet' },
+          ],
+        },
+      ],
+    },
+    contractRegistry: {
+      canonicalSourcePath: 'app/onchain/deployments/contract-registry.json',
+      generatorScript: 'app/onchain/scripts/generate-registry.py',
+      deploymentRegistry: 'app/onchain/deployments/registry.json',
+    },
+  };
+
+  return new Response(JSON.stringify(runbook), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
 export const handlers: Record<string, MockHandler> = {
   '/health': healthHandler,
   '/aid-packages': aidPackagesHandler,
+  '/analytics/global-stats': dashboardSummaryHandler,
   '/recipients/import/validate': recipientsImportValidateHandler,
   '/recipients/import/confirm': recipientsImportConfirmHandler,
   '/notifications/activity-feed': activityFeedHandler,
+  '/auth/webauthn/register/options': webauthnRegisterOptionsHandler,
+  '/auth/webauthn/register/verify': webauthnRegisterVerifyHandler,
+  '/auth/webauthn/auth/options': webauthnAuthOptionsHandler,
+  '/auth/webauthn/auth/verify': webauthnAuthVerifyHandler,
+  '/v1/verification-inbox': inboxListHandler,
+  '/v1/verification-inbox/stats': inboxStatsHandler,
+  '/v1/verification-inbox/:id': async (url, options) => {
+    const method = options?.method?.toUpperCase() ?? 'GET';
+    const path = url.split('?')[0];
+
+    if (path.endsWith('/approve') && method === 'POST') {
+      return inboxApproveHandler(url, options);
+    }
+    if (path.endsWith('/reject') && method === 'POST') {
+      return inboxRejectHandler(url, options);
+    }
+    if (path.endsWith('/request-resubmission') && method === 'POST') {
+      return inboxResubmitHandler(url, options);
+    }
+    if (path.endsWith('/notes') && method === 'GET') {
+      return inboxGetNotesHandler(url, options);
+    }
+    if (path.endsWith('/notes') && method === 'POST') {
+      return inboxAddNoteHandler(url, options);
+    }
+    if (method === 'GET') {
+      return inboxDetailHandler(url, options);
+    }
+
+    return new Response(JSON.stringify({ message: 'Method not implemented in mock' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  },
   '/campaigns': async (url, options) => {
     const method = options?.method?.toUpperCase() ?? 'GET';
     if (method === 'POST') {
@@ -463,4 +1492,6 @@ export const handlers: Record<string, MockHandler> = {
     }
     return new Response(JSON.stringify({ success: false, message: 'Method not implemented in mock' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
   },
+  '/contract-registry': contractRegistryHandler,
+  '/runbook': runbookHandler,
 };

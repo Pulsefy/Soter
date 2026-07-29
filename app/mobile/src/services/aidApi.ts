@@ -11,7 +11,17 @@ export interface AidItem {
   createdAt: string;
 }
 
-export type ClaimStatus = 'requested' | 'verified' | 'disbursed';
+export type ClaimStatus = 'requested' | 'verified' | 'approved' | 'disbursed';
+
+export type ClaimTimelineStatus = 'verification' | 'approval' | 'claim' | 'disbursement';
+
+export interface ClaimTimelineEvent {
+  status: ClaimTimelineStatus;
+  label?: string;
+  timestamp?: string;
+  transactionHash?: string;
+  explorerUrl?: string;
+}
 
 export interface AidDetails {
   id: string;
@@ -28,6 +38,15 @@ export interface AidDetails {
   status: ClaimStatus;
   claimId: string;
   createdAt: string;
+  verifiedAt?: string;
+  approvedAt?: string;
+  claimedAt?: string;
+  disbursedAt?: string;
+  verificationTransactionHash?: string;
+  approvalTransactionHash?: string;
+  claimTransactionHash?: string;
+  disbursementTransactionHash?: string;
+  timeline?: ClaimTimelineEvent[];
 }
 
 /** Fetch aid overview list from the backend */
@@ -107,4 +126,6 @@ export const getMockAidDetails = (aidId: string): AidDetails => ({
   status: 'verified',
   claimId: `claim-${aidId}`,
   createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(),
+  verifiedAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
+  approvalTransactionHash: 'f'.repeat(64),
 });

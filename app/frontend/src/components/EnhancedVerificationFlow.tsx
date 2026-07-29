@@ -70,7 +70,7 @@ interface EnhancedFlowState {
     apiError: Error | string | null;
     result: VerificationResult | null;
     evidenceArtifact: EvidenceArtifact | null;
-    artifactNotes: string;
+    artifactNotes?: string;
     showArtifactViewer: boolean;
 }
 

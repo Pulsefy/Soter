@@ -11,7 +11,10 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import rateLimitConfig from '../../config/rate-limit.config';
 import { ConfigType } from '@nestjs/config';
+import Redis from 'ioredis';
 import { Request } from 'express';
+import { REDIS_CLIENT } from '../../redis/redis.module';
+import rateLimitConfig from '../../config/rate-limit.config';
 import {
   RateLimitConfig,
   RateLimitPolicy,
@@ -28,32 +31,18 @@ interface RateLimitUser {
 @Injectable()
 export class AdaptiveRateLimitGuard implements CanActivate {
   constructor(
-  private readonly configService: ConfigService,
-
-  @Inject(rateLimitConfig.KEY)
-  private readonly rateLimitCfg: ConfigType<typeof rateLimitConfig>,
-
-  @Optional()
-  private readonly redisClient?: Redis,
-) {}
-
-  private get config(): RateLimitConfig {
-    const rateLimit = this.configService.get<RateLimitConfig>('rateLimit') ?? {
-      default: { limit: 10, window: 60, enabled: true },
-      public: { limit: 10, window: 60, keyPrefix: 'public', enabled: true },
-      auth: { limit: 30, window: 60, keyPrefix: 'auth', enabled: true },
-      apiKey: { limit: 100, window: 60, keyPrefix: 'apikey', enabled: true },
-      admin: { limit: 200, window: 60, keyPrefix: 'admin', enabled: true },
-      webhook: { limit: 500, window: 60, keyPrefix: 'webhook', enabled: true },
-      search: { limit: 20, window: 60, keyPrefix: 'search', enabled: true },
-      health: { limit: 1000, window: 60, keyPrefix: 'health', enabled: true },
-      endpoints: {},
-    };
-    return rateLimit;
-  }
+    @Inject(REDIS_CLIENT) private readonly redisClient: Redis,
+    @Inject(rateLimitConfig.KEY)
+    private readonly config: ConfigType<typeof rateLimitConfig>,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request: Request = context.switchToHttp().getRequest<Request>();
+    const client = this.redisClient;
+
+    const user = request.user as RateLimitUser | undefined;
+    const userType = this.getUserType(user);
+    const policy = this.getPolicyForRequest(request, userType);
 
     let client;
     try {

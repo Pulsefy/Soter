@@ -5,6 +5,7 @@ export interface AnchorMetadata {
   campaignRef?: string | null;
   claimId?: string | null;
   packageId?: string | null;
+  contractId?: string | null;
 }
 
 export interface VerificationJobData {

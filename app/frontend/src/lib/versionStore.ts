@@ -1,34 +1,23 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { VersionConfig, VersionState } from '@/types/version';
-
-const MOCK_VERSION_CONFIG: VersionConfig = {
-  currentVersion: '1.4.0',
-  latestVersion: '1.5.0',
-  forceUpgrade: false,
-  releaseNotes: {
-    version: '1.5.0',
-    title: "What's New",
-    changes: [
-      'Improved beneficiary verification',
-      'Faster voucher loading',
-      'Offline sync improvements',
-      'Enhanced security measures',
-    ],
-  },
-};
+import { DEFAULT_VERSION_CONFIG } from '@/lib/defaultVersionConfig';
 
 export const useVersionStore = create<VersionState>()(
   persist(
     (set, get) => ({
-      currentVersion: MOCK_VERSION_CONFIG.currentVersion,
-      latestVersion: MOCK_VERSION_CONFIG.latestVersion,
-      forceUpgradeRequired: MOCK_VERSION_CONFIG.forceUpgrade,
-      releaseNotes: MOCK_VERSION_CONFIG.releaseNotes,
+      platform: DEFAULT_VERSION_CONFIG.platform,
+      currentVersion: DEFAULT_VERSION_CONFIG.currentVersion,
+      latestVersion: DEFAULT_VERSION_CONFIG.latestVersion,
+      minRequiredVersion: DEFAULT_VERSION_CONFIG.minRequiredVersion ?? null,
+      forceUpgradeRequired: DEFAULT_VERSION_CONFIG.forceUpgrade,
+      releaseNotes: DEFAULT_VERSION_CONFIG.releaseNotes,
+      forceUpgradeScreen: DEFAULT_VERSION_CONFIG.forceUpgradeScreen ?? null,
+      storeUrl: DEFAULT_VERSION_CONFIG.storeUrl ?? null,
       lastSeenVersion: null,
       shouldShowReleaseNotes: false,
 
-      setLastSeenVersion: (version: string) => {
+      setLastSeenVersion: (version: string | null) => {
         set({ lastSeenVersion: version });
       },
 
@@ -44,10 +33,14 @@ export const useVersionStore = create<VersionState>()(
           config.releaseNotes?.version !== lastSeenVersion;
 
         set({
+          platform: config.platform,
           currentVersion: config.currentVersion,
           latestVersion: config.latestVersion,
+          minRequiredVersion: config.minRequiredVersion ?? null,
           forceUpgradeRequired: config.forceUpgrade,
           releaseNotes: config.releaseNotes,
+          forceUpgradeScreen: config.forceUpgradeScreen ?? null,
+          storeUrl: config.storeUrl ?? null,
           shouldShowReleaseNotes: shouldShow,
         });
       },
@@ -74,7 +67,7 @@ export class VersionService {
       return await response.json();
     } catch (error) {
       console.warn('Network error fetching version config from backend, falling back to mock:', error);
-      return MOCK_VERSION_CONFIG;
+      return DEFAULT_VERSION_CONFIG;
     }
   }
 }

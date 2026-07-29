@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import {
   HealthIndicator,
   HealthIndicatorResult,
@@ -8,15 +8,14 @@ import {
 } from '@nestjs/terminus';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { RedisService } from '@liaoliaots/nestjs-redis';
+import Redis from 'ioredis';
+import { REDIS_CLIENT } from '../../redis/redis.module';
 
 @Injectable()
 export class HealthService extends HealthIndicator {
   constructor(
-    private readonly redisService: RedisService,
-    @Optional()
-    @InjectQueue('default')
-    private readonly queue?: Queue,
+    @InjectQueue('default') private readonly queue: Queue,
+    @Inject(REDIS_CLIENT) private readonly redisClient: Redis,
   ) {
     super();
   }
@@ -70,7 +69,7 @@ export class HealthService extends HealthIndicator {
    */
   async checkRedis(key: string): Promise<HealthIndicatorResult> {
     try {
-      const redis = this.redisService.getOrThrow();
+      const redis = this.redisClient;
       const start = Date.now();
       await redis.ping();
       const latency = Date.now() - start;

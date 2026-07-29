@@ -10,6 +10,6 @@ import { BudgetService } from '../common/budget/budget.service';
   imports: [OnchainModule, CommonServicesModule, ConfigModule],
   providers: [AidEscrowService, BudgetService],
   controllers: [AidEscrowController],
-  exports: [AidEscrowService],
+  exports: [AidEscrowService, OnchainModule],
 })
 export class AidEscrowModule {}

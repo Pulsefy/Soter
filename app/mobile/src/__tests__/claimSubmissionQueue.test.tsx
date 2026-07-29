@@ -302,6 +302,71 @@ describe('syncQueue – retryFailedAction', () => {
     const stateAfter = await getSyncQueueState();
     expect(stateAfter.items[0].state).toBe('pending');
   });
+
+  it('identifies 409 conflict errors and sets action state to conflict', async () => {
+    const { dispatchNetworkAction, getSyncQueueState, isConflictError, mapConflictErrorMessage } = loadFreshQueue();
+    global.fetch = jest.fn().mockRejectedValue(new Error('HTTP error 409: Conflict - already claimed')) as unknown as typeof fetch;
+
+    const result = await dispatchNetworkAction(
+      { type: 'claim-submission', payload: { aidId: 'aid-1', claimId: 'claim-1', idempotencyKey: 'idem-409' } },
+      { online: true },
+    );
+
+    expect(result.status).toBe('queued');
+    const state = await getSyncQueueState();
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0].state).toBe('conflict');
+    expect(isConflictError(state.items[0].lastError)).toBe(true);
+
+    const clearMsg = mapConflictErrorMessage(state.items[0].lastError);
+    expect(clearMsg).toContain('Conflict: This claim has already been submitted and processed on the server.');
+  });
+
+  it('allows discarding an item from the queue', async () => {
+    const itemToDiscard = {
+      id: 'discard-1',
+      type: 'claim-submission',
+      payload: { aidId: 'aid-disc', claimId: 'claim-disc', idempotencyKey: 'idem-disc' },
+      state: 'conflict',
+      retryCount: 1,
+      maxRetries: 5,
+      nextRetryAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastError: 'HTTP 409 Conflict',
+    };
+    await seedStorage([itemToDiscard]);
+
+    const { getSyncQueueState, discardAction } = loadFreshQueue();
+    await discardAction('discard-1');
+
+    const stateAfter = await getSyncQueueState();
+    expect(stateAfter.items).toHaveLength(0);
+  });
+
+  it('requeues a conflicted or failed item to pending state', async () => {
+    const conflictedItem = {
+      id: 'conflict-1',
+      type: 'claim-submission',
+      payload: { aidId: 'aid-conf', claimId: 'claim-conf', idempotencyKey: 'idem-conf' },
+      state: 'conflict',
+      retryCount: 1,
+      maxRetries: 5,
+      nextRetryAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastError: 'HTTP 409 Conflict',
+    };
+    await seedStorage([conflictedItem]);
+
+    const { getSyncQueueState, requeueAction } = loadFreshQueue();
+    await requeueAction('conflict-1');
+
+    const stateAfter = await getSyncQueueState();
+    expect(stateAfter.items[0].state).toBe('pending');
+    expect(stateAfter.items[0].retryCount).toBe(0);
+    expect(stateAfter.items[0].lastError).toBeNull();
+  });
 });
 
 // ── SubmissionStatusBadge ─────────────────────────────────────────────────────
@@ -332,13 +397,16 @@ jest.mock('../contexts/SyncContext', () => ({
     lastSyncError: 'HTTP error! status: 503',
     pendingCount: 1,
     failedCount: 1,
+    conflictCount: 0,
     flushNow: jest.fn(),
     retryAction: jest.fn(),
+    requeueAction: jest.fn(),
+    discardAction: jest.fn(),
   }),
 }));
 
-jest.mock('../theme/ThemeContext', () => ({
-  useTheme: () => ({
+jest.mock('../theme/useAppTheme', () => ({
+  useAppTheme: () => ({
     colors: {
       background: '#FFFFFF',
       surface: '#F9FAFB',
@@ -347,6 +415,13 @@ jest.mock('../theme/ThemeContext', () => ({
       textSecondary: '#6B7280',
       primary: '#2563EB',
       error: '#DC2626',
+      warningBg: '#FEF3C7',
+      warning: '#92400E',
+      infoBg: '#DBEAFE',
+      info: '#1E40AF',
+      successBg: '#D1FAE5',
+      success: '#065F46',
+      errorBg: '#FEE2E2',
     },
   }),
 }));

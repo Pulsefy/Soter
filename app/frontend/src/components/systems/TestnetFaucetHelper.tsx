@@ -119,7 +119,7 @@ export default function TestnetFaucetHelper() {
 
   useEffect(() => {
     if (isTestnet && publicKey) {
-      loadBalance();
+      void loadBalance();
     }
   }, [isTestnet, publicKey, loadBalance]);
 

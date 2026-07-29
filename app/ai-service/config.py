@@ -4,7 +4,7 @@ Handles environment variables and API key management
 """
 
 from typing import Literal, Optional
-from pydantic import model_validator
+from pydantic import model_validator, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import logging
 import os
@@ -64,7 +64,9 @@ class Settings(BaseSettings):
     # Cache TTL settings (in seconds)
     cache_ttl_task_status: int = 30  # Short TTL for responsive polling
     cache_ttl_artifact_access: int = 60  # 1 minute for artifact metadata
-    cache_ttl_verification: int = 120  # AI verification responses, keyed by claim/artifact/model version
+    cache_ttl_verification: int = (
+        120  # AI verification responses, keyed by claim/artifact/model version
+    )
 
     # Application settings
     app_env: Literal["development", "staging", "production", "test"] = "development"
@@ -78,12 +80,14 @@ class Settings(BaseSettings):
     task_retry_delay_seconds: int = 30
 
     # Backend webhook URL for notifications
-    backend_webhook_url: Optional[str] = "http://localhost:3001/ai/webhook"
+    backend_webhook_url: HttpUrl = (
+        "http://localhost:3000/api/v1/webhooks/ai-verification"
+    )
 
     # Shared HMAC secret for signing outbound webhook payloads.
-    # Must match WEBHOOK_SECRET on the NestJS backend.
+    # Must match AI_WEBHOOK_SECRET on the NestJS backend.
     # If unset, webhook calls are sent unsigned (development only).
-    webhook_secret: Optional[str] = None
+    ai_webhook_secret: Optional[str] = None
 
     # Proof-of-life settings
     proof_of_life_confidence_threshold: float = 0.65
@@ -113,13 +117,17 @@ class Settings(BaseSettings):
         if self.app_env == "staging":
             self.request_rate_limit = "5/minute"
             self.ai_deterministic_mode = True
-            if not (self.openai_api_key or self.groq_api_key or self.test_provider_mode):
+            if not (
+                self.openai_api_key or self.groq_api_key or self.test_provider_mode
+            ):
                 self.test_provider_mode = True
 
         if self.app_env == "test":
             self.request_rate_limit = "5/minute"
             self.ai_deterministic_mode = True
-            if not (self.openai_api_key or self.groq_api_key or self.test_provider_mode):
+            if not (
+                self.openai_api_key or self.groq_api_key or self.test_provider_mode
+            ):
                 self.test_provider_mode = True
 
         if self.app_env == "production":
@@ -127,7 +135,9 @@ class Settings(BaseSettings):
                 self.log_level = "WARNING"
             if self.request_rate_limit == "10/minute":
                 self.request_rate_limit = "20/minute"
-            if not (self.openai_api_key or self.groq_api_key or self.test_provider_mode):
+            if not (
+                self.openai_api_key or self.groq_api_key or self.test_provider_mode
+            ):
                 raise ValueError(
                     "Production environment requires OPENAI_API_KEY, GROQ_API_KEY, or TEST_PROVIDER_MODE=true"
                 )
@@ -135,7 +145,9 @@ class Settings(BaseSettings):
         return self
 
     def validate_api_keys(self) -> bool:
-        has_key = bool(self.openai_api_key or self.groq_api_key or self.test_provider_mode)
+        has_key = bool(
+            self.openai_api_key or self.groq_api_key or self.test_provider_mode
+        )
         if not has_key:
             logger.warning("No API keys configured. AI features will be unavailable.")
         return has_key
@@ -164,7 +176,11 @@ class Settings(BaseSettings):
         # Add production origins
         if self.cors_allowed_origins:
             origins.extend(
-                [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
+                [
+                    origin.strip()
+                    for origin in self.cors_allowed_origins.split(",")
+                    if origin.strip()
+                ]
             )
 
         # Add Vercel preview pattern if enabled
@@ -175,12 +191,22 @@ class Settings(BaseSettings):
         # Add custom origins
         if self.cors_custom_origins:
             origins.extend(
-                [origin.strip() for origin in self.cors_custom_origins.split(",") if origin.strip()]
+                [
+                    origin.strip()
+                    for origin in self.cors_custom_origins.split(",")
+                    if origin.strip()
+                ]
             )
 
         # Always allow localhost for development
         if self.app_env == "development":
-            origins.extend(["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"])
+            origins.extend(
+                [
+                    "http://localhost:3000",
+                    "http://localhost:3001",
+                    "http://127.0.0.1:3000",
+                ]
+            )
 
         return origins
 
@@ -202,8 +228,9 @@ class Settings(BaseSettings):
         for allowed in allowed_origins:
             # Handle wildcard patterns (e.g., https://*.vercel.app)
             if "*" in allowed:
-                pattern = allowed.replace("*", "[^\"]*")
+                pattern = allowed.replace("*", '[^"]*')
                 import re
+
                 if re.match(f"^{pattern}$", origin):
                     return True
             # Exact match

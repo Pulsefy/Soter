@@ -83,6 +83,20 @@ describe('Verification Metadata E2E', () => {
       const errors = metadataService.validateMetadata(validMetadata);
       expect(errors).toHaveLength(0);
 
+      const overloadedMetadata = {
+        campaignId: '123e4567-e89b-12d3-a456-426614174000',
+        claimId: '123e4567-e89b-12d3-a456-426614174001',
+        packageId: 'contract_123',
+        contractId: 'contract_123',
+        network: 'testnet',
+      };
+      const overloadedErrors =
+        metadataService.validateMetadata(overloadedMetadata);
+      expect(overloadedErrors.length).toBeGreaterThan(0);
+      expect(overloadedErrors.some(e => e.includes('cannot overload'))).toBe(
+        true,
+      );
+
       const invalidMetadata = {
         campaignId: 'invalid-uuid',
         claimId: 'invalid-uuid',
@@ -104,6 +118,7 @@ describe('Verification Metadata E2E', () => {
         claimId: '123e4567-e89b-12d3-a456-426614174001',
         campaignId: '123e4567-e89b-12d3-a456-426614174000',
         packageId: 'pkg_abc123',
+        contractId: 'contract_abc123',
         result: {
           score: 0.85,
           confidence: 0.92,

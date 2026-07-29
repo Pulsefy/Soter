@@ -242,6 +242,10 @@ model Claim {
   /// Stores AI verification anchor metadata (campaign_ref, claim_id, package_id)
   anchorMetadata Json?
 
+  /// Optional receipt metadata pointer (URI/hash) emitted on on-chain claim/disbursement events
+  /// for off-chain receipt discovery. Set at disbursement time.
+  receiptPointer String?
+
   balanceLedger     BalanceLedger[]
   sorobanTransactions SorobanTransaction[]
   sorobanEventCorrelations SorobanEventCorrelation[]
@@ -379,6 +383,7 @@ model Organization {
   verificationSessions VerificationSession[]
   verificationRequests VerificationRequest[]
   evidenceQueueItems EvidenceQueueItem[] @relation("OrganizationEvidenceQueueItems")
+  deviceNotificationTokens DeviceNotificationToken[]
 
   @@index([deletedAt])
 }
@@ -391,6 +396,8 @@ model User {
   organization Organization? @relation(fields: [orgId], references: [id])
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  deviceNotificationTokens DeviceNotificationToken[]
 
   @@index([orgId])
 }
@@ -831,6 +838,31 @@ model DeploymentMetadata {
   @@index([deployedAt])
 }
 
+enum ImportJobStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+model ImportJob {
+  id            String          @id @default(cuid())
+  status        ImportJobStatus @default(pending)
+  campaignId    String
+  totalRows     Int             @default(0)
+  processedRows Int             @default(0)
+  errorRows     Int             @default(0)
+  errors        String?
+  reportUrl     String?
+  fileName      String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  completedAt   DateTime?
+
+  @@index([campaignId])
+  @@index([status])
+}
+
 enum SorobanEventTopic {
   package_created
   package_claimed
@@ -846,6 +878,14 @@ enum SorobanEventTopic {
   claim_cancelled
   claim_archived
   escrow_initialized
+  escrow_funded
+  batch_created_event
+  extended_event
+  surplus_withdrawn_event
+  contract_paused_event
+  contract_unpaused_event
+  action_paused_event
+  action_unpaused_event
   config_updated
   admin_updated
   tokens_allowed
@@ -888,4 +928,45 @@ model SorobanEventCorrelation {
   @@index([createdAt])
   @@index([correlationSource])
   @@unique([txHash, eventIndex]) // Each event in a transaction is unique
+}
+
+enum DevicePlatform {
+  ios
+  android
+}
+
+model DeviceNotificationToken {
+  id          String          @id @default(cuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  orgId       String?
+  organization Organization?  @relation(fields: [orgId], references: [id])
+  
+  // Device identification
+  platform    DevicePlatform
+  deviceId    String          // Unique device identifier (e.g., UUID from mobile app)
+  
+  // Push notification token
+  token       String          // The actual push notification token from APNS/FCM
+  
+  // Metadata
+  deviceName  String?         // Optional human-readable device name
+  appVersion  String?         // App version when token was registered
+  
+  // Lifecycle
+  isActive    Boolean         @default(true)
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  revokedBy   String?
+  revokedReason String?
+  
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([userId, deviceId, platform])
+  @@index([userId])
+  @@index([orgId])
+  @@index([token])
+  @@index([isActive])
+  @@index([revokedAt])
 }
