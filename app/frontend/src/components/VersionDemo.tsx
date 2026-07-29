@@ -60,7 +60,7 @@ export function VersionDemo() {
   };
 
   const handleReset = () => {
-    store.setLastSeenVersion(null);
+    store.setLastSeenVersion('');
     store.setShouldShowReleaseNotes(false);
   };
 

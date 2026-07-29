@@ -1,3 +1,4 @@
-export const getExplorerUrl = (type: 'tz' | 'address', value: string): string => {
-  return `https://stellar.expert/explorer/testnet/${type}/${value}`;
+export const getExplorerUrl = (type: 'tx' | 'tz' | 'address', value: string): string => {
+  const segment = type === 'tz' ? 'tx' : type;
+  return `https://stellar.expert/explorer/testnet/${segment}/${value}`;
 };

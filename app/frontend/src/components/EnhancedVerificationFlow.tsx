@@ -139,6 +139,7 @@ export const EnhancedVerificationFlow: React.FC = () => {
         apiError: null,
         result: null,
         evidenceArtifact: null,
+        artifactNotes: '',
         showArtifactViewer: false,
     });
 
@@ -162,6 +163,7 @@ export const EnhancedVerificationFlow: React.FC = () => {
             apiError: null,
             result: null,
             evidenceArtifact: null,
+            artifactNotes: '',
             showArtifactViewer: false,
         });
         setDraftRestored(false);

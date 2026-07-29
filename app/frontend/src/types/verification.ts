@@ -2,7 +2,7 @@
  * Wizard step identifiers for the VerificationFlow component.
  * The flow is strictly linear: upload → analysing → result.
  */
-export type VerificationStep = 'upload' | 'analysing' | 'result';
+export type VerificationStep = 'upload' | 'analysing' | 'result' | 'review';
 
 /**
  * Payload returned by POST /api/v1/verification/start on success.
