@@ -43,6 +43,11 @@ import {
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
+import {
+  findLatestDeployment,
+  loadContractRegistryArtifact,
+  resolveRegistryArtifactPath,
+} from '../deployment-metadata/contract-registry.artifact';
 
 @Injectable()
 export class SorobanAdapter implements OnchainAdapter {
@@ -57,11 +62,8 @@ export class SorobanAdapter implements OnchainAdapter {
   private keypair: Keypair | null = null;
 
   constructor(private configService: ConfigService) {
-    this.contractId = this.configService.get<string>(
-      'AID_ESCROW_CONTRACT_ID',
-      '',
-    );
     this.network = this.configService.get<string>('SOROBAN_NETWORK', 'testnet');
+    this.contractId = this.resolveContractId();
     this.rpcUrl = this.configService.get<string>(
       'STELLAR_RPC_URL',
       'https://soroban-testnet.stellar.org',
@@ -75,6 +77,56 @@ export class SorobanAdapter implements OnchainAdapter {
       '',
     );
     this.errorMapper = new SorobanErrorMapper();
+  }
+
+  private resolveContractId(): string {
+    const envContractId = this.configService.get<string>(
+      'AID_ESCROW_CONTRACT_ID',
+      '',
+    );
+    if (envContractId) {
+      this.logger.log(
+        'Contract registry source active: env (AID_ESCROW_CONTRACT_ID)',
+      );
+      return envContractId;
+    }
+
+    const artifactPath = resolveRegistryArtifactPath(
+      this.configService.get<string>('CONTRACT_REGISTRY_PATH'),
+    );
+    if (!artifactPath) {
+      this.logger.warn(
+        'Contract registry source active: missing; AID_ESCROW_CONTRACT_ID and onchain registry artifact are unavailable',
+      );
+      return '';
+    }
+
+    try {
+      const deployments = loadContractRegistryArtifact(artifactPath);
+      const deployment = findLatestDeployment(
+        deployments,
+        this.network,
+        'aid_escrow',
+      );
+      if (deployment) {
+        this.logger.log(
+          `Contract registry source active: artifact (${artifactPath}) for ${this.network}/aid_escrow`,
+        );
+        return deployment.contractId;
+      }
+
+      this.logger.warn(
+        `Contract registry source active: missing; no ${this.network}/aid_escrow deployment in ${artifactPath}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Contract registry source active: missing; failed to read ${artifactPath}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    return '';
   }
 
   private validateConfig(): void {
