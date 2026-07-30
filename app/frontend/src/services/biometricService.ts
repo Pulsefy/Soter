@@ -156,7 +156,7 @@ export async function checkBiometricAvailability(): Promise<BiometricCapabilitie
     const uvpaa = await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
     const detectedCapabilities: string[] = [];
 
-    if (typeof window.PublicKeyCredential.isExternalCTAP2SecurityKeySupported === 'function') {
+    if (typeof (window.PublicKeyCredential as unknown as Record<string, unknown>).isExternalCTAP2SecurityKeySupported === 'function') {
       // reserved for future cross-platform key support detection
     }
 

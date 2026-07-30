@@ -34,8 +34,17 @@ class PIIScrubberService:
     }
 
     ALLOWLIST = {
-        "Soter", "Pulsefy", "Stellar", "Humanitarian", "Coordinator", 
-        "Manager", "Project", "Water", "Clear", "Crystal", "Coordinator"
+        "Soter",
+        "Pulsefy",
+        "Stellar",
+        "Humanitarian",
+        "Coordinator",
+        "Manager",
+        "Project",
+        "Water",
+        "Clear",
+        "Crystal",
+        "Coordinator",
     }
 
     DATE_REGEXES = [
@@ -115,7 +124,7 @@ class PIIScrubberService:
             }
         finally:
             latency = time.time() - start_time
-            metrics.PIPELINE_STEP_LATENCY.labels(step_name='scrub').observe(latency)
+            metrics.PIPELINE_STEP_LATENCY.labels(step_name="scrub").observe(latency)
 
     def _build_nlp(self) -> Language:
         nlp = spacy.blank("en")
@@ -146,7 +155,14 @@ class PIIScrubberService:
                         {"IS_TITLE": True, "OP": "?"},
                         {
                             "LOWER": {
-                                "IN": ["camp", "state", "region", "district", "city", "village"]
+                                "IN": [
+                                    "camp",
+                                    "state",
+                                    "region",
+                                    "district",
+                                    "city",
+                                    "village",
+                                ]
                             },
                             "OP": "?",
                         },
@@ -164,7 +180,25 @@ class PIIScrubberService:
                     "label": "DATE",
                     "pattern": [
                         {"IS_DIGIT": True},
-                        {"LOWER": {"IN": ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec"]}},
+                        {
+                            "LOWER": {
+                                "IN": [
+                                    "jan",
+                                    "feb",
+                                    "mar",
+                                    "apr",
+                                    "may",
+                                    "jun",
+                                    "jul",
+                                    "aug",
+                                    "sep",
+                                    "sept",
+                                    "oct",
+                                    "nov",
+                                    "dec",
+                                ]
+                            }
+                        },
                         {"IS_DIGIT": True},
                     ],
                 },
@@ -179,7 +213,14 @@ class PIIScrubberService:
         for ent in doc.ents:
             mapped = self._normalize_label(ent.label_)
             if mapped:
-                spans.append(PIISpan(start=ent.start_char, end=ent.end_char, label=mapped, text=ent.text))
+                spans.append(
+                    PIISpan(
+                        start=ent.start_char,
+                        end=ent.end_char,
+                        label=mapped,
+                        text=ent.text,
+                    )
+                )
 
         for pattern in self.DATE_REGEXES:
             spans.extend(self._spans_from_regex(text, pattern, "DATE"))
@@ -188,7 +229,9 @@ class PIIScrubberService:
             spans.extend(self._spans_from_regex(text, pattern, "PERSON"))
 
         for pattern in self.LOCATION_REGEXES:
-            spans.extend(self._spans_from_regex(text, pattern, "LOCATION")) # Removed capture group 1 to get full address if regex 2 matches
+            spans.extend(
+                self._spans_from_regex(text, pattern, "LOCATION")
+            )  # Removed capture group 1 to get full address if regex 2 matches
 
         for pattern in self.EMAIL_REGEXES:
             spans.extend(self._spans_from_regex(text, pattern, "EMAIL"))
@@ -210,7 +253,9 @@ class PIIScrubberService:
             return "DATE"
         return ""
 
-    def _spans_from_regex(self, text: str, pattern: str, label: str, capture_group: int = 0) -> List[PIISpan]:
+    def _spans_from_regex(
+        self, text: str, pattern: str, label: str, capture_group: int = 0
+    ) -> List[PIISpan]:
         spans: List[PIISpan] = []
         for match in re.finditer(pattern, text):
             if capture_group:
@@ -229,11 +274,15 @@ class PIIScrubberService:
 
         # Filter out spans that are in the allowlist
         filtered_by_allowlist = [
-            span for span in spans 
+            span
+            for span in spans
             if not any(word in self.ALLOWLIST for word in span.text.split())
         ]
 
-        sorted_spans = sorted(filtered_by_allowlist, key=lambda span: (span.start, -(span.end - span.start)))
+        sorted_spans = sorted(
+            filtered_by_allowlist,
+            key=lambda span: (span.start, -(span.end - span.start)),
+        )
         filtered: List[PIISpan] = []
         current_end = -1
 
@@ -245,7 +294,9 @@ class PIIScrubberService:
 
         return filtered
 
-    def _mask_spans(self, text: str, spans: List[PIISpan]) -> Tuple[str, Dict[str, int]]:
+    def _mask_spans(
+        self, text: str, spans: List[PIISpan]
+    ) -> Tuple[str, Dict[str, int]]:
         if not spans:
             return text, {}
 
@@ -255,7 +306,7 @@ class PIIScrubberService:
         cursor = 0
 
         for span in spans:
-            chunks.append(text[cursor:span.start])
+            chunks.append(text[cursor : span.start])
             counters[span.label] += 1
             token_base = self.TOKEN_BASE_BY_LABEL[span.label]
             token = f"[{token_base}]"

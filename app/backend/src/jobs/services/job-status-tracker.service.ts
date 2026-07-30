@@ -134,7 +134,11 @@ export class JobStatusTracker {
    * Fires when a job is added to the queue
    */
   @OnEvent('bull:job-created')
-  async onJobCreated(payload: { jobId: string; jobType: JobType; metadata?: Record<string, unknown> }): Promise<void> {
+  async onJobCreated(payload: {
+    jobId: string;
+    jobType: JobType;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
     await this.emitJobStatus({
       jobId: payload.jobId,
       jobType: payload.jobType,
@@ -148,7 +152,11 @@ export class JobStatusTracker {
    * Fires when a worker starts processing a job
    */
   @OnEvent('bull:job-started')
-  async onJobStarted(payload: { jobId: string; jobType: JobType; metadata?: Record<string, unknown> }): Promise<void> {
+  async onJobStarted(payload: {
+    jobId: string;
+    jobType: JobType;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
     await this.emitJobStatus({
       jobId: payload.jobId,
       jobType: payload.jobType,
@@ -250,7 +258,11 @@ export class JobStatusTracker {
    * Fires when a job is manually cancelled
    */
   @OnEvent('bull:job-cancelled')
-  async onJobCancelled(payload: { jobId: string; jobType: JobType; metadata?: Record<string, unknown> }): Promise<void> {
+  async onJobCancelled(payload: {
+    jobId: string;
+    jobType: JobType;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
     await this.emitJobStatus({
       jobId: payload.jobId,
       jobType: payload.jobType,

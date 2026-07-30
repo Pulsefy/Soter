@@ -242,6 +242,10 @@ model Claim {
   /// Stores AI verification anchor metadata (campaign_ref, claim_id, package_id)
   anchorMetadata Json?
 
+  /// Optional receipt metadata pointer (URI/hash) emitted on on-chain claim/disbursement events
+  /// for off-chain receipt discovery. Set at disbursement time.
+  receiptPointer String?
+
   balanceLedger     BalanceLedger[]
   sorobanTransactions SorobanTransaction[]
   sorobanEventCorrelations SorobanEventCorrelation[]

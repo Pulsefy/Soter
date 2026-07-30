@@ -57,7 +57,9 @@ interface AuthenticatedSocket extends Socket {
     credentials: true,
   },
 })
-export class JobStatusGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
+export class JobStatusGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   private server: Server;
 
@@ -102,9 +104,12 @@ export class JobStatusGateway implements OnGatewayInit, OnGatewayConnection, OnG
    */
   handleConnection(socket: AuthenticatedSocket): void {
     const socketId = socket.id;
-    const userId = socket.user?.id || socket.handshake.headers['x-user-id'] as string;
+    const userId =
+      socket.user?.id || (socket.handshake.headers['x-user-id'] as string);
 
-    this.logger.log(`Client connected: ${socketId} (user: ${userId || 'anonymous'})`);
+    this.logger.log(
+      `Client connected: ${socketId} (user: ${userId || 'anonymous'})`,
+    );
 
     // Initialize subscription tracking
     socket.subscriptions = new Map();
@@ -134,7 +139,10 @@ export class JobStatusGateway implements OnGatewayInit, OnGatewayConnection, OnG
     // Clean up subscriptions
     if (socket.subscriptions) {
       for (const [, metadata] of socket.subscriptions) {
-        await this.jobStatusBroadcaster.removeSubscription(metadata.jobId, metadata.subscriptionId);
+        await this.jobStatusBroadcaster.removeSubscription(
+          metadata.jobId,
+          metadata.subscriptionId,
+        );
       }
     }
 
@@ -192,12 +200,19 @@ export class JobStatusGateway implements OnGatewayInit, OnGatewayConnection, OnG
       socket.subscriptions?.set(jobId, metadata);
 
       // Record subscription in Redis
-      await this.jobStatusBroadcaster.recordSubscription(jobId, subscriptionId, userId);
+      await this.jobStatusBroadcaster.recordSubscription(
+        jobId,
+        subscriptionId,
+        userId,
+      );
 
       // Get missed updates if requested
       let missedUpdates: JobStatusEvent[] = [];
       if (validatedOptions.sendMissedUpdates) {
-        const history = await this.jobStatusBroadcaster.getJobHistory(jobId, 50);
+        const history = await this.jobStatusBroadcaster.getJobHistory(
+          jobId,
+          50,
+        );
         missedUpdates = this.filterEvents(history, validatedOptions);
       }
 
@@ -216,7 +231,9 @@ export class JobStatusGateway implements OnGatewayInit, OnGatewayConnection, OnG
         ...ack,
       });
 
-      this.logger.debug(`Client ${socketId} subscribed to job ${jobId} (subId: ${subscriptionId})`);
+      this.logger.debug(
+        `Client ${socketId} subscribed to job ${jobId} (subId: ${subscriptionId})`,
+      );
 
       // Set up Redis subscription for this job
       if (!socket.redisSub) {
@@ -227,10 +244,14 @@ export class JobStatusGateway implements OnGatewayInit, OnGatewayConnection, OnG
       const jobChannel = `job_status:${jobId}`;
 
       // Listen for new events
-      redisSub.subscribe(jobChannel, (err) => {
+      redisSub.subscribe(jobChannel, err => {
         if (err) {
-          this.logger.error(`Failed to subscribe to channel ${jobChannel}: ${err.message}`);
-          socket.emit('error', { message: 'Failed to subscribe to job updates' });
+          this.logger.error(
+            `Failed to subscribe to channel ${jobChannel}: ${err.message}`,
+          );
+          socket.emit('error', {
+            message: 'Failed to subscribe to job updates',
+          });
         }
       });
 
@@ -257,7 +278,9 @@ export class JobStatusGateway implements OnGatewayInit, OnGatewayConnection, OnG
             `Emitted job status to ${socketId}: ${event.job.id} (${event.job.status})`,
           );
         } catch (error) {
-          this.logger.error(`Failed to parse job status event: ${error instanceof Error ? error.message : String(error)}`);
+          this.logger.error(
+            `Failed to parse job status event: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
       });
     } catch (error) {
@@ -293,7 +316,10 @@ export class JobStatusGateway implements OnGatewayInit, OnGatewayConnection, OnG
     try {
       const metadata = socket.subscriptions?.get(jobId);
       if (metadata) {
-        await this.jobStatusBroadcaster.removeSubscription(jobId, metadata.subscriptionId);
+        await this.jobStatusBroadcaster.removeSubscription(
+          jobId,
+          metadata.subscriptionId,
+        );
         socket.subscriptions?.delete(jobId);
       }
 
@@ -328,7 +354,10 @@ export class JobStatusGateway implements OnGatewayInit, OnGatewayConnection, OnG
   /**
    * Filter events based on subscription options
    */
-  private filterEvents(events: JobStatusEvent[], options: JobStatusSubscriptionOptions): JobStatusEvent[] {
+  private filterEvents(
+    events: JobStatusEvent[],
+    options: JobStatusSubscriptionOptions,
+  ): JobStatusEvent[] {
     return events.filter(event => {
       // Filter by job type
       if (options.jobTypes && options.jobTypes.length > 0) {
@@ -356,7 +385,10 @@ export class JobStatusGateway implements OnGatewayInit, OnGatewayConnection, OnG
   /**
    * Determine if an event should be emitted based on subscription options
    */
-  private shouldEmitEvent(event: JobStatusEvent, options: JobStatusSubscriptionOptions): boolean {
+  private shouldEmitEvent(
+    event: JobStatusEvent,
+    options: JobStatusSubscriptionOptions,
+  ): boolean {
     return this.filterEvents([event], options).length > 0;
   }
 

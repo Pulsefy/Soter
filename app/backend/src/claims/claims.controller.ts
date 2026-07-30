@@ -35,6 +35,7 @@ import {
 } from './dto/claim-receipt.dto';
 import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
+import { DisburseClaimDto } from './dto/disburse-claim.dto';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
@@ -210,10 +211,14 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  async disburse(@Param('id') id: string, @Request() req: ExpressRequest) {
+  async disburse(
+    @Param('id') id: string,
+    @Body() dto: DisburseClaimDto,
+    @Request() req: ExpressRequest,
+  ) {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
-    return this.claimsService.disburse(id);
+    return this.claimsService.disburse(id, dto.receiptPointer);
   }
 
   @Patch(':id/archive')

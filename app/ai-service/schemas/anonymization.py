@@ -5,7 +5,11 @@ from schemas.common import AnchorMetadata
 
 
 class AnonymizeRequest(BaseModel):
-    text: str = Field(min_length=1, description="Input text to anonymize before LLM processing", examples=["John Doe from New York on 2024-01-01 requested aid"])
+    text: str = Field(
+        min_length=1,
+        description="Input text to anonymize before LLM processing",
+        examples=["John Doe from New York on 2024-01-01 requested aid"],
+    )
     anchor_metadata: Optional[AnchorMetadata] = None
 
     model_config = {
@@ -13,7 +17,10 @@ class AnonymizeRequest(BaseModel):
             "examples": [
                 {
                     "text": "John Doe from New York on 2024-01-01 requested aid",
-                    "anchor_metadata": {"campaign_ref": "campaign-2024-001", "claim_id": "claim-abc123"}
+                    "anchor_metadata": {
+                        "campaign_ref": "campaign-2024-001",
+                        "claim_id": "claim-abc123",
+                    },
                 }
             ]
         }
@@ -36,13 +43,17 @@ class PIISummary(BaseModel):
 class AnonymizeResult(BaseModel):
     """Payload nested inside the ResultEnvelope for anonymization responses."""
 
-    anonymized_text: str = Field(examples=["[NAME] from [LOCATION] on [DATE] requested aid"])
+    anonymized_text: str = Field(
+        examples=["[NAME] from [LOCATION] on [DATE] requested aid"]
+    )
     original_length: int = Field(examples=[50])
     pii_summary: Dict[str, Any] = Field(
         default_factory=dict,
         examples=[{"names": 1, "locations": 1, "dates": 1, "total": 3}],
     )
-    token_counts: Dict[str, int] = Field(default_factory=dict, examples=[{"original": 10, "anonymized": 10}])
+    token_counts: Dict[str, int] = Field(
+        default_factory=dict, examples=[{"original": 10, "anonymized": 10}]
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -51,7 +62,11 @@ class AnonymizeResult(BaseModel):
                     "anonymized_text": "[NAME] from [LOCATION] on [DATE] requested aid",
                     "original_length": 50,
                     "pii_summary": {"names": 1, "locations": 1, "dates": 1, "total": 3},
-                    "token_counts": {"[RECIPIENT_NAME]": 1, "[LOCATION]": 1, "[EVENT_DATE]": 1},
+                    "token_counts": {
+                        "[RECIPIENT_NAME]": 1,
+                        "[LOCATION]": 1,
+                        "[EVENT_DATE]": 1,
+                    },
                 }
             ]
         }
@@ -67,10 +82,14 @@ class AnonymizeResponse(BaseModel):
     """
 
     success: bool = Field(examples=[True])
-    anonymized_text: str = Field(examples=["[NAME] from [LOCATION] on [DATE] requested aid"])
+    anonymized_text: str = Field(
+        examples=["[NAME] from [LOCATION] on [DATE] requested aid"]
+    )
     original_length: int = Field(examples=[50])
     pii_summary: PIISummary
-    token_counts: Dict[str, int] = Field(default_factory=dict, examples=[{"original": 10, "anonymized": 10}])
+    token_counts: Dict[str, int] = Field(
+        default_factory=dict, examples=[{"original": 10, "anonymized": 10}]
+    )
     anchor_metadata: Optional[AnchorMetadata] = None
 
     model_config = {
@@ -82,7 +101,10 @@ class AnonymizeResponse(BaseModel):
                     "original_length": 50,
                     "pii_summary": {"names": 1, "locations": 1, "dates": 1, "total": 3},
                     "token_counts": {"original": 10, "anonymized": 10},
-                    "anchor_metadata": {"campaign_ref": "campaign-2024-001", "claim_id": "claim-abc123"}
+                    "anchor_metadata": {
+                        "campaign_ref": "campaign-2024-001",
+                        "claim_id": "claim-abc123",
+                    },
                 }
             ]
         }

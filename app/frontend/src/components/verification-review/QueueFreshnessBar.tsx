@@ -64,13 +64,13 @@ export function QueueFreshnessBar({
   const { lastRefreshedAt, isRefreshing, latencyMs, hasError, refresh } = status;
 
   // Tick every second to keep the relative timestamp live
-  const [, setTick] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 1000);
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const ageMs = lastRefreshedAt > 0 ? Date.now() - lastRefreshedAt : null;
+  const ageMs = lastRefreshedAt > 0 ? now - lastRefreshedAt : null;
   // Consider data stale when it's older than 1.5× the auto-refresh interval
   const isStale = ageMs !== null && ageMs > autoRefreshMs * 1.5;
   const neverFetched = lastRefreshedAt === 0;

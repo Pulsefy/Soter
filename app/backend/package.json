@@ -62,7 +62,8 @@
     "redis": "^6.0.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -118,8 +119,7 @@
       ".*metrics/metrics\\.service$": "<rootDir>/src/observability/metrics/metrics.service",
       ".*/session/session\\.service$": "<rootDir>/src/session/session.service",
       ".*/prisma/prisma\\.service$": "<rootDir>/src/prisma/prisma.service",
-      ".*config/config$": "<rootDir>/src/config/config",
-      ".*guards/hmac-auth\\.guard$": "<rootDir>/src/common/guards/hmac.guard"
+      ".*config/config$": "<rootDir>/src/config/config"
     }
   },
   "prisma": {

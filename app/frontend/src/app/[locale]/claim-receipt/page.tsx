@@ -32,22 +32,11 @@ export default function ClaimReceiptPage() {
       ? 'package'
       : 'unknown';
 
-<<<<<<< Updated upstream
-  const [claim, setClaim] = useState<ClaimReceiptData | null>(null);
-  const [loading, setLoading] = useState(Boolean(claimId));
-  const [error, setError] = useState<string | null>(
-    claimId ? null : 'Claim ID not provided',
-  );
-
-  useEffect(() => {
-    if (!claimId) {
-=======
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
   useEffect(() => {
     if (!identifier) {
       setState({ kind: 'not-found', identifierType: 'unknown' });
->>>>>>> Stashed changes
       return;
     }
 
@@ -56,41 +45,12 @@ export default function ClaimReceiptPage() {
     const loadReceipt = async () => {
       setState({ kind: 'loading' });
       try {
-<<<<<<< Updated upstream
-        setLoading(true);
-        // TODO: Replace with actual API call
-        // const response = await fetch(`/api/claims/${claimId}/receipt`);
-        // if (!response.ok) throw new Error('Failed to load receipt');
-        // const data: ClaimReceiptData = await response.json();
-
-        // Mock data for now
-        const data: ClaimReceiptData = {
-          claimId,
-          packageId: 'pkg-' + Math.random().toString(36).substr(2, 9),
-          status: 'disbursed',
-          amount: 150.5,
-          tokenAddress:
-            'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
-          transactionHash:
-            '439d564ab3b4df9d1d1f057bb081f9a26be4cd8cf9d564ab3b4df9d1d1f057bb',
-          contractAddress:
-            'CDA4BEYKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
-          timestamp: new Date().toISOString(),
-        };
-
-        setClaim(data);
-        setError(null);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : 'Failed to load claim receipt',
-=======
         const response = await fetchClient(
           `${API_URL}/claims/${encodeURIComponent(identifier)}/receipt`,
           {
             signal: abortCtrl.signal,
             cache: 'no-store',
           },
->>>>>>> Stashed changes
         );
 
         if (response.status === 404) {
@@ -141,11 +101,7 @@ export default function ClaimReceiptPage() {
         await navigator.share({
           title: 'Claim Receipt',
           text: `Claim ${claim.claimId} - ${claim.status}`,
-<<<<<<< Updated upstream
-          url: pageUrl,
-=======
-          url: claim.explorerLink ?? undefined,
->>>>>>> Stashed changes
+          url: claim.explorerLink ?? pageUrl,
         });
       } else {
         // Fallback: copy URL to clipboard

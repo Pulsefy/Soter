@@ -1,4 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { INTEGRATION_ERROR_CODES } from '../constants/integration-error-codes';
+
+// Re-export integration codes so consumers only need one import path.
+export { INTEGRATION_ERROR_CODES } from '../constants/integration-error-codes';
+export {
+  AppException,
+  type IntegrationErrorCode,
+} from '../constants/integration-error-codes';
 
 /**
  * Standardized error response format for all API endpoints
@@ -56,9 +64,12 @@ export class ErrorResponseDto {
 }
 
 /**
- * Standard error codes for programmatic handling
+ * Standard error codes for programmatic handling.
+ * Integration-specific codes are merged in from INTEGRATION_ERROR_CODES so
+ * both the base and domain codes are accessible from a single constant.
  */
 export const ERROR_CODES = {
+  // Base codes
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   NOT_FOUND: 'NOT_FOUND',
   UNAUTHORIZED: 'UNAUTHORIZED',
@@ -76,6 +87,8 @@ export const ERROR_CODES = {
   INVALID_OPERATION: 'INVALID_OPERATION',
   DEPENDENCY_FAILURE: 'DEPENDENCY_FAILURE',
   TIMEOUT: 'TIMEOUT',
+  // Integration codes (AI, onchain, evidence, webhook)
+  ...INTEGRATION_ERROR_CODES,
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_CODES;
