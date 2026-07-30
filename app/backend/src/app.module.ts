@@ -43,6 +43,7 @@ import { InvitesModule } from './orgs/invites.module';
 import { AdminSearchModule } from './search/admin-search.module';
 import { EntityLinkingModule } from './entity-linking/entity-linking.module';
 import { DeploymentMetadataModule } from './deployment-metadata/deployment-metadata.module';
+import { ReleaseConfigModule } from './release-config/release-config.module';
 import { RedisModule } from './redis/redis.module';
 import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guard';
 import { DeprecationInterceptor } from './common/interceptors/deprecation.interceptor';
@@ -53,7 +54,6 @@ import { CacheResponseInterceptor } from './common/interceptors/cache-response.i
 import { WebhooksModule } from 'src/webhooks.module';
 import { CorrelationModule } from './common/modules/correlation.module';
 import { RecipientImportModule } from './recipient-import/recipient-import.module';
-import { VersionConfigModule } from './version-config/version-config.module';
 import { DeviceTokensModule } from './device-tokens/device-tokens.module';
 
 @Module({
@@ -124,12 +124,12 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
     AdminSearchModule,
     EntityLinkingModule,
     DeploymentMetadataModule,
+    ReleaseConfigModule,
     SandboxModule,
     WebhooksModule,
     CorrelationModule,
     RedisModule,
     RecipientImportModule,
-    VersionConfigModule,
     DeviceTokensModule,
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
