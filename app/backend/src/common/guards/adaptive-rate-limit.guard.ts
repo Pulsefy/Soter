@@ -7,8 +7,9 @@ import {
   Inject,
 } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
-import { RedisService } from '@liaoliaots/nestjs-redis';
+import Redis from 'ioredis';
 import { Request } from 'express';
+import { REDIS_CLIENT } from '../../redis/redis.module';
 import rateLimitConfig from '../../config/rate-limit.config';
 import {
   RateLimitPolicy,
@@ -25,14 +26,14 @@ interface RateLimitUser {
 @Injectable()
 export class AdaptiveRateLimitGuard implements CanActivate {
   constructor(
-    private readonly redisService: RedisService,
+    @Inject(REDIS_CLIENT) private readonly redisClient: Redis,
     @Inject(rateLimitConfig.KEY)
     private readonly config: ConfigType<typeof rateLimitConfig>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request: Request = context.switchToHttp().getRequest<Request>();
-    const client = this.redisService.getOrThrow();
+    const client = this.redisClient;
 
     const user = request.user as RateLimitUser | undefined;
     const userType = this.getUserType(user);

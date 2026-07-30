@@ -77,3 +77,9 @@ def test_production_environment_allows_test_provider_when_enabled(monkeypatch):
     settings = Settings()
 
     assert settings.get_active_provider() == "test"
+
+
+def test_malformed_webhook_url_fails_validation(monkeypatch):
+    monkeypatch.setenv("BACKEND_WEBHOOK_URL", "not-a-url")
+    with pytest.raises(ValueError):
+        Settings()

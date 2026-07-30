@@ -158,9 +158,9 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
   async claimAidPackage(
     params: ClaimAidPackageParams,
   ): Promise<ClaimAidPackageResult> {
-    await this.invokeContract('claim_package', [
+    await this.invokeContract('claim', [
       params.packageId,
-      params.recipientAddress,
+      params.receiptPointer ?? null,
     ]);
     return {
       packageId: params.packageId,
@@ -174,9 +174,9 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
   async disburseAidPackage(
     params: DisburseAidPackageParams,
   ): Promise<DisburseAidPackageResult> {
-    await this.invokeContract('disburse_package', [
+    await this.invokeContract('disburse', [
       params.packageId,
-      params.operatorAddress,
+      params.receiptPointer ?? null,
     ]);
     return {
       packageId: params.packageId,
@@ -312,6 +312,7 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     const result = await this.disburseAidPackage({
       packageId: params.packageId,
       operatorAddress: params.recipientAddress ?? this.secretKey,
+      receiptPointer: params.receiptPointer,
     });
     return {
       transactionHash: result.transactionHash,

@@ -144,6 +144,7 @@ export class MockOnchainAdapter implements OnchainAdapter {
       metadata: {
         packageId: params.packageId,
         recipientAddress: params.recipientAddress,
+        receiptPointer: params.receiptPointer,
         adapter: 'mock',
       },
     };
@@ -166,6 +167,7 @@ export class MockOnchainAdapter implements OnchainAdapter {
       metadata: {
         packageId: params.packageId,
         operatorAddress: params.operatorAddress,
+        receiptPointer: params.receiptPointer,
         adapter: 'mock',
       },
     };
@@ -344,6 +346,7 @@ export class MockOnchainAdapter implements OnchainAdapter {
         claimId: params.claimId,
         packageId: params.packageId,
         recipientAddress: params.recipientAddress,
+        receiptPointer: params.receiptPointer,
         adapter: 'mock',
       },
     };

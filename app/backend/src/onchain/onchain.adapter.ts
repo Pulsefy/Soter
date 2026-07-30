@@ -67,6 +67,7 @@ export interface BatchCreateAidPackagesResult {
 export interface ClaimAidPackageParams {
   packageId: string;
   recipientAddress: string;
+  receiptPointer?: string;
 }
 
 export interface ClaimAidPackageResult {
@@ -81,6 +82,7 @@ export interface ClaimAidPackageResult {
 export interface DisburseAidPackageParams {
   packageId: string;
   operatorAddress: string; // Usually admin
+  receiptPointer?: string;
 }
 
 export interface DisburseAidPackageResult {
@@ -193,6 +195,7 @@ export interface DisburseParams {
   recipientAddress?: string;
   amount?: string;
   tokenAddress: string; // Required for multi-token support
+  receiptPointer?: string;
 }
 
 export interface DisburseResult {

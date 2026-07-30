@@ -72,6 +72,13 @@ export class ClaimReceiptDto {
     required: false,
   })
   explorerLink?: string;
+
+  @ApiProperty({
+    description: 'Receipt metadata pointer (optional)',
+    example: 'ipfs://QmReceipt123',
+    required: false,
+  })
+  receiptPointer?: string;
 }
 
 export class ClaimShareResponseDto {

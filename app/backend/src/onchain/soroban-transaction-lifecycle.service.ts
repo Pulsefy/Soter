@@ -149,11 +149,15 @@ export class SorobanTransactionLifecycleService {
           break;
 
         case SorobanOperationType.disburse_claim:
-          result = await this.onchainAdapter.disburse({
-            claimId: transaction.claimId!,
-            packageId: transaction.packageId!,
-            tokenAddress: transaction.tokenAddress!,
-          });
+          {
+            const metadata = transaction.metadata as Record<string, any> | null;
+            result = await this.onchainAdapter.disburse({
+              claimId: transaction.claimId!,
+              packageId: transaction.packageId!,
+              tokenAddress: transaction.tokenAddress!,
+              receiptPointer: metadata?.receiptPointer ?? undefined,
+            });
+          }
           break;
 
         case SorobanOperationType.init_escrow:

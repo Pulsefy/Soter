@@ -1,5 +1,3 @@
-import axios from 'axios';
-
 export interface ApiKey {
   id: string;
   name: string;
@@ -10,19 +8,23 @@ export interface ApiKey {
 }
 
 export async function getKeys(): Promise<ApiKey[]> {
-  const res = await axios.get('/api/admin/keys');
-  return res.data;
+  const res = await fetch('/api/admin/keys');
+  if (!res.ok) throw new Error('Failed to fetch API keys');
+  return res.json();
 }
 
 export async function rotateKey(id: string): Promise<void> {
-  await axios.post(`/api/admin/keys/${id}/rotate`);
+  const res = await fetch(`/api/admin/keys/${id}/rotate`, { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to rotate API key');
 }
 
 export async function revokeKey(id: string): Promise<void> {
-  await axios.post(`/api/admin/keys/${id}/revoke`);
+  const res = await fetch(`/api/admin/keys/${id}/revoke`, { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to revoke API key');
 }
 
 export async function createKey(): Promise<ApiKey> {
-  const res = await axios.post('/api/admin/keys');
-  return res.data;
+  const res = await fetch('/api/admin/keys', { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to create API key');
+  return res.json();
 }

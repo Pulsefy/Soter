@@ -11,8 +11,6 @@ import {
   Request,
   HttpCode,
   HttpStatus,
-  BadRequestException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
@@ -41,6 +39,10 @@ import {
   evidenceMulterOptions,
   validateUploadedFile,
 } from './file-validation';
+import {
+  AppException,
+  INTEGRATION_ERROR_CODES,
+} from '../common/constants/integration-error-codes';
 
 @ApiTags('Evidence Queue')
 @ApiBearerAuth('JWT-auth')
@@ -102,16 +104,24 @@ export class EvidenceController {
     files: Express.Multer.File[] | undefined,
   ): Express.Multer.File {
     if (!files || files.length === 0) {
-      throw new BadRequestException('No file uploaded');
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_MISSING_FILE,
+        400,
+        'No file uploaded',
+      );
     }
     if (files.length > 1) {
-      throw new BadRequestException(
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_MISSING_FILE,
+        400,
         `Only a single file may be uploaded in the "${UPLOAD_FIELD}" field`,
       );
     }
     const file = files[0];
     if (file.fieldname !== UPLOAD_FIELD) {
-      throw new BadRequestException(
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_MISSING_FILE,
+        400,
         `Unexpected field "${file.fieldname}"; file must be sent in the "${UPLOAD_FIELD}" field`,
       );
     }
@@ -185,7 +195,11 @@ export class EvidenceController {
     @Request() req?: ExpressRequest,
   ) {
     if (!orgId) {
-      throw new BadRequestException('orgId is required');
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_MISSING_FILE,
+        400,
+        'orgId is required',
+      );
     }
 
     const userId = req?.user?.apiKeyId || req?.user?.authType || 'system';
@@ -195,7 +209,9 @@ export class EvidenceController {
     const ownsArtifact =
       await this.artifactTokenService.validateArtifactOwnership(id, orgId);
     if (!ownsArtifact) {
-      throw new UnauthorizedException(
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_ACCESS_DENIED,
+        401,
         'Artifact does not belong to the specified organization',
       );
     }
@@ -251,7 +267,11 @@ export class EvidenceController {
 
     // Additional validation: ensure token artifact ID matches URL
     if (tokenPayload.artifactId !== id) {
-      throw new UnauthorizedException('Token artifact ID mismatch');
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_ACCESS_DENIED,
+        401,
+        'Token artifact ID mismatch',
+      );
     }
 
     // Get artifact details from evidence service
@@ -259,7 +279,11 @@ export class EvidenceController {
     const artifactItem = artifact.find(item => item.id === id);
 
     if (!artifactItem) {
-      throw new UnauthorizedException('Artifact not found');
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_NOT_FOUND,
+        401,
+        'Artifact not found',
+      );
     }
 
     return {

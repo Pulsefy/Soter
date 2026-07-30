@@ -44,8 +44,8 @@ describe('CancelAndReissueService', () => {
   };
 
   const mockEncryptionService = {
-    encrypt: jest.fn((v: string) => v ? `encrypted:${v}` : v),
-    decrypt: jest.fn((v: string) => v ? v.replace('encrypted:', '') : v),
+    encrypt: jest.fn((v: string) => (v ? `encrypted:${v}` : v)),
+    decrypt: jest.fn((v: string) => (v ? v.replace('encrypted:', '') : v)),
   };
 
   const mockMetricsService = {
@@ -73,23 +73,25 @@ describe('CancelAndReissueService', () => {
   describe('cancel', () => {
     it('should emit ClaimCancelledEvent with all required payload fields', async () => {
       mockPrismaService.claim.findUnique.mockResolvedValue(mockClaim);
-      mockPrismaService.$transaction.mockImplementation((fn: (tx: any) => Promise<any>) => {
-        const tx = {
-          claim: {
-            update: jest.fn().mockResolvedValue({
-              ...mockClaim,
-              status: ClaimStatus.cancelled,
-              cancelledAt: new Date(),
-              cancelledBy: 'operator-1',
-              cancelReason: 'Test reason',
-            }),
-          },
-          balanceLedger: {
-            create: jest.fn().mockResolvedValue({}),
-          },
-        };
-        return fn(tx);
-      });
+      mockPrismaService.$transaction.mockImplementation(
+        (fn: (tx: any) => Promise<any>) => {
+          const tx = {
+            claim: {
+              update: jest.fn().mockResolvedValue({
+                ...mockClaim,
+                status: ClaimStatus.cancelled,
+                cancelledAt: new Date(),
+                cancelledBy: 'operator-1',
+                cancelReason: 'Test reason',
+              }),
+            },
+            balanceLedger: {
+              create: jest.fn().mockResolvedValue({}),
+            },
+          };
+          return fn(tx);
+        },
+      );
 
       await service.cancel('claim-123', {
         operatorId: 'operator-1',
@@ -116,27 +118,30 @@ describe('CancelAndReissueService', () => {
 
     it('should emit ClaimCancelledEvent without optional reason field', async () => {
       mockPrismaService.claim.findUnique.mockResolvedValue(mockClaim);
-      mockPrismaService.$transaction.mockImplementation((fn: (tx: any) => Promise<any>) => {
-        const tx = {
-          claim: {
-            update: jest.fn().mockResolvedValue({
-              ...mockClaim,
-              status: ClaimStatus.cancelled,
-              cancelledAt: new Date(),
-              cancelledBy: 'operator-1',
-              cancelReason: null,
-            }),
-          },
-          balanceLedger: {
-            create: jest.fn().mockResolvedValue({}),
-          },
-        };
-        return fn(tx);
-      });
+      mockPrismaService.$transaction.mockImplementation(
+        (fn: (tx: any) => Promise<any>) => {
+          const tx = {
+            claim: {
+              update: jest.fn().mockResolvedValue({
+                ...mockClaim,
+                status: ClaimStatus.cancelled,
+                cancelledAt: new Date(),
+                cancelledBy: 'operator-1',
+                cancelReason: null,
+              }),
+            },
+            balanceLedger: {
+              create: jest.fn().mockResolvedValue({}),
+            },
+          };
+          return fn(tx);
+        },
+      );
 
       await service.cancel('claim-123', { operatorId: 'operator-1' });
 
-      const metadata = (auditService.record as jest.Mock).mock.calls[0][0].metadata;
+      const metadata = (auditService.record as jest.Mock).mock.calls[0][0]
+        .metadata;
       expect(metadata.claimId).toBe('claim-123');
       expect(metadata.reason).toBeUndefined();
       expect(metadata.unlockedAmount).toBe(100);
@@ -146,29 +151,31 @@ describe('CancelAndReissueService', () => {
   describe('reissue', () => {
     it('should emit ClaimCancelledEvent and ClaimReissuedEvent with all required payload fields', async () => {
       mockPrismaService.claim.findUnique.mockResolvedValue(mockClaim);
-      mockPrismaService.$transaction.mockImplementation((fn: (tx: any) => Promise<any>) => {
-        const tx = {
-          claim: {
-            update: jest.fn().mockResolvedValue({
-              ...mockClaim,
-              status: ClaimStatus.cancelled,
-              cancelledAt: new Date(),
-              cancelledBy: 'operator-1',
-            }),
-            create: jest.fn().mockResolvedValue({
-              id: 'claim-456',
-              campaignId: 'campaign-1',
-              amount: 100,
-              status: ClaimStatus.requested,
-              reissuedFromId: 'claim-123',
-            }),
-          },
-          balanceLedger: {
-            create: jest.fn().mockResolvedValue({}),
-          },
-        };
-        return fn(tx);
-      });
+      mockPrismaService.$transaction.mockImplementation(
+        (fn: (tx: any) => Promise<any>) => {
+          const tx = {
+            claim: {
+              update: jest.fn().mockResolvedValue({
+                ...mockClaim,
+                status: ClaimStatus.cancelled,
+                cancelledAt: new Date(),
+                cancelledBy: 'operator-1',
+              }),
+              create: jest.fn().mockResolvedValue({
+                id: 'claim-456',
+                campaignId: 'campaign-1',
+                amount: 100,
+                status: ClaimStatus.requested,
+                reissuedFromId: 'claim-123',
+              }),
+            },
+            balanceLedger: {
+              create: jest.fn().mockResolvedValue({}),
+            },
+          };
+          return fn(tx);
+        },
+      );
 
       await service.reissue('claim-123', {
         operatorId: 'operator-1',
@@ -204,29 +211,31 @@ describe('CancelAndReissueService', () => {
 
     it('should emit ClaimReissuedEvent with overridden amount', async () => {
       mockPrismaService.claim.findUnique.mockResolvedValue(mockClaim);
-      mockPrismaService.$transaction.mockImplementation((fn: (tx: any) => Promise<any>) => {
-        const tx = {
-          claim: {
-            update: jest.fn().mockResolvedValue({
-              ...mockClaim,
-              status: ClaimStatus.cancelled,
-              cancelledAt: new Date(),
-              cancelledBy: 'operator-1',
-            }),
-            create: jest.fn().mockResolvedValue({
-              id: 'claim-789',
-              campaignId: 'campaign-1',
-              amount: 250,
-              status: ClaimStatus.requested,
-              reissuedFromId: 'claim-123',
-            }),
-          },
-          balanceLedger: {
-            create: jest.fn().mockResolvedValue({}),
-          },
-        };
-        return fn(tx);
-      });
+      mockPrismaService.$transaction.mockImplementation(
+        (fn: (tx: any) => Promise<any>) => {
+          const tx = {
+            claim: {
+              update: jest.fn().mockResolvedValue({
+                ...mockClaim,
+                status: ClaimStatus.cancelled,
+                cancelledAt: new Date(),
+                cancelledBy: 'operator-1',
+              }),
+              create: jest.fn().mockResolvedValue({
+                id: 'claim-789',
+                campaignId: 'campaign-1',
+                amount: 250,
+                status: ClaimStatus.requested,
+                reissuedFromId: 'claim-123',
+              }),
+            },
+            balanceLedger: {
+              create: jest.fn().mockResolvedValue({}),
+            },
+          };
+          return fn(tx);
+        },
+      );
 
       await service.reissue('claim-123', {
         operatorId: 'operator-1',

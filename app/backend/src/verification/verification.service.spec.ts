@@ -1,5 +1,4 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getQueueToken } from '@nestjs/bullmq';
 import { HttpService } from '@nestjs/axios';
@@ -248,12 +247,15 @@ describe('VerificationService', () => {
       );
     });
 
-    it('should throw NotFoundException for non-existent claim', async () => {
+    it('should throw AppException(AI_VERIFICATION_FAILED) for non-existent claim', async () => {
       jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue(null);
 
       await expect(
         service.enqueueVerification('non-existent-id'),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toMatchObject({
+        errorCode: 'AI_VERIFICATION_FAILED',
+        statusCode: 404,
+      });
     });
 
     it('should skip enqueuing for already verified claims', async () => {
@@ -298,7 +300,7 @@ describe('VerificationService', () => {
       expect(updateSpy).toHaveBeenCalled();
     });
 
-    it('should throw NotFoundException for non-existent claim during processing', async () => {
+    it('should throw AppException(AI_VERIFICATION_FAILED) for non-existent claim during processing', async () => {
       jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue(null);
 
       await expect(
@@ -307,7 +309,10 @@ describe('VerificationService', () => {
           timestamp: Date.now(),
           priority: VerificationPriority.NORMAL,
         }),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toMatchObject({
+        errorCode: 'AI_VERIFICATION_FAILED',
+        statusCode: 404,
+      });
     });
 
     it('should update claim status to verified when score meets threshold', async () => {
@@ -573,12 +578,13 @@ describe('VerificationService', () => {
       expect(result).toEqual(mockClaim);
     });
 
-    it('should throw NotFoundException for non-existent claim', async () => {
+    it('should throw AppException(AI_VERIFICATION_FAILED) for non-existent claim', async () => {
       jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue(null);
 
-      await expect(service.findOne('non-existent-id')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.findOne('non-existent-id')).rejects.toMatchObject({
+        errorCode: 'AI_VERIFICATION_FAILED',
+        statusCode: 404,
+      });
     });
   });
 

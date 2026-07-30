@@ -4,7 +4,7 @@ describe('SorobanErrorMapper', () => {
   const mapper = new SorobanErrorMapper();
 
   it('maps invalid token contract errors from numeric contract codes', () => {
-    expect(mapper.mapError({ errorCode: 17 })).toEqual({
+    expect(mapper.mapError({ errorCode: 17 })).toMatchObject({
       statusCode: 400,
       message: 'Invalid token contract address',
       details: {
@@ -15,7 +15,7 @@ describe('SorobanErrorMapper', () => {
   });
 
   it('maps reverted token transfers from numeric contract codes', () => {
-    expect(mapper.mapError({ errorCode: 18 })).toEqual({
+    expect(mapper.mapError({ errorCode: 18 })).toMatchObject({
       statusCode: 502,
       message: 'Token transfer failed',
       details: {

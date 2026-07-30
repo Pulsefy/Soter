@@ -9,12 +9,17 @@ interface ForceUpgradeScreenProps {
 }
 
 export function ForceUpgradeScreen({ onRetry }: ForceUpgradeScreenProps) {
-  const { latestVersion, currentVersion, loadVersionConfig } = useVersion();
+  const {
+    latestVersion,
+    currentVersion,
+    minRequiredVersion,
+    loadVersionConfig,
+    forceUpgradeScreen,
+    storeUrl,
+  } = useVersion();
 
   const handleUpdateApp = () => {
-    // For MVP: Log to console and open placeholder URL
-    console.log('Update App clicked - would redirect to app store');
-    window.open('https://soter.app/download', '_blank');
+    window.open(storeUrl?.web ?? 'https://soter.app/download', '_blank');
   };
 
   const handleRetry = async () => {
@@ -42,12 +47,13 @@ export function ForceUpgradeScreen({ onRetry }: ForceUpgradeScreenProps) {
 
           {/* Title */}
           <h1 className="mb-4 text-3xl font-semibold tracking-tight text-slate-50">
-            Upgrade Required
+            {forceUpgradeScreen?.title ?? 'Upgrade Required'}
           </h1>
 
           {/* Description */}
           <p className="mb-8 text-lg text-slate-300">
-            A newer version of Soter is required before you can continue using the application.
+            {forceUpgradeScreen?.message ??
+              'A newer version of Soter is required before you can continue using the application.'}
           </p>
 
           {/* Version Info */}
@@ -66,7 +72,7 @@ export function ForceUpgradeScreen({ onRetry }: ForceUpgradeScreenProps) {
                   Required Version
                 </div>
                 <div className="text-xl font-mono text-green-400">
-                  {latestVersion}
+                  {minRequiredVersion ?? latestVersion}
                 </div>
               </div>
             </div>
@@ -79,7 +85,7 @@ export function ForceUpgradeScreen({ onRetry }: ForceUpgradeScreenProps) {
               className="w-full flex items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 text-lg font-medium text-white shadow-lg hover:from-blue-700 hover:to-blue-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 transition-all"
             >
               <Download size={20} aria-hidden="true" />
-              Update App
+              {forceUpgradeScreen?.updateLabel ?? 'Update App'}
             </button>
 
             <button
@@ -87,24 +93,25 @@ export function ForceUpgradeScreen({ onRetry }: ForceUpgradeScreenProps) {
               className="w-full flex items-center justify-center gap-3 rounded-xl bg-slate-800/50 backdrop-blur-sm px-6 py-4 text-lg font-medium text-slate-300 hover:bg-slate-800/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 transition-colors border border-slate-700"
             >
               <RefreshCcw size={20} aria-hidden="true" />
-              Check Again
+              {forceUpgradeScreen?.retryLabel ?? 'Check Again'}
             </button>
           </div>
 
           {/* Additional Information */}
           <div className="mt-8 space-y-2 text-sm text-slate-400">
             <p>
-              This upgrade includes critical security updates and new features required for the platform.
+              {forceUpgradeScreen?.details ??
+                'This upgrade includes critical security updates and new features required for the platform.'}
             </p>
             <p className="text-xs">
               For help with the update process, visit our{' '}
               <a
-                href="https://soter.app/support"
+                href={forceUpgradeScreen?.supportUrl ?? 'https://soter.app/support'}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-400 hover:text-blue-300 underline transition-colors"
               >
-                support page
+                {forceUpgradeScreen?.supportLabel ?? 'support page'}
               </a>
               .
             </p>

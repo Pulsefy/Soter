@@ -31,7 +31,9 @@ ocr_service = OCRService()
 async def process_ocr(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
-    language_hint: Annotated[Optional[LanguageHint], Form(description="Language hint for OCR")] = None,
+    language_hint: Annotated[
+        Optional[LanguageHint], Form(description="Language hint for OCR")
+    ] = None,
 ) -> OCRResponse:
     start_time = time.time()
 
@@ -70,9 +72,11 @@ async def process_ocr(
             )
 
         start_inference = time.time()
-        result = ocr_service.process_image(img, language_hint=language_hint.value if language_hint else None)
+        result = ocr_service.process_image(
+            img, language_hint=language_hint.value if language_hint else None
+        )
         inference_latency = time.time() - start_inference
-        
+
         metrics.INFERENCE_LATENCY.labels(task_type="ocr").observe(inference_latency)
         metrics.logger.info(f"OCR Inference completed in {inference_latency:.4f}s")
 

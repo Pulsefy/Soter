@@ -64,9 +64,7 @@ def test_finalize_requires_all_chunks_then_resumes(tmp_path):
 def test_rejects_invalid_content_type(tmp_path):
     service = _make_service(tmp_path)
     with pytest.raises(UploadSessionError) as exc_info:
-        service.create_session(
-            "user-1", "bad.exe", "application/x-msdownload", 4, 1
-        )
+        service.create_session("user-1", "bad.exe", "application/x-msdownload", 4, 1)
     assert exc_info.value.code == "invalid_content_type"
 
 
