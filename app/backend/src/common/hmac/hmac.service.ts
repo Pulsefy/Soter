@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class HmacService {
@@ -10,23 +10,19 @@ export class HmacService {
     this.secret = this.config.getOrThrow<string>('AI_WEBHOOK_SECRET');
   }
 
-  /**
-   * Signs a payload string and returns the hex HMAC-SHA256 digest.
-   * Use this when sending outbound callbacks so the receiver can verify.
-   */
-  sign(payload: string | Buffer): string {
-    return createHmac('sha256', this.secret).update(payload).digest('hex');
+  sign(payload: string): string {
+    return crypto
+      .createHmac('sha256', this.secret)
+      .update(payload)
+      .digest('hex');
   }
 
-  /**
-   * Timing-safe comparison of a received signature against the expected one.
-   */
-  verify(payload: string | Buffer, signature: string): boolean {
-    const expected = this.sign(payload);
-    try {
-      return timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
-    } catch {
-      return false;
-    }
+  verify(payload: string, signature: string): boolean {
+    const expected = crypto
+      .createHmac('sha256', this.secret)
+      .update(payload)
+      .digest('hex');
+
+    return signature === expected;
   }
 }
