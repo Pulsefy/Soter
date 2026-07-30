@@ -80,7 +80,9 @@ class Settings(BaseSettings):
     task_retry_delay_seconds: int = 30
 
     # Backend webhook URL for notifications
-    backend_webhook_url: Optional[HttpUrl] = "http://localhost:3000/api/v1/webhooks/ai-verification"
+    backend_webhook_url: HttpUrl = (
+        "http://localhost:3000/api/v1/webhooks/ai-verification"
+    )
 
     # Shared HMAC secret for signing outbound webhook payloads.
     # Must match AI_WEBHOOK_SECRET on the NestJS backend.

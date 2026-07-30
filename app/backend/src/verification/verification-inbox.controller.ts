@@ -9,8 +9,6 @@ import {
   HttpStatus,
   HttpCode,
   Request,
-  ParseIntPipe,
-  DefaultValuePipe,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import {
@@ -31,11 +29,9 @@ import { ReviewLockService } from './review-lock.service';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
 import {
-  AcquireLockDto,
   ReleaseLockDto,
   RefreshLockDto,
   LockEntityType,
-  LockResponseCode,
 } from './dto/review-lock.dto';
 
 interface InboxUser {

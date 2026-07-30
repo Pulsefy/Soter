@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  ConflictException,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import {
@@ -158,7 +153,7 @@ export class ReviewLockService {
       };
     }
 
-    const releasedLock = await this.prisma.reviewLock.update({
+    await this.prisma.reviewLock.update({
       where: { id: dto.lockId },
       data: {
         status: 'released',
@@ -437,7 +432,9 @@ export class ReviewLockService {
     locksByEntityType: Record<string, number>;
   }> {
     const now = new Date();
-    const staleThreshold = new Date(now.getTime() - this.STALE_LOCK_THRESHOLD_MS);
+    const staleThreshold = new Date(
+      now.getTime() - this.STALE_LOCK_THRESHOLD_MS,
+    );
 
     const [activeLocks, staleLocks, totalLocks, locksByEntityType] =
       await Promise.all([
@@ -476,7 +473,14 @@ export class ReviewLockService {
   private async refreshExistingLock(
     lockId: string,
     durationSeconds?: number,
-  ): Promise<{ id: string; expiresAt: Date; lockedBy: string; entityType: string; entityId: string; lockedAt: Date }> {
+  ): Promise<{
+    id: string;
+    expiresAt: Date;
+    lockedBy: string;
+    entityType: string;
+    entityId: string;
+    lockedAt: Date;
+  }> {
     const durationMs = (durationSeconds ?? 300) * 1000;
     const newExpiresAt = new Date(Date.now() + durationMs);
 
@@ -494,7 +498,9 @@ export class ReviewLockService {
     entityId: string,
   ): Promise<void> {
     const now = new Date();
-    const staleThreshold = new Date(now.getTime() - this.STALE_LOCK_THRESHOLD_MS);
+    const staleThreshold = new Date(
+      now.getTime() - this.STALE_LOCK_THRESHOLD_MS,
+    );
 
     await this.prisma.reviewLock.updateMany({
       where: {

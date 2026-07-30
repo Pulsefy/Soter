@@ -270,6 +270,22 @@ pub struct AdminTransferCancelled {
     pub timestamp: u64,
 }
 
+/// Emitted when a token is added to the allowed tokens allowlist.
+#[contractevent]
+pub struct TokenAdded {
+    pub admin: Address,
+    pub token: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when a token is removed from the allowed tokens allowlist.
+#[contractevent]
+pub struct TokenRemoved {
+    pub admin: Address,
+    pub token: Address,
+    pub timestamp: u64,
+}
+
 #[contract]
 pub struct AidEscrow;
 
@@ -2010,6 +2026,98 @@ impl AidEscrow {
         package_id: u64,
     ) -> Vec<crate::delegate::DelegateHistory> {
         crate::delegate::get_delegate_history(&env, package_id)
+    }
+
+    // --- Token Allowlist Management ---
+
+    /// Admin-only. Adds a token to the allowed tokens list.
+    /// Validates the token contract interface before adding.
+    /// Emits a `TokenAdded` event.
+    ///
+    /// # Arguments
+    /// * `token` — Address of the token contract to add.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::InvalidToken` if the token contract is invalid.
+    /// Returns `Error::InvalidState` if the token is already in the list.
+    pub fn add_allowed_token(env: Env, token: Address) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        // Validate the token contract
+        Self::validate_token(&env, &token)?;
+
+        // Read current config
+        let mut config = Self::get_config(env.clone());
+
+        // Check if token already in list
+        if config.allowed_tokens.contains(token.clone()) {
+            return Err(Error::InvalidState);
+        }
+
+        // Add the token
+        config.allowed_tokens.push_back(token.clone());
+        env.storage().instance().set(&KEY_CONFIG, &config);
+
+        // Emit event
+        let timestamp = env.ledger().timestamp();
+        TokenAdded {
+            admin,
+            token,
+            timestamp,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Admin-only. Removes a token from the allowed tokens list.
+    /// Emits a `TokenRemoved` event.
+    ///
+    /// # Arguments
+    /// * `token` — Address of the token contract to remove.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::InvalidState` if the token is not in the list.
+    pub fn remove_allowed_token(env: Env, token: Address) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        // Read current config
+        let mut config = Self::get_config(env.clone());
+
+        // Check if token is not in the list (error)
+        let mut found = false;
+        let mut new_tokens = Vec::new(&env);
+        for i in 0..config.allowed_tokens.len() {
+            let t = config.allowed_tokens.get(i).unwrap();
+            if t == token {
+                found = true;
+            } else {
+                new_tokens.push_back(t);
+            }
+        }
+
+        if !found {
+            return Err(Error::InvalidState);
+        }
+
+        // Update config with new token list
+        config.allowed_tokens = new_tokens;
+        env.storage().instance().set(&KEY_CONFIG, &config);
+
+        // Emit event
+        let timestamp = env.ledger().timestamp();
+        TokenRemoved {
+            admin,
+            token,
+            timestamp,
+        }
+        .publish(&env);
+
+        Ok(())
     }
 }
 

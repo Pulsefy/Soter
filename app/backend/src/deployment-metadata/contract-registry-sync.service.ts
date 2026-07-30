@@ -124,10 +124,10 @@ export class ContractRegistrySyncService implements OnModuleInit {
     }
   }
 
-  private async logFallback(
+  private logFallback(
     kind: 'env' | 'database',
     reason: string,
-  ): Promise<ContractRegistrySyncResult> {
+  ): ContractRegistrySyncResult {
     this.logger.warn(
       `Contract registry source active: ${kind} fallback; ${reason}`,
     );

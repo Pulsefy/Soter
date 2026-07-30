@@ -106,7 +106,10 @@ export class VerificationInboxService {
       items: items.map(item => {
         const lock = lockMap.get(item.id);
         const remainingSeconds = lock
-          ? Math.max(0, Math.floor((lock.expiresAt.getTime() - now.getTime()) / 1000))
+          ? Math.max(
+              0,
+              Math.floor((lock.expiresAt.getTime() - now.getTime()) / 1000),
+            )
           : 0;
 
         return {
@@ -267,7 +270,9 @@ export class VerificationInboxService {
             expiresAt: activeLock.expiresAt,
             remainingSeconds: Math.max(
               0,
-              Math.floor((activeLock.expiresAt.getTime() - now.getTime()) / 1000),
+              Math.floor(
+                (activeLock.expiresAt.getTime() - now.getTime()) / 1000,
+              ),
             ),
           }
         : null,

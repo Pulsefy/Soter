@@ -130,9 +130,15 @@ async def process_ocr(
 @limiter.limit(settings.request_rate_limit)
 async def queue_batch_ocr_jobs(
     request: Request,
-    files: Annotated[list[UploadFile], File(description="One or more image files to process")],
-    anchor_metadata: Annotated[Optional[str], Form(description="JSON encoded AnchorMetadata")] = None,
-    language_hint: Annotated[Optional[LanguageHint], Form(description="Language hint for OCR")] = None,
+    files: Annotated[
+        list[UploadFile], File(description="One or more image files to process")
+    ],
+    anchor_metadata: Annotated[
+        Optional[str], Form(description="JSON encoded AnchorMetadata")
+    ] = None,
+    language_hint: Annotated[
+        Optional[LanguageHint], Form(description="Language hint for OCR")
+    ] = None,
 ) -> BatchOCRResponse:
     """Queue OCR processing for a batch of uploaded document images."""
     if not files:
@@ -194,7 +200,11 @@ async def queue_batch_ocr_jobs(
                 BatchOCRDocumentStatus(
                     filename=image.filename,
                     status="failed",
-                    error=exc.detail if isinstance(exc.detail, dict) else {"code": "processing_error", "message": str(exc.detail)},
+                    error=(
+                        exc.detail
+                        if isinstance(exc.detail, dict)
+                        else {"code": "processing_error", "message": str(exc.detail)}
+                    ),
                 )
             )
         except Exception as exc:

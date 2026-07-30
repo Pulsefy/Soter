@@ -3,11 +3,11 @@
   "private": true,
   "workspaces": ["app/*", "tools/*"],
   "scripts": {
-    "dev": "npm run dev --workspace=app/frontend",
-    "build": "npm run build --workspace=app/frontend",
-    "start": "npm run start --workspace=app/frontend",
-    "lint": "npm run lint --workspace=app/frontend",
-    "test": "npm run test --workspace=app/frontend"
+    "dev": "pnpm run dev --filter=app/frontend",
+    "build": "pnpm run build --filter=app/frontend",
+    "start": "pnpm run start --filter=app/frontend",
+    "lint": "pnpm run lint --filter=app/frontend",
+    "test": "pnpm run test --filter=app/frontend"
   },
   "devDependencies": {
     "@prisma/client": "^7.4.1",
@@ -35,6 +35,34 @@
     "redis": "^5.12.1",
     "socket.io-client": "^4.8.3"
   },
+  "overrides": {
+    "jest": "29.7.0",
+    "jest-environment-jsdom": "29.7.0",
+    "jest-environment-node": "29.7.0",
+    "jest-runtime": "29.7.0",
+    "babel-jest": "29.7.0",
+    "@jest/core": "29.7.0",
+    "@jest/globals": "29.7.0",
+    "@jest/transform": "29.7.0",
+    "@jest/types": "29.6.3",
+    "@types/jest": "29.5.14",
+    "jest-util": "29.7.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "jest": "29.7.0",
+      "jest-environment-jsdom": "29.7.0",
+      "jest-environment-node": "29.7.0",
+      "jest-runtime": "29.7.0",
+      "babel-jest": "29.7.0",
+      "@jest/core": "29.7.0",
+      "@jest/globals": "29.7.0",
+      "@jest/transform": "29.7.0",
+      "@jest/types": "29.6.3",
+      "@types/jest": "29.5.14",
+      "jest-util": "29.7.0"
+    }
+  },
   "version": "1.0.0",
   "description": "<img width=\"1080\" height=\"1080\" alt=\"Gemini_Generated_Image_efez0kefez0kefez (1)\" src=\"https://github.com/user-attachments/assets/72250381-5090-45e4-9941-5096c190a000\" />[...],",
   "main": ".eslintrc.js",
@@ -45,7 +73,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/Truphile/Soter/issues"
   },

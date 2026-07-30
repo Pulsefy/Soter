@@ -67,5 +67,5 @@ def test_callback_hmac_matches_fixture():
     )
 
     signature = payload.sign(SECRET)
-    
+
     assert signature == expected_headers["X-Signature-256"]
