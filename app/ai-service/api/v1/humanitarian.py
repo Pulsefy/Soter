@@ -15,7 +15,10 @@ from schemas.humanitarian import (
 )
 from services.cache import cached_response
 from services.artifact_access import ArtifactAccessError
-from services.evidence_access_control import EvidenceAccessControl, EvidenceAccessControlError
+from services.evidence_access_control import (
+    EvidenceAccessControl,
+    EvidenceAccessControlError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +104,7 @@ async def verify_humanitarian_claim(
             "humanitarian_services_uninitialised",
             extra={
                 "event": "service_misconfiguration",
-                "correlation_id": getattr(
-                    http_request.state, "correlation_id", ""
-                ),
+                "correlation_id": getattr(http_request.state, "correlation_id", ""),
             },
         )
         raise HTTPException(
@@ -112,7 +113,9 @@ async def verify_humanitarian_claim(
         )
     correlation_id = getattr(http_request.state, "correlation_id", "") or ""
 
-    logger.info("Processing humanitarian verification request with evidence ownership validation")
+    logger.info(
+        "Processing humanitarian verification request with evidence ownership validation"
+    )
 
     try:
         # Fail-closed access control for evidence-bearing requests.
@@ -217,7 +220,9 @@ async def verify_humanitarian_claim(
         model_version = humanitarian_verification_service.get_model_version(
             request.provider_preference
         )
-        artifact_tag = ",".join(sorted(request.artifact_ids)) if request.artifact_ids else ""
+        artifact_tag = (
+            ",".join(sorted(request.artifact_ids)) if request.artifact_ids else ""
+        )
 
         raw = await _verify_claim_cached(
             humanitarian_verification_service,

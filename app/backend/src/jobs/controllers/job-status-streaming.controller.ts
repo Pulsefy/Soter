@@ -3,11 +3,26 @@
  * Provides REST endpoints for querying job status and subscription history
  */
 
-import { Controller, Get, Param, Query, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiOkResponse, ApiNotFoundResponse } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiOkResponse,
+  ApiNotFoundResponse,
+} from '@nestjs/swagger';
 
 import { JobStatusBroadcaster } from '../services/job-status-broadcaster.service';
-import { JobStatusEvent, JobStatusWithResultDto } from '../dtos/job-status-event.dto';
+import {
+  JobStatusEvent,
+  JobStatusWithResultDto,
+} from '../dtos/job-status-event.dto';
 
 @ApiTags('Jobs - Status Streaming')
 @Controller('jobs')
@@ -38,7 +53,9 @@ export class JobStatusStreamingController {
     },
   })
   @ApiNotFoundResponse({ description: 'Job not found' })
-  async getJobStatus(@Param('jobId') jobId: string): Promise<JobStatusWithResultDto | null> {
+  async getJobStatus(
+    @Param('jobId') jobId: string,
+  ): Promise<JobStatusWithResultDto | null> {
     const history = await this.jobStatusBroadcaster.getJobHistory(jobId, 1);
     return history.length > 0 ? history[0].job : null;
   }
@@ -82,7 +99,10 @@ export class JobStatusStreamingController {
     @Query('limit') limit?: string,
   ): Promise<{ jobId: string; events: JobStatusEvent[] }> {
     const parsedLimit = limit ? Math.min(parseInt(limit, 10), 100) : 50;
-    const events = await this.jobStatusBroadcaster.getJobHistory(jobId, parsedLimit);
+    const events = await this.jobStatusBroadcaster.getJobHistory(
+      jobId,
+      parsedLimit,
+    );
 
     return {
       jobId,
@@ -98,7 +118,8 @@ export class JobStatusStreamingController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get job subscription metrics',
-    description: 'Retrieves information about active subscriptions and streaming connections for a job.',
+    description:
+      'Retrieves information about active subscriptions and streaming connections for a job.',
   })
   @ApiOkResponse({
     description: 'Subscription metrics retrieved successfully',
@@ -133,7 +154,8 @@ export class JobStatusStreamingController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get global streaming metrics',
-    description: 'Retrieves aggregate metrics about all active job status streams.',
+    description:
+      'Retrieves aggregate metrics about all active job status streams.',
   })
   @ApiOkResponse({
     description: 'Metrics retrieved successfully',

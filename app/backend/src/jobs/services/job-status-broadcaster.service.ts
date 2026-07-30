@@ -117,10 +117,17 @@ export class JobStatusBroadcaster {
    * @param limit - Maximum number of updates to retrieve
    * @returns Array of job status events
    */
-  async getJobHistory(jobId: string, limit: number = 50): Promise<JobStatusEvent[]> {
+  async getJobHistory(
+    jobId: string,
+    limit: number = 50,
+  ): Promise<JobStatusEvent[]> {
     try {
       const historyKey = this.getHistoryKey(jobId);
-      const events = await this.redis.lrange(historyKey, 0, Math.min(limit - 1, this.MAX_HISTORY_SIZE - 1));
+      const events = await this.redis.lrange(
+        historyKey,
+        0,
+        Math.min(limit - 1, this.MAX_HISTORY_SIZE - 1),
+      );
 
       return events
         .map(data => {
@@ -155,12 +162,18 @@ export class JobStatusBroadcaster {
   ): Promise<void> {
     try {
       const key = this.SUBSCRIPTIONS_KEY + jobId;
-      const data = JSON.stringify({ subscriptionId, userId, subscribedAt: new Date().toISOString() });
+      const data = JSON.stringify({
+        subscriptionId,
+        userId,
+        subscribedAt: new Date().toISOString(),
+      });
 
       await this.redis.hset(key, subscriptionId, data);
       await this.redis.expire(key, ttl);
 
-      this.logger.debug(`Recorded subscription: ${subscriptionId} for job ${jobId}`);
+      this.logger.debug(
+        `Recorded subscription: ${subscriptionId} for job ${jobId}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to record subscription: ${error instanceof Error ? error.message : String(error)}`,
@@ -173,12 +186,17 @@ export class JobStatusBroadcaster {
    * @param jobId - The job ID
    * @param subscriptionId - The subscription ID
    */
-  async removeSubscription(jobId: string, subscriptionId: string): Promise<void> {
+  async removeSubscription(
+    jobId: string,
+    subscriptionId: string,
+  ): Promise<void> {
     try {
       const key = this.SUBSCRIPTIONS_KEY + jobId;
       await this.redis.hdel(key, subscriptionId);
 
-      this.logger.debug(`Removed subscription: ${subscriptionId} for job ${jobId}`);
+      this.logger.debug(
+        `Removed subscription: ${subscriptionId} for job ${jobId}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to remove subscription: ${error instanceof Error ? error.message : String(error)}`,

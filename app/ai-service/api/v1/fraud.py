@@ -17,7 +17,9 @@ router = APIRouter(tags=["fraud"])
 
 
 @router.post("/fraud/detect", response_model=ResultEnvelope[List[ClaimFraudResult]])
-async def detect_fraud_endpoint(request: FraudDetectionRequest) -> ResultEnvelope[List[ClaimFraudResult]]:
+async def detect_fraud_endpoint(
+    request: FraudDetectionRequest,
+) -> ResultEnvelope[List[ClaimFraudResult]]:
     """
     Analyse a batch of claims for suspicious patterns.
 
@@ -32,9 +34,7 @@ async def detect_fraud_endpoint(request: FraudDetectionRequest) -> ResultEnvelop
 
         flagged = [r for r in results if r.is_flagged]
         reasons = [
-            f"claim_id={r.claim_id}: {r.reason}"
-            for r in flagged
-            if r.reason
+            f"claim_id={r.claim_id}: {r.reason}" for r in flagged if r.reason
         ] or None
 
         # Aggregate confidence: 1 - mean(fraud_risk_score of flagged claims), or

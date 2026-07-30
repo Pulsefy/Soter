@@ -173,6 +173,8 @@ def ensure_queue_capacity() -> None:
         reason, details = queue_result
         raise LoadShedError(
             reason,
-            REASON_MESSAGES.get(reason, "Service temporarily unavailable due to high load"),
+            REASON_MESSAGES.get(
+                reason, "Service temporarily unavailable due to high load"
+            ),
             details=details,
         )

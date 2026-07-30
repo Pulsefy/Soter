@@ -30,7 +30,7 @@ with open(os.path.join(os.path.dirname(__file__), 'callback_payload.json'), 'wb'
 # Write headers
 with open(os.path.join(os.path.dirname(__file__), 'callback_headers.json'), 'w') as f:
     json.dump({
-        "x-webhook-signature": signature,
+        "X-Signature-256": signature,
         "content-type": "application/json"
     }, f, indent=2)
 

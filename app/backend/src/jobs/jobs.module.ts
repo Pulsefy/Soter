@@ -22,7 +22,17 @@ import { JobStatusGateway } from './gateways/job-status.gateway';
     EventEmitterModule.forRoot(),
   ],
   controllers: [JobsController, JobStatusStreamingController],
-  providers: [DlqService, JobStatusBroadcaster, JobStatusTracker, JobStatusGateway],
-  exports: [DlqService, JobStatusBroadcaster, JobStatusTracker, JobStatusGateway],
+  providers: [
+    DlqService,
+    JobStatusBroadcaster,
+    JobStatusTracker,
+    JobStatusGateway,
+  ],
+  exports: [
+    DlqService,
+    JobStatusBroadcaster,
+    JobStatusTracker,
+    JobStatusGateway,
+  ],
 })
 export class JobsModule {}

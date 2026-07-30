@@ -171,7 +171,7 @@ export class ClaimsService {
     );
   }
 
-  async disburse(id: string) {
+  async disburse(id: string, receiptPointer?: string) {
     const claim = await this.prisma.claim.findUnique({
       where: { id },
       include: { campaign: true },
@@ -185,6 +185,14 @@ export class ClaimsService {
       throw new BadRequestException(
         `Cannot transition from ${claim.status} to ${ClaimStatus.disbursed}`,
       );
+    }
+
+    // Store receiptPointer on the claim record if provided
+    if (receiptPointer) {
+      await this.prisma.claim.update({
+        where: { id },
+        data: { receiptPointer },
+      });
     }
 
     // Create Soroban transaction record with comprehensive lifecycle tracking
@@ -209,6 +217,7 @@ export class ClaimsService {
             campaignId: claim.campaignId,
             claimAmount: claim.amount,
             originalClaimStatus: claim.status,
+            receiptPointer,
           },
           maxAttempts: 5,
         });
@@ -229,6 +238,7 @@ export class ClaimsService {
           transactionId: sorobanTransaction.id,
           packageId,
           correlationId,
+          receiptPointer,
         },
       );
 
@@ -252,6 +262,7 @@ export class ClaimsService {
       {
         claimId: id,
         sorobanTransactionId: sorobanTransaction?.id,
+        receiptPointer,
       },
     );
 
@@ -616,6 +627,7 @@ export class ClaimsService {
       recipientRef: claim.recipientRef,
       transactionHash,
       explorerLink,
+      receiptPointer: claim.receiptPointer ?? undefined,
     };
   }
 

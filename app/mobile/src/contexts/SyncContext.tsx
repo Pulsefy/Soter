@@ -13,9 +13,11 @@ import {
   QueuedSyncAction,
   SyncActionSuccessEvent,
   SyncQueueState,
+  discardAction as discardQueueAction,
   dispatchNetworkAction,
   flushPendingNetworkActions,
   getSyncQueueState,
+  requeueAction as requeueQueueAction,
   retryFailedAction,
   subscribeToSyncQueue,
   subscribeToSyncSuccess,
@@ -27,6 +29,7 @@ interface SyncContextValue extends SyncQueueState {
   isConnected: boolean;
   pendingCount: number;
   failedCount: number;
+  conflictCount: number;
   lastCompletedAction: SyncActionSuccessEvent | null;
   flushNow: () => Promise<void>;
   queueStatusRefresh: (aidId: string) => Promise<
@@ -50,6 +53,8 @@ interface SyncContextValue extends SyncQueueState {
     { status: 'completed'; result: unknown } | { status: 'queued'; action: QueuedSyncAction }
   >;
   retryAction: (actionId: string) => Promise<void>;
+  requeueAction: (actionId: string) => Promise<void>;
+  discardAction: (actionId: string) => Promise<void>;
   getActionsForAid: (aidId: string) => QueuedSyncAction[];
 }
 
@@ -61,6 +66,7 @@ const defaultValue: SyncContextValue = {
   isConnected: true,
   pendingCount: 0,
   failedCount: 0,
+  conflictCount: 0,
   lastCompletedAction: null,
   flushNow: async () => {},
   queueStatusRefresh: async () => ({ status: 'queued', action: {} as QueuedSyncAction }),
@@ -68,6 +74,8 @@ const defaultValue: SyncContextValue = {
   queueEvidenceUpload: async () => ({ status: 'queued', action: {} as QueuedSyncAction }),
   queueClaimSubmission: async () => ({ status: 'queued', action: {} as QueuedSyncAction }),
   retryAction: async () => {},
+  requeueAction: async () => {},
+  discardAction: async () => {},
   getActionsForAid: () => [],
 };
 
@@ -128,14 +136,18 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
   }, [flushNow, isConnected, saverModeActive]);
 
   const value = useMemo<SyncContextValue>(() => {
-    const pendingCount = syncState.items.filter((item) => item.state !== 'failed').length;
+    const pendingCount = syncState.items.filter(
+      (item) => item.state === 'pending' || item.state === 'retrying',
+    ).length;
     const failedCount = syncState.items.filter((item) => item.state === 'failed').length;
+    const conflictCount = syncState.items.filter((item) => item.state === 'conflict').length;
 
     return {
       ...syncState,
       isConnected,
       pendingCount,
       failedCount,
+      conflictCount,
       lastCompletedAction,
       flushNow,
       queueStatusRefresh: (aidId: string) =>
@@ -165,13 +177,20 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
         await retryFailedAction(actionId);
         await flushPendingNetworkActions({ online: isConnected, saverMode: saverModeActive });
       },
+      requeueAction: async (actionId: string) => {
+        await requeueQueueAction(actionId);
+        await flushPendingNetworkActions({ online: isConnected, saverMode: saverModeActive });
+      },
+      discardAction: async (actionId: string) => {
+        await discardQueueAction(actionId);
+      },
       getActionsForAid: (aidId: string) =>
         syncState.items.filter((item) => {
           const payload = item.payload as { aidId?: string };
           return payload.aidId === aidId;
         }),
     };
-  }, [flushNow, isConnected, lastCompletedAction, syncState]);
+  }, [flushNow, isConnected, lastCompletedAction, saverModeActive, syncState]);
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;
 };

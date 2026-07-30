@@ -1,12 +1,14 @@
 """Stability tests for the fixture-driven TestProvider across all endpoints."""
 
 import pytest
+from unittest.mock import MagicMock
 
 from config import settings
 from services.test_provider import TestProvider
 from services.humanitarian_verification import HumanitarianVerificationService
 from services.ocr import OCRService
 from services.pii_scrubber import PIIScrubberService
+from services.providers import LLMResponse
 
 __test__ = True
 
@@ -14,6 +16,7 @@ __test__ = True
 # -----------------------------------------------------------------------
 # TestProvider unit-level determinism
 # -----------------------------------------------------------------------
+
 
 class TestTestProviderDeterminism:
     def setup_method(self):
@@ -67,6 +70,7 @@ class TestTestProviderDeterminism:
 # Humanitarian verification – stability
 # -----------------------------------------------------------------------
 
+
 class TestHumanitarianTestProviderStability:
     def setup_method(self):
         self.service = HumanitarianVerificationService()
@@ -74,8 +78,19 @@ class TestHumanitarianTestProviderStability:
     def test_deterministic_verify_claim_outputs_remain_stable(self, monkeypatch):
         monkeypatch.setattr(settings, "ai_deterministic_mode", True)
         monkeypatch.setattr(settings, "openai_api_key", "test-api-key")
-        monkeypatch.setattr(self.service, "_provider_attempt_order", lambda p: ["openai"])
-        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda p: "test-model")
+
+        mock_provider = MagicMock()
+        mock_provider.llm_chat.return_value = LLMResponse(
+            content='{"verdict":"credible","confidence":0.74,"summary":"Deterministic verification output for testing"}',
+            provider="openai",
+            model="test-model",
+        )
+        mock_registry = MagicMock()
+        mock_registry.resolve_llm.return_value = [("openai", mock_provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda p: "test-model"
+        )
 
         first = self.service.verify_claim(
             aid_claim="Emergency medical supplies delivered.",
@@ -121,13 +136,18 @@ class TestHumanitarianTestProviderStability:
         assert "verdict" in result["verification"]
         assert "confidence" in result["verification"]
         assert "summary" in result["verification"]
-        assert result["verification"]["verdict"] in ("credible", "inconclusive", "not_credible")
+        assert result["verification"]["verdict"] in (
+            "credible",
+            "inconclusive",
+            "not_credible",
+        )
         assert 0.0 <= result["verification"]["confidence"] <= 1.0
 
 
 # -----------------------------------------------------------------------
 # OCR – stability (test provider bypasses Tesseract)
 # -----------------------------------------------------------------------
+
 
 class TestOCRTestProviderStability:
     def setup_method(self):
@@ -137,6 +157,7 @@ class TestOCRTestProviderStability:
         monkeypatch.setattr(settings, "test_provider_mode", True)
 
         from PIL import Image
+
         img = Image.new("RGB", (100, 50), color="white")
 
         first = self.service.process_image(img)
@@ -150,6 +171,7 @@ class TestOCRTestProviderStability:
         monkeypatch.setattr(settings, "test_provider_mode", True)
 
         from PIL import Image
+
         img = Image.new("RGB", (200, 100), color="white")
 
         result = self.service.process_image(img)
@@ -160,29 +182,44 @@ class TestOCRTestProviderStability:
     def test_ocr_different_inputs_can_produce_different_outputs(self, monkeypatch):
         monkeypatch.setattr(settings, "test_provider_mode", True)
 
-        provider = self.service.test_provider
+        from services.providers import FixtureProvider
+
+        provider = FixtureProvider()
         texts = set()
         for i in range(30):
-            resp = provider.get_response("ocr", {"seed": i, "variant": f"input_{i}"})
+            resp = provider._inner.get_response(
+                "ocr", {"seed": i, "variant": f"input_{i}"}
+            )
             texts.add(resp.get("raw_text", ""))
 
         assert len(texts) > 1
 
     def test_ocr_regular_service_unchanged(self, monkeypatch):
         """Without test_provider_mode, OCR goes through the real dependency path."""
-        from unittest.mock import patch
+        from unittest.mock import MagicMock
         from PIL import Image
+
         img = Image.new("RGB", (50, 50), color="red")
 
         monkeypatch.setattr(settings, "test_provider_mode", False)
-        with patch.object(self.service, "_run_tesseract", side_effect=RuntimeError("no tesseract")):
-            with pytest.raises(RuntimeError):
-                self.service.process_image(img)
+
+        failing_provider = MagicMock()
+        failing_provider.name = "failing"
+        failing_provider.ocr_extract.side_effect = RuntimeError("no tesseract")
+
+        mock_registry = MagicMock()
+        mock_registry.resolve_ocr.return_value = [("failing", failing_provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+
+        result = self.service.process_image(img)
+        assert result.raw_text == ""
+        assert result.fields == {}
 
 
 # -----------------------------------------------------------------------
 # PII scrubber – stability (test provider bypasses spaCy)
 # -----------------------------------------------------------------------
+
 
 class TestPIIscrubberTestProviderStability:
     def setup_method(self):
@@ -226,12 +263,16 @@ class TestPIIscrubberTestProviderStability:
         summary = result["pii_summary"]
         assert summary["names"] >= 0
         assert summary["locations"] >= 0
-        assert summary["total"] == sum(summary[k] for k in ("names", "locations", "dates", "emails", "phones", "ids"))
+        assert summary["total"] == sum(
+            summary[k]
+            for k in ("names", "locations", "dates", "emails", "phones", "ids")
+        )
 
 
 # -----------------------------------------------------------------------
 # Cross-endpoint determinism sanity
 # -----------------------------------------------------------------------
+
 
 class TestCrossEndpointStability:
     def setup_method(self):

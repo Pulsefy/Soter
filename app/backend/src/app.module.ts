@@ -50,6 +50,7 @@ import { DeprecationInterceptor } from './common/interceptors/deprecation.interc
 import { SandboxModule } from './sandbox/sandbox.module';
 import { CacheModule } from './common/cache/cache.module';
 import { CacheResponseInterceptor } from './common/interceptors/cache-response.interceptor';
+import { ReleaseConfigService } from './release-config.service';
 
 import { WebhooksModule } from 'src/webhooks.module';
 import { CorrelationModule } from './common/modules/correlation.module';
@@ -186,6 +187,7 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
   controllers: [AppController],
   providers: [
     AppService,
+    ReleaseConfigService,
     {
       provide: APP_FILTER,
       useClass: AllExceptionsFilter,

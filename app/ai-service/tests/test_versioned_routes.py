@@ -30,7 +30,6 @@ import main
 import metrics
 from main import app
 
-
 # ---------------------------------------------------------------------------
 # Session-level resource-check bypass
 # Every test gets healthy resources unless it opts out explicitly.
@@ -180,7 +179,9 @@ class TestOCRV1Path:
         img = Image.new("RGB", (60, 60), color="green")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        with patch("api.v1.ocr.run_ocr_from_bytes", return_value=self._FAKE_OCR) as mock_run:
+        with patch(
+            "api.v1.ocr.run_ocr_from_bytes", return_value=self._FAKE_OCR
+        ) as mock_run:
             response = client.post(
                 "/v1/ai/ocr",
                 files={"image": ("img.png", buf.getvalue(), "image/png")},
@@ -239,16 +240,16 @@ class TestLegacyRedirects:
     @pytest.mark.parametrize("method,path,expected_location", REDIRECT_CASES)
     def test_redirect_status_308(self, client, method, path, expected_location):
         response = client.request(method, path, json={})
-        assert response.status_code == 308, (
-            f"Expected 308 for {method} {path}, got {response.status_code}"
-        )
+        assert (
+            response.status_code == 308
+        ), f"Expected 308 for {method} {path}, got {response.status_code}"
 
     @pytest.mark.parametrize("method,path,expected_location", REDIRECT_CASES)
     def test_redirect_location_header(self, client, method, path, expected_location):
         response = client.request(method, path, json={})
-        assert response.headers.get("location") == expected_location, (
-            f"Wrong Location for {method} {path}: {response.headers.get('location')}"
-        )
+        assert (
+            response.headers.get("location") == expected_location
+        ), f"Wrong Location for {method} {path}: {response.headers.get('location')}"
 
 
 class TestLegacyPrefixRedirects:

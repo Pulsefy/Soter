@@ -10,7 +10,6 @@ from schemas.common import AnchorMetadata
 from schemas.ocr import OCRData, OCRFieldResult
 from services.ocr import OCRService
 
-
 ocr_service = OCRService()
 
 
@@ -55,7 +54,9 @@ def run_ocr_from_base64(
     anchor_metadata: Optional[str] = None,
     language_hint: Optional[str] = None,
 ) -> dict:
-    return run_ocr_from_bytes(base64.b64decode(image_base64), anchor_metadata, language_hint=language_hint)
+    return run_ocr_from_bytes(
+        base64.b64decode(image_base64), anchor_metadata, language_hint=language_hint
+    )
 
 
 def _parse_anchor_metadata(anchor_metadata: Optional[str]) -> Optional[AnchorMetadata]:

@@ -7,14 +7,16 @@ import type {
   InternalNote,
   VerificationStatus,
 } from '@/types/verification-review';
+import type { ContractRegistryResponse } from '@/types/contract-registry';
+import type { RunbookResponse } from '@/types/runbook';
 
 export type MockHandler = (
   url: string,
   options?: RequestInit,
 ) => Promise<Response>;
 
-function base64UrlEncode(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
+function base64UrlEncode(buf: ArrayBuffer | Uint8Array): string {
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
@@ -1157,6 +1159,278 @@ const dashboardSummaryHandler: MockHandler = async () => {
   );
 };
 
+const contractRegistryHandler: MockHandler = async () => {
+  const registry: ContractRegistryResponse = {
+    schema_version: 2,
+    generated_at: new Date().toISOString(),
+    contracts: {
+      aid_escrow: {
+        version: '0.2.0',
+        networks: {
+          testnet: {
+            contract_id: 'CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG',
+            version: '0.1.0',
+            deployed_at: '2026-06-03',
+          },
+        },
+      },
+    },
+    source: {
+      canonical_path: 'app/onchain/deployments/contract-registry.json',
+      generator_script: 'app/onchain/scripts/generate-registry.py',
+      deployment_registry: 'app/onchain/deployments/registry.json',
+    },
+  };
+
+  return new Response(JSON.stringify(registry), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+const runbookHandler: MockHandler = async () => {
+  const runbook: RunbookResponse = {
+    schema_version: 1,
+    generated_at: new Date().toISOString(),
+    sections: {
+      preDemo: {
+        id: 'pre-demo',
+        titleKey: 'preDemoTitle',
+        subtitleKey: 'preDemoSubtitle',
+        items: [
+          {
+            id: 'pre-system-health',
+            titleKey: 'preSystemHealth',
+            descriptionKey: 'preSystemHealthDesc',
+            icon: 'Server',
+            autoVerify: 'health',
+          },
+          {
+            id: 'pre-network-config',
+            titleKey: 'preNetworkConfig',
+            descriptionKey: 'preNetworkConfigDesc',
+            icon: 'Globe',
+            autoVerify: 'never',
+          },
+          {
+            id: 'pre-contract-registry',
+            titleKey: 'preContractRegistry',
+            descriptionKey: 'preContractRegistryDesc',
+            href: '/demo-checklist#contract-registry',
+            linkLabelKey: 'openContractRegistry',
+            icon: 'FileCode',
+            autoVerify: 'never',
+          },
+          {
+            id: 'pre-wallet-connect',
+            titleKey: 'preWalletConnect',
+            descriptionKey: 'preWalletConnectDesc',
+            href: '/',
+            linkLabelKey: 'goHome',
+            icon: 'Wallet',
+            autoVerify: 'wallet',
+          },
+          {
+            id: 'pre-faucet-funding',
+            titleKey: 'preFaucetFunding',
+            descriptionKey: 'preFaucetFundingDesc',
+            icon: 'Droplet',
+            autoVerify: 'never',
+          },
+          {
+            id: 'pre-backend-smoke',
+            titleKey: 'preBackendSmoke',
+            descriptionKey: 'preBackendSmokeDesc',
+            href: '/dashboard',
+            linkLabelKey: 'openDashboard',
+            icon: 'Activity',
+            autoVerify: 'never',
+          },
+        ],
+      },
+      liveDemo: {
+        id: 'live-demo',
+        titleKey: 'liveDemoTitle',
+        subtitleKey: 'liveDemoSubtitle',
+        items: [
+          {
+            id: 'live-campaign-browse',
+            titleKey: 'liveCampaignBrowse',
+            descriptionKey: 'liveCampaignBrowseDesc',
+            href: '/campaigns',
+            linkLabelKey: 'openCampaigns',
+            icon: 'Megaphone',
+            autoVerify: 'never',
+          },
+          {
+            id: 'live-claim-submit',
+            titleKey: 'liveClaimSubmit',
+            descriptionKey: 'liveClaimSubmitDesc',
+            href: '/claim-receipt?claimId=demo-test',
+            linkLabelKey: 'openClaimFlow',
+            icon: 'FileText',
+            autoVerify: 'never',
+          },
+          {
+            id: 'live-verification-review',
+            titleKey: 'liveVerificationReview',
+            descriptionKey: 'liveVerificationReviewDesc',
+            href: '/verification-review',
+            linkLabelKey: 'openVerificationReview',
+            icon: 'CheckSquare',
+            autoVerify: 'never',
+          },
+          {
+            id: 'live-onchain-receipt',
+            titleKey: 'liveOnchainReceipt',
+            descriptionKey: 'liveOnchainReceiptDesc',
+            href: '/claim-receipt?claimId=demo-verify',
+            linkLabelKey: 'openReceiptPage',
+            icon: 'Receipt',
+            autoVerify: 'never',
+          },
+          {
+            id: 'live-dashboard-metrics',
+            titleKey: 'liveDashboardMetrics',
+            descriptionKey: 'liveDashboardMetricsDesc',
+            href: '/dashboard',
+            linkLabelKey: 'openDashboard',
+            icon: 'BarChart3',
+            autoVerify: 'never',
+          },
+        ],
+      },
+      postDemo: {
+        id: 'post-demo',
+        titleKey: 'postDemoTitle',
+        subtitleKey: 'postDemoSubtitle',
+        items: [
+          {
+            id: 'post-data-cleanup',
+            titleKey: 'postDataCleanup',
+            descriptionKey: 'postDataCleanupDesc',
+            icon: 'Trash2',
+            autoVerify: 'never',
+          },
+          {
+            id: 'post-ledger-reconcile',
+            titleKey: 'postLedgerReconcile',
+            descriptionKey: 'postLedgerReconcileDesc',
+            icon: 'Database',
+            autoVerify: 'never',
+          },
+          {
+            id: 'post-state-export',
+            titleKey: 'postStateExport',
+            descriptionKey: 'postStateExportDesc',
+            icon: 'Download',
+            autoVerify: 'never',
+          },
+          {
+            id: 'post-debrief-notes',
+            titleKey: 'postDebriefNotes',
+            descriptionKey: 'postDebriefNotesDesc',
+            icon: 'Edit3',
+            autoVerify: 'never',
+          },
+        ],
+      },
+    },
+    failureRecovery: {
+      titleKey: 'recoveryTitle',
+      subtitleKey: 'recoverySubtitle',
+      issues: [
+        {
+          id: 'rpc-timeout',
+          symptomKey: 'issueRpcTimeoutSymptom',
+          causeKey: 'issueRpcTimeoutCause',
+          severity: 'medium',
+          actions: [
+            { id: 'rpc-1', description: 'Verify RPC endpoint URL matches canonical network config', command: 'curl -I https://soroban-testnet.stellar.org:443' },
+            { id: 'rpc-2', description: 'Check network connectivity and firewall rules' },
+            { id: 'rpc-3', description: 'Switch to alternative RPC endpoint if available' },
+            { id: 'rpc-4', description: 'Retry request with exponential backoff' },
+          ],
+          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §9.1'],
+        },
+        {
+          id: 'rate-limiting',
+          symptomKey: 'issueRateLimitSymptom',
+          causeKey: 'issueRateLimitCause',
+          severity: 'low',
+          actions: [
+            { id: 'rl-1', description: 'Wait 2-5 minutes before retrying', command: 'Start-Sleep -Seconds 120' },
+            { id: 'rl-2', description: 'Use dedicated RPC provider if public endpoint is throttled' },
+            { id: 'rl-3', description: 'Batch requests to reduce call frequency' },
+          ],
+          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §9.5'],
+        },
+        {
+          id: 'insufficient-xlm',
+          symptomKey: 'issueXlmSymptom',
+          causeKey: 'issueXlmCause',
+          severity: 'high',
+          actions: [
+            { id: 'xlm-1', description: 'Request testnet XLM via Friendbot', command: 'curl "https://friendbot.stellar.org/?addr=YOUR_ADDRESS"' },
+            { id: 'xlm-2', description: 'Check balance with Stellar Laboratory' },
+            { id: 'xlm-3', description: 'Allow 5-10 seconds for ledger confirmation' },
+            { id: 'xlm-4', description: 'Ensure base reserve (1 XLM) plus fees are covered' },
+          ],
+        },
+        {
+          id: 'stale-ledger',
+          symptomKey: 'issueStaleLedgerSymptom',
+          causeKey: 'issueStaleLedgerCause',
+          severity: 'medium',
+          actions: [
+            { id: 'sl-1', description: 'Wait for ledger sync (typically 5-30 seconds)' },
+            { id: 'sl-2', description: 'Verify RPC provider is fully synced' },
+            { id: 'sl-3', description: 'Retry query with fresh RPC connection' },
+            { id: 'sl-4', description: 'Run ledger reconciliation if off-chain state drifts' },
+          ],
+          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §9.3'],
+        },
+        {
+          id: 'contract-id-mismatch',
+          symptomKey: 'issueContractMismatchSymptom',
+          causeKey: 'issueContractMismatchCause',
+          severity: 'high',
+          actions: [
+            { id: 'cm-1', description: 'Check canonical contract registry for correct Contract ID' },
+            { id: 'cm-2', description: 'Update CONTRACT_ID in backend .env file' },
+            { id: 'cm-3', description: 'Restart backend service to pick up new config' },
+            { id: 'cm-4', description: 'Clear browser localStorage cached package IDs' },
+            { id: 'cm-5', description: 'Run redeployment checklist if fresh deploy needed' },
+          ],
+          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §12', 'testnet-deployment-plan.md §5'],
+        },
+        {
+          id: 'wallet-network-mismatch',
+          symptomKey: 'issueWalletMismatchSymptom',
+          causeKey: 'issueWalletMismatchCause',
+          severity: 'medium',
+          actions: [
+            { id: 'wm-1', description: 'Open Freighter wallet settings' },
+            { id: 'wm-2', description: 'Switch network to Testnet (not Mainnet or Futurenet)' },
+            { id: 'wm-3', description: 'Refresh page and re-connect wallet' },
+            { id: 'wm-4', description: 'Confirm network indicator shows Testnet' },
+          ],
+        },
+      ],
+    },
+    contractRegistry: {
+      canonicalSourcePath: 'app/onchain/deployments/contract-registry.json',
+      generatorScript: 'app/onchain/scripts/generate-registry.py',
+      deploymentRegistry: 'app/onchain/deployments/registry.json',
+    },
+  };
+
+  return new Response(JSON.stringify(runbook), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
 export const handlers: Record<string, MockHandler> = {
   '/health': healthHandler,
   '/aid-packages': aidPackagesHandler,
@@ -1218,4 +1492,6 @@ export const handlers: Record<string, MockHandler> = {
     }
     return new Response(JSON.stringify({ success: false, message: 'Method not implemented in mock' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
   },
+  '/contract-registry': contractRegistryHandler,
+  '/runbook': runbookHandler,
 };

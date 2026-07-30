@@ -85,6 +85,37 @@ def test_task_status_endpoint_returns_local_job_status(client):
     assert data["result"]["type"] == "ocr"
 
 
+def test_batch_ocr_returns_document_statuses_for_mixed_inputs(client, monkeypatch):
+    created_tasks = []
+
+    def fake_create_task(task_type, payload):
+        created_tasks.append((task_type, payload))
+        return f"ocr-task-{len(created_tasks)}"
+
+    monkeypatch.setattr(tasks, "create_task", fake_create_task)
+
+    response = client.post(
+        "/v1/ai/ocr/batch",
+        files=[
+            ("files", ("doc-a.png", _png_bytes(), "image/png")),
+            ("files", ("doc-b.png", b"not-a-real-image", "image/png")),
+            ("files", ("doc-c.png", _png_bytes(), "image/png")),
+        ],
+    )
+
+    assert response.status_code == 202
+    data = response.json()
+    assert data["success"] is True
+    assert len(data["documents"]) == 3
+    assert data["documents"][0]["status"] == "pending"
+    assert data["documents"][0]["task_id"] == "ocr-task-1"
+    assert data["documents"][1]["status"] == "failed"
+    assert data["documents"][1]["error"]["code"] == "invalid_image"
+    assert data["documents"][2]["status"] == "pending"
+    assert data["documents"][2]["task_id"] == "ocr-task-2"
+    assert len(created_tasks) == 2
+
+
 def test_retry_policy_is_defined_on_heavy_task():
     task = tasks.get_process_heavy_inference_task()
 

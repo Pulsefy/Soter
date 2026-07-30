@@ -40,7 +40,7 @@ export class DeviceTokensController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid credentials.' })
   async register(@Body() dto: RegisterDeviceTokenDto, @Req() req: Request) {
     const actor = {
-      userId: req.user?.id as string | undefined,
+      userId: req.user?.id,
       orgId: req.user?.orgId as string | undefined,
       role: req.user?.role as string | undefined,
     };
@@ -57,7 +57,7 @@ export class DeviceTokensController {
   @ApiOkResponse({ description: 'Device tokens listed.' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid credentials.' })
   async list(@Req() req: Request) {
-    const userId = req.user?.id as string | undefined;
+    const userId = req.user?.id;
     if (!userId) {
       return ApiResponseDto.badRequest('User ID not found in request');
     }
@@ -73,7 +73,7 @@ export class DeviceTokensController {
   @ApiOkResponse({ description: 'Device token fetched.' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid credentials.' })
   async get(@Param('id') id: string, @Req() req: Request) {
-    const userId = req.user?.id as string | undefined;
+    const userId = req.user?.id;
     if (!userId) {
       return ApiResponseDto.badRequest('User ID not found in request');
     }
@@ -97,7 +97,7 @@ export class DeviceTokensController {
     @Req() req: Request,
   ) {
     const actor = {
-      userId: req.user?.id as string | undefined,
+      userId: req.user?.id,
       orgId: req.user?.orgId as string | undefined,
       role: req.user?.role as string | undefined,
     };
@@ -113,7 +113,7 @@ export class DeviceTokensController {
   @ApiOkResponse({ description: 'Device token deleted.' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid credentials.' })
   async delete(@Param('id') id: string, @Req() req: Request) {
-    const userId = req.user?.id as string | undefined;
+    const userId = req.user?.id;
     if (!userId) {
       return ApiResponseDto.badRequest('User ID not found in request');
     }
@@ -130,7 +130,7 @@ export class DeviceTokensController {
   @ApiOkResponse({ description: 'Last used timestamp updated.' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid credentials.' })
   async heartbeat(@Param('id') id: string, @Req() req: Request) {
-    const userId = req.user?.id as string | undefined;
+    const userId = req.user?.id;
     if (!userId) {
       return ApiResponseDto.badRequest('User ID not found in request');
     }

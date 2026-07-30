@@ -8,7 +8,11 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { REDIS_CLIENT } from '../../redis/redis.module';
 import { JobStatusBroadcaster } from '../services/job-status-broadcaster.service';
-import { JobStatusEvent, JobStatus, JobType } from '../dtos/job-status-event.dto';
+import {
+  JobStatusEvent,
+  JobStatus,
+  JobType,
+} from '../dtos/job-status-event.dto';
 
 describe('JobStatusBroadcaster', () => {
   let service: JobStatusBroadcaster;
@@ -226,7 +230,10 @@ describe('JobStatusBroadcaster', () => {
 
   describe('getMetrics', () => {
     it('should return metrics about streaming state', async () => {
-      mockRedis.keys.mockResolvedValueOnce(['job_status_history:job_1', 'job_status_history:job_2']);
+      mockRedis.keys.mockResolvedValueOnce([
+        'job_status_history:job_1',
+        'job_status_history:job_2',
+      ]);
       mockRedis.keys.mockResolvedValueOnce(['job_subscriptions:job_1']);
       mockRedis.llen.mockResolvedValue(10);
       mockRedis.hlen.mockResolvedValue(3);

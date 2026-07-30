@@ -8,6 +8,7 @@
  */
 
 import { io, Socket } from 'socket.io-client';
+import { useState, useEffect, useRef } from 'react';
 
 export enum JobStatus {
   PENDING = 'pending',
@@ -393,20 +394,12 @@ export function useJobStatus(
   jobId: string | null,
   options: SubscriptionOptions = {}
 ) {
-  // Import React dynamically to avoid dependency if not using React
-  let React: any;
-  try {
-    React = require('react');
-  } catch {
-    throw new Error('React is required to use useJobStatus hook');
-  }
+  const [status, setStatus] = useState<JobStatusInfo | null>(null);
+  const [error, setError] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const clientRef = useRef<JobStatusClient | null>(null);
 
-  const [status, setStatus] = React.useState<JobStatusInfo | null>(null);
-  const [error, setError] = React.useState<any>(null);
-  const [loading, setLoading] = React.useState(true);
-  const clientRef = React.useRef<JobStatusClient | null>(null);
-
-  React.useEffect(() => {
+  useEffect(() => {
     if (!jobId) return;
 
     const initializeClient = async () => {
@@ -450,7 +443,7 @@ export function useJobStatus(
     };
   }, [jobId, baseUrl, token]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     return () => {
       if (clientRef.current) {
         clientRef.current.disconnect();

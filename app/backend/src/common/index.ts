@@ -6,6 +6,7 @@
 
 // Constants
 export * from './constants/api-version.constants';
+export * from './constants/integration-error-codes';
 
 // Decorators
 export * from './decorators/deprecated.decorator';

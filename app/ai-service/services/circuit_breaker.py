@@ -8,18 +8,20 @@ logger = logging.getLogger(__name__)
 class CircuitBreaker:
     """
     A thread-safe implementation of the Circuit Breaker pattern.
-    
+
     States:
     - CLOSED: Normal operation. Requests flow through.
     - OPEN: Service is failing. Requests fail-fast (return False/raise error).
     - HALF_OPEN: Recovery window elapsed. Allow a request to test downstream health.
     """
 
-    def __init__(self, name: str, failure_threshold: int = 3, recovery_timeout: float = 30.0):
+    def __init__(
+        self, name: str, failure_threshold: int = 3, recovery_timeout: float = 30.0
+    ):
         self.name = name
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
-        
+
         self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
         self.failure_count = 0
         self.last_state_change = time.time()
@@ -73,7 +75,10 @@ class CircuitBreaker:
         with self._lock:
             now = time.time()
             self.failure_count += 1
-            if self.state == "HALF_OPEN" or self.failure_count >= self.failure_threshold:
+            if (
+                self.state == "HALF_OPEN"
+                or self.failure_count >= self.failure_threshold
+            ):
                 logger.warning(
                     "Circuit breaker for provider '%s' transitioning from %s to OPEN "
                     "(failures: %s, threshold: %s)",

@@ -587,3 +587,44 @@ fn test_delegate_claimed_event() {
     // Actor for revoked after claim is the delegate who claimed
     assert_eq!(data_address(&env, &revoked_data, "actor"), delegate);
 }
+
+#[test]
+fn test_token_added_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (token_client, _token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    client.add_allowed_token(&token_client.address);
+
+    let data = last_event_data(&env, &contract_id, "token_added");
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_eq!(data_address(&env, &data, "token"), token_client.address);
+    assert_field_exists(&env, &data, "timestamp");
+}
+
+#[test]
+fn test_token_removed_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (token_client, _token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    client.add_allowed_token(&token_client.address);
+    client.remove_allowed_token(&token_client.address);
+
+    let data = last_event_data(&env, &contract_id, "token_removed");
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_eq!(data_address(&env, &data, "token"), token_client.address);
+    assert_field_exists(&env, &data, "timestamp");
+}
