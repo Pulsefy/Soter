@@ -14,12 +14,19 @@ export interface HealthCheckResult {
   details?: Record<string, unknown>;
 }
 
+export interface DeploymentMetadata {
+  gitSha: string;
+  environment: string;
+  buildTimestamp: string;
+}
+
 export interface LivenessResponse {
   status: 'ok';
   service: 'backend';
   version: string;
   environment: string;
   timestamp: string;
+  deployment: DeploymentMetadata;
   checks: {
     process: HealthCheckResult;
   };
@@ -68,6 +75,7 @@ export class HealthService {
       version: process.env.npm_package_version ?? '0.0.0',
       environment: this.configService.get<string>('NODE_ENV') ?? 'development',
       timestamp: new Date().toISOString(),
+      deployment: this.getDeploymentMetadata(),
       checks: {
         process: {
           status: 'up',
@@ -213,6 +221,22 @@ export class HealthService {
         },
       };
     }
+  }
+
+  /**
+   * Deployment metadata linking this running backend instance to the CI/CD
+   * build that produced it (git sha, environment, build timestamp).
+   * Populated from env vars set at build/deploy time; falls back to safe
+   * 'unknown' defaults so the endpoint never errors when they're absent
+   * (e.g. local development).
+   */
+  private getDeploymentMetadata(): DeploymentMetadata {
+    return {
+      gitSha: this.configService.get<string>('GIT_SHA') ?? 'unknown',
+      environment: this.configService.get<string>('NODE_ENV') ?? 'development',
+      buildTimestamp:
+        this.configService.get<string>('BUILD_TIMESTAMP') ?? 'unknown',
+    };
   }
 
   private isEnabled(value?: string): boolean {

@@ -31,6 +31,44 @@ import { EncryptionService } from '../common/encryption/encryption.service';
 import { BudgetService } from '../common/budget/budget.service';
 import { SorobanTransactionLifecycleService } from '../onchain/soroban-transaction-lifecycle.service';
 import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
+import { escapeCsvField, toCsvRow } from '../common/csv/csv.util';
+import { streamCursorPaginated } from '../common/streaming/cursor-paginate';
+
+export interface ClaimExportRow {
+  id: string;
+  campaignId: string;
+  campaignName: string;
+  status: string;
+  amount: number;
+  evidenceRef: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  cancelledAt: Date | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
+  reissuedFromId: string | null;
+  tokenAddress: string | null;
+}
+
+interface RawClaimExportRow {
+  id: string;
+  campaignId: string;
+  campaign: {
+    name: string;
+    metadata: unknown;
+  } | null;
+  status: ClaimStatus;
+  amount: number;
+  evidenceRef: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+  cancelledAt: Date | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
+  reissuedFromId: string | null;
+  metadata: unknown;
+}
 
 type ExpirationCleanupCapableAdapter = OnchainAdapter & {
   revokeAidPackage?: (params: {
@@ -143,9 +181,7 @@ export class ClaimsService {
         campaign: true,
       },
     });
-    const claim = claimResult as
-      | (typeof claimResult & { deletedAt: Date | null })
-      | null;
+    const claim = claimResult;
     if (!claim || claim.deletedAt) {
       throw new NotFoundException('Claim not found');
     }
@@ -300,8 +336,7 @@ export class ClaimsService {
     }
 
     const campaignMetadata = claim.campaign?.metadata as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     if (campaignMetadata?.tokenAddress) {
       return campaignMetadata.tokenAddress as string;
     }
@@ -770,30 +805,15 @@ export class ClaimsService {
     }
   }
 
-  async exportClaims(query: ExportClaimsQueryDto): Promise<{
-    data: Array<{
-      id: string;
-      campaignId: string;
-      campaignName: string;
-      status: string;
-      amount: number;
-      evidenceRef: string | null;
-      createdAt: Date;
-      updatedAt: Date;
-      cancelledAt: Date | null;
-      cancelledBy: string | null;
-      cancelReason: string | null;
-      reissuedFromId: string | null;
-      tokenAddress: string | null;
-    }>;
-    total: number;
-    page: number;
-    limit: number;
-  }> {
-    const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(200, Math.max(1, query.limit ?? 50));
-    const skip = (page - 1) * limit;
+  /** Batch size used when streaming exports; bounds memory to O(batch), not O(total rows). */
+  private static readonly EXPORT_BATCH_SIZE = 500;
 
+  private static readonly CSV_HEADER =
+    'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress';
+
+  private buildExportWhere(
+    query: ExportClaimsQueryDto,
+  ): Prisma.ClaimWhereInput {
     const where: Prisma.ClaimWhereInput = {
       deletedAt: null,
     };
@@ -821,113 +841,90 @@ export class ClaimsService {
       where.OR = [
         {
           campaign: {
-            metadata: { path: 'tokenAddress', equals: query.tokenAddress },
+            metadata: { path: ['tokenAddress'], equals: query.tokenAddress },
           },
         },
       ];
     }
 
-    const [claimsResult, total] = await this.prisma.$transaction([
-      this.prisma.claim.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-        include: { campaign: true },
-      }),
-      this.prisma.claim.count({ where }),
-    ]);
-
-    const claims = claimsResult as unknown as Array<{
-      id: string;
-      campaignId: string;
-      campaign: {
-        name: string;
-        metadata: unknown;
-      } | null;
-      status: ClaimStatus;
-      amount: number;
-      evidenceRef: string | null;
-      createdAt: Date;
-      updatedAt: Date;
-      deletedAt: Date | null;
-      cancelledAt: Date | null;
-      cancelledBy: string | null;
-      cancelReason: string | null;
-      reissuedFromId: string | null;
-      metadata: unknown;
-    }>;
-
-    const data = claims.map(c => {
-      const claimMetadata = c.metadata as Record<string, unknown> | undefined;
-      const campaignMetadata = c.campaign?.metadata as
-        | Record<string, unknown>
-        | undefined;
-
-      return {
-        id: c.id,
-        campaignId: c.campaignId,
-        campaignName: c.campaign?.name ?? '',
-        status: c.status,
-        amount: c.amount,
-        evidenceRef: c.evidenceRef ?? null,
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
-        cancelledAt: c.cancelledAt ?? null,
-        cancelledBy: c.cancelledBy ?? null,
-        cancelReason: c.cancelReason ?? null,
-        reissuedFromId: c.reissuedFromId ?? null,
-        tokenAddress: (claimMetadata?.tokenAddress ??
-          campaignMetadata?.tokenAddress ??
-          null) as string | null,
-      };
-    });
-
-    return { data, total, page, limit };
+    return where;
   }
 
-  buildCsv(
-    rows: Array<{
-      id: string;
-      campaignId: string;
-      campaignName: string;
-      status: string;
-      amount: number;
-      evidenceRef: string | null;
-      createdAt: Date;
-      updatedAt: Date;
-      cancelledAt: Date | null;
-      cancelledBy: string | null;
-      cancelReason: string | null;
-      reissuedFromId: string | null;
-      tokenAddress: string | null;
-    }>,
-  ): string {
-    const escape = (value: string | number | null): string => {
-      const str = String(value ?? '').replace(/"/g, '""');
-      return `"${str}"`;
+  private mapClaimRow(c: RawClaimExportRow): ClaimExportRow {
+    const claimMetadata = c.metadata as Record<string, unknown> | undefined;
+    const campaignMetadata = c.campaign?.metadata as
+      Record<string, unknown> | undefined;
+
+    return {
+      id: c.id,
+      campaignId: c.campaignId,
+      campaignName: c.campaign?.name ?? '',
+      status: c.status,
+      amount: c.amount,
+      evidenceRef: c.evidenceRef ?? null,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+      cancelledAt: c.cancelledAt ?? null,
+      cancelledBy: c.cancelledBy ?? null,
+      cancelReason: c.cancelReason ?? null,
+      reissuedFromId: c.reissuedFromId ?? null,
+      tokenAddress: (claimMetadata?.tokenAddress ??
+        campaignMetadata?.tokenAddress ??
+        null) as string | null,
     };
+  }
 
-    const header =
-      'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress';
-    const lines = rows.map(r =>
-      [
-        escape(r.id),
-        escape(r.campaignId),
-        escape(r.campaignName),
-        escape(r.status),
-        escape(r.amount.toFixed(2)),
-        escape(r.evidenceRef),
-        escape(r.createdAt.toISOString()),
-        escape(r.updatedAt.toISOString()),
-        escape(r.cancelledAt?.toISOString() ?? ''),
-        escape(r.cancelledBy),
-        escape(r.cancelReason),
-        escape(r.reissuedFromId),
-        escape(r.tokenAddress),
-      ].join(','),
-    );
+  /** Count of claims matching the export filters, for the X-Total-Count header. */
+  async countExport(query: ExportClaimsQueryDto): Promise<number> {
+    return this.prisma.claim.count({ where: this.buildExportWhere(query) });
+  }
 
-    return [header, ...lines].join('\r\n');
+  /**
+   * Streams claim export rows using cursor-based pagination, fetching one
+   * bounded batch at a time instead of loading the full matching set into
+   * memory. See ClaimsController#exportClaims for how this is piped
+   * directly into the HTTP response.
+   */
+  async *streamExportRows(
+    query: ExportClaimsQueryDto,
+  ): AsyncGenerator<ClaimExportRow> {
+    const where = this.buildExportWhere(query);
+    const batchSize = ClaimsService.EXPORT_BATCH_SIZE;
+
+    const fetchPage = (cursor: string | undefined) =>
+      this.prisma.claim.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: batchSize,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        include: { campaign: true },
+      }) as unknown as Promise<RawClaimExportRow[]>;
+
+    for await (const row of streamCursorPaginated(fetchPage, batchSize)) {
+      yield this.mapClaimRow(row);
+    }
+  }
+
+  /** Streams the export as CSV text chunks: header first, then one line per row. */
+  async *streamExportCsv(query: ExportClaimsQueryDto): AsyncGenerator<string> {
+    yield ClaimsService.CSV_HEADER + '\r\n';
+
+    for await (const row of this.streamExportRows(query)) {
+      yield toCsvRow([
+        escapeCsvField(row.id),
+        escapeCsvField(row.campaignId),
+        escapeCsvField(row.campaignName),
+        escapeCsvField(row.status),
+        escapeCsvField(row.amount.toFixed(2)),
+        escapeCsvField(row.evidenceRef),
+        escapeCsvField(row.createdAt.toISOString()),
+        escapeCsvField(row.updatedAt.toISOString()),
+        escapeCsvField(row.cancelledAt?.toISOString() ?? ''),
+        escapeCsvField(row.cancelledBy),
+        escapeCsvField(row.cancelReason),
+        escapeCsvField(row.reissuedFromId),
+        escapeCsvField(row.tokenAddress),
+      ]);
+    }
   }
 }

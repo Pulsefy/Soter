@@ -28,9 +28,7 @@ export class WebhookHmacGuard implements CanActivate {
 
     const rawBody =
       (req as Request & { rawBody?: Buffer | string }).rawBody ??
-      (typeof req.body === 'string'
-        ? req.body
-        : JSON.stringify(req.body));
+      (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
 
     if (!this.hmac.verify(rawBody, signature)) {
       throw new UnauthorizedException('Invalid webhook signature');

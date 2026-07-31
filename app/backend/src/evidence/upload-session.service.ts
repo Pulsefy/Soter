@@ -20,6 +20,8 @@ import {
   ALLOWED_MIME_TYPES,
   MAX_FILE_SIZE,
   isSafeFilename,
+  validateExtensionForMime,
+  validateFileContent,
 } from './file-validation';
 
 /** Sessions expire after 24 hours of inactivity. */
@@ -52,6 +54,10 @@ export class UploadSessionService {
     if (!(ALLOWED_MIME_TYPES as readonly string[]).includes(dto.mimeType)) {
       throw new BadRequestException(`Disallowed mimeType: ${dto.mimeType}`);
     }
+    // Extension must be on the allow-list and consistent with the declared
+    // mimeType (e.g. rejects "evil.txt" declared as "application/pdf").
+    // Content itself can't be checked yet since no bytes have arrived.
+    validateExtensionForMime(dto.fileName, dto.mimeType);
     if (dto.totalSize > MAX_FILE_SIZE) {
       throw new BadRequestException(
         `totalSize exceeds maximum of ${MAX_FILE_SIZE} bytes`,
@@ -173,6 +179,39 @@ export class UploadSessionService {
     // Reassemble from Redis
     const parts = await this.store.getAllChunks(sessionId, session.totalChunks);
     const assembled = Buffer.concat(parts);
+
+    // Deep, content-aware re-validation of the assembled bytes. `create()`
+    // only checked client-declared metadata (fileName/mimeType/totalSize);
+    // this confirms the actual uploaded content matches what was declared
+    // (size, extension/MIME consistency, magic-byte signature) before it is
+    // ever written to disk or queued. A session whose content fails this
+    // check can't be salvaged, so it's aborted rather than left retryable.
+    try {
+      validateFileContent({
+        filename: session.fileName,
+        mimetype: session.mimeType,
+        size: assembled.length,
+        buffer: assembled,
+      });
+    } catch (error) {
+      await this.store.updateSessionStatus(
+        sessionId,
+        UploadSessionStatus.aborted,
+      );
+      await this.store.cleanupSession(sessionId, session.totalChunks);
+      await this.auditService.record({
+        actorId: ownerId,
+        entity: 'upload_session',
+        entityId: sessionId,
+        action: 'session_content_rejected',
+        metadata: {
+          fileName: session.fileName,
+          mimeType: session.mimeType,
+          reason: error instanceof Error ? error.message : 'unknown',
+        },
+      });
+      throw error;
+    }
 
     // Encrypt and persist as a regular evidence file
     const encrypted = this.encryptionService.encryptBuffer(assembled);

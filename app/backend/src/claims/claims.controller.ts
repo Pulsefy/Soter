@@ -43,6 +43,7 @@ import { InternalNotesService } from 'src/common/services/internal-notes.service
 import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
 import { SorobanEventCorrelationService } from '../onchain/soroban-event-correlation.service';
+import { streamCsvResponse } from '../common/csv/stream-csv-response';
 
 @ApiTags('Onchain Proxy')
 @ApiBearerAuth('JWT-auth')
@@ -488,11 +489,13 @@ export class ClaimsController {
   @ApiOperation({
     summary: 'Export claims as CSV',
     description:
-      'Exports claim records as CSV with support for date range, status, organization, token, and pagination filters. ' +
-      'Excludes sensitive recipient data (recipientRef is encrypted and not exported).',
+      'Streams claim records as CSV with support for date range, status, organization, and token filters. ' +
+      'Rows are fetched and written in bounded batches so exporting a large number of claims does not ' +
+      'buffer the full result set in memory. Excludes sensitive recipient data (recipientRef is encrypted ' +
+      'and not exported).',
   })
   @ApiOkResponse({
-    description: 'Claims exported successfully.',
+    description: 'Claims exported successfully as a streamed CSV response.',
     content: {
       'text/csv': {
         schema: { type: 'string' },
@@ -535,32 +538,17 @@ export class ClaimsController {
     required: false,
     description: 'Token address filter',
   })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    description: 'Page number (default: 1)',
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    description: 'Items per page (default: 50, max: 200)',
-  })
   async exportClaims(
     @Query() query: ExportClaimsQueryDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const result = await this.claimsService.exportClaims(query);
+    @Res() res: Response,
+  ): Promise<void> {
+    const total = await this.claimsService.countExport(query);
 
-    const csv = this.claimsService.buildCsv(result.data);
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="claims-export-${Date.now()}.csv"`,
+    await streamCsvResponse(
+      res,
+      `claims-export-${Date.now()}.csv`,
+      this.claimsService.streamExportCsv(query),
+      total,
     );
-    res.setHeader('X-Total-Count', String(result.total));
-    res.setHeader('X-Page', String(result.page));
-    res.setHeader('X-Limit', String(result.limit));
-
-    return csv;
   }
 }

@@ -82,5 +82,4 @@ export class AidController {
   ) {
     return this.aidService.transitionClaim(id, from, to);
   }
-
 }

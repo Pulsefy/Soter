@@ -60,6 +60,8 @@ describe('HealthController', () => {
     configValues.STELLAR_RPC_URL = undefined;
     configValues.HEALTHCHECK_STELLAR_REQUIRED = undefined;
     configValues.HEALTHCHECK_STELLAR_TIMEOUT_MS = undefined;
+    configValues.GIT_SHA = undefined;
+    configValues.BUILD_TIMESTAMP = undefined;
     prismaMock.$queryRaw.mockResolvedValue([{ '?column?': 1 }]);
     global.fetch = originalFetch;
   });
@@ -85,6 +87,33 @@ describe('HealthController', () => {
         },
       }),
     );
+  });
+
+  it('GET /health/live includes deployment metadata with safe defaults when unset', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/health/live')
+      .expect(200);
+
+    expect(res.body.deployment).toEqual({
+      gitSha: 'unknown',
+      environment: 'test',
+      buildTimestamp: 'unknown',
+    });
+  });
+
+  it('GET /health/live surfaces deployment metadata when GIT_SHA/BUILD_TIMESTAMP are set', async () => {
+    configValues.GIT_SHA = 'a1b2c3d';
+    configValues.BUILD_TIMESTAMP = '2025-02-23T10:00:00.000Z';
+
+    const res = await request(app.getHttpServer())
+      .get('/health/live')
+      .expect(200);
+
+    expect(res.body.deployment).toEqual({
+      gitSha: 'a1b2c3d',
+      environment: 'test',
+      buildTimestamp: '2025-02-23T10:00:00.000Z',
+    });
   });
 
   it('GET /health/ready returns ready when database is reachable and Stellar is optional', async () => {
@@ -128,11 +157,7 @@ describe('HealthController', () => {
   it('GET /health/ready returns 503 when Stellar is required and RPC is down', async () => {
     configValues.STELLAR_RPC_URL = 'https://soroban-testnet.stellar.org';
     configValues.HEALTHCHECK_STELLAR_REQUIRED = 'true';
-    global.fetch = jest
-      .fn()
-      .mockRejectedValueOnce(
-        new Error('rpc timeout'),
-      ) as unknown as typeof fetch;
+    global.fetch = jest.fn().mockRejectedValueOnce(new Error('rpc timeout'));
 
     const res = await request(app.getHttpServer())
       .get('/health/ready')

@@ -25,12 +25,14 @@ describe('E2E Testnet Happy Path Scenario (Campaign -> Package -> Verification -
       timestamp: new Date(),
     }),
     getTokenBalance: jest.fn().mockResolvedValue({ balance: '10000' }),
-    createAidPackage: jest
-      .fn()
-      .mockResolvedValue({ packageId: 'pkg_e2e_001', transactionHash: '0xhash_e2e_create' }),
-    disburseAidPackage: jest
-      .fn()
-      .mockResolvedValue({ packageId: 'pkg_e2e_001', transactionHash: '0xhash_e2e_disburse' }),
+    createAidPackage: jest.fn().mockResolvedValue({
+      packageId: 'pkg_e2e_001',
+      transactionHash: '0xhash_e2e_create',
+    }),
+    disburseAidPackage: jest.fn().mockResolvedValue({
+      packageId: 'pkg_e2e_001',
+      transactionHash: '0xhash_e2e_disburse',
+    }),
     getAidPackageCount: jest.fn().mockResolvedValue({
       aggregates: {
         totalCommitted: '10000',
@@ -79,8 +81,7 @@ describe('E2E Testnet Happy Path Scenario (Campaign -> Package -> Verification -
     // 1. Create Organization & Campaign
     const org = await prisma.organization.create({
       data: {
-        name: 'E2E Testnet Relief Org',
-        slug: `e2e-org-${Date.now()}`,
+        name: `E2E Testnet Relief Org ${Date.now()}`,
       },
     });
 
@@ -89,7 +90,8 @@ describe('E2E Testnet Happy Path Scenario (Campaign -> Package -> Verification -
       .send({
         organizationId: org.id,
         name: 'E2E Flood Relief 2026',
-        description: 'End-to-End Testnet campaign for automated verification & disbursement',
+        description:
+          'End-to-End Testnet campaign for automated verification & disbursement',
         targetAmount: 50000,
       })
       .expect(201);
@@ -116,8 +118,10 @@ describe('E2E Testnet Happy Path Scenario (Campaign -> Package -> Verification -
       .post('/api/v1/verifications')
       .send({
         packageId,
-        channel: VerificationChannel.PORTAL,
-        evidenceUrl: 'https://storage.soter.org/evidence/e2e_verification_photo.jpg',
+        channel: VerificationChannel.email,
+        email: 'e2e-happy-path@soter.org',
+        evidenceUrl:
+          'https://storage.soter.org/evidence/e2e_verification_photo.jpg',
         metadata: {
           location: 'Testnet Region A',
           aiScore: 0.98,
@@ -127,7 +131,9 @@ describe('E2E Testnet Happy Path Scenario (Campaign -> Package -> Verification -
       .expect(201);
 
     const verificationId = verificationRes.body.id;
-    console.log(`[STEP 3 SUCCESS] AI Verification completed with ID: ${verificationId}`);
+    console.log(
+      `[STEP 3 SUCCESS] AI Verification completed with ID: ${verificationId}`,
+    );
 
     // 4. Claim Package
     const claimRes = await request(app.getHttpServer())
@@ -138,7 +144,9 @@ describe('E2E Testnet Happy Path Scenario (Campaign -> Package -> Verification -
       })
       .expect(200);
 
-    console.log(`[STEP 4 SUCCESS] Package claimed by recipient: ${claimRes.body.status || 'Claimed'}`);
+    console.log(
+      `[STEP 4 SUCCESS] Package claimed by recipient: ${claimRes.body.status || 'Claimed'}`,
+    );
 
     // 5. Disburse Funds Onchain
     const disburseRes = await request(app.getHttpServer())
@@ -146,7 +154,9 @@ describe('E2E Testnet Happy Path Scenario (Campaign -> Package -> Verification -
       .send({})
       .expect(200);
 
-    console.log(`[STEP 5 SUCCESS] Onchain disbursement verified on Testnet: ${disburseRes.body.transactionHash || '0xhash_e2e_disburse'}`);
+    console.log(
+      `[STEP 5 SUCCESS] Onchain disbursement verified on Testnet: ${disburseRes.body.transactionHash || '0xhash_e2e_disburse'}`,
+    );
 
     // Cleanup E2E test data
     await prisma.campaign.delete({ where: { id: campaignId } }).catch(() => {});

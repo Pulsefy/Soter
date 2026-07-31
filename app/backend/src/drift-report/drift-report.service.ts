@@ -73,11 +73,10 @@ export class DriftReportService {
       this.logger.debug('Redis unavailable – generating report from scratch');
     }
 
-    const [deployments, onChainMeta] =
-      await Promise.all([
-        this.deploymentMetadataService.findAll(),
-        this.contractReadAdapter.getContractMetadata(),
-      ]);
+    const [deployments, onChainMeta] = await Promise.all([
+      this.deploymentMetadataService.findAll(),
+      this.contractReadAdapter.getContractMetadata(),
+    ]);
 
     const configMismatches = this.detectConfigMismatches(
       deployments,
@@ -131,7 +130,9 @@ export class DriftReportService {
     if (report.configMismatches.length === 0) {
       lines.push('✓ No configuration mismatches detected.');
     } else {
-      lines.push(`✗ Configuration mismatches (${report.configMismatches.length}):`);
+      lines.push(
+        `✗ Configuration mismatches (${report.configMismatches.length}):`,
+      );
       for (const m of report.configMismatches) {
         lines.push(
           `  [${m.severity.toUpperCase()}] ${m.network}/${m.contractName} — ${m.field}`,
@@ -170,7 +171,9 @@ export class DriftReportService {
     lines.push('');
 
     lines.push('═══════════════════════════════════════════════════');
-    lines.push(`  Actionable: ${report.overallStatus !== 'healthy' ? 'YES' : 'NO'}`);
+    lines.push(
+      `  Actionable: ${report.overallStatus !== 'healthy' ? 'YES' : 'NO'}`,
+    );
     lines.push('═══════════════════════════════════════════════════');
 
     return lines.join('\n');
@@ -276,9 +279,7 @@ export class DriftReportService {
     const hasHighSeverity =
       mismatches.some(m => m.severity === 'high') ||
       missing.some(m => m.severity === 'high');
-    const hasMediumSeverity = mismatches.some(
-      m => m.severity === 'medium',
-    );
+    const hasMediumSeverity = mismatches.some(m => m.severity === 'medium');
 
     if (hasHighSeverity) return 'critical';
     if (hasMediumSeverity || missing.length > 0) return 'drift_detected';

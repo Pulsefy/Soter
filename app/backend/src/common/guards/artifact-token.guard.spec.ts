@@ -239,7 +239,7 @@ describe('ArtifactTokenGuard', () => {
       const context = createContext({ authorization: 'Bearer valid-token' });
       await guard.canActivate(context as any);
 
-      const req = context.switchToHttp().getRequest();
+      const req = context.switchToHttp().getRequest() as Record<string, any>;
       expect(req['artifactToken']).toBeDefined();
       expect(req['artifactToken'].artifactId).toBe(mockArtifactId);
       expect(req['artifactToken'].orgId).toBe(mockOrgId);

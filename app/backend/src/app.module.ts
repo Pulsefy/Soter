@@ -56,11 +56,13 @@ import { WebhooksModule } from 'src/webhooks.module';
 import { CorrelationModule } from './common/modules/correlation.module';
 import { RecipientImportModule } from './recipient-import/recipient-import.module';
 import { DeviceTokensModule } from './device-tokens/device-tokens.module';
+import { validateNetworkConfig } from './config/network-config.validation';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateNetworkConfig,
       envFilePath: (() => {
         const candidates = [
           join(__dirname, '..', '.env'),
