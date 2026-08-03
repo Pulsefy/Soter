@@ -16,11 +16,13 @@ describe('DriftReportService', () => {
     contractName: 'AidEscrow',
     network: 'testnet',
     contractId: 'CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG',
-    wasmHash: '24328e15b7c11c7ff07caeaf0328da591b3b63e84af57fa03623c10126eabc8d',
+    wasmHash:
+      '24328e15b7c11c7ff07caeaf0328da591b3b63e84af57fa03623c10126eabc8d',
     deployedAt: new Date('2026-06-03T12:00:00Z'),
     commitSha: 'abc123def456',
     deployer: 'GA5TBSBGERHVMEFBJGEM3KYMRLWO73Y2QRAV6P66GPEBOJ5ZMJUT7LLY',
-    transactionHash: '292bf42f063310028456890e88861cd1650149ef0d4e66ba2a22ea5769964e64',
+    transactionHash:
+      '292bf42f063310028456890e88861cd1650149ef0d4e66ba2a22ea5769964e64',
     metadata: { version: '1.0.0' },
     createdAt: new Date('2026-06-03T12:00:00Z'),
     updatedAt: new Date('2026-06-03T12:00:00Z'),
@@ -69,7 +71,10 @@ describe('DriftReportService', () => {
       providers: [
         DriftReportService,
         { provide: RedisService, useValue: mockRedis },
-        { provide: DeploymentMetadataService, useValue: mockDeploymentMetadata },
+        {
+          provide: DeploymentMetadataService,
+          useValue: mockDeploymentMetadata,
+        },
         { provide: ContractReadServiceImpl, useValue: mockContractRead },
         { provide: ConfigService, useValue: mockConfigService },
       ],
@@ -139,7 +144,9 @@ describe('DriftReportService', () => {
       const result = await service.generateReport();
 
       expect(result.configMismatches).toHaveLength(1);
-      expect(result.configMismatches[0].field).toBe('wasmHash vs on-chain version');
+      expect(result.configMismatches[0].field).toBe(
+        'wasmHash vs on-chain version',
+      );
       expect(result.configMismatches[0].severity).toBe('high');
       expect(result.overallStatus).toBe('critical');
     });
@@ -157,12 +164,17 @@ describe('DriftReportService', () => {
         wasmHash: mockOnChainMetadata.version,
         commitSha: mockOnChainMetadata.version,
       };
-      mockDeploymentMetadata.findAll.mockResolvedValue([mismatchedDeployment, mainnetDeployment]);
+      mockDeploymentMetadata.findAll.mockResolvedValue([
+        mismatchedDeployment,
+        mainnetDeployment,
+      ]);
 
       const result = await service.generateReport();
 
       expect(result.configMismatches).toHaveLength(1);
-      expect(result.configMismatches[0].field).toBe('commitSha vs on-chain version');
+      expect(result.configMismatches[0].field).toBe(
+        'commitSha vs on-chain version',
+      );
       expect(result.configMismatches[0].severity).toBe('low');
       expect(result.overallStatus).toBe('healthy');
     });
@@ -173,7 +185,9 @@ describe('DriftReportService', () => {
       const result = await service.generateReport();
 
       expect(result.missingDeployments.length).toBeGreaterThanOrEqual(1);
-      expect(result.missingDeployments.some(d => d.network === 'testnet')).toBe(true);
+      expect(result.missingDeployments.some(d => d.network === 'testnet')).toBe(
+        true,
+      );
       expect(result.overallStatus).not.toBe('healthy');
     });
 
@@ -190,7 +204,10 @@ describe('DriftReportService', () => {
         wasmHash: mockOnChainMetadata.version,
         commitSha: mockOnChainMetadata.version,
       };
-      mockDeploymentMetadata.findAll.mockResolvedValue([matchingDeployment, mainnetDeployment]);
+      mockDeploymentMetadata.findAll.mockResolvedValue([
+        matchingDeployment,
+        mainnetDeployment,
+      ]);
       mockContractRead.getAidPackageCount.mockResolvedValue({
         totalCommitted: '0',
         totalClaimed: '0',
@@ -220,7 +237,12 @@ describe('DriftReportService', () => {
         configMismatches: [],
         missingDeployments: [],
         networkSummaries: [
-          { network: 'testnet', configuredCount: 1, onchainVersion: '1.0.0', discrepancies: [] },
+          {
+            network: 'testnet',
+            configuredCount: 1,
+            onchainVersion: '1.0.0',
+            discrepancies: [],
+          },
         ],
         totalContracts: 1,
         totalNetworks: 1,
@@ -250,7 +272,11 @@ describe('DriftReportService', () => {
           },
         ],
         missingDeployments: [
-          { network: 'mainnet', contractName: 'AidEscrow', severity: 'high' as const },
+          {
+            network: 'mainnet',
+            contractName: 'AidEscrow',
+            severity: 'high' as const,
+          },
         ],
         networkSummaries: [],
         totalContracts: 1,

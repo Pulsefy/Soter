@@ -12,6 +12,7 @@ import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { ClaimReceiptDto, SendReceiptShareDto } from './dto/claim-receipt.dto';
+import { explorerTxUrl } from '../common/utils/explorer-url.util';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
 import {
   ClaimStatus,
@@ -31,6 +32,44 @@ import { EncryptionService } from '../common/encryption/encryption.service';
 import { BudgetService } from '../common/budget/budget.service';
 import { SorobanTransactionLifecycleService } from '../onchain/soroban-transaction-lifecycle.service';
 import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
+import { escapeCsvField, toCsvRow } from '../common/csv/csv.util';
+import { streamCursorPaginated } from '../common/streaming/cursor-paginate';
+
+export interface ClaimExportRow {
+  id: string;
+  campaignId: string;
+  campaignName: string;
+  status: string;
+  amount: number;
+  evidenceRef: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  cancelledAt: Date | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
+  reissuedFromId: string | null;
+  tokenAddress: string | null;
+}
+
+interface RawClaimExportRow {
+  id: string;
+  campaignId: string;
+  campaign: {
+    name: string;
+    metadata: unknown;
+  } | null;
+  status: ClaimStatus;
+  amount: number;
+  evidenceRef: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+  cancelledAt: Date | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
+  reissuedFromId: string | null;
+  metadata: unknown;
+}
 
 type ExpirationCleanupCapableAdapter = OnchainAdapter & {
   revokeAidPackage?: (params: {
@@ -76,7 +115,6 @@ export class ClaimsService {
   }
 
   async create(createClaimDto: CreateClaimDto) {
-    // Check if campaign exists
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: createClaimDto.campaignId },
     });
@@ -84,7 +122,6 @@ export class ClaimsService {
       throw new NotFoundException('Campaign not found');
     }
 
-    // Enforce campaign funding cap
     await this.budgetService.assertWithinBudget(
       createClaimDto.campaignId,
       createClaimDto.amount,
@@ -111,7 +148,6 @@ export class ClaimsService {
 
     claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
-    // Stub audit hook
     void this.auditLog('claim', claim.id, 'created', {
       status: claim.status,
       tokenAddress: createClaimDto.tokenAddress,
@@ -143,9 +179,7 @@ export class ClaimsService {
         campaign: true,
       },
     });
-    const claim = claimResult as
-      | (typeof claimResult & { deletedAt: Date | null })
-      | null;
+    const claim = claimResult;
     if (!claim || claim.deletedAt) {
       throw new NotFoundException('Claim not found');
     }
@@ -187,7 +221,6 @@ export class ClaimsService {
       );
     }
 
-    // Store receiptPointer on the claim record if provided
     if (receiptPointer) {
       await this.prisma.claim.update({
         where: { id },
@@ -195,20 +228,18 @@ export class ClaimsService {
       });
     }
 
-    // Create Soroban transaction record with comprehensive lifecycle tracking
     let sorobanTransaction: SorobanTransaction | undefined;
     if (this.onchainEnabled && this.onchainAdapter) {
       const packageId = this.generateMockPackageId(id);
       const tokenAddress = this.getTokenAddressForClaim(claim);
       const correlationId = `disburse-${id}-${Date.now()}`;
 
-      // Create transaction record in database with full lifecycle support
       sorobanTransaction =
         await this.sorobanTransactionService.createTransaction({
           claimId: id,
           operation: SorobanOperationType.disburse_claim,
           packageId,
-          operatorAddress: 'admin', // In production, get from authenticated context
+          operatorAddress: 'admin',
           recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
           amount: claim.amount.toString(),
           tokenAddress,
@@ -222,12 +253,11 @@ export class ClaimsService {
           maxAttempts: 5,
         });
 
-      // Schedule for immediate execution with retry capabilities
       await this.sorobanTransactionScheduler.scheduleTransaction(
         sorobanTransaction.id,
         {
           correlationId,
-          priority: 1, // High priority for disbursements
+          priority: 1,
         },
       );
 
@@ -242,15 +272,12 @@ export class ClaimsService {
         },
       );
 
-      // Emit metrics for transaction creation
       this.metricsService.incrementCounter('soroban_disbursement_scheduled', {
         claimId: id,
         transactionId: sorobanTransaction.id,
       });
     }
 
-    // Update claim status to disbursed (optimistic update)
-    // The Soroban transaction will be processed asynchronously with full retry logic
     const updatedClaim = await this.transitionStatus(
       id,
       ClaimStatus.approved,
@@ -269,10 +296,6 @@ export class ClaimsService {
     return updatedClaim;
   }
 
-  /**
-   * Generate a deterministic mock package ID from claim ID
-   * In production, this would come from the createClaim on-chain call
-   */
   private generateMockPackageId(claimId: string): string {
     const hash = createHash('sha256')
       .update(`package-${claimId}`)
@@ -280,11 +303,6 @@ export class ClaimsService {
     return BigInt('0x' + hash.substring(0, 16)).toString();
   }
 
-  /**
-   * Get token address for a claim
-   * In production, this should be retrieved from the claim record
-   * For now, uses a default or derives from campaign metadata
-   */
   private getTokenAddressForClaim(
     claim: {
       metadata?: any;
@@ -300,8 +318,7 @@ export class ClaimsService {
     }
 
     const campaignMetadata = claim.campaign?.metadata as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     if (campaignMetadata?.tokenAddress) {
       return campaignMetadata.tokenAddress as string;
     }
@@ -525,9 +542,6 @@ export class ClaimsService {
     console.log(`Audit: ${entity} ${entityId} ${action}`, metadata);
   }
 
-  /**
-   * Build a blockchain explorer link for a transaction hash.
-   */
   private buildExplorerLink(transactionHash: string): string | null {
     const network =
       this.configService.get<string>('STELLAR_NETWORK')?.toLowerCase() ??
@@ -541,12 +555,7 @@ export class ClaimsService {
     return `${explorerBase}/testnet/tx/${transactionHash}`;
   }
 
-  /**
-   * Resolve a claim from either a claim ID or a package (campaign) identifier.
-   * When given a package ID, returns the most recent claim for that package.
-   */
   private async resolveClaimByIdentifier(identifier: string): Promise<any> {
-    // 1. Try direct claim ID lookup
     try {
       const directClaim = await this.findOne(identifier);
       if (directClaim) return directClaim;
@@ -554,7 +563,6 @@ export class ClaimsService {
       // not found via claim ID - fall through
     }
 
-    // 2. Try as package / campaign identifier, most recent claim first
     const claimsForPackage = await this.prisma.claim.findMany({
       where: {
         deletedAt: null,
@@ -575,9 +583,6 @@ export class ClaimsService {
     throw new NotFoundException('Claim not found');
   }
 
-  /**
-   * Look up the on-chain disbursement transaction hash for a claim via audit logs.
-   */
   private async findDisbursementTransaction(
     claimId: string,
   ): Promise<{ transactionHash: string; status: string } | null> {
@@ -599,9 +604,6 @@ export class ClaimsService {
     };
   }
 
-  /**
-   * Generate a receipt DTO for a claim, resolvable by claim ID or package ID.
-   */
   async getReceipt(identifier: string): Promise<ClaimReceiptDto> {
     const claim = await this.resolveClaimByIdentifier(identifier);
 
@@ -617,6 +619,8 @@ export class ClaimsService {
       ? (this.buildExplorerLink(transactionHash) ?? undefined)
       : undefined;
 
+    const timeline = await this.buildTimeline(claim.id);
+
     return {
       claimId: claim.id,
       packageId: claim.campaignId,
@@ -627,14 +631,31 @@ export class ClaimsService {
       recipientRef: claim.recipientRef,
       transactionHash,
       explorerLink,
-      receiptPointer: claim.receiptPointer ?? undefined,
+      timeline,
     };
   }
 
-  /**
-   * Generate and share a claim receipt
-   * Supports email, SMS, and inline sharing
-   */
+  private async buildTimeline(claimId: string) {
+    const logs = await this.prisma.auditLog.findMany({
+      where: { entityId: claimId, entity: 'claim' },
+      orderBy: { timestamp: 'asc' },
+    });
+
+    return logs
+      .filter((log) => log.action.startsWith('status_changed_to_'))
+      .map((log) => {
+        const metadata = log.metadata as Record<string, any> | null;
+        const txHash = metadata?.transactionHash as string | undefined;
+        const network = this.configService.get<string>('STELLAR_NETWORK') ?? 'testnet';
+        return {
+          status: log.action.replace('status_changed_to_', ''),
+          timestamp: log.timestamp.toISOString(),
+          transactionHash: txHash,
+          explorerUrl: txHash ? explorerTxUrl(txHash, network) : undefined,
+        };
+      });
+  }
+
   async shareReceipt(
     id: string,
     shareDto: SendReceiptShareDto,
@@ -680,9 +701,6 @@ export class ClaimsService {
     };
   }
 
-  /**
-   * Generate formatted receipt text
-   */
   private generateReceiptText(receipt: ClaimReceiptDto): string {
     const lines = [
       '═══════════════════════════════════════',
@@ -721,10 +739,6 @@ export class ClaimsService {
     return lines.join('\n');
   }
 
-  /**
-   * Send receipt via email
-   * Stub implementation - replace with actual email service
-   */
   private sendReceiptViaEmail(
     emailAddresses: string[],
     receipt: ClaimReceiptDto,
@@ -747,10 +761,6 @@ export class ClaimsService {
     }
   }
 
-  /**
-   * Send receipt via SMS
-   * Stub implementation - replace with actual SMS service
-   */
   private sendReceiptViaSMS(
     phoneNumbers: string[],
     receipt: ClaimReceiptDto,
@@ -770,30 +780,14 @@ export class ClaimsService {
     }
   }
 
-  async exportClaims(query: ExportClaimsQueryDto): Promise<{
-    data: Array<{
-      id: string;
-      campaignId: string;
-      campaignName: string;
-      status: string;
-      amount: number;
-      evidenceRef: string | null;
-      createdAt: Date;
-      updatedAt: Date;
-      cancelledAt: Date | null;
-      cancelledBy: string | null;
-      cancelReason: string | null;
-      reissuedFromId: string | null;
-      tokenAddress: string | null;
-    }>;
-    total: number;
-    page: number;
-    limit: number;
-  }> {
-    const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(200, Math.max(1, query.limit ?? 50));
-    const skip = (page - 1) * limit;
+  private static readonly EXPORT_BATCH_SIZE = 500;
 
+  private static readonly CSV_HEADER =
+    'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress';
+
+  private buildExportWhere(
+    query: ExportClaimsQueryDto,
+  ): Prisma.ClaimWhereInput {
     const where: Prisma.ClaimWhereInput = {
       deletedAt: null,
     };
@@ -821,113 +815,82 @@ export class ClaimsService {
       where.OR = [
         {
           campaign: {
-            metadata: { path: 'tokenAddress', equals: query.tokenAddress },
+            metadata: { path: ['tokenAddress'], equals: query.tokenAddress },
           },
         },
       ];
     }
 
-    const [claimsResult, total] = await this.prisma.$transaction([
-      this.prisma.claim.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-        include: { campaign: true },
-      }),
-      this.prisma.claim.count({ where }),
-    ]);
-
-    const claims = claimsResult as unknown as Array<{
-      id: string;
-      campaignId: string;
-      campaign: {
-        name: string;
-        metadata: unknown;
-      } | null;
-      status: ClaimStatus;
-      amount: number;
-      evidenceRef: string | null;
-      createdAt: Date;
-      updatedAt: Date;
-      deletedAt: Date | null;
-      cancelledAt: Date | null;
-      cancelledBy: string | null;
-      cancelReason: string | null;
-      reissuedFromId: string | null;
-      metadata: unknown;
-    }>;
-
-    const data = claims.map(c => {
-      const claimMetadata = c.metadata as Record<string, unknown> | undefined;
-      const campaignMetadata = c.campaign?.metadata as
-        | Record<string, unknown>
-        | undefined;
-
-      return {
-        id: c.id,
-        campaignId: c.campaignId,
-        campaignName: c.campaign?.name ?? '',
-        status: c.status,
-        amount: c.amount,
-        evidenceRef: c.evidenceRef ?? null,
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
-        cancelledAt: c.cancelledAt ?? null,
-        cancelledBy: c.cancelledBy ?? null,
-        cancelReason: c.cancelReason ?? null,
-        reissuedFromId: c.reissuedFromId ?? null,
-        tokenAddress: (claimMetadata?.tokenAddress ??
-          campaignMetadata?.tokenAddress ??
-          null) as string | null,
-      };
-    });
-
-    return { data, total, page, limit };
+    return where;
   }
 
-  buildCsv(
-    rows: Array<{
-      id: string;
-      campaignId: string;
-      campaignName: string;
-      status: string;
-      amount: number;
-      evidenceRef: string | null;
-      createdAt: Date;
-      updatedAt: Date;
-      cancelledAt: Date | null;
-      cancelledBy: string | null;
-      cancelReason: string | null;
-      reissuedFromId: string | null;
-      tokenAddress: string | null;
-    }>,
-  ): string {
-    const escape = (value: string | number | null): string => {
-      const str = String(value ?? '').replace(/"/g, '""');
-      return `"${str}"`;
+  private mapClaimRow(c: RawClaimExportRow): ClaimExportRow {
+    const claimMetadata = c.metadata as Record<string, unknown> | undefined;
+    const campaignMetadata = c.campaign?.metadata as
+      Record<string, unknown> | undefined;
+
+    return {
+      id: c.id,
+      campaignId: c.campaignId,
+      campaignName: c.campaign?.name ?? '',
+      status: c.status,
+      amount: c.amount,
+      evidenceRef: c.evidenceRef ?? null,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+      cancelledAt: c.cancelledAt ?? null,
+      cancelledBy: c.cancelledBy ?? null,
+      cancelReason: c.cancelReason ?? null,
+      reissuedFromId: c.reissuedFromId ?? null,
+      tokenAddress: (claimMetadata?.tokenAddress ??
+        campaignMetadata?.tokenAddress ??
+        null) as string | null,
     };
+  }
 
-    const header =
-      'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress';
-    const lines = rows.map(r =>
-      [
-        escape(r.id),
-        escape(r.campaignId),
-        escape(r.campaignName),
-        escape(r.status),
-        escape(r.amount.toFixed(2)),
-        escape(r.evidenceRef),
-        escape(r.createdAt.toISOString()),
-        escape(r.updatedAt.toISOString()),
-        escape(r.cancelledAt?.toISOString() ?? ''),
-        escape(r.cancelledBy),
-        escape(r.cancelReason),
-        escape(r.reissuedFromId),
-        escape(r.tokenAddress),
-      ].join(','),
-    );
+  async countExport(query: ExportClaimsQueryDto): Promise<number> {
+    return this.prisma.claim.count({ where: this.buildExportWhere(query) });
+  }
 
-    return [header, ...lines].join('\r\n');
+  async *streamExportRows(
+    query: ExportClaimsQueryDto,
+  ): AsyncGenerator<ClaimExportRow> {
+    const where = this.buildExportWhere(query);
+    const batchSize = ClaimsService.EXPORT_BATCH_SIZE;
+
+    const fetchPage = (cursor: string | undefined) =>
+      this.prisma.claim.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: batchSize,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        include: { campaign: true },
+      }) as unknown as Promise<RawClaimExportRow[]>;
+
+    for await (const row of streamCursorPaginated(fetchPage, batchSize)) {
+      yield this.mapClaimRow(row);
+    }
+  }
+
+  async *streamExportCsv(query: ExportClaimsQueryDto): AsyncGenerator<string> {
+    yield ClaimsService.CSV_HEADER + '\r\n';
+
+    for await (const row of this.streamExportRows(query)) {
+      yield toCsvRow([
+        escapeCsvField(row.id),
+        escapeCsvField(row.campaignId),
+        escapeCsvField(row.campaignName),
+        escapeCsvField(row.status),
+        escapeCsvField(row.amount.toFixed(2)),
+        escapeCsvField(row.evidenceRef),
+        escapeCsvField(row.createdAt.toISOString()),
+        escapeCsvField(row.updatedAt.toISOString()),
+        escapeCsvField(row.cancelledAt?.toISOString() ?? ''),
+        escapeCsvField(row.cancelledBy),
+        escapeCsvField(row.cancelReason),
+        escapeCsvField(row.reissuedFromId),
+        escapeCsvField(row.tokenAddress),
+      ]);
+    }
   }
 }

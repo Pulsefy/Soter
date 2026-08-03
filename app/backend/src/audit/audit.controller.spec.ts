@@ -68,7 +68,7 @@ describe('AuditController', () => {
         setHeader: jest.fn(),
       } as any;
 
-      await controller.getLogs(query as any, res);
+      await controller.getLogs(query, res);
 
       expect(service.findLogs).toHaveBeenCalledWith(query);
       expect(res.setHeader).toHaveBeenCalledWith('X-Total-Count', '0');
@@ -98,7 +98,7 @@ describe('AuditController', () => {
     it('should return CSV string and set headers when format=csv', async () => {
       const res = makeRes();
       const returned = await controller.exportLogs(
-        { format: 'csv' } as any,
+        { format: 'csv' },
         res as any,
       );
 
@@ -118,7 +118,7 @@ describe('AuditController', () => {
     it('should pass from/to filters to exportLogs', async () => {
       const res = makeRes();
       await controller.exportLogs(
-        { from: '2024-01-01', to: '2024-12-31' } as any,
+        { from: '2024-01-01', to: '2024-12-31' },
         res as any,
       );
 

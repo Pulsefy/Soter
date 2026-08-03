@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { rpc as SorobanRpc, xdr, scValToNative } from '@stellar/stellar-sdk';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { withRetryTimeout } from './utils/retry-with-timeout';
+import { getNetworkProfile } from 'src/config/network.config';
 
 export interface EventCorrelationResult {
   correlated: number;
@@ -106,17 +107,20 @@ export class SorobanEventCorrelationService {
     private readonly configService: ConfigService,
     private readonly metricsService: MetricsService,
   ) {
+    const networkProfile = getNetworkProfile(
+      this.configService.get<string>('SOROBAN_NETWORK'),
+    );
     this.contractId = this.configService.get<string>(
       'AID_ESCROW_CONTRACT_ID',
       '',
     );
     this.rpcUrl = this.configService.get<string>(
       'STELLAR_RPC_URL',
-      'https://soroban-testnet.stellar.org',
+      networkProfile.defaultRpcUrl,
     );
     this.networkPassphrase = this.configService.get<string>(
       'STELLAR_NETWORK_PASSPHRASE',
-      'Test SDF Network ; September 2015',
+      networkProfile.passphrase,
     );
   }
 

@@ -43,6 +43,7 @@ import {
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
+import { getNetworkProfile } from 'src/config/network.config';
 
 @Injectable()
 export class SorobanAdapter implements OnchainAdapter {
@@ -62,13 +63,14 @@ export class SorobanAdapter implements OnchainAdapter {
       '',
     );
     this.network = this.configService.get<string>('SOROBAN_NETWORK', 'testnet');
+    const networkProfile = getNetworkProfile(this.network);
     this.rpcUrl = this.configService.get<string>(
       'STELLAR_RPC_URL',
-      'https://soroban-testnet.stellar.org',
+      networkProfile.defaultRpcUrl,
     );
     this.networkPassphrase = this.configService.get<string>(
       'STELLAR_NETWORK_PASSPHRASE',
-      'Test SDF Network ; September 2015',
+      networkProfile.passphrase,
     );
     this.adminSecretKey = this.configService.get<string>(
       'SOROBAN_ADMIN_SECRET_KEY',
@@ -92,14 +94,20 @@ export class SorobanAdapter implements OnchainAdapter {
         'SOROBAN_ADMIN_SECRET_KEY is not configured. Required for signing Soroban transactions.',
       );
     }
-    if (!this.rpcUrl.includes('testnet')) {
+    const expectedProfile = getNetworkProfile(this.network);
+    if (this.networkPassphrase !== expectedProfile.passphrase) {
       throw new Error(
-        `Cross-network mismatch: STELLAR_RPC_URL (${this.rpcUrl}) does not appear to be testnet.`,
+        `Cross-network mismatch: STELLAR_NETWORK_PASSPHRASE does not match the ` +
+          `${this.network} passphrase.`,
       );
     }
-    if (!this.networkPassphrase.includes('Test SDF Network')) {
+    const conflictingKeyword = expectedProfile.foreignRpcKeywords.find(
+      keyword => this.rpcUrl.toLowerCase().includes(keyword),
+    );
+    if (conflictingKeyword) {
       throw new Error(
-        'Cross-network mismatch: STELLAR_NETWORK_PASSPHRASE does not match testnet passphrase.',
+        `Cross-network mismatch: STELLAR_RPC_URL (${this.rpcUrl}) looks like a ` +
+          `${conflictingKeyword} endpoint, but SOROBAN_NETWORK is "${this.network}".`,
       );
     }
   }

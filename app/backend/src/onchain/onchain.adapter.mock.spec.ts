@@ -149,7 +149,7 @@ describe('MockOnchainAdapter', () => {
         tokenAddress: MOCK_TOKEN_ADDRESS,
       };
 
-      const result = await adapter.disburse(params as any);
+      const result = await adapter.disburse(params);
 
       expect(result.amountDisbursed).toBe('1000000000');
     });

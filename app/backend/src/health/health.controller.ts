@@ -33,8 +33,15 @@ export class HealthController {
     schema: {
       example: {
         status: 'ok',
+        service: 'backend',
         version: '1.0.0',
+        environment: 'production',
         timestamp: '2025-02-23T12:00:00.000Z',
+        deployment: {
+          gitSha: 'a1b2c3d',
+          environment: 'production',
+          buildTimestamp: '2025-02-23T10:00:00.000Z',
+        },
       },
     },
   })
@@ -59,7 +66,18 @@ export class HealthController {
     schema: {
       example: {
         status: 'ok',
-        uptime: '2d 5h 12m 30s',
+        service: 'backend',
+        version: '1.0.0',
+        environment: 'production',
+        timestamp: '2025-02-23T12:00:00.000Z',
+        deployment: {
+          gitSha: 'a1b2c3d',
+          environment: 'production',
+          buildTimestamp: '2025-02-23T10:00:00.000Z',
+        },
+        checks: {
+          process: { status: 'up' },
+        },
       },
     },
   })

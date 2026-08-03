@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { RedisService } from '../../cache/redis.service';
-import { AiTaskWebhookDto, TaskStatus } from './dto/ai-task-webhook.dto';
+import {
+  AiVerificationWebhookDto,
+  TaskStatus,
+} from '../webhooks/dto/ai-verification-webhook.dto';
 import { MetricsService } from '../observability/metrics/metrics.service';
 
 @Injectable()
@@ -58,7 +61,7 @@ export class AidService {
     return { id, status: toStatus };
   }
 
-  async handleTaskWebhook(payload: AiTaskWebhookDto) {
+  async handleTaskWebhook(payload: AiVerificationWebhookDto) {
     const deliveryKey = `webhook:delivery:${payload.deliveryId}`;
     const isDuplicate = await this.redisService.get(deliveryKey);
 

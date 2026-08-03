@@ -362,6 +362,33 @@ async def correlation_id_middleware(request: Request, call_next):
 
 
 @app.middleware("http")
+async def demo_mode_header_middleware(request: Request, call_next):
+    """
+    Stamp every response with an ``X-Demo-Mode`` header so clients and
+    contributors can tell at a glance whether they are seeing fixture-driven
+    or deterministic data instead of live AI inference.
+
+    Header values:
+    - ``fixture``       — TEST_PROVIDER_MODE is active (no API keys used)
+    - ``deterministic`` — AI_DETERMINISTIC_MODE is active (hardcoded outputs)
+    - ``live``          — real provider is in use
+
+    The companion ``/health/mode`` endpoint exposes the same information as
+    JSON for programmatic consumers.
+    """
+    response = await call_next(request)
+
+    if settings.test_provider_mode:
+        response.headers["X-Demo-Mode"] = "fixture"
+    elif settings.ai_deterministic_mode:
+        response.headers["X-Demo-Mode"] = "deterministic"
+    else:
+        response.headers["X-Demo-Mode"] = "live"
+
+    return response
+
+
+@app.middleware("http")
 async def monitor_requests(request: Request, call_next):
     path = request.url.path
 
@@ -444,6 +471,35 @@ async def health_check():
     return {"status": "healthy", "service": "soter-ai-service", "version": "1.0.0"}
 
 
+@app.get("/health/mode")
+async def health_mode():
+    """
+    Returns the current AI provider mode so contributors and the frontend
+    can detect demo/degraded states explicitly.
+
+    Response fields:
+    - ``demo_mode``          — one of ``fixture``, ``deterministic``, or ``live``
+    - ``test_provider_mode`` — whether TEST_PROVIDER_MODE is enabled
+    - ``deterministic_mode`` — whether AI_DETERMINISTIC_MODE is enabled
+    - ``active_provider``    — resolved provider name (``test``, ``openai``, ``groq``, or ``null``)
+    - ``app_env``            — current APP_ENV value
+    """
+    if settings.test_provider_mode:
+        demo_mode = "fixture"
+    elif settings.ai_deterministic_mode:
+        demo_mode = "deterministic"
+    else:
+        demo_mode = "live"
+
+    return {
+        "demo_mode": demo_mode,
+        "test_provider_mode": settings.test_provider_mode,
+        "deterministic_mode": settings.ai_deterministic_mode,
+        "active_provider": settings.get_active_provider(),
+        "app_env": settings.app_env,
+    }
+
+
 @app.get("/health/dependencies")
 async def health_dependencies():
     """Lightweight dependency probe for staging and CI.
@@ -490,12 +546,21 @@ async def health_dependencies():
 
 @app.get("/")
 async def root():
+    if settings.test_provider_mode:
+        demo_mode = "fixture"
+    elif settings.ai_deterministic_mode:
+        demo_mode = "deterministic"
+    else:
+        demo_mode = "live"
+
     return {
         "service": "Soter AI Service",
         "version": "1.0.0",
         "docs": "/docs",
         "health": "/health",
+        "mode": "/health/mode",
         "api_v1": "/v1",
+        "demo_mode": demo_mode,
     }
 
 

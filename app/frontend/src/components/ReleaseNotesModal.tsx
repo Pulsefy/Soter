@@ -4,7 +4,6 @@ import React, { useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X, CheckCircle, ExternalLink } from 'lucide-react';
 import { useVersion } from '@/hooks/useVersion';
-import { useTranslations } from 'next-intl';
 
 interface ReleaseNotesModalProps {
   open: boolean;
@@ -12,7 +11,6 @@ interface ReleaseNotesModalProps {
 }
 
 export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps) {
-  const t = useTranslations();
   const { releaseNotes, handleContinue, shouldShowNotes } = useVersion();
 
   // Close modal if notes shouldn't be shown
@@ -104,7 +102,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
             <div className="p-6 pt-4 border-t border-gray-100 dark:border-gray-800">
               <div className="flex items-center justify-between">
                 <button
-                  onClick={() => window.open('https://soter.app/changelog', '_blank')}
+                  onClick={() => window.open(releaseNotes.changelogUrl ?? 'https://soter.app/changelog', '_blank')}
                   className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                 >
                   <ExternalLink size={16} aria-hidden="true" />
@@ -115,7 +113,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                   className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                   autoFocus
                 >
-                  Continue
+                  {releaseNotes.continueLabel ?? 'Continue'}
                 </button>
               </div>
             </div>

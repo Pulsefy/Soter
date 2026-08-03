@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ClaimsService } from './claims.service';
+import { ClaimsService, ClaimExportRow } from './claims.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BudgetService } from '../common/budget/budget.service';
 import {
@@ -113,6 +113,7 @@ describe('ClaimsService', () => {
               update: jest.fn(),
               findMany: jest.fn(),
               create: jest.fn(),
+              count: jest.fn(),
             },
             sorobanTransaction: {
               create: jest.fn(),
@@ -502,6 +503,132 @@ describe('ClaimsService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('CSV export streaming', () => {
+    const makeRawClaim = (
+      id: string,
+      overrides: Record<string, unknown> = {},
+    ) => ({
+      id,
+      campaignId: 'campaign-1',
+      campaign: { name: 'Test Campaign', metadata: null },
+      status: ClaimStatus.approved,
+      amount: 100,
+      evidenceRef: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      deletedAt: null,
+      cancelledAt: null,
+      cancelledBy: null,
+      cancelReason: null,
+      reissuedFromId: null,
+      metadata: null,
+      ...overrides,
+    });
+
+    it('countExport(): counts using the same filters as the export', async () => {
+      jest.spyOn(prismaService.claim, 'count').mockResolvedValue(7);
+
+      const total = await service.countExport({
+        status: ClaimStatus.approved,
+        campaignId: 'campaign-1',
+      });
+
+      expect(total).toBe(7);
+      const args = (prismaService.claim.count as jest.Mock).mock.calls[0]?.[0];
+      expect(args?.where).toMatchObject({
+        deletedAt: null,
+        status: ClaimStatus.approved,
+        campaignId: 'campaign-1',
+      });
+    });
+
+    it('countExport(): rejects an invalid date filter', async () => {
+      await expect(
+        service.countExport({ from: 'not-a-date' } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('streamExportRows(): pages through results with cursor-based pagination', async () => {
+      const firstPage = Array.from({ length: 500 }, (_, i) =>
+        makeRawClaim(`claim-${i}`),
+      );
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValueOnce(firstPage as never)
+        .mockResolvedValueOnce([makeRawClaim('claim-500')] as never);
+
+      const rows: ClaimExportRow[] = [];
+      for await (const row of service.streamExportRows({})) {
+        rows.push(row);
+      }
+
+      expect(rows).toHaveLength(501);
+      expect(rows[0].campaignName).toBe('Test Campaign');
+
+      const calls = (prismaService.claim.findMany as jest.Mock).mock.calls;
+      expect(calls[0][0]?.cursor).toBeUndefined();
+      expect(calls[1][0]?.cursor).toEqual({ id: 'claim-499' });
+      expect(calls[1][0]?.skip).toBe(1);
+    });
+
+    it('streamExportRows(): never requests more than the batch size in a single query', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValue([] as never);
+
+      const rows: ClaimExportRow[] = [];
+      for await (const row of service.streamExportRows({})) {
+        rows.push(row);
+      }
+
+      for (const call of (prismaService.claim.findMany as jest.Mock).mock
+        .calls) {
+        expect(call[0]?.take).toBeLessThanOrEqual(500);
+      }
+    });
+
+    it('streamExportRows(): does not fetch further pages than the caller consumes (non-buffering)', async () => {
+      const fullPage = Array.from({ length: 500 }, (_, i) =>
+        makeRawClaim(`claim-${i}`),
+      );
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValue(fullPage as never);
+
+      const rows: ClaimExportRow[] = [];
+      for await (const row of service.streamExportRows({})) {
+        rows.push(row);
+        if (rows.length === 3) break;
+      }
+
+      expect(rows).toHaveLength(3);
+      expect(prismaService.claim.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('streamExportCsv(): yields the header first, then one escaped CSV line per row', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValueOnce([
+          makeRawClaim('claim-1', {
+            campaign: { name: 'Has, a comma', metadata: null },
+          }),
+        ] as never)
+        .mockResolvedValueOnce([] as never);
+
+      const chunks: string[] = [];
+      for await (const chunk of service.streamExportCsv({})) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).toBe(
+        'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress\r\n',
+      );
+      expect(chunks[1]).toContain('"claim-1"');
+      expect(chunks[1]).toContain('"Has, a comma"');
+      expect(chunks[1].endsWith('\r\n')).toBe(true);
     });
   });
 });
