@@ -16,7 +16,7 @@ jobs:
   integration-harness:
     name: Testnet Integration Harness
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && env.SOROBAN_CONTRACT_ID != '' && env.SOROBAN_RPC_URL != '')
     env:
       SOROBAN_RPC_URL: ${{ secrets.SOROBAN_RPC_URL }}
       SOROBAN_CONTRACT_ID: ${{ secrets.SOROBAN_CONTRACT_ID }}
