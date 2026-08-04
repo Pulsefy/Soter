@@ -1,6 +1,8 @@
 import { Controller, Get, Query, Res, Version } from '@nestjs/common';
 import { Response } from 'express';
 import { AuditService, AuditQuery, ExportAuditQuery } from './audit.service';
+import { Roles } from 'src/auth/roles.decorator';
+import { AppRole } from 'src/auth/app-role.enum';
 import {
   ApiTags,
   ApiOperation,
@@ -22,6 +24,7 @@ export class AuditController {
 
   @Get()
   @Version('1')
+  @Roles(AppRole.admin)
   @ApiOperation({
     summary: 'Query audit logs',
     description:
@@ -34,6 +37,7 @@ export class AuditController {
   @ApiQuery({ name: 'entity', required: false })
   @ApiQuery({ name: 'entityId', required: false })
   @ApiQuery({ name: 'actorId', required: false })
+  @ApiQuery({ name: 'correlationId', required: false })
   @ApiQuery({ name: 'action', required: false })
   @ApiQuery({ name: 'startTime', required: false, description: 'ISO string' })
   @ApiQuery({ name: 'endTime', required: false, description: 'ISO string' })
@@ -62,6 +66,7 @@ export class AuditController {
 
   @Get('export')
   @Version('1')
+  @Roles(AppRole.admin)
   @ApiOperation({
     summary: 'Export anonymized audit logs',
     description:

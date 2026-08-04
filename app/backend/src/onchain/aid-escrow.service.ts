@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AuditService } from '../audit/audit.service';
 import { OnchainAdapter, ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
 import {
   CreateAidPackageDto,
@@ -31,6 +32,7 @@ export class AidEscrowService {
     private readonly onchainAdapter: OnchainAdapter,
     private readonly budgetService: BudgetService,
     private readonly configService: ConfigService,
+    private readonly auditService: AuditService,
   ) {
     this.network = this.configService.get<string>('SOROBAN_NETWORK', 'testnet');
   }
@@ -118,7 +120,11 @@ export class AidEscrowService {
    * Create a single aid package
    * Performs token balance check before creation
    */
-  async createAidPackage(dto: CreateAidPackageDto, operatorAddress: string) {
+  async createAidPackage(
+    dto: CreateAidPackageDto,
+    operatorAddress: string,
+    correlationId?: string,
+  ) {
     this.logger.debug('Creating aid package:', {
       packageId: dto.packageId,
       recipient: dto.recipientAddress,
@@ -156,6 +162,21 @@ export class AidEscrowService {
       amount: dto.amount,
       tokenAddress: dto.tokenAddress,
       expiresAt: dto.expiresAt,
+    });
+
+    await this.auditService.record({
+      actorId: operatorAddress || 'admin',
+      entity: 'aidPackage',
+      entityId: result.packageId,
+      action: 'create',
+      correlationId,
+      metadata: {
+        tokenAddress: dto.tokenAddress,
+        recipientAddress: dto.recipientAddress,
+        amount: dto.amount,
+        operatorAddress,
+        expiresAt: dto.expiresAt,
+      },
     });
 
     this.logger.debug('Aid package created successfully:', {
@@ -299,6 +320,7 @@ export class AidEscrowService {
   async batchCreateAidPackages(
     dto: BatchCreateAidPackagesDto,
     operatorAddress: string,
+    correlationId?: string,
   ) {
     this.logger.debug('Batch creating aid packages:', {
       count: dto.recipientAddresses.length,
@@ -339,6 +361,20 @@ export class AidEscrowService {
       expiresIn: dto.expiresIn,
     });
 
+    await this.auditService.record({
+      actorId: operatorAddress || 'admin',
+      entity: 'aidPackageBatch',
+      entityId: result.transactionHash ?? 'batch',
+      action: 'create',
+      correlationId,
+      metadata: {
+        packageIds: result.packageIds,
+        tokenAddress: dto.tokenAddress,
+        operatorAddress,
+        count: result.packageIds.length,
+      },
+    });
+
     this.logger.debug('Batch aid packages created successfully:', {
       packageCount: result.packageIds.length,
       transactionHash: result.transactionHash,
@@ -376,6 +412,7 @@ export class AidEscrowService {
   async disburseAidPackage(
     dto: DisburseAidPackageDto,
     operatorAddress: string,
+    correlationId?: string,
   ) {
     this.logger.debug('Disbursing aid package:', {
       packageId: dto.packageId,
@@ -385,6 +422,19 @@ export class AidEscrowService {
     const result = await this.onchainAdapter.disburseAidPackage({
       packageId: dto.packageId,
       operatorAddress,
+    });
+
+    await this.auditService.record({
+      actorId: operatorAddress || 'admin',
+      entity: 'aidPackage',
+      entityId: dto.packageId,
+      action: 'disburse',
+      correlationId,
+      metadata: {
+        operatorAddress,
+        amountDisbursed: result.amountDisbursed,
+        transactionHash: result.transactionHash,
+      },
     });
 
     this.logger.debug('Aid package disbursed successfully:', {

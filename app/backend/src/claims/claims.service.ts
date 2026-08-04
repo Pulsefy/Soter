@@ -148,9 +148,15 @@ export class ClaimsService {
 
     claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
-    void this.auditLog('claim', claim.id, 'created', {
-      status: claim.status,
-      tokenAddress: createClaimDto.tokenAddress,
+    await this.auditService.record({
+      actorId: 'system',
+      entity: 'claim',
+      entityId: claim.id,
+      action: 'created',
+      metadata: {
+        status: claim.status,
+        tokenAddress: createClaimDto.tokenAddress,
+      },
     });
 
     this.metricsService.incrementClaimsCreated(campaign.id);
@@ -189,23 +195,42 @@ export class ClaimsService {
     };
   }
 
-  async verify(id: string) {
+  async verify(
+    id: string,
+    actorId: string = 'system',
+    correlationId?: string,
+  ) {
     return this.transitionStatus(
       id,
       ClaimStatus.requested,
       ClaimStatus.verified,
+      undefined,
+      actorId,
+      correlationId,
     );
   }
 
-  async approve(id: string) {
+  async approve(
+    id: string,
+    actorId: string = 'system',
+    correlationId?: string,
+  ) {
     return this.transitionStatus(
       id,
       ClaimStatus.verified,
       ClaimStatus.approved,
+      undefined,
+      actorId,
+      correlationId,
     );
   }
 
-  async disburse(id: string, receiptPointer?: string) {
+  async disburse(
+    id: string,
+    receiptPointer?: string,
+    actorId: string = 'system',
+    correlationId?: string,
+  ) {
     const claim = await this.prisma.claim.findUnique({
       where: { id },
       include: { campaign: true },
@@ -282,6 +307,9 @@ export class ClaimsService {
       id,
       ClaimStatus.approved,
       ClaimStatus.disbursed,
+      undefined,
+      actorId,
+      correlationId,
     );
 
     this.logger.log(
@@ -326,11 +354,18 @@ export class ClaimsService {
     return defaultTokenAddress;
   }
 
-  async archive(id: string) {
+  async archive(
+    id: string,
+    actorId: string = 'system',
+    correlationId?: string,
+  ) {
     return this.transitionStatus(
       id,
       ClaimStatus.disbursed,
       ClaimStatus.archived,
+      undefined,
+      actorId,
+      correlationId,
     );
   }
 
@@ -475,6 +510,8 @@ export class ClaimsService {
     fromStatus: ClaimStatus,
     toStatus: ClaimStatus,
     onchainResult?: DisburseResult | null,
+    actorId: string = 'system',
+    correlationId?: string,
   ) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
@@ -493,15 +530,22 @@ export class ClaimsService {
         include: { campaign: true },
       });
 
-      void this.auditLog('claim', id, `status_changed_to_${toStatus}`, {
-        from: fromStatus,
-        to: toStatus,
-        onchainResult: onchainResult
-          ? {
-              transactionHash: onchainResult.transactionHash,
-              status: onchainResult.status,
-            }
-          : undefined,
+      await this.auditService.record({
+        actorId,
+        entity: 'claim',
+        entityId: id,
+        action: `status_changed_to_${toStatus}`,
+        correlationId,
+        metadata: {
+          from: fromStatus,
+          to: toStatus,
+          onchainResult: onchainResult
+            ? {
+                transactionHash: onchainResult.transactionHash,
+                status: onchainResult.status,
+              }
+            : undefined,
+        },
       });
 
       return updated;
@@ -531,15 +575,6 @@ export class ClaimsService {
     this.metricsService.adjustClaimsInFunnel(toStatus, 1);
 
     return updatedClaim;
-  }
-
-  private auditLog(
-    entity: string,
-    entityId: string,
-    action: string,
-    metadata?: Record<string, unknown>,
-  ) {
-    console.log(`Audit: ${entity} ${entityId} ${action}`, metadata);
   }
 
   private buildExplorerLink(transactionHash: string): string | null {
@@ -687,10 +722,16 @@ export class ClaimsService {
         shareDto.message ?? undefined,
       );
     }
-    void this.auditLog('claim', id, 'receipt_shared', {
-      channel: shareDto.channel,
-      emailCount: shareDto.emailAddresses?.length || 0,
-      smsCount: shareDto.phoneNumbers?.length || 0,
+    await this.auditService.record({
+      actorId: 'system',
+      entity: 'claim',
+      entityId: id,
+      action: 'receipt_shared',
+      metadata: {
+        channel: shareDto.channel,
+        emailCount: shareDto.emailAddresses?.length || 0,
+        smsCount: shareDto.phoneNumbers?.length || 0,
+      },
     });
 
     return {

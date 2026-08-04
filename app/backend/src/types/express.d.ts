@@ -15,6 +15,8 @@ declare global {
         authType?: 'apiKey' | 'envApiKey';
         scopes?: ApiKeyScope[];
       };
+      correlationId?: string;
+      requestId?: string;
     }
   }
 }

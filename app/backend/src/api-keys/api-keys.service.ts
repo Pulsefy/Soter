@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { randomBytes, createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { AppRole } from '../auth/app-role.enum';
 import { ApiKeyScope } from './api-key-scope.enum';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
@@ -61,7 +62,10 @@ function deserializeRow<T extends { scopes?: string | null }>(
 
 @Injectable()
 export class ApiKeysService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   private newRawKey(): string {
     return `s2s_${randomBytes(32).toString('base64url')}`;
@@ -74,7 +78,11 @@ export class ApiKeysService {
     return 'unknown';
   }
 
-  async create(dto: CreateApiKeyDto, actor?: Actor) {
+  async create(
+    dto: CreateApiKeyDto,
+    actor?: Actor,
+    correlationId?: string,
+  ) {
     if (dto.role === AppRole.ngo && !dto.ngoId) {
       throw new BadRequestException('ngoId is required for NGO API keys');
     }
@@ -97,7 +105,23 @@ export class ApiKeysService {
       select: selectFields,
     });
 
-    return { ...deserializeRow(row), apiKey: rawKey };
+    const result = { ...deserializeRow(row), apiKey: rawKey };
+
+    await this.auditService.record({
+      actorId: this.actorId(actor),
+      entity: 'apiKey',
+      entityId: row.id,
+      action: 'create',
+      correlationId,
+      metadata: {
+        role: dto.role,
+        ngoId: dto.ngoId ?? null,
+        description: dto.description ?? null,
+        scopes,
+      },
+    });
+
+    return result;
   }
 
   async list() {
@@ -109,7 +133,12 @@ export class ApiKeysService {
     return rows.map(deserializeRow);
   }
 
-  async revoke(id: string, reason: string | undefined, actor?: Actor) {
+  async revoke(
+    id: string,
+    reason: string | undefined,
+    actor?: Actor,
+    correlationId?: string,
+  ) {
     const existing = await this.prisma.apiKey.findUnique({
       where: { id },
       select: { id: true, revokedAt: true },
@@ -136,10 +165,25 @@ export class ApiKeysService {
       select: selectFields,
     });
 
+    await this.auditService.record({
+      actorId: this.actorId(actor),
+      entity: 'apiKey',
+      entityId: row.id,
+      action: 'revoke',
+      correlationId,
+      metadata: {
+        reason: reason ?? 'revoked',
+      },
+    });
+
     return deserializeRow(row);
   }
 
-  async rotate(id: string, actor?: Actor) {
+  async rotate(
+    id: string,
+    actor?: Actor,
+    correlationId?: string,
+  ) {
     return this.prisma.$transaction(async tx => {
       const existing = await tx.apiKey.findUnique({
         where: { id },
@@ -186,7 +230,23 @@ export class ApiKeysService {
         },
       });
 
-      return { replacement: deserializeRow(replacement), apiKey: rawKey };
+      const result = { replacement: deserializeRow(replacement), apiKey: rawKey };
+
+      await this.auditService.record({
+        actorId: this.actorId(actor),
+        entity: 'apiKey',
+        entityId: existing.id,
+        action: 'rotate',
+        correlationId,
+        metadata: {
+          replacementId: replacement.id,
+          role: existing.role,
+          ngoId: existing.ngoId,
+          description: existing.description,
+        },
+      });
+
+      return result;
     });
   }
 }

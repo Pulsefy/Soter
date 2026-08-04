@@ -9,6 +9,9 @@ const SENSITIVE_KEYS = new Set([
   'private_key',
   'creditcard',
   'ssn',
+  'recipient',
+  'recipientref',
+  'recipientaddress',
 ]);
 
 function isSensitive(key: string): boolean {

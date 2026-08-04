@@ -5,12 +5,14 @@ import { IsInt, IsOptional, Max, Min } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { MetricsService } from 'src/audit/metrics.service';
+import { redactLogData } from '../logger/log-redaction.util';
 
 export interface AuditLogParams {
   actorId: string;
   entity: string;
   entityId: string;
   action: string;
+  correlationId?: string;
   metadata?: Record<string, any>;
 }
 
@@ -19,6 +21,7 @@ export interface AuditQuery {
   entityId?: string;
   actorId?: string;
   action?: string;
+  correlationId?: string;
   startTime?: string;
   endTime?: string;
   page?: number;
@@ -31,6 +34,7 @@ export class ExportAuditQuery {
   entity?: string;
   action?: string;
   actorId?: string;
+  correlationId?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -74,6 +78,13 @@ export class AuditService {
     return createHash('sha256').update(value).digest('hex').slice(0, 16);
   }
 
+  private redactMetadata(
+    metadata?: Record<string, unknown>,
+  ): Prisma.InputJsonValue | undefined {
+    if (!metadata) return undefined;
+    return redactLogData(metadata) as Prisma.InputJsonValue;
+  }
+
   async record(params: AuditLogParams) {
     const end = this.metrics.dbQueryDuration.startTimer({
       operation: 'create',
@@ -86,7 +97,8 @@ export class AuditService {
           entity: params.entity,
           entityId: params.entityId,
           action: params.action,
-          metadata: (params.metadata as Prisma.InputJsonValue) ?? {},
+          correlationId: params.correlationId,
+          metadata: this.redactMetadata(params.metadata) ?? {},
         },
       });
       end();
@@ -112,6 +124,7 @@ export class AuditService {
     if (query.entityId) where.entityId = query.entityId;
     if (query.actorId) where.actorId = query.actorId;
     if (query.action) where.action = query.action;
+    if (query.correlationId) where.correlationId = query.correlationId;
 
     if (query.startTime || query.endTime) {
       where.timestamp = {};
@@ -155,6 +168,9 @@ export class AuditService {
     if (query.entity) where.entity = query.entity;
     if (query.action) where.action = query.action;
     if (query.actorId) where.actorId = query.actorId;
+
+    if (query.action) where.action = query.action;
+    if (query.correlationId) where.correlationId = query.correlationId;
 
     if (query.from || query.to) {
       if (query.from && isNaN(Date.parse(query.from))) {

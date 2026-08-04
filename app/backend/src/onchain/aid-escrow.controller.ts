@@ -83,11 +83,20 @@ export class AidEscrowController {
   })
   async createAidPackage(
     @Body() dto: CreateAidPackageDto,
-    @Req() req: Request & { user?: { address?: string } },
+    @Req() req: Request & {
+      user?: { address?: string };
+      correlationId?: string;
+      requestId?: string;
+    },
   ): Promise<any> {
     try {
       const operatorAddress = req.user?.address || 'admin';
-      return await this.aidEscrowService.createAidPackage(dto, operatorAddress);
+      const correlationId = req.correlationId ?? req.requestId;
+      return await this.aidEscrowService.createAidPackage(
+        dto,
+        operatorAddress,
+        correlationId,
+      );
     } catch (error) {
       this.logger.error('Failed to create aid package:', error);
       this.errorMapper.throwMappedError(error);
@@ -165,7 +174,11 @@ export class AidEscrowController {
   })
   async batchCreateAidPackages(
     @Body() dto: BatchCreateAidPackagesDto,
-    @Req() req: Request & { user?: { address?: string } },
+    @Req() req: Request & {
+      user?: { address?: string };
+      correlationId?: string;
+      requestId?: string;
+    },
   ): Promise<any> {
     if (dto.recipientAddresses.length !== dto.amounts.length) {
       throw new BadRequestException(
@@ -174,10 +187,12 @@ export class AidEscrowController {
     }
 
     const operatorAddress = req.user?.address || 'admin';
+    const correlationId = req.correlationId ?? req.requestId;
     try {
       return await this.aidEscrowService.batchCreateAidPackages(
         dto,
         operatorAddress,
+        correlationId,
       );
     } catch (error) {
       this.logger.error('Failed to batch create aid packages:', error);
@@ -275,13 +290,19 @@ export class AidEscrowController {
   })
   async disburseAidPackage(
     @Param('id') packageId: string,
-    @Req() req: Request & { user?: { address?: string } },
+    @Req() req: Request & {
+      user?: { address?: string };
+      correlationId?: string;
+      requestId?: string;
+    },
   ): Promise<any> {
     try {
       const operatorAddress = req.user?.address || 'admin';
+      const correlationId = req.correlationId ?? req.requestId;
       return await this.aidEscrowService.disburseAidPackage(
         { packageId },
         operatorAddress,
+        correlationId,
       );
     } catch (error) {
       this.logger.error('Failed to disburse aid package:', error);

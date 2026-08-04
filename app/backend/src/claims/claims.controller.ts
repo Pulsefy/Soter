@@ -73,6 +73,13 @@ export class ClaimsController {
     }
   }
 
+  private getActorId(user: any): string {
+    if (user?.apiKeyId) return user.apiKeyId;
+    if (user?.authType === 'envApiKey') return 'env:API_KEY';
+    if (user?.role) return `role:${user.role}`;
+    return 'unknown';
+  }
+
   @Post()
   @ApiOperation({
     summary: 'Create a claim',
@@ -143,7 +150,12 @@ export class ClaimsController {
   async verify(@Param('id') id: string, @Request() req: ExpressRequest) {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
-    return this.claimsService.verify(id);
+    const correlationId = req.correlationId ?? req.requestId;
+    return this.claimsService.verify(
+      id,
+      this.getActorId(req.user),
+      correlationId,
+    );
   }
 
   @Post(':id/approve')
@@ -164,10 +176,15 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  async approve(@Param('id') id: string, @Request() req: ExpressRequest) {
+  async approve(@Param('id') id: string, @Request() req: ExpressRequest & { correlationId?: string; requestId?: string }) {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
-    return this.claimsService.approve(id);
+    const correlationId = req.correlationId ?? req.requestId;
+    return this.claimsService.approve(
+      id,
+      this.getActorId(req.user),
+      correlationId,
+    );
   }
 
   @Post(':id/disburse')
@@ -215,11 +232,17 @@ export class ClaimsController {
   async disburse(
     @Param('id') id: string,
     @Body() dto: DisburseClaimDto,
-    @Request() req: ExpressRequest,
+    @Request() req: ExpressRequest & { correlationId?: string; requestId?: string },
   ) {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
-    return this.claimsService.disburse(id, dto.receiptPointer);
+    const correlationId = req.correlationId ?? req.requestId;
+    return this.claimsService.disburse(
+      id,
+      dto.receiptPointer,
+      this.getActorId(req.user),
+      correlationId,
+    );
   }
 
   @Patch(':id/archive')
@@ -236,10 +259,18 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  async archive(@Param('id') id: string, @Request() req: ExpressRequest) {
+  async archive(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest & { correlationId?: string; requestId?: string },
+  ) {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
-    return this.claimsService.archive(id);
+    const correlationId = req.correlationId ?? req.requestId;
+    return this.claimsService.archive(
+      id,
+      this.getActorId(req.user),
+      correlationId,
+    );
   }
 
   @Get(':id/receipt')

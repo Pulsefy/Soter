@@ -8,6 +8,11 @@ import { ONCHAIN_ADAPTER_TOKEN } from '../src/onchain/onchain.adapter';
 import { BudgetService } from '../src/common/budget/budget.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { SorobanEventCorrelationService } from '../src/onchain/soroban-event-correlation.service';
+import { AuditService } from '../src/audit/audit.service';
+
+const mockAuditService = {
+  record: jest.fn().mockResolvedValue(null),
+};
 
 const mockEventCorrelationService = {
   getCorrelationsForPackage: jest.fn().mockResolvedValue([]),
@@ -42,6 +47,10 @@ describe('Transaction Status Polling', () => {
         {
           provide: SorobanEventCorrelationService,
           useValue: mockEventCorrelationService,
+        },
+        {
+          provide: AuditService,
+          useValue: mockAuditService,
         },
       ],
     }).compile();

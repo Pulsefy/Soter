@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApiKeysService } from './api-keys.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { AppRole } from '../auth/app-role.enum';
 import { ApiKeyScope } from './api-key-scope.enum';
 
@@ -17,6 +18,9 @@ describe('ApiKeysService', () => {
     },
     $transaction: jest.fn(),
   };
+  const mockAuditService = {
+    record: jest.fn().mockResolvedValue({ id: 'audit-1' }),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -26,6 +30,10 @@ describe('ApiKeysService', () => {
         {
           provide: PrismaService,
           useValue: mockPrisma,
+        },
+        {
+          provide: AuditService,
+          useValue: mockAuditService,
         },
       ],
     }).compile();

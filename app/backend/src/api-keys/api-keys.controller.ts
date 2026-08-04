@@ -38,7 +38,11 @@ export class ApiKeysController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid credentials.' })
   @ApiForbiddenResponse({ description: 'Insufficient permissions.' })
   async create(@Body() dto: CreateApiKeyDto, @Req() req: Request) {
-    const created = await this.apiKeys.create(dto, req.user);
+    const created = await this.apiKeys.create(
+      dto,
+      req.user,
+      req.correlationId ?? req.requestId,
+    );
     return ApiResponseDto.ok(created, 'API key created');
   }
 
@@ -63,7 +67,11 @@ export class ApiKeysController {
   @ApiOkResponse({ description: 'API key rotated.' })
   @ApiBadRequestResponse({ description: 'Cannot rotate revoked key.' })
   async rotate(@Param('id') id: string, @Req() req: Request) {
-    const rotated = await this.apiKeys.rotate(id, req.user);
+    const rotated = await this.apiKeys.rotate(
+      id,
+      req.user,
+      req.correlationId ?? req.requestId,
+    );
     return ApiResponseDto.ok(rotated, 'API key rotated');
   }
 
@@ -79,7 +87,12 @@ export class ApiKeysController {
     @Body() dto: RevokeApiKeyDto,
     @Req() req: Request,
   ) {
-    const revoked = await this.apiKeys.revoke(id, dto.reason, req.user);
+    const revoked = await this.apiKeys.revoke(
+      id,
+      dto.reason,
+      req.user,
+      req.correlationId ?? req.requestId,
+    );
     return ApiResponseDto.ok(revoked, 'API key revoked');
   }
 }
