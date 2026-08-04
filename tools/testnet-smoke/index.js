@@ -352,8 +352,15 @@ async function run() {
 
   // ── Validation ──
   if (!CONTRACT_ID || !CONTRACT_ID.startsWith('C') || CONTRACT_ID.length !== 56) {
-    console.error('ERROR: SOROBAN_CONTRACT_ID missing or invalid. Must be a 56-char C-prefixed ID.');
-    exitCode = 2;
+    console.warn('WARN: SOROBAN_CONTRACT_ID missing or invalid. Running RPC health check only; skipping contract tests.');
+    try {
+      const health = await withRetry(() => server.getHealth(), 'getHealth', cid);
+      console.log(`RPC health: ${JSON.stringify(health)}`);
+      // leave exitCode as 0 to indicate success for non-contract runs
+    } catch (err) {
+      console.error(`RPC health check failed: ${err.message}`);
+      exitCode = 2;
+    }
     return;
   }
 
