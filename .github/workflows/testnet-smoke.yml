@@ -16,7 +16,7 @@ jobs:
   integration-harness:
     name: Testnet Integration Harness
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && env.SOROBAN_CONTRACT_ID != '' && env.SOROBAN_RPC_URL != '')
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     env:
       SOROBAN_RPC_URL: ${{ secrets.SOROBAN_RPC_URL }}
       SOROBAN_CONTRACT_ID: ${{ secrets.SOROBAN_CONTRACT_ID }}
@@ -42,17 +42,24 @@ jobs:
           npm install --no-workspaces
 
       - name: Run integration harness
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && env.SOROBAN_CONTRACT_ID != '' && env.SOROBAN_RPC_URL != '')
         working-directory: tools/testnet-smoke
-        env:
-          SOROBAN_RPC_URL: ${{ secrets.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org' }}
-          SOROBAN_CONTRACT_ID: ${{ secrets.SOROBAN_CONTRACT_ID }}
-          SOROBAN_ADMIN_SECRET_KEY: ${{ secrets.SOROBAN_ADMIN_SECRET_KEY }}
-          SOROBAN_TOKEN_ADDRESS: ${{ secrets.SOROBAN_TOKEN_ADDRESS }}
-          SOROBAN_RECIPIENT_SECRET_KEY: ${{ secrets.SOROBAN_RECIPIENT_SECRET_KEY }}
-          SOROBAN_NETWORK_PASSPHRASE: ${{ secrets.SOROBAN_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015' }}
-          SMOKE_RETRIES: ${{ vars.SMOKE_RETRIES || '3' }}
-          SMOKE_RETRY_DELAY_MS: ${{ vars.SMOKE_RETRY_DELAY_MS || '2000' }}
-          SMOKE_OP_TIMEOUT_MS: ${{ vars.SMOKE_OP_TIMEOUT_MS || '120000' }}
         run: |
+          # Skip on push if required secrets are not configured (prevents accidental runs)
+          if [ "${{ github.event_name }}" = "push" ]; then
+            if [ -z "${{ secrets.SOROBAN_CONTRACT_ID }}" ] || [ -z "${{ secrets.SOROBAN_RPC_URL }}" ]; then
+              echo "Skipping integration harness on push: SOROBAN_CONTRACT_ID or SOROBAN_RPC_URL not set."
+              exit 0
+            fi
+          fi
+
+          export SOROBAN_RPC_URL="${{ secrets.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org' }}"
+          export SOROBAN_CONTRACT_ID="${{ secrets.SOROBAN_CONTRACT_ID }}"
+          export SOROBAN_ADMIN_SECRET_KEY="${{ secrets.SOROBAN_ADMIN_SECRET_KEY }}"
+          export SOROBAN_TOKEN_ADDRESS="${{ secrets.SOROBAN_TOKEN_ADDRESS }}"
+          export SOROBAN_RECIPIENT_SECRET_KEY="${{ secrets.SOROBAN_RECIPIENT_SECRET_KEY }}"
+          export SOROBAN_NETWORK_PASSPHRASE="${{ secrets.SOROBAN_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015' }}"
+          export SMOKE_RETRIES="${{ vars.SMOKE_RETRIES || '3' }}"
+          export SMOKE_RETRY_DELAY_MS="${{ vars.SMOKE_RETRY_DELAY_MS || '2000' }}"
+          export SMOKE_OP_TIMEOUT_MS="${{ vars.SMOKE_OP_TIMEOUT_MS || '120000' }}"
+
           node index.js
