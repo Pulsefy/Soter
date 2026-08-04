@@ -39,7 +39,7 @@ jobs:
       - name: Install dependencies
         working-directory: tools/testnet-smoke
         run: |
-          npm install
+          npm install --no-workspaces
 
       - name: Run integration harness
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && env.SOROBAN_CONTRACT_ID != '' && env.SOROBAN_RPC_URL != '')
