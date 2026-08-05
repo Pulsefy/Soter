@@ -20,6 +20,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { RequestCorrelationMiddleware } from './middleware/request-correlation.middleware';
 import { SecurityModule } from './common/security/security.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { RecipientsModule } from './recipients/recipients.module';
 import { APP_GUARD } from '@nestjs/core';
 import { ApiKeyGuard } from './common/guards/api-key.guard';
 import { RolesGuard } from './auth/roles.guard';
@@ -43,20 +44,26 @@ import { InvitesModule } from './orgs/invites.module';
 import { AdminSearchModule } from './search/admin-search.module';
 import { EntityLinkingModule } from './entity-linking/entity-linking.module';
 import { DeploymentMetadataModule } from './deployment-metadata/deployment-metadata.module';
-import { RedisModule } from '@liaoliaots/nestjs-redis';
+import { ReleaseConfigModule } from './release-config/release-config.module';
+import { RedisModule } from './redis/redis.module';
 import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guard';
 import { DeprecationInterceptor } from './common/interceptors/deprecation.interceptor';
 import { SandboxModule } from './sandbox/sandbox.module';
 import { CacheModule } from './common/cache/cache.module';
 import { CacheResponseInterceptor } from './common/interceptors/cache-response.interceptor';
+import { ReleaseConfigService } from './release-config.service';
 
 import { WebhooksModule } from 'src/webhooks.module';
 import { CorrelationModule } from './common/modules/correlation.module';
+import { RecipientImportModule } from './recipient-import/recipient-import.module';
+import { DeviceTokensModule } from './device-tokens/device-tokens.module';
+import { validateNetworkConfig } from './config/network-config.validation';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateNetworkConfig,
       envFilePath: (() => {
         const candidates = [
           join(__dirname, '..', '.env'),
@@ -106,6 +113,7 @@ import { CorrelationModule } from './common/modules/correlation.module';
     SecurityModule,
     TestErrorModule,
     CampaignsModule,
+    RecipientsModule,
     ObservabilityModule,
     ClaimsModule,
     NotificationsModule,
@@ -121,23 +129,18 @@ import { CorrelationModule } from './common/modules/correlation.module';
     AdminSearchModule,
     EntityLinkingModule,
     DeploymentMetadataModule,
+    ReleaseConfigModule,
     SandboxModule,
     WebhooksModule,
     CorrelationModule,
-    RedisModule.forRootAsync({
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        config: {
-          host: configService.get<string>('REDIS_HOST') ?? 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') ?? '6379', 10),
-        },
-      }),
-      inject: [ConfigService],
-    }),
+    RedisModule,
+    RecipientImportModule,
+    DeviceTokensModule,
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => {
-        const redisHost = configService.get<string>('REDIS_HOST') ?? 'localhost';
+        const redisHost =
+          configService.get<string>('REDIS_HOST') ?? 'localhost';
         const redisPort = parseInt(
           configService.get<string>('REDIS_PORT') ?? '6379',
           10,
@@ -189,6 +192,7 @@ import { CorrelationModule } from './common/modules/correlation.module';
   controllers: [AppController],
   providers: [
     AppService,
+    ReleaseConfigService,
     {
       provide: APP_FILTER,
       useClass: AllExceptionsFilter,

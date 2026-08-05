@@ -1,10 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
   Switch,
   StyleSheet,
   Alert,
+  Clipboard,
   Linking,
   Pressable,
   ScrollView,
@@ -16,7 +17,6 @@ import { useBiometric } from '../contexts/BiometricContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { config } from '../config';
-import { useWallet } from '../contexts/WalletContext';
 
 const STELLAR_LAB_FAUCET_URL = 'https://lab.stellar.org/account/fund';
 const STELLAR_FRIENDBOT_URL = 'https://friendbot-testnet.stellar.org';
@@ -26,7 +26,6 @@ export const SettingsScreen: React.FC = () => {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { biometricEnabled, biometricSupported, toggleBiometric } = useBiometric();
   const { permissionGranted, requestPermission } = useNotification();
-  const { disconnectWallet } = useWallet();
   const {
     active: saverModeActive,
     source: saverModeSource,
@@ -63,21 +62,6 @@ export const SettingsScreen: React.FC = () => {
     await toggleBiometric(value);
   };
 
-  const handleResetWalletSession = () => {
-    Alert.alert(
-      'Reset Wallet Session',
-      'This will clear the current WalletConnect session and let you reconnect safely.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset',
-          style: 'destructive',
-          onPress: () => void disconnectWallet(),
-        },
-      ],
-    );
-  };
-
   const openFaucetTool = async (url: string) => {
     try {
       await Linking.openURL(url);
@@ -85,6 +69,30 @@ export const SettingsScreen: React.FC = () => {
       Alert.alert(
         'Unable to Open Link',
         'Please try again or open the faucet from your browser.',
+      );
+    }
+  };
+
+  const copyPublicKey = async () => {
+    if (!publicKey) return;
+    try {
+      Clipboard.setString(publicKey);
+      setCopiedKey(true);
+      setTimeout(() => setCopiedKey(false), 2000);
+    } catch {
+      Alert.alert('Error', 'Failed to copy public key to clipboard.');
+    }
+  };
+
+  const openAccountExplorer = async () => {
+    if (!publicKey) return;
+    const url = getAccountExplorerUrl(publicKey);
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(
+        'Unable to Open Link',
+        'Could not open the Stellar Expert explorer.',
       );
     }
   };
@@ -147,29 +155,6 @@ export const SettingsScreen: React.FC = () => {
             Biometrics are not available or not enrolled on this device.
           </Text>
         )}
-
-        <Text
-          style={styles.sectionHeader}
-          accessibilityRole="header"
-        >
-          Wallet
-        </Text>
-
-        <Pressable
-          style={styles.row}
-          accessibilityRole="button"
-          accessibilityLabel="Reset Wallet Session"
-          accessibilityHint="Clears a stale or broken WalletConnect session so you can reconnect safely"
-          onPress={handleResetWalletSession}
-        >
-          <View style={styles.rowText}>
-            <Text style={styles.rowTitle}>Reset Wallet Session</Text>
-            <Text style={styles.rowSubtitle}>
-              Clear a stale, broken, or partially restored WalletConnect session.
-            </Text>
-          </View>
-          <Text style={styles.resetButtonText}>Reset</Text>
-        </Pressable>
 
         <Text
           style={styles.sectionHeader}
@@ -284,8 +269,70 @@ export const SettingsScreen: React.FC = () => {
 
             <View style={styles.faucetPanel}>
               <Text style={styles.faucetCopy}>
-                Fund demo accounts with free test XLM from Stellar.
+                Fund your testnet wallet with free XLM from the Stellar
+                development network. Copy your public key below, then use one of
+                the official faucet tools to send test XLM to your account.
               </Text>
+
+              {isWalletConnected && publicKey ? (
+                <>
+                  {/* Public Key Display & Copy */}
+                  <View style={styles.keyCard}>
+                    <Text style={styles.keyLabel}>Your Public Key</Text>
+                    <Text
+                      style={styles.keyValue}
+                      selectable
+                      numberOfLines={1}
+                      ellipsizeMode="middle"
+                    >
+                      {publicKey}
+                    </Text>
+                    <View style={styles.keyActions}>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.keyActionButton,
+                          pressed && styles.linkButtonPressed,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          copiedKey ? 'Public key copied' : 'Copy public key to clipboard'
+                        }
+                        accessibilityHint="Copies your Stellar public key for pasting into a faucet"
+                        onPress={() => void copyPublicKey()}
+                      >
+                        <Text style={styles.keyActionText}>
+                          {copiedKey ? '✓ Copied' : 'Copy Key'}
+                        </Text>
+                      </Pressable>
+
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.keyActionButtonSecondary,
+                          pressed && styles.linkButtonPressed,
+                        ]}
+                        accessibilityRole="link"
+                        accessibilityLabel="View account on Stellar Expert explorer"
+                        accessibilityHint="Opens your account on the Stellar Expert testnet explorer to view your balance and transactions"
+                        onPress={() => void openAccountExplorer()}
+                      >
+                        <Text style={styles.keyActionTextSecondary}>
+                          View in Explorer
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  <Text style={styles.faucetHint}>
+                    After funding, use the explorer to verify your balance and
+                    return to the app to continue.
+                  </Text>
+                </>
+              ) : (
+                <Text style={styles.faucetHint}>
+                  Connect your wallet first to see your public key and fund your
+                  account.
+                </Text>
+              )}
 
               <View style={styles.linkGroup}>
                 <Pressable
@@ -389,6 +436,69 @@ const makeStyles = (colors: AppColors) =>
       color: colors.textSecondary,
       lineHeight: 20,
     },
+    faucetHint: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      lineHeight: 18,
+      fontStyle: 'italic',
+    },
+    keyCard: {
+      backgroundColor: colors.infoBg,
+      borderRadius: 12,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 10,
+    },
+    keyLabel: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.info,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    keyValue: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textPrimary,
+      fontFamily: 'monospace',
+    },
+    keyActions: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    keyActionButton: {
+      flex: 1,
+      minHeight: 40,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.brand.primary,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    keyActionButtonSecondary: {
+      flex: 1,
+      minHeight: 40,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    keyActionText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    keyActionTextSecondary: {
+      color: colors.info,
+      fontSize: 14,
+      fontWeight: '700',
+    },
     linkGroup: {
       gap: 10,
     },
@@ -417,11 +527,6 @@ const makeStyles = (colors: AppColors) =>
     },
     linkButtonText: {
       color: '#FFFFFF',
-      fontSize: 15,
-      fontWeight: '700',
-    },
-    resetButtonText: {
-      color: colors.brand.primary,
       fontSize: 15,
       fontWeight: '700',
     },

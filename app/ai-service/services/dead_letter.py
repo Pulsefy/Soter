@@ -125,7 +125,11 @@ class DeadLetterQueue:
                 existing.updated_at = now
                 logger.warning(
                     "dead_letter_item_updated",
-                    extra={"dead_letter_id": entry_id, "kind": kind, "task_id": task_id},
+                    extra={
+                        "dead_letter_id": entry_id,
+                        "kind": kind,
+                        "task_id": task_id,
+                    },
                 )
                 return existing
 

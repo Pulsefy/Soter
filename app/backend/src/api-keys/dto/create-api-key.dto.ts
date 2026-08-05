@@ -1,11 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  IsDateString,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   ArrayUnique,
+  ValidateIf,
 } from 'class-validator';
 import { AppRole } from '../../auth/app-role.enum';
 import { ApiKeyScope } from '../api-key-scope.enum';
@@ -49,4 +54,27 @@ export class CreateApiKeyDto {
   @IsString()
   @MaxLength(200)
   description?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional absolute expiry (ISO-8601). Mutually exclusive with expiresInDays.',
+    example: '2027-01-01T00:00:00.000Z',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined && value !== null)
+  @IsDateString()
+  expiresAt?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional relative TTL in days from creation. Mutually exclusive with expiresAt.',
+    example: 90,
+    minimum: 1,
+    maximum: 3650,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  expiresInDays?: number;
 }

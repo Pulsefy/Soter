@@ -64,6 +64,10 @@ export class ApiKeyGuard implements CanActivate {
     });
 
     if (record) {
+      if (record.expiresAt && record.expiresAt.getTime() <= Date.now()) {
+        throw new UnauthorizedException('API key has expired');
+      }
+
       // Record usage for lifecycle visibility (best-effort, but awaited to ensure consistency in tests)
       await this.prisma.apiKey.update({
         where: { id: record.id },

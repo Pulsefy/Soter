@@ -55,7 +55,12 @@ def _error_response(code: str) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         headers=headers,
-        content={"error": {"code": code, "message": _ERROR_MESSAGES.get(code, "Request failed")}},
+        content={
+            "error": {
+                "code": code,
+                "message": _ERROR_MESSAGES.get(code, "Request failed"),
+            }
+        },
     )
 
 
@@ -74,7 +79,9 @@ async def list_dead_letter_items(
 ):
     """List dead-letter items, optionally filtered by kind and/or status."""
     if x_user_role not in READ_AUTHORIZED_ROLES:
-        return _forbidden(f"User role '{x_user_role}' is not authorized to view dead-letter items")
+        return _forbidden(
+            f"User role '{x_user_role}' is not authorized to view dead-letter items"
+        )
 
     items = dead_letter_queue.list(kind=kind, status=status)
     return {
@@ -90,7 +97,9 @@ async def get_dead_letter_item(
 ):
     """Get a single dead-letter item with its full replay audit log."""
     if x_user_role not in READ_AUTHORIZED_ROLES:
-        return _forbidden(f"User role '{x_user_role}' is not authorized to view dead-letter items")
+        return _forbidden(
+            f"User role '{x_user_role}' is not authorized to view dead-letter items"
+        )
 
     entry = dead_letter_queue.get(item_id)
     if entry is None:
@@ -114,7 +123,9 @@ async def replay_dead_letter_item(
     per-item cooldown elapses.
     """
     if x_user_role not in REPLAY_AUTHORIZED_ROLES:
-        return _forbidden(f"User role '{x_user_role}' is not authorized to replay dead-letter items")
+        return _forbidden(
+            f"User role '{x_user_role}' is not authorized to replay dead-letter items"
+        )
 
     try:
         entry = dead_letter_queue.check_replayable(item_id)
@@ -135,10 +146,16 @@ async def replay_dead_letter_item(
         replay_error = str(exc)
         logger.warning(
             "dead_letter_replay_failed",
-            extra={"dead_letter_id": item_id, "kind": entry.kind, "error": replay_error},
+            extra={
+                "dead_letter_id": item_id,
+                "kind": entry.kind,
+                "error": replay_error,
+            },
         )
 
-    updated = dead_letter_queue.record_attempt(item_id, actor=actor, success=success, error=replay_error)
+    updated = dead_letter_queue.record_attempt(
+        item_id, actor=actor, success=success, error=replay_error
+    )
     metrics.DEAD_LETTER_REPLAY_ATTEMPTS_TOTAL.labels(
         kind=entry.kind, outcome="succeeded" if success else "failed"
     ).inc()

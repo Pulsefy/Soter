@@ -6,15 +6,15 @@ import { AlertTriangle, CheckCircle2, ChevronLeft, Download, FileSpreadsheet, Re
 import { useToast } from '@/components/ToastProvider';
 import { normalizeError } from '@/lib/error-utils';
 import {
-  buildValidationReport,
-  capValidationErrors,
   confirmRecipientsImport,
+  downloadImportReport,
   parseRecipientsCsv,
   validateHeaders,
   validateRecipientsImport,
   type HeaderValidationResult,
   type ImportProgress,
   type ParsedCsvData,
+  type ReportSource,
   type ValidationResult,
   type WizardStep,
 } from '@/lib/csv-validation';
@@ -51,18 +51,14 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
   const [headerValidation, setHeaderValidation] = useState<HeaderValidationResult | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [liveMessage, setLiveMessage] = useState('');
+  const [isDownloadingReport, setIsDownloadingReport] = useState(false);
+  const [lastReportSource, setLastReportSource] = useState<ReportSource | null>(null);
   const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
 
   function announce(message: string) {
     setLiveMessage(message);
   }
-
-  useEffect(() => {
-    if (liveMessage && liveRegionRef.current) {
-      liveRegionRef.current.textContent = liveMessage;
-    }
-  }, [liveMessage]);
 
   useEffect(() => {
     if (stepHeadingRef.current) {
@@ -86,6 +82,7 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
     setSubmitError(null);
     setHeaderValidation(null);
     setImportProgress(null);
+    setLastReportSource(null);
 
     if (!nextFile) {
       return;
@@ -168,20 +165,39 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
     }
   }
 
-  function handleDownloadReport() {
-    if (!validationResult) {
+  async function handleDownloadReport() {
+    if (!validationResult || !file || isDownloadingReport) {
       return;
     }
 
-    const blob = buildValidationReport(validationResult);
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `recipient-validation-report-${campaignId}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    setIsDownloadingReport(true);
+    try {
+      const report = await downloadImportReport(campaignId, file, validationResult);
+
+      const url = URL.createObjectURL(report.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = report.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      setLastReportSource(report.meta.source);
+
+      if (report.meta.source === 'backend') {
+        toast('Report ready', 'Backend import report downloaded.', 'success');
+        announce('Backend import report downloaded.');
+      } else {
+        toast('Report ready', 'Backend unavailable — generated the validation report locally.', 'warning');
+        announce('Backend unavailable. The validation report was generated locally and downloaded.');
+      }
+    } catch (error) {
+      const normalized = normalizeError(error);
+      toast('Report failed', normalized.message, 'error');
+    } finally {
+      setIsDownloadingReport(false);
+    }
   }
 
   async function handleConfirmImport() {
@@ -220,24 +236,15 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
     setIsParsing(false);
     setIsValidating(false);
     setIsSubmitting(false);
+    setIsDownloadingReport(false);
     setSubmitMessage(null);
     setSubmitError(null);
+    setLastReportSource(null);
     announce('Started over. Step 1: Upload recipient file.');
   }
 
-  const cappedResult = useMemo(() => {
-    if (!validationResult) return null;
-    return capValidationErrors(validationResult);
-  }, [validationResult]);
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-white to-slate-50 px-4 py-8 dark:via-slate-950 dark:to-slate-950">
-      <div
-        ref={liveRegionRef}
-        aria-live="polite"
-        aria-atomic="true"
-        className="sr-only"
-      />
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">
@@ -266,11 +273,12 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
             {validationResult && (
               <button
                 type="button"
-                onClick={handleDownloadReport}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                onClick={() => void handleDownloadReport()}
+                disabled={isDownloadingReport}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <Download className="h-4 w-4" />
-                Download validation report
+                {isDownloadingReport ? 'Preparing report…' : 'Download validation report'}
               </button>
             )}
             <button
@@ -324,15 +332,14 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
               />
             )}
 
-            {step === 3 && parsedData && cappedResult && (
+            {step === 3 && parsedData && validationResult && (
               <Step3Validation
-                result={cappedResult.display}
-                originalResult={validationResult!}
+                result={validationResult}
                 headers={parsedData.headers}
-                remainingErrors={cappedResult.remainingErrors}
-                remainingWarnings={cappedResult.remainingWarnings}
                 isValidating={isValidating}
                 canProceed={canAdvanceToConfirm}
+                isDownloadingReport={isDownloadingReport}
+                lastReportSource={lastReportSource}
                 headingRef={stepHeadingRef}
                 onBack={() => {
                   setStep(2);
@@ -342,7 +349,7 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
                   setStep(4);
                   announce('Step 4: Confirm import');
                 }}
-                onDownloadReport={handleDownloadReport}
+                onDownloadReport={() => void handleDownloadReport()}
               />
             )}
 

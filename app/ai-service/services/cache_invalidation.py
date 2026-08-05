@@ -33,7 +33,9 @@ class CacheInvalidationHelper:
         deleted = self.cache.delete_pattern(pattern)
         metrics.CACHE_INVALIDATION_TOTAL.labels(reason="task_status").inc()
         if deleted > 0:
-            logger.info(f"Invalidated {deleted} task status cache entries for task {task_id}")
+            logger.info(
+                f"Invalidated {deleted} task status cache entries for task {task_id}"
+            )
         return deleted
 
     def invalidate_all_task_statuses(self) -> int:
@@ -64,7 +66,9 @@ class CacheInvalidationHelper:
         deleted = self.cache.delete_pattern(pattern)
         metrics.CACHE_INVALIDATION_TOTAL.labels(reason="artifact_access").inc()
         if deleted > 0:
-            logger.info(f"Invalidated {deleted} artifact access cache entries for {artifact_id}")
+            logger.info(
+                f"Invalidated {deleted} artifact access cache entries for {artifact_id}"
+            )
         return deleted
 
     def invalidate_verification_by_artifact(self, artifact_id: str) -> int:
@@ -87,10 +91,14 @@ class CacheInvalidationHelper:
         deleted = self.cache.delete_pattern(pattern)
         metrics.CACHE_INVALIDATION_TOTAL.labels(reason="artifact_updated").inc()
         if deleted > 0:
-            logger.info(f"Invalidated {deleted} verification cache entries for artifact {artifact_id}")
+            logger.info(
+                f"Invalidated {deleted} verification cache entries for artifact {artifact_id}"
+            )
         return deleted
 
-    def invalidate_verification_by_model_version(self, provider: str, model: str) -> int:
+    def invalidate_verification_by_model_version(
+        self, provider: str, model: str
+    ) -> int:
         """
         Invalidate cached AI verification responses produced by a specific
         provider/model pairing, e.g. after upgrading the configured model.
@@ -126,7 +134,9 @@ class CacheInvalidationHelper:
         return deleted
 
 
-def get_invalidation_helper(cache_service: Optional[CacheService] = None) -> CacheInvalidationHelper:
+def get_invalidation_helper(
+    cache_service: Optional[CacheService] = None,
+) -> CacheInvalidationHelper:
     """
     Get a cache invalidation helper instance.
 
@@ -139,6 +149,7 @@ def get_invalidation_helper(cache_service: Optional[CacheService] = None) -> Cac
     """
     if cache_service is None:
         from main import app
+
         cache_service = getattr(app.state, "cache", None)
         if cache_service is None:
             raise RuntimeError("Cache service not available")

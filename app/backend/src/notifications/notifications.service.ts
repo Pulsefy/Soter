@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { AuditLog, NotificationOutbox } from '@prisma/client';
+import {
+  AuditLog,
+  NotificationOutbox,
+  NotificationDeliveryAttempt,
+  DeliveryAttemptOutcome,
+} from '@prisma/client';
 import {
   NotificationJobData,
   NotificationType,
@@ -149,6 +154,66 @@ export class NotificationsService {
    */
   async getOutboxRecord(id: string): Promise<NotificationOutbox | null> {
     return this.prisma.notificationOutbox.findUnique({ where: { id } });
+  }
+
+  /**
+   * Returns the full delivery-attempt timeline for a single outbox record,
+   * newest first (issue #716). NotificationOutbox only ever holds the
+   * latest attempt's outcome; this is what makes a real timeline possible.
+   */
+  async getDeliveryAttempts(
+    outboxId: string,
+  ): Promise<NotificationDeliveryAttempt[]> {
+    return this.prisma.notificationDeliveryAttempt.findMany({
+      where: { outboxId },
+      orderBy: { startedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Returns a filtered, paginated slice of delivery attempts across all
+   * outbox records, for the admin delivery-history endpoint (issue #716).
+   */
+  async getDeliveryHistory(filters: {
+    outcome?: DeliveryAttemptOutcome;
+    failureCategory?: string;
+    type?: string;
+    from?: Date;
+    to?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ items: NotificationDeliveryAttempt[]; total: number }> {
+    const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
+    const offset = Math.max(filters.offset ?? 0, 0);
+
+    const where: {
+      outcome?: DeliveryAttemptOutcome;
+      failureCategory?: string;
+      startedAt?: { gte?: Date; lte?: Date };
+      outbox?: { type: string };
+    } = {};
+
+    if (filters.outcome) where.outcome = filters.outcome;
+    if (filters.failureCategory) where.failureCategory = filters.failureCategory;
+    if (filters.type) where.outbox = { type: filters.type };
+    if (filters.from || filters.to) {
+      where.startedAt = {
+        ...(filters.from ? { gte: filters.from } : {}),
+        ...(filters.to ? { lte: filters.to } : {}),
+      };
+    }
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.notificationDeliveryAttempt.findMany({
+        where,
+        orderBy: { startedAt: 'desc' },
+        take: limit,
+        skip: offset,
+      }),
+      this.prisma.notificationDeliveryAttempt.count({ where }),
+    ]);
+
+    return { items, total };
   }
 
   /**

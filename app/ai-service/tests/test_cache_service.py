@@ -172,15 +172,22 @@ class TestCacheService:
         key = cache._generate_key(
             "humanitarian_verification",
             aid_claim="claim",
-            tags={"artifact_tag": "artifact-123", "model_version": "openai:gpt-4o-mini"},
+            tags={
+                "artifact_tag": "artifact-123",
+                "model_version": "openai:gpt-4o-mini",
+            },
         )
 
         assert "artifact_tag=artifact-123" in key
-        assert "model_version=openai:gpt-4o-mini" not in key  # colon is a tag separator, must be sanitized
+        assert (
+            "model_version=openai:gpt-4o-mini" not in key
+        )  # colon is a tag separator, must be sanitized
         assert "model_version=openai_gpt-4o-mini" in key
         assert key.startswith("cache:ai:humanitarian_verification:")
 
-    def test_generate_key_tags_change_key_even_with_same_hash_inputs(self, cache_service_with_mock_redis):
+    def test_generate_key_tags_change_key_even_with_same_hash_inputs(
+        self, cache_service_with_mock_redis
+    ):
         """Two calls with identical hashed args but different tags must not collide"""
         cache = cache_service_with_mock_redis
 
@@ -193,11 +200,15 @@ class TestCacheService:
         """Tags with no value shouldn't add noise to the key"""
         cache = cache_service_with_mock_redis
 
-        key = cache._generate_key("test", tags={"artifact_tag": "", "model_version": None})
+        key = cache._generate_key(
+            "test", tags={"artifact_tag": "", "model_version": None}
+        )
 
         assert key == cache._generate_key("test", tags=None)
 
-    def test_generate_key_without_tags_is_unchanged(self, cache_service_with_mock_redis):
+    def test_generate_key_without_tags_is_unchanged(
+        self, cache_service_with_mock_redis
+    ):
         """Backward compatibility: no tags means the same key shape as before"""
         cache = cache_service_with_mock_redis
 
@@ -223,7 +234,7 @@ class TestCachedResponseDecorator:
         call_count = 0
 
         @cached_response(prefix="test", ttl_seconds=60)
-        async def test_func(cache_service, arg1):
+        async def test_func(arg1):
             nonlocal call_count
             call_count += 1
             return f"result_{arg1}"
@@ -324,16 +335,25 @@ class TestCachedResponseDecorator:
         mock_cache.get.return_value = None
         mock_cache._generate_key = Mock(return_value="test_key")
 
-        @cached_response(prefix="test", ttl_seconds=60, key_tags=["artifact_tag", "model_version"])
+        @cached_response(
+            prefix="test", ttl_seconds=60, key_tags=["artifact_tag", "model_version"]
+        )
         async def test_func(aid_claim, artifact_tag, model_version):
             return "result"
 
         with patch("main.app") as mock_app:
             mock_app.state.cache = mock_cache
-            await test_func(aid_claim="claim", artifact_tag="artifact-1", model_version="openai:gpt-4o-mini")
+            await test_func(
+                aid_claim="claim",
+                artifact_tag="artifact-1",
+                model_version="openai:gpt-4o-mini",
+            )
 
         _, call_kwargs = mock_cache._generate_key.call_args
-        assert call_kwargs["tags"] == {"artifact_tag": "artifact-1", "model_version": "openai:gpt-4o-mini"}
+        assert call_kwargs["tags"] == {
+            "artifact_tag": "artifact-1",
+            "model_version": "openai:gpt-4o-mini",
+        }
 
     @pytest.mark.asyncio
     async def test_cached_response_without_key_tags_passes_no_tags(self):

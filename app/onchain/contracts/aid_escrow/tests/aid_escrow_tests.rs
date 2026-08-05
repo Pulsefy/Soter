@@ -558,3 +558,240 @@ mod token_decimal_normalization {
         assert!(result.is_ok());
     }
 }
+
+// ===========================================================================
+// transfer_admin / accept_admin / cancel — Two-step admin handover
+// ===========================================================================
+
+mod admin_transfer {
+    use super::*;
+    use aid_escrow::Error;
+
+    #[test]
+    fn nominate_and_accept_transfers_admin() {
+        let t = TestSetup::new();
+        let new_admin = Address::generate(&t.env);
+
+        t.client.transfer_admin(&new_admin);
+        assert_eq!(t.client.get_pending_admin(), Some(new_admin.clone()));
+
+        t.client.accept_admin();
+        assert_eq!(t.client.get_admin(), new_admin);
+        assert_eq!(t.client.get_pending_admin(), None);
+    }
+
+    #[test]
+    fn new_admin_is_reflected_after_accept() {
+        let t = TestSetup::new();
+        let new_admin = Address::generate(&t.env);
+
+        t.client.transfer_admin(&new_admin);
+        t.client.accept_admin();
+
+        assert_eq!(t.client.get_admin(), new_admin);
+        assert_eq!(t.client.get_pending_admin(), None);
+    }
+
+    #[test]
+    fn cancel_removes_pending_admin() {
+        let t = TestSetup::new();
+        let new_admin = Address::generate(&t.env);
+
+        t.client.transfer_admin(&new_admin);
+        assert_eq!(t.client.get_pending_admin(), Some(new_admin));
+
+        t.client.cancel_admin_transfer();
+        assert_eq!(t.client.get_pending_admin(), None);
+        assert_eq!(t.client.get_admin(), t.admin);
+    }
+
+    #[test]
+    fn reject_nominate_same_as_current_admin() {
+        let t = TestSetup::new();
+        let result = t.client.try_transfer_admin(&t.admin);
+        assert_eq!(result, Err(Ok(Error::InvalidPendingAdmin)));
+    }
+
+    #[test]
+    fn reject_accept_with_no_pending() {
+        let t = TestSetup::new();
+        let result = t.client.try_accept_admin();
+        assert_eq!(result, Err(Ok(Error::NoPendingTransfer)));
+    }
+
+    #[test]
+    fn reject_cancel_with_no_pending() {
+        let t = TestSetup::new();
+        let result = t.client.try_cancel_admin_transfer();
+        assert_eq!(result, Err(Ok(Error::NoPendingTransfer)));
+    }
+
+    #[test]
+    fn get_pending_admin_returns_none_when_no_transfer() {
+        let t = TestSetup::new();
+        assert_eq!(t.client.get_pending_admin(), None);
+    }
+
+    #[test]
+    fn nominate_overwrites_previous_pending() {
+        let t = TestSetup::new();
+        let new_admin1 = Address::generate(&t.env);
+        let new_admin2 = Address::generate(&t.env);
+
+        t.client.transfer_admin(&new_admin1);
+        assert_eq!(t.client.get_pending_admin(), Some(new_admin1.clone()));
+
+        t.client.transfer_admin(&new_admin2);
+        assert_eq!(t.client.get_pending_admin(), Some(new_admin2.clone()));
+
+        t.client.accept_admin();
+        assert_eq!(t.client.get_admin(), new_admin2);
+    }
+}
+
+// ===========================================================================
+// Token Allowlist Management — Tests
+// ===========================================================================
+
+mod token_allowlist {
+    use super::*;
+    use aid_escrow::Error;
+
+    #[test]
+    fn add_allowed_token_succeeds() {
+        let t = TestSetup::new();
+
+        let result = t.client.try_add_allowed_token(&t.token);
+        assert!(result.is_ok());
+
+        let config = t.client.get_config();
+        assert!(config.allowed_tokens.contains(t.token.clone()));
+    }
+
+    #[test]
+    fn add_allowed_token_fails_for_invalid_token_address() {
+        let t = TestSetup::new();
+        let invalid_token = t.env.register(AidEscrow, ());
+
+        let result = t.client.try_add_allowed_token(&invalid_token);
+        assert_eq!(result, Err(Ok(Error::InvalidToken)));
+    }
+
+    #[test]
+    fn add_allowed_token_fails_for_duplicate() {
+        let t = TestSetup::new();
+
+        t.client.add_allowed_token(&t.token);
+        let result = t.client.try_add_allowed_token(&t.token);
+        assert_eq!(result, Err(Ok(Error::InvalidState)));
+    }
+
+    #[test]
+    fn remove_allowed_token_succeeds() {
+        let t = TestSetup::new();
+
+        t.client.add_allowed_token(&t.token);
+        let config_before = t.client.get_config();
+        assert!(config_before.allowed_tokens.contains(t.token.clone()));
+
+        let result = t.client.try_remove_allowed_token(&t.token);
+        assert!(result.is_ok());
+
+        let config_after = t.client.get_config();
+        assert!(!config_after.allowed_tokens.contains(t.token.clone()));
+    }
+
+    #[test]
+    fn remove_allowed_token_fails_when_not_in_list() {
+        let t = TestSetup::new();
+
+        let result = t.client.try_remove_allowed_token(&t.token);
+        assert_eq!(result, Err(Ok(Error::InvalidState)));
+    }
+
+    #[test]
+    fn allowlisted_token_enables_package_creation() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+
+        // First add a DIFFERENT token to make the allowlist non-empty.
+        // When the list is empty ALL tokens are allowed, so we need at
+        // least one entry before the allowlist gate activates.
+        let other_token_id = t.env.register_stellar_asset_contract_v2(t.admin.clone());
+        let other_token = other_token_id.address();
+        t.client.add_allowed_token(&other_token);
+
+        // Fund contract
+        t.fund_contract(ONE_TOKEN);
+
+        // Try creating package with t.token (NOT yet in allowlist) - should fail
+        let result = t.client.try_create_package(
+            &t.admin,
+            &1u64,
+            &recipient,
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3600),
+            &Map::new(&t.env),
+        );
+        assert_eq!(result, Err(Ok(Error::InvalidState)));
+
+        // Add target token to allowlist
+        t.client.add_allowed_token(&t.token);
+
+        // Now create package should succeed
+        let id = t.client.create_package(
+            &t.admin,
+            &1u64,
+            &recipient,
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3600),
+            &Map::new(&t.env),
+        );
+        assert_eq!(id, 1);
+    }
+
+    #[test]
+    fn removing_allowlisted_token_blocks_package_creation() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+
+        // Add both the target token AND a different token so the
+        // allowlist stays non-empty after removal. When the list is
+        // empty ALL tokens are allowed again.
+        t.client.add_allowed_token(&t.token);
+        let other_token_id = t.env.register_stellar_asset_contract_v2(t.admin.clone());
+        let other_token = other_token_id.address();
+        t.client.add_allowed_token(&other_token);
+
+        t.fund_contract(ONE_TOKEN * 2);
+
+        // Create first package - succeeds (token is in allowlist)
+        let id1 = t.client.create_package(
+            &t.admin,
+            &1u64,
+            &recipient,
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3600),
+            &Map::new(&t.env),
+        );
+        assert_eq!(id1, 1);
+
+        // Remove ONLY target token - allowlist still has other_token (non-empty)
+        t.client.remove_allowed_token(&t.token);
+
+        // Create second package - fails (token not in non-empty allowlist)
+        let result = t.client.try_create_package(
+            &t.admin,
+            &2u64,
+            &recipient,
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3600),
+            &Map::new(&t.env),
+        );
+        assert_eq!(result, Err(Ok(Error::InvalidState)));
+    }
+}

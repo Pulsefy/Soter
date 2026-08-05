@@ -178,7 +178,7 @@ describe('Artifact Ownership Tokens (e2e)', () => {
       const token = tokenRes.body.token;
 
       // Wait for token to expire
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      await new Promise(resolve => setTimeout(resolve, 1100));
 
       // Try to access with expired token
       const res = await request(app.getHttpServer())
@@ -301,10 +301,7 @@ describe('Artifact Ownership Tokens (e2e)', () => {
         .expect(200);
 
       // Revoke token via direct DB call (simulating admin action)
-      const tokenHash = crypto
-        .createHash('sha256')
-        .update(token)
-        .digest('hex');
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
       await prisma.artifactAccessToken.update({
         where: { tokenHash },
         data: {
@@ -341,7 +338,7 @@ describe('Artifact Ownership Tokens (e2e)', () => {
         .expect(201);
 
       // Wait for token to expire
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      await new Promise(resolve => setTimeout(resolve, 1100));
 
       // Count expired tokens before cleanup
       const expiredBefore = await prisma.artifactAccessToken.count({

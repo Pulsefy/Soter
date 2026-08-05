@@ -6,11 +6,8 @@ import {
   Patch,
   Delete,
   Put,
-  UseGuards,
 } from '@nestjs/common';
 import { AidService } from './aid.service';
-import { AiTaskWebhookDto } from './dto/ai-task-webhook.dto';
-import { WebhookHmacGuard } from '../common/guards/webhook-hmac.guard';
 import {
   ApiTags,
   ApiOperation,
@@ -84,18 +81,5 @@ export class AidController {
     @Body('to') to: string,
   ) {
     return this.aidService.transitionClaim(id, from, to);
-  }
-
-  @ApiOperation({
-    summary: 'Webhook for AI task notifications',
-    description:
-      'Receives notifications from the AI service when background tasks complete.',
-  })
-  @ApiOkResponse({ description: 'Webhook received successfully.' })
-  @ApiBadRequestResponse({ description: 'Invalid webhook payload.' })
-  @UseGuards(WebhookHmacGuard)
-  @Post('webhook')
-  async handleTaskWebhook(@Body() payload: AiTaskWebhookDto) {
-    return this.aidService.handleTaskWebhook(payload);
   }
 }

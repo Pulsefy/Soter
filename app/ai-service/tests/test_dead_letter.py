@@ -65,7 +65,9 @@ def _run_thread_synchronously(monkeypatch):
 class TestDeadLetterQueueService:
     def test_add_and_get(self):
         queue = DeadLetterQueue(max_attempts=3, cooldown_seconds=0)
-        entry = queue.add(kind="callback", task_id="t-1", payload={"status": "failed"}, error="boom")
+        entry = queue.add(
+            kind="callback", task_id="t-1", payload={"status": "failed"}, error="boom"
+        )
 
         assert entry.id == "callback:t-1"
         assert entry.status == "pending"
@@ -74,8 +76,12 @@ class TestDeadLetterQueueService:
 
     def test_add_is_idempotent_per_task_and_kind(self):
         queue = DeadLetterQueue(max_attempts=3, cooldown_seconds=0)
-        queue.add(kind="async_job", task_id="t-1", payload={"a": 1}, error="first failure")
-        second = queue.add(kind="async_job", task_id="t-1", payload={"a": 2}, error="second failure")
+        queue.add(
+            kind="async_job", task_id="t-1", payload={"a": 1}, error="first failure"
+        )
+        second = queue.add(
+            kind="async_job", task_id="t-1", payload={"a": 2}, error="second failure"
+        )
 
         assert len(queue.list()) == 1
         assert second.error == "second failure"
@@ -123,7 +129,9 @@ class TestDeadLetterQueueService:
         assert queue.get(entry.id).status == "pending"
 
         queue.check_replayable(entry.id)
-        updated = queue.record_attempt(entry.id, actor="op", success=False, error="still failing")
+        updated = queue.record_attempt(
+            entry.id, actor="op", success=False, error="still failing"
+        )
         assert updated.status == "exhausted"
         assert updated.attempts == 2
 
@@ -151,11 +159,15 @@ class TestDeadLetterQueueService:
 class TestDeadLetterCapture:
     def test_webhook_delivery_failure_is_dead_lettered(self, monkeypatch):
         _run_thread_synchronously(monkeypatch)
-        monkeypatch.setattr(settings, "backend_webhook_url", "http://backend.test/webhook")
+        monkeypatch.setattr(
+            settings, "backend_webhook_url", "http://backend.test/webhook"
+        )
 
         mock_response = MagicMock(status_code=500, text="upstream error")
         with patch("httpx.Client.post", return_value=mock_response):
-            tasks.send_webhook_notification("task-webhook-1", "completed", result={"ok": True})
+            tasks.send_webhook_notification(
+                "task-webhook-1", "completed", result={"ok": True}
+            )
 
         entry = dead_letter_queue.get("callback:task-webhook-1")
         assert entry is not None
@@ -166,19 +178,27 @@ class TestDeadLetterCapture:
 
     def test_successful_webhook_delivery_is_not_dead_lettered(self, monkeypatch):
         _run_thread_synchronously(monkeypatch)
-        monkeypatch.setattr(settings, "backend_webhook_url", "http://backend.test/webhook")
+        monkeypatch.setattr(
+            settings, "backend_webhook_url", "http://backend.test/webhook"
+        )
 
         mock_response = MagicMock(status_code=200, text="ok")
         with patch("httpx.Client.post", return_value=mock_response):
-            tasks.send_webhook_notification("task-webhook-2", "completed", result={"ok": True})
+            tasks.send_webhook_notification(
+                "task-webhook-2", "completed", result={"ok": True}
+            )
 
         assert dead_letter_queue.get("callback:task-webhook-2") is None
 
     def test_task_retry_exhaustion_is_dead_lettered(self, monkeypatch):
-        monkeypatch.setattr(settings, "backend_webhook_url", None)  # keep this test focused on the DLQ
+        monkeypatch.setattr(
+            settings, "backend_webhook_url", None
+        )  # keep this test focused on the DLQ
         payload = {"type": "model_inference", "data": {}}
 
-        tasks.handle_task_retries_exhausted("task-async-1", payload, "provider unreachable")
+        tasks.handle_task_retries_exhausted(
+            "task-async-1", payload, "provider unreachable"
+        )
 
         entry = dead_letter_queue.get("async_job:task-async-1")
         assert entry is not None
@@ -238,7 +258,9 @@ class TestDeadLetterAPI:
 
     def test_replay_success_updates_item_and_audit_log(self, client, monkeypatch):
         entry = self._seed_callback_entry()
-        monkeypatch.setattr(tasks, "replay_callback_delivery", lambda task_id, payload: None)
+        monkeypatch.setattr(
+            tasks, "replay_callback_delivery", lambda task_id, payload: None
+        )
 
         response = client.post(
             f"/v1/ai/dead-letter/{entry.id}/replay",
@@ -252,7 +274,9 @@ class TestDeadLetterAPI:
         assert data["item"]["audit_log"][0]["actor"] == "op-42"
         assert data["item"]["audit_log"][0]["outcome"] == "succeeded"
 
-    def test_replay_exhaustion_returns_409_after_max_attempts(self, client, monkeypatch):
+    def test_replay_exhaustion_returns_409_after_max_attempts(
+        self, client, monkeypatch
+    ):
         monkeypatch.setattr(dead_letter_queue, "max_attempts", 1)
         monkeypatch.setattr(dead_letter_queue, "cooldown_seconds", 0)
 

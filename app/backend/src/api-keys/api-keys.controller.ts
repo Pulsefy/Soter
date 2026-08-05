@@ -18,6 +18,7 @@ import { ApiKeyScope } from './api-key-scope.enum';
 import { ApiKeysService } from './api-keys.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { RevokeApiKeyDto } from './dto/revoke-api-key.dto';
+import { RotateApiKeyDto } from './dto/rotate-api-key.dto';
 
 @ApiTags('API Keys')
 @ApiBearerAuth('JWT-auth')
@@ -31,7 +32,7 @@ export class ApiKeysController {
   @ApiOperation({
     summary: 'Create an API key (returned once)',
     description:
-      'Creates a new API key. The raw key is only returned at creation time; future listings show masked previews only.',
+      'Creates a new API key with optional expiry metadata (expiresAt or expiresInDays). The raw key is only returned at creation time; future listings show masked previews and rotation status only.',
   })
   @ApiCreatedResponse({ description: 'API key created.' })
   @ApiBadRequestResponse({ description: 'Invalid payload.' })
@@ -47,6 +48,8 @@ export class ApiKeysController {
   @Scopes(ApiKeyScope.admin)
   @ApiOperation({
     summary: 'List API keys (masked previews only)',
+    description:
+      'Returns API keys with masked previews, optional expiry metadata, and safe rotation status fields (no secrets).',
   })
   @ApiOkResponse({ description: 'API keys listed.' })
   async list() {
@@ -59,11 +62,17 @@ export class ApiKeysController {
   @Scopes(ApiKeyScope.admin)
   @ApiOperation({
     summary: 'Rotate an API key (revoke old, create new)',
+    description:
+      'Revokes the existing key and issues a replacement. Optional expiry fields set metadata on the replacement; otherwise the previous expiresAt is inherited when present.',
   })
   @ApiOkResponse({ description: 'API key rotated.' })
   @ApiBadRequestResponse({ description: 'Cannot rotate revoked key.' })
-  async rotate(@Param('id') id: string, @Req() req: Request) {
-    const rotated = await this.apiKeys.rotate(id, req.user);
+  async rotate(
+    @Param('id') id: string,
+    @Body() dto: RotateApiKeyDto,
+    @Req() req: Request,
+  ) {
+    const rotated = await this.apiKeys.rotate(id, req.user, dto ?? {});
     return ApiResponseDto.ok(rotated, 'API key rotated');
   }
 
