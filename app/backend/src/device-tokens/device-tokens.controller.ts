@@ -22,7 +22,7 @@ import { ApiResponseDto } from '../common/dto/api-response.dto';
 import { DeviceTokensService } from './device-tokens.service';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
 import { RevokeDeviceTokenDto } from './dto/revoke-device-token.dto';
-import { Public } from '../decorators/public.decorator';
+import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('Device Tokens')
 @ApiBearerAuth('JWT-auth')
