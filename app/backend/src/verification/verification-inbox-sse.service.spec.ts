@@ -1,9 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MessageEvent } from '@nestjs/common';
-import { firstValueFrom, take, toArray } from 'rxjs';
+
 import {
   VerificationInboxSseService,
-  InboxSseEvent,
 } from './verification-inbox-sse.service';
 
 describe('VerificationInboxSseService', () => {
