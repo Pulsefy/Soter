@@ -8,6 +8,7 @@ import { VerificationFlowService } from './verification-flow.service';
 import { VerificationProcessor } from './verification.processor';
 import { VerificationInboxController } from './verification-inbox.controller';
 import { VerificationInboxService } from './verification-inbox.service';
+import { VerificationInboxSseService } from './verification-inbox-sse.service';
 import { EnhancedVerificationFlowService } from './enhanced-verification-flow.service';
 import { VerificationMetadataService } from './metadata.service';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -47,6 +48,7 @@ import { MetricsModule } from '../observability/metrics/metrics.module';
     VerificationFlowService,
     VerificationProcessor,
     VerificationInboxService,
+    VerificationInboxSseService, // SSE connection manager for real-time inbox updates
     EnhancedVerificationFlowService, // Added enhanced flow service
     VerificationMetadataService, // Added metadata service
   ],
@@ -54,6 +56,7 @@ import { MetricsModule } from '../observability/metrics/metrics.module';
     VerificationService,
     VerificationFlowService,
     VerificationInboxService,
+    VerificationInboxSseService, // Exported so other modules can emit inbox events if needed
     VerificationMetadataService, // Export for use in other modules
   ],
 })

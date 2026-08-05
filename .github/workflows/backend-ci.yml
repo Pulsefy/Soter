@@ -60,5 +60,10 @@ jobs:
         env:
           DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_test
 
+      - name: Test (e2e)
+        run: pnpm --filter backend run test:e2e:ci
+        env:
+          DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_test
+
       - name: Build
         run: pnpm --filter backend run build

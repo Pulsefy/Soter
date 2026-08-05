@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { VerificationInboxSseService } from './verification-inbox-sse.service';
 import { Prisma, VerificationStatus } from '@prisma/client';
 
 export interface InboxItem {
@@ -50,6 +51,7 @@ export class VerificationInboxService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly sseService: VerificationInboxSseService,
   ) {}
 
   async getInbox(
@@ -190,6 +192,18 @@ export class VerificationInboxService {
       });
     }
 
+    // Emit SSE event so connected reviewer clients are notified in real-time.
+    this.sseService.emit(
+      this.sseService.buildStatusEvent(
+        id,
+        verification.status,
+        status,
+        reviewerId,
+        rejectionReason,
+        nextStepMessage,
+      ),
+    );
+
     return updated;
   }
 
@@ -248,6 +262,11 @@ export class VerificationInboxService {
       action: 'internal_note_added',
       metadata: { noteId: note.id, category: category ?? null },
     });
+
+    // Emit SSE event so connected reviewer clients are notified in real-time.
+    this.sseService.emit(
+      this.sseService.buildNoteEvent(id, note.id, authorId, category ?? null),
+    );
 
     return note;
   }

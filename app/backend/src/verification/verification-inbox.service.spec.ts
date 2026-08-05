@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { VerificationInboxService } from './verification-inbox.service';
+import { VerificationInboxSseService } from './verification-inbox-sse.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { mockDeep, DeepMockProxy } from 'jest-mock-extended';
@@ -10,6 +11,7 @@ describe('VerificationInboxService', () => {
   let service: VerificationInboxService;
   let prismaMock: DeepMockProxy<PrismaService>;
   let auditMock: DeepMockProxy<AuditService>;
+  let sseMock: DeepMockProxy<VerificationInboxSseService>;
 
   const now = new Date('2026-01-25T00:00:00.000Z');
 
@@ -29,6 +31,8 @@ describe('VerificationInboxService', () => {
   beforeEach(async () => {
     prismaMock = mockDeep<PrismaService>();
     auditMock = mockDeep<AuditService>();
+    sseMock = mockDeep<VerificationInboxSseService>();
+
     auditMock.record.mockResolvedValue(undefined as any);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -36,6 +40,7 @@ describe('VerificationInboxService', () => {
         VerificationInboxService,
         { provide: PrismaService, useValue: prismaMock },
         { provide: AuditService, useValue: auditMock },
+        { provide: VerificationInboxSseService, useValue: sseMock },
       ],
     }).compile();
 
@@ -85,6 +90,38 @@ describe('VerificationInboxService', () => {
           action: 'review_approved',
         }),
       );
+    });
+
+    it('emits SSE event after status update', async () => {
+      prismaMock.verificationRequest.findUnique.mockResolvedValue(
+        baseVerification,
+      );
+      prismaMock.verificationRequest.update.mockResolvedValue({
+        ...baseVerification,
+        status: 'approved' as VerificationStatus,
+        reviewedAt: now,
+        reviewedBy: 'reviewer-1',
+      });
+
+      const fakeEvent = {
+        type: 'status_updated' as const,
+        verificationId: 'v1',
+        timestamp: now.toISOString(),
+        data: {},
+      };
+      sseMock.buildStatusEvent.mockReturnValue(fakeEvent);
+
+      await service.updateStatus('v1', 'approved', 'reviewer-1');
+
+      expect(sseMock.buildStatusEvent).toHaveBeenCalledWith(
+        'v1',
+        'pending_review',
+        'approved',
+        'reviewer-1',
+        undefined,
+        undefined,
+      );
+      expect(sseMock.emit).toHaveBeenCalledWith(fakeEvent);
     });
 
     it('creates internal note when provided', async () => {
@@ -187,6 +224,41 @@ describe('VerificationInboxService', () => {
           action: 'internal_note_added',
         }),
       );
+    });
+
+    it('emits SSE event after note creation', async () => {
+      prismaMock.verificationRequest.findUnique.mockResolvedValue(
+        baseVerification,
+      );
+      const note = {
+        id: 'note-1',
+        entityType: 'verification',
+        entityId: 'v1',
+        content: 'Follow up needed',
+        authorId: 'author-1',
+        category: 'follow_up',
+        createdAt: now,
+        updatedAt: now,
+      };
+      prismaMock.internalNote.create.mockResolvedValue(note);
+
+      const fakeEvent = {
+        type: 'note_added' as const,
+        verificationId: 'v1',
+        timestamp: now.toISOString(),
+        data: {},
+      };
+      sseMock.buildNoteEvent.mockReturnValue(fakeEvent);
+
+      await service.addInternalNote('v1', 'Follow up needed', 'author-1', 'follow_up');
+
+      expect(sseMock.buildNoteEvent).toHaveBeenCalledWith(
+        'v1',
+        'note-1',
+        'author-1',
+        'follow_up',
+      );
+      expect(sseMock.emit).toHaveBeenCalledWith(fakeEvent);
     });
   });
 
