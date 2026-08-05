@@ -20,16 +20,83 @@ import {
   INestApplication,
   ValidationPipe,
   VersioningType,
+  MessageEvent,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { VerificationInboxSseService } from '../src/verification/verification-inbox-sse.service';
-import { MessageEvent } from '@nestjs/common';
 import { App } from 'supertest/types';
 
 const API_KEY = 'sse-inbox-e2e-test-key';
+
+/**
+ * Wait for the next event on the SSE service stream, optionally scoped to a
+ * specific verificationId.  Resolves with the MessageEvent or rejects after
+ * the given timeout (default 5 s).
+ */
+function nextEvent(
+  sseService: VerificationInboxSseService,
+  verificationId?: string,
+  timeoutMs = 5000,
+): Promise<MessageEvent> {
+  return new Promise<MessageEvent>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('Timed out waiting for SSE event')),
+      timeoutMs,
+    );
+
+    const sub = sseService.getStream(verificationId).subscribe({
+      next: (msg) => {
+        clearTimeout(timer);
+        sub.unsubscribe();
+        resolve(msg);
+      },
+      error: (err: unknown) => {
+        clearTimeout(timer);
+        reject(err as Error);
+      },
+    });
+  });
+}
+
+/**
+ * Wait for the next HTTP response on a supertest request that opens an
+ * SSE connection.  Aborts the request once the response headers arrive.
+ */
+function awaitSseResponse(
+  req: request.Test,
+): Promise<request.Response> {
+  return new Promise<request.Response>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('SSE response did not arrive')),
+      5000,
+    );
+
+    req
+      .buffer(false)
+      .parse((_res, _cb) => {
+        // Intentionally left empty — we only want the headers.
+      });
+
+    req.on('response', (res: request.Response) => {
+      clearTimeout(timer);
+      req.abort();
+      resolve(res);
+    });
+
+    req.on('error', (err: NodeJS.ErrnoException) => {
+      clearTimeout(timer);
+      // ECONNRESET is expected when req.abort() is called.
+      if (err.code === 'ECONNRESET') {
+        // Already resolved — nothing to do.
+      } else {
+        reject(err);
+      }
+    });
+  });
+}
 
 describe('Verification Inbox SSE (integration)', () => {
   let app: INestApplication<App>;
@@ -44,7 +111,9 @@ describe('Verification Inbox SSE (integration)', () => {
   const auth = (req: request.Test) => req.set('x-api-key', API_KEY);
 
   async function seedVerification() {
-    return prisma.verificationRequest.create({ data: {} });
+    return prisma.verificationRequest.create({
+      data: { status: 'pending_review' },
+    });
   }
 
   // ────────────────────────────────────────────────────────────
@@ -99,61 +168,29 @@ describe('Verification Inbox SSE (integration)', () => {
         .expect(401);
     });
 
-    it('opens the SSE stream with a valid API key (200, text/event-stream)', done => {
-      const req = request(app.getHttpServer())
-        .get('/api/v1/verification-inbox/events')
-        .set('x-api-key', API_KEY)
-        .buffer(false)
-        .parse((_res, _cb) => {
-          // Don't parse — we just want the headers
-        });
+    it('opens the SSE stream with a valid API key (200, text/event-stream)', async () => {
+      const res = await awaitSseResponse(
+        request(app.getHttpServer())
+          .get('/api/v1/verification-inbox/events')
+          .set('x-api-key', API_KEY),
+      );
 
-      req.on('response', res => {
-        expect(res.status).toBe(200);
-        expect(res.headers['content-type']).toMatch(/text\/event-stream/);
-        expect(res.headers['cache-control']).toMatch(/no-cache/);
-        req.abort();
-        done();
-      });
-
-      req.on('error', err => {
-        // ECONNRESET / abort is expected when we call req.abort()
-        if ((err as NodeJS.ErrnoException).code !== 'ECONNRESET') {
-          done(err);
-        } else {
-          done();
-        }
-      });
-
-      // Safety timeout — if the response never fires, fail fast.
-      setTimeout(() => done(new Error('SSE response did not arrive')), 5000);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toMatch(/text\/event-stream/);
+      expect(res.headers['cache-control']).toMatch(/no-cache/);
     });
 
-    it('scoped endpoint returns 200 for an existing verification id', async done => {
+    it('scoped endpoint returns 200 for an existing verification id', async () => {
       const verification = await seedVerification();
 
-      const req = request(app.getHttpServer())
-        .get(`/api/v1/verification-inbox/${verification.id}/events`)
-        .set('x-api-key', API_KEY)
-        .buffer(false)
-        .parse((_res, _cb) => {});
+      const res = await awaitSseResponse(
+        request(app.getHttpServer())
+          .get(`/api/v1/verification-inbox/${verification.id}/events`)
+          .set('x-api-key', API_KEY),
+      );
 
-      req.on('response', res => {
-        expect(res.status).toBe(200);
-        expect(res.headers['content-type']).toMatch(/text\/event-stream/);
-        req.abort();
-        done();
-      });
-
-      req.on('error', err => {
-        if ((err as NodeJS.ErrnoException).code !== 'ECONNRESET') {
-          done(err);
-        } else {
-          done();
-        }
-      });
-
-      setTimeout(() => done(new Error('SSE response did not arrive')), 5000);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toMatch(/text\/event-stream/);
     });
   });
 
@@ -162,101 +199,73 @@ describe('Verification Inbox SSE (integration)', () => {
   // ────────────────────────────────────────────────────────────
 
   describe('status_updated event shape', () => {
-    it('emits a status_updated event after approve, with correct shape', done => {
-      seedVerification()
-        .then(verification => {
-          const sub = sseService.getStream().subscribe(msg => {
-            sub.unsubscribe();
+    it('emits a status_updated event after approve, with correct shape', async () => {
+      const verification = await seedVerification();
 
-            const data = JSON.parse(msg.data as string) as Record<
-              string,
-              unknown
-            >;
+      const eventPromise = nextEvent(sseService);
 
-            // Event type
-            expect(msg.type).toBe('status_updated');
+      await auth(
+        request(app.getHttpServer())
+          .post(`/api/v1/verification-inbox/${verification.id}/approve`)
+          .send({}),
+      ).expect(200);
 
-            // Stable id format
-            expect(typeof msg.id).toBe('string');
-            expect((msg.id as string).startsWith(verification.id)).toBe(true);
+      const msg = await eventPromise;
+      const data = JSON.parse(msg.data as string) as Record<string, unknown>;
 
-            // Payload fields
-            expect(data['verificationId']).toBe(verification.id);
-            expect(data['previousStatus']).toBe('pending_review');
-            expect(data['newStatus']).toBe('approved');
-            expect(typeof data['reviewerId']).toBe('string');
-            expect(typeof data['timestamp']).toBe('string');
-
-            done();
-          });
-
-          return auth(
-            request(app.getHttpServer())
-              .post(`/api/v1/verification-inbox/${verification.id}/approve`)
-              .send({}),
-          ).expect(200);
-        })
-        .catch(done);
+      expect(msg.type).toBe('status_updated');
+      expect(typeof msg.id).toBe('string');
+      expect((msg.id as string).startsWith(verification.id)).toBe(true);
+      expect(data['verificationId']).toBe(verification.id);
+      expect(data['previousStatus']).toBe('pending_review');
+      expect(data['newStatus']).toBe('approved');
+      expect(typeof data['reviewerId']).toBe('string');
+      expect(typeof data['timestamp']).toBe('string');
     });
 
-    it('includes rejectionReason and nextStepMessage for reject', done => {
-      seedVerification()
-        .then(verification => {
-          const sub = sseService.getStream().subscribe(msg => {
-            sub.unsubscribe();
+    it('includes rejectionReason and nextStepMessage for reject', async () => {
+      const verification = await seedVerification();
 
-            const data = JSON.parse(msg.data as string) as Record<
-              string,
-              unknown
-            >;
+      const eventPromise = nextEvent(sseService);
 
-            expect(msg.type).toBe('status_updated');
-            expect(data['newStatus']).toBe('rejected');
-            expect(data['rejectionReason']).toBe('Document expired');
-            expect(data['nextStepMessage']).toBe('Please resubmit valid docs');
+      await auth(
+        request(app.getHttpServer())
+          .post(`/api/v1/verification-inbox/${verification.id}/reject`)
+          .send({
+            rejectionReason: 'Document expired',
+            nextStepMessage: 'Please resubmit valid docs',
+          }),
+      ).expect(200);
 
-            done();
-          });
+      const msg = await eventPromise;
+      const data = JSON.parse(msg.data as string) as Record<string, unknown>;
 
-          return auth(
-            request(app.getHttpServer())
-              .post(`/api/v1/verification-inbox/${verification.id}/reject`)
-              .send({
-                rejectionReason: 'Document expired',
-                nextStepMessage: 'Please resubmit valid docs',
-              }),
-          ).expect(200);
-        })
-        .catch(done);
+      expect(msg.type).toBe('status_updated');
+      expect(data['newStatus']).toBe('rejected');
+      expect(data['rejectionReason']).toBe('Document expired');
+      expect(data['nextStepMessage']).toBe('Please resubmit valid docs');
     });
 
-    it('emits status_updated for needs_resubmission', done => {
-      seedVerification()
-        .then(verification => {
-          const sub = sseService.getStream().subscribe(msg => {
-            sub.unsubscribe();
+    it('emits status_updated for needs_resubmission', async () => {
+      const verification = await seedVerification();
 
-            const data = JSON.parse(msg.data as string) as Record<
-              string,
-              unknown
-            >;
+      const eventPromise = nextEvent(sseService);
 
-            expect(data['newStatus']).toBe('needs_resubmission');
-            done();
-          });
+      await auth(
+        request(app.getHttpServer())
+          .post(
+            `/api/v1/verification-inbox/${verification.id}/request-resubmission`,
+          )
+          .send({
+            rejectionReason: 'Expired',
+            nextStepMessage: 'Resubmit',
+          }),
+      ).expect(200);
 
-          return auth(
-            request(app.getHttpServer())
-              .post(
-                `/api/v1/verification-inbox/${verification.id}/request-resubmission`,
-              )
-              .send({
-                rejectionReason: 'Expired',
-                nextStepMessage: 'Resubmit',
-              }),
-          ).expect(200);
-        })
-        .catch(done);
+      const msg = await eventPromise;
+      const data = JSON.parse(msg.data as string) as Record<string, unknown>;
+
+      expect(data['newStatus']).toBe('needs_resubmission');
     });
   });
 
@@ -265,56 +274,42 @@ describe('Verification Inbox SSE (integration)', () => {
   // ────────────────────────────────────────────────────────────
 
   describe('note_added event shape', () => {
-    it('emits a note_added event after addInternalNote, with correct shape', done => {
-      seedVerification()
-        .then(verification => {
-          const sub = sseService.getStream().subscribe(msg => {
-            sub.unsubscribe();
+    it('emits a note_added event after addInternalNote, with correct shape', async () => {
+      const verification = await seedVerification();
 
-            const data = JSON.parse(msg.data as string) as Record<
-              string,
-              unknown
-            >;
+      const eventPromise = nextEvent(sseService);
 
-            expect(msg.type).toBe('note_added');
-            expect(data['verificationId']).toBe(verification.id);
-            expect(typeof data['noteId']).toBe('string');
-            expect(typeof data['authorId']).toBe('string');
-            expect(typeof data['timestamp']).toBe('string');
+      await auth(
+        request(app.getHttpServer())
+          .post(`/api/v1/verification-inbox/${verification.id}/notes`)
+          .send({ content: 'Integration test note', category: 'follow_up' }),
+      ).expect(201);
 
-            done();
-          });
+      const msg = await eventPromise;
+      const data = JSON.parse(msg.data as string) as Record<string, unknown>;
 
-          return auth(
-            request(app.getHttpServer())
-              .post(`/api/v1/verification-inbox/${verification.id}/notes`)
-              .send({ content: 'Integration test note', category: 'follow_up' }),
-          ).expect(201);
-        })
-        .catch(done);
+      expect(msg.type).toBe('note_added');
+      expect(data['verificationId']).toBe(verification.id);
+      expect(typeof data['noteId']).toBe('string');
+      expect(typeof data['authorId']).toBe('string');
+      expect(typeof data['timestamp']).toBe('string');
     });
 
-    it('includes category in the note_added payload when provided', done => {
-      seedVerification()
-        .then(verification => {
-          const sub = sseService.getStream().subscribe(msg => {
-            sub.unsubscribe();
+    it('includes category in the note_added payload when provided', async () => {
+      const verification = await seedVerification();
 
-            const data = JSON.parse(msg.data as string) as Record<
-              string,
-              unknown
-            >;
-            expect(data['category']).toBe('escalation');
-            done();
-          });
+      const eventPromise = nextEvent(sseService);
 
-          return auth(
-            request(app.getHttpServer())
-              .post(`/api/v1/verification-inbox/${verification.id}/notes`)
-              .send({ content: 'Escalating this case', category: 'escalation' }),
-          ).expect(201);
-        })
-        .catch(done);
+      await auth(
+        request(app.getHttpServer())
+          .post(`/api/v1/verification-inbox/${verification.id}/notes`)
+          .send({ content: 'Escalating this case', category: 'escalation' }),
+      ).expect(201);
+
+      const msg = await eventPromise;
+      const data = JSON.parse(msg.data as string) as Record<string, unknown>;
+
+      expect(data['category']).toBe('escalation');
     });
   });
 
@@ -323,41 +318,33 @@ describe('Verification Inbox SSE (integration)', () => {
   // ────────────────────────────────────────────────────────────
 
   describe('scoped stream', () => {
-    it('scoped stream only delivers events for the watched verification', done => {
-      Promise.all([seedVerification(), seedVerification()])
-        .then(([target, other]) => {
-          const received: string[] = [];
+    it('scoped stream only delivers events for the watched verification', async () => {
+      const [target, other] = await Promise.all([
+        seedVerification(),
+        seedVerification(),
+      ]);
 
-          const sub = sseService.getStream(target.id).subscribe(msg => {
-            sub.unsubscribe();
+      // Subscribe to the scoped stream BEFORE triggering mutations.
+      const eventPromise = nextEvent(sseService, target.id);
 
-            const data = JSON.parse(msg.data as string) as {
-              verificationId: string;
-            };
-            received.push(data.verificationId);
+      // Approve 'other' first — should NOT reach the scoped stream.
+      await auth(
+        request(app.getHttpServer())
+          .post(`/api/v1/verification-inbox/${other.id}/approve`)
+          .send({}),
+      ).expect(200);
 
-            expect(received).toHaveLength(1);
-            expect(received[0]).toBe(target.id);
-            done();
-          });
+      // Approve 'target' — SHOULD reach the scoped stream.
+      await auth(
+        request(app.getHttpServer())
+          .post(`/api/v1/verification-inbox/${target.id}/approve`)
+          .send({}),
+      ).expect(200);
 
-          // Approve 'other' first — should not reach the scoped stream.
-          return auth(
-            request(app.getHttpServer())
-              .post(`/api/v1/verification-inbox/${other.id}/approve`)
-              .send({}),
-          )
-            .expect(200)
-            .then(() =>
-              // Approve 'target' — should reach the scoped stream.
-              auth(
-                request(app.getHttpServer())
-                  .post(`/api/v1/verification-inbox/${target.id}/approve`)
-                  .send({}),
-              ).expect(200),
-            );
-        })
-        .catch(done);
+      const msg = await eventPromise;
+      const data = JSON.parse(msg.data as string) as { verificationId: string };
+
+      expect(data.verificationId).toBe(target.id);
     });
   });
 
@@ -366,47 +353,39 @@ describe('Verification Inbox SSE (integration)', () => {
   // ────────────────────────────────────────────────────────────
 
   describe('reconnect behaviour', () => {
-    it('re-connecting stream does not replay events emitted while disconnected', done => {
-      seedVerification()
-        .then(verification => {
-          // First connection — immediately disconnect.
-          const firstSub = sseService.getStream().subscribe(() => {});
-          firstSub.unsubscribe();
+    it('re-connecting stream does not replay events emitted while disconnected', async () => {
+      const verification = await seedVerification();
 
-          // Trigger a mutation while disconnected.
-          return auth(
-            request(app.getHttpServer())
-              .post(`/api/v1/verification-inbox/${verification.id}/approve`)
-              .send({}),
+      // First connection — immediately disconnect.
+      const firstSub = sseService.getStream().subscribe(() => {});
+      firstSub.unsubscribe();
+
+      // Trigger a mutation while disconnected — must NOT be replayed.
+      await auth(
+        request(app.getHttpServer())
+          .post(`/api/v1/verification-inbox/${verification.id}/approve`)
+          .send({}),
+      ).expect(200);
+
+      // Seed a second verification for the reconnected stream.
+      const secondVerification = await seedVerification();
+
+      // Reconnect and wait for the next event emitted AFTER reconnect.
+      const eventPromise = nextEvent(sseService);
+
+      await auth(
+        request(app.getHttpServer())
+          .post(
+            `/api/v1/verification-inbox/${secondVerification.id}/approve`,
           )
-            .expect(200)
-            .then(() => seedVerification())
-            .then(secondVerification => {
-              // Reconnect — second connection.
-              const secondReceived: string[] = [];
-              const secondSub = sseService.getStream().subscribe(msg => {
-                secondSub.unsubscribe();
-                const data = JSON.parse(msg.data as string) as {
-                  verificationId: string;
-                };
-                secondReceived.push(data.verificationId);
+          .send({}),
+      ).expect(200);
 
-                // Must only see events emitted AFTER reconnect.
-                expect(secondReceived).toHaveLength(1);
-                expect(secondReceived[0]).toBe(secondVerification.id);
-                done();
-              });
+      const msg = await eventPromise;
+      const data = JSON.parse(msg.data as string) as { verificationId: string };
 
-              return auth(
-                request(app.getHttpServer())
-                  .post(
-                    `/api/v1/verification-inbox/${secondVerification.id}/approve`,
-                  )
-                  .send({}),
-              ).expect(200);
-            });
-        })
-        .catch(done);
+      // Must only see the event emitted after reconnect.
+      expect(data.verificationId).toBe(secondVerification.id);
     });
   });
 
