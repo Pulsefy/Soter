@@ -1,7 +1,6 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, MessageEvent } from '@nestjs/common';
 import { Observable, Subject } from 'rxjs';
 import { filter } from 'rxjs/operators';
-import { MessageEvent } from '@nestjs/common';
 
 /** The set of event types that can be streamed to reviewers. */
 export type InboxEventType = 'status_updated' | 'note_added';
