@@ -126,6 +126,84 @@ class PIIScrubberService:
             latency = time.time() - start_time
             metrics.PIPELINE_STEP_LATENCY.labels(step_name="scrub").observe(latency)
 
+    def preview(self, text: str) -> Dict[str, object]:
+        """Return a structured diff of what would be redacted.
+
+        Unlike :meth:`anonymize`, this method never mutates the input and
+        exposes per-span metadata so callers can render a visual diff without
+        committing the scrub.  The ``content`` field of each segment always
+        contains the *original* text, which is safe because the caller already
+        possesses it.
+        """
+        start_time = time.time()
+        try:
+            if not text:
+                return {
+                    "segments": [],
+                    "original_length": 0,
+                    "redacted_text": "",
+                    "pii_summary": {"names": 0, "locations": 0, "dates": 0, "emails": 0, "phones": 0, "ids": 0, "total": 0},
+                }
+
+            spans = self._detect_spans(text)
+            segments: List[Dict[str, object]] = []
+            cursor = 0
+
+            for span in spans:
+                if span.start > cursor:
+                    segments.append({
+                        "kind": "text",
+                        "content": text[cursor:span.start],
+                        "start": cursor,
+                        "end": span.start,
+                    })
+
+                token_base = self.TOKEN_BASE_BY_LABEL.get(span.label, "REDACTED")
+                segments.append({
+                    "kind": "redaction",
+                    "content": text[span.start:span.end],
+                    "start": span.start,
+                    "end": span.end,
+                    "replacement": f"[{token_base}]",
+                    "pii_type": span.label,
+                })
+                cursor = span.end
+
+            if cursor < len(text):
+                segments.append({
+                        "kind": "text",
+                        "content": text[cursor:],
+                        "start": cursor,
+                        "end": len(text),
+                })
+
+            redacted_text, _ = self._mask_spans(text, spans)
+
+            names = sum(1 for s in spans if s.label == "PERSON")
+            locations = sum(1 for s in spans if s.label == "LOCATION")
+            dates = sum(1 for s in spans if s.label == "DATE")
+            emails = sum(1 for s in spans if s.label == "EMAIL")
+            phones = sum(1 for s in spans if s.label == "PHONE")
+            ids = sum(1 for s in spans if s.label == "ID")
+
+            return {
+                "segments": segments,
+                "original_length": len(text),
+                "redacted_text": redacted_text,
+                "pii_summary": {
+                    "names": names,
+                    "locations": locations,
+                    "dates": dates,
+                    "emails": emails,
+                    "phones": phones,
+                    "ids": ids,
+                    "total": len(spans),
+                },
+            }
+        finally:
+            latency = time.time() - start_time
+            metrics.PIPELINE_STEP_LATENCY.labels(step_name='preview').observe(latency)
+
     def _build_nlp(self) -> Language:
         nlp = spacy.blank("en")
         ruler = nlp.add_pipe("entity_ruler")
