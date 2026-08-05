@@ -12,7 +12,7 @@ import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from sklearn.neighbors import LocalOutlierFactor
 
-from schemas.fraud import ClaimMetadata, ClaimFraudResult
+from schemas.fraud import ClaimMetadata, ClaimFraudResult, FraudExplanationCode
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +35,14 @@ def _vectorize(claims: List[ClaimMetadata]) -> np.ndarray:
     hash_enc.fit(hashes)
     loc_enc.fit(locs)
 
-    return np.column_stack([
-        ip_enc.transform(ips),
-        hash_enc.transform(hashes),
-        loc_enc.transform(locs),
-        amounts,
-    ]).astype(float)
+    return np.column_stack(
+        [
+            ip_enc.transform(ips),
+            hash_enc.transform(hashes),
+            loc_enc.transform(locs),
+            amounts,
+        ]
+    ).astype(float)
 
 
 def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
@@ -52,10 +54,14 @@ def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
     """
     if len(claims) == 1:
         # LOF needs at least 2 samples; single claim gets a neutral score
-        return [ClaimFraudResult(claim_id=claims[0].claim_id, fraud_risk_score=0.0, is_flagged=False)]
+        return [
+            ClaimFraudResult(
+                claim_id=claims[0].claim_id, fraud_risk_score=0.0, is_flagged=False
+            )
+        ]
 
     X = _vectorize(claims)
-    
+
     # Add tiny random noise to prevent identical point degeneracy and zero-distance division issues
     np.random.seed(42)
     X_noise = X + np.random.normal(0, 1e-5, X.shape)
@@ -63,7 +69,9 @@ def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
     n_neighbors = min(20, max(2, len(claims) // 2))
     lof = LocalOutlierFactor(n_neighbors=n_neighbors, contamination="auto")
     lof.fit_predict(X_noise)
-    raw_scores: np.ndarray = lof.negative_outlier_factor_  # negative; more negative = more anomalous
+    raw_scores: np.ndarray = (
+        lof.negative_outlier_factor_
+    )  # negative; more negative = more anomalous
 
     # Normalise to [0, 1]: most anomalous → 1, most normal → 0
     min_s, max_s = raw_scores.min(), raw_scores.max()
@@ -76,11 +84,13 @@ def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
     for claim, raw, score in zip(claims, raw_scores, normalised):
         is_flagged = raw < _OUTLIER_THRESHOLD
         reason = "Anomalous pattern detected" if is_flagged else None
+        code = FraudExplanationCode.ANOMALY_DETECTED if is_flagged else None
         results.append(
             ClaimFraudResult(
                 claim_id=claim.claim_id,
                 fraud_risk_score=round(float(score), 4),
                 is_flagged=is_flagged,
+                code=code,
                 reason=reason,
             )
         )

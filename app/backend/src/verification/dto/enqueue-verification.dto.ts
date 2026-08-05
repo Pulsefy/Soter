@@ -57,5 +57,6 @@ export class EnqueueVerificationDto {
     campaignRef?: string;
     claimId?: string;
     packageId?: string;
+    contractId?: string;
   };
 }

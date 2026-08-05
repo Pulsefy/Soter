@@ -39,12 +39,12 @@ def test_health_response_structure(client):
     """Test that health endpoint returns correct structure"""
     response = client.get("/health")
     data = response.json()
-    
+
     # Check required fields
     assert "status" in data
     assert "service" in data
     assert "version" in data
-    
+
     # Check field types
     assert isinstance(data["status"], str)
     assert isinstance(data["service"], str)
@@ -63,7 +63,7 @@ def test_openapi_schema(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
     data = response.json()
-    
+
     assert data["openapi"] == "3.1.0" or data["openapi"].startswith("3.")
     assert data["info"]["title"] == "Soter AI Service"
     assert data["info"]["version"] == "1.0.0"
@@ -85,11 +85,15 @@ def test_cors_headers(client):
 def test_proof_of_life_success(client, monkeypatch):
     """Test successful proof-of-life response contract."""
 
-    def fake_analyze(selfie_image_base64, burst_images_base64=None, confidence_threshold=None):
+    def fake_analyze(
+        selfie_image_base64, burst_images_base64=None, confidence_threshold=None
+    ):
         return {
             "is_real_person": True,
             "confidence": 0.91,
-            "threshold": confidence_threshold if confidence_threshold is not None else 0.65,
+            "threshold": (
+                confidence_threshold if confidence_threshold is not None else 0.65
+            ),
             "checks": {
                 "face_detected": True,
                 "blink_detected": True,
@@ -121,7 +125,9 @@ def test_proof_of_life_success(client, monkeypatch):
 def test_proof_of_life_invalid_image(client, monkeypatch):
     """Test proof-of-life validation errors are returned as HTTP 422."""
 
-    def fake_analyze(selfie_image_base64, burst_images_base64=None, confidence_threshold=None):
+    def fake_analyze(
+        selfie_image_base64, burst_images_base64=None, confidence_threshold=None
+    ):
         raise ValueError("Invalid base64 image payload")
 
     monkeypatch.setattr(main.proof_of_life_analyzer, "analyze", fake_analyze)
@@ -175,7 +181,12 @@ def test_anonymize_endpoint_validation(client):
 def test_humanitarian_verification_success(client, monkeypatch):
     """Test successful humanitarian verification response contract."""
 
-    def fake_verify_claim(aid_claim, supporting_evidence=None, context_factors=None, provider_preference="auto"):
+    def fake_verify_claim(
+        aid_claim,
+        supporting_evidence=None,
+        context_factors=None,
+        provider_preference="auto",
+    ):
         return {
             "provider": "openai",
             "model": "gpt-4o-mini",
@@ -188,7 +199,9 @@ def test_humanitarian_verification_success(client, monkeypatch):
             "raw_response": "{}",
         }
 
-    monkeypatch.setattr(main.humanitarian_verification_service, "verify_claim", fake_verify_claim)
+    monkeypatch.setattr(
+        main.humanitarian_verification_service, "verify_claim", fake_verify_claim
+    )
 
     response = client.post(
         "/ai/humanitarian/verify",
@@ -211,10 +224,17 @@ def test_humanitarian_verification_success(client, monkeypatch):
 def test_humanitarian_verification_failure(monkeypatch):
     """Test humanitarian verification failure path returns an error envelope."""
 
-    def fake_verify_claim(aid_claim, supporting_evidence=None, context_factors=None, provider_preference="auto"):
+    def fake_verify_claim(
+        aid_claim,
+        supporting_evidence=None,
+        context_factors=None,
+        provider_preference="auto",
+    ):
         raise RuntimeError("all providers unavailable")
 
-    monkeypatch.setattr(main.humanitarian_verification_service, "verify_claim", fake_verify_claim)
+    monkeypatch.setattr(
+        main.humanitarian_verification_service, "verify_claim", fake_verify_claim
+    )
 
     # Use raise_server_exceptions=False so RuntimeError returns a 500 response
     safe_client = TestClient(app, raise_server_exceptions=False)

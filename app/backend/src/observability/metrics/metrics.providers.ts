@@ -97,6 +97,18 @@ export const metricsProviders = [
     labelNames: ['callback_type', 'reason'],
   }),
 
+  // Notification Delivery Metrics (issue #716)
+  makeCounterProvider({
+    name: 'notification_delivery_attempts_total',
+    help: 'Total number of notification delivery attempts, labelled by type and outcome',
+    labelNames: ['type', 'outcome'],
+  }),
+  makeCounterProvider({
+    name: 'notification_delivery_failures_by_category_total',
+    help: 'Total number of failed notification delivery attempts, labelled by type and a bounded failure category (not raw error text)',
+    labelNames: ['type', 'failure_category'],
+  }),
+
   // Error Rate Metrics
   makeCounterProvider({
     name: 'error_rate_total',
@@ -139,5 +151,43 @@ export const metricsProviders = [
     name: 'verification_queue_waiting_by_priority',
     help: 'Current number of waiting verification jobs by priority tier',
     labelNames: ['priority'],
+  }),
+
+  // Claim Funnel Metrics
+  makeCounterProvider({
+    name: 'claims_created_total',
+    help: 'Total number of claims created',
+    labelNames: ['campaign_id'],
+  }),
+  makeCounterProvider({
+    name: 'claims_verified_total',
+    help: 'Total number of claims verified',
+    labelNames: ['campaign_id'],
+  }),
+  makeCounterProvider({
+    name: 'claims_approved_total',
+    help: 'Total number of claims approved',
+    labelNames: ['campaign_id'],
+  }),
+  makeCounterProvider({
+    name: 'claims_disbursed_total',
+    help: 'Total number of claims disbursed',
+    labelNames: ['campaign_id', 'onchain_enabled'],
+  }),
+  makeCounterProvider({
+    name: 'claims_cancelled_total',
+    help: 'Total number of claims cancelled',
+    labelNames: ['campaign_id', 'from_status'],
+  }),
+  makeGaugeProvider({
+    name: 'claims_in_funnel',
+    help: 'Current number of claims at each funnel stage',
+    labelNames: ['status'],
+  }),
+  makeHistogramProvider({
+    name: 'claim_funnel_duration_seconds',
+    help: 'Time spent within each claim funnel stage before transitioning',
+    labelNames: ['from_status', 'to_status'],
+    buckets: [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 86400],
   }),
 ];

@@ -6,6 +6,8 @@ import {
   MAX_FILE_SIZE,
   evidenceFileFilter,
   isSafeFilename,
+  validateExtensionForMime,
+  validateFileContent,
   validateUploadedFile,
 } from './file-validation';
 
@@ -235,6 +237,64 @@ describe('evidenceFileFilter', () => {
     });
     expect(err).toBeInstanceOf(BadRequestException);
     expect(accept).toBe(false);
+  });
+});
+
+describe('validateExtensionForMime', () => {
+  it('returns the extension for an allowed, consistent pair', () => {
+    expect(validateExtensionForMime('evidence.png', 'image/png')).toBe('.png');
+  });
+
+  it('rejects a disallowed extension', () => {
+    expect(() => validateExtensionForMime('evil.exe', 'text/plain')).toThrow(
+      /extension/i,
+    );
+  });
+
+  it('rejects an extension/mimeType mismatch', () => {
+    expect(() =>
+      validateExtensionForMime('note.txt', 'application/pdf'),
+    ).toThrow(/does not match/i);
+  });
+});
+
+describe('validateFileContent', () => {
+  it('accepts declared metadata backed by matching bytes (upload-session path)', () => {
+    const result = validateFileContent({
+      filename: 'evidence.pdf',
+      mimetype: 'application/pdf',
+      size: PDF_MAGIC.length + 4,
+      buffer: Buffer.concat([PDF_MAGIC, Buffer.alloc(4, 1)]),
+    });
+    expect(result).toMatchObject({
+      filename: 'evidence.pdf',
+      mimetype: 'application/pdf',
+      extension: '.pdf',
+    });
+  });
+
+  it('rejects reassembled content whose bytes do not match the declared type', () => {
+    // Mirrors the upload-session finalize flow: client declares image/png up
+    // front, but the actual assembled chunk bytes are not a PNG.
+    expect(() =>
+      validateFileContent({
+        filename: 'evidence.png',
+        mimetype: 'image/png',
+        size: 20,
+        buffer: Buffer.from('this is plain text pretending to be png'),
+      }),
+    ).toThrow(/do not match/i);
+  });
+
+  it('rejects a declared size over the limit', () => {
+    expect(() =>
+      validateFileContent({
+        filename: 'big.txt',
+        mimetype: 'text/plain',
+        size: MAX_FILE_SIZE + 1,
+        buffer: Buffer.alloc(MAX_FILE_SIZE + 1, 0x61),
+      }),
+    ).toThrow(PayloadTooLargeException);
   });
 });
 

@@ -12,7 +12,7 @@ import { HealthService } from './health.service';
 import { LivenessResponse, ReadinessResponse } from './health.service';
 import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { Public } from '../common/decorators/public.decorator';
-import { Throttle } from '@nestjs/throttler';
+import { SkipThrottle } from '../common/decorators/skip-throttle.decorator';
 
 @ApiTags('Health')
 @Controller('health')
@@ -20,8 +20,8 @@ export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
   @Public()
+  @SkipThrottle()
   @Get()
-  @Throttle({ default: { ttl: 60, limit: 100 } }) // Limit to 100 requests per minute for this endpoint
   @Version(API_VERSIONS.V1)
   @ApiOperation({
     summary: 'Check system liveness and basic service metadata',
@@ -33,8 +33,15 @@ export class HealthController {
     schema: {
       example: {
         status: 'ok',
+        service: 'backend',
         version: '1.0.0',
+        environment: 'production',
         timestamp: '2025-02-23T12:00:00.000Z',
+        deployment: {
+          gitSha: 'a1b2c3d',
+          environment: 'production',
+          buildTimestamp: '2025-02-23T10:00:00.000Z',
+        },
       },
     },
   })
@@ -46,6 +53,7 @@ export class HealthController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get('live')
   @Version(API_VERSIONS.V1)
   @ApiOperation({
@@ -58,7 +66,18 @@ export class HealthController {
     schema: {
       example: {
         status: 'ok',
-        uptime: '2d 5h 12m 30s',
+        service: 'backend',
+        version: '1.0.0',
+        environment: 'production',
+        timestamp: '2025-02-23T12:00:00.000Z',
+        deployment: {
+          gitSha: 'a1b2c3d',
+          environment: 'production',
+          buildTimestamp: '2025-02-23T10:00:00.000Z',
+        },
+        checks: {
+          process: { status: 'up' },
+        },
       },
     },
   })
@@ -67,6 +86,7 @@ export class HealthController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get('ready')
   @Version(API_VERSIONS.V1)
   @ApiOperation({
@@ -111,6 +131,7 @@ export class HealthController {
   }
 
   @Get('error')
+  @SkipThrottle()
   @Version(API_VERSIONS.V1)
   @ApiOperation({ summary: 'Trigger an error for testing' })
   @ApiInternalServerErrorResponse({
@@ -127,6 +148,7 @@ export class HealthController {
   }
 
   @Get('onchain')
+  @SkipThrottle()
   @Version(API_VERSIONS.V1)
   @ApiOperation({
     summary: 'On-chain contract health probe (internal use)',

@@ -66,7 +66,7 @@ export class LedgerReconciliationService {
         endLedger,
         campaignId,
         thresholdPercent,
-      } as ReconciliationJobData,
+      },
       {
         attempts: 3,
         backoff: {

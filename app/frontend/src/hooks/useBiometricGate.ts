@@ -2,76 +2,59 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { useBiometricStore } from '@/lib/biometricStore';
-import { 
-  getBiometricStatus, 
+import {
+  getBiometricStatus,
   promptBiometricAuthentication,
   BiometricAuthResult,
-  BiometricStatus 
+  BiometricStatus,
 } from '@/services/biometricService';
 import { useToast } from '@/components/ToastProvider';
 
 export interface BiometricGateOptions {
-  /** Reason shown to user during biometric prompt */
   reason?: string;
-  /** Whether to require biometrics (if available) */
   requireBiometrics?: boolean;
-  /** Callback when biometric authentication starts */
   onAuthStart?: () => void;
-  /** Callback when biometric authentication completes */
   onAuthComplete?: (result: BiometricAuthResult) => void;
-  /** Custom message for fallback confirmation dialog */
   fallbackMessage?: string;
-  /** Title for fallback confirmation dialog */
   fallbackTitle?: string;
-  /** Whether this is a high-risk action */
   highRisk?: boolean;
+  userId?: string;
+  /**
+   * Controls how the hook behaves when biometrics are unavailable.
+   *   - "auto"         (default) → show window.confirm for backward compat
+   *   - "external-ui"  → caller already rendered <BiometricConfirmationModal/>,
+   *                      so skip the inner confirm and trust the outer UI
+   *   - "skip"         → no confirmation at all (only for truly low-risk ops)
+   */
+  fallbackMode?: 'auto' | 'external-ui' | 'skip';
+  /**
+   * Custom fallback resolver. When provided, replaces window.confirm with
+   * a caller-supplied async confirmation (e.g. controlled React modal).
+   * Returning true executes the action; false cancels.
+   */
+  fallbackResolver?: (opts: {
+    title: string;
+    message: string;
+    reason: string;
+    highRisk: boolean;
+  }) => Promise<boolean> | boolean;
 }
 
 export interface BiometricGate {
-  /** Confirm before executing a high-risk action */
   confirmBeforeAction: <T>(
     action: () => Promise<T> | T,
-    options?: BiometricGateOptions
+    options?: BiometricGateOptions,
   ) => Promise<T>;
 }
 
 export interface UseBiometricGateReturn extends BiometricGate {
-  /** Current biometric availability status */
   status: BiometricStatus;
-  /** Whether biometric check is in progress */
   isLoading: boolean;
-  /** Last authentication result */
   lastAuthResult: BiometricAuthResult | null;
-  /** Check biometric availability (updates store) */
   checkAvailability: () => Promise<BiometricStatus>;
-  /** Manually trigger biometric authentication */
-  authenticate: (reason?: string) => Promise<BiometricAuthResult>;
+  authenticate: (reason?: string, userId?: string) => Promise<BiometricAuthResult>;
 }
 
-/**
- * Hook for biometric authentication gate that protects high-risk actions.
- * 
- * Features:
- * - Checks biometric availability
- * - Triggers biometric authentication when available
- * - Falls back to confirmation dialog when biometrics unavailable
- * - Manages loading states
- * - Integrates with toast notifications
- * 
- * Example usage:
- * ```tsx
- * const { confirmBeforeAction, isLoading } = useBiometricGate();
- * 
- * const handleDelete = async () => {
- *   await confirmBeforeAction(async () => {
- *     await deleteRecord();
- *   }, {
- *     reason: 'Delete sensitive record',
- *     fallbackMessage: 'Biometric authentication is unavailable. Continue with standard confirmation?'
- *   });
- * };
- * ```
- */
 export function useBiometricGate(): UseBiometricGateReturn {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
@@ -80,15 +63,11 @@ export function useBiometricGate(): UseBiometricGateReturn {
     lastAuthResult,
     setStatus,
     setLastAuthResult,
-    userPreference
+    userPreference,
   } = useBiometricStore();
-  
-  // Ref to track if a confirmation modal is open
+
   const isConfirmingRef = useRef(false);
 
-  /**
-   * Check biometric availability and update store
-   */
   const checkAvailability = useCallback(async (): Promise<BiometricStatus> => {
     setIsLoading(true);
     try {
@@ -104,19 +83,16 @@ export function useBiometricGate(): UseBiometricGateReturn {
     }
   }, [setStatus]);
 
-  /**
-   * Manually trigger biometric authentication
-   */
-  const authenticate = useCallback(async (reason?: string): Promise<BiometricAuthResult> => {
+  const authenticate = useCallback(async (reason?: string, userId?: string): Promise<BiometricAuthResult> => {
     setIsLoading(true);
     try {
-      const result = await promptBiometricAuthentication({ 
-        reason: reason || 'Confirm your identity' 
+      const result = await promptBiometricAuthentication({
+        reason: reason || 'Confirm your identity',
+        userId,
       });
-      
+
       setLastAuthResult(result);
-      
-      // Show toast feedback
+
       if (result === 'success') {
         toast('Authentication successful', 'Biometric verification completed', 'success');
       } else if (result === 'failed') {
@@ -124,7 +100,7 @@ export function useBiometricGate(): UseBiometricGateReturn {
       } else if (result === 'cancelled') {
         toast('Authentication cancelled', 'Biometric verification was cancelled', 'warning');
       }
-      
+
       return result;
     } catch (error) {
       console.error('Biometric authentication error:', error);
@@ -136,19 +112,9 @@ export function useBiometricGate(): UseBiometricGateReturn {
     }
   }, [setLastAuthResult, toast]);
 
-  /**
-   * Core function: confirm before executing high-risk action
-   */
   const confirmBeforeAction = useCallback(async <T,>(
     action: () => Promise<T> | T,
-    options?: {
-      reason?: string;
-      requireBiometrics?: boolean;
-      onAuthStart?: () => void;
-      onAuthComplete?: (result: BiometricAuthResult) => void;
-      fallbackMessage?: string;
-      fallbackTitle?: string;
-    }
+    options?: BiometricGateOptions,
   ): Promise<T> => {
     const {
       reason = 'Confirm this high-risk action',
@@ -156,10 +122,13 @@ export function useBiometricGate(): UseBiometricGateReturn {
       onAuthStart,
       onAuthComplete,
       fallbackMessage = 'Biometric authentication is unavailable on this device. Do you want to continue with standard confirmation?',
-      fallbackTitle = 'Confirm Action'
+      fallbackTitle = 'Confirm Action',
+      highRisk = false,
+      userId,
+      fallbackMode = 'auto',
+      fallbackResolver,
     } = options || {};
 
-    // Prevent multiple concurrent confirmations
     if (isConfirmingRef.current) {
       throw new Error('Another confirmation is already in progress');
     }
@@ -168,44 +137,50 @@ export function useBiometricGate(): UseBiometricGateReturn {
     setIsLoading(true);
 
     try {
-      // Check biometric availability
-      const currentStatus = status === 'unknown' ? await checkAvailability() : status;
-      
-      // Determine if we should use biometrics
-      const shouldUseBiometrics = 
-        requireBiometrics && 
+      const currentStatus: BiometricStatus = status === 'unknown' ? await checkAvailability() : status;
+
+      const shouldUseBiometrics =
+        requireBiometrics &&
         currentStatus === 'available' &&
         userPreference !== 'disabled';
 
       if (shouldUseBiometrics) {
-        // Biometric authentication flow
         onAuthStart?.();
-        const authResult = await authenticate(reason);
+        const authResult = await authenticate(reason, userId);
         onAuthComplete?.(authResult);
 
         if (authResult === 'success') {
-          // Authentication successful, execute the action
-          const result = await action();
-          return result;
-        } else {
-          // Authentication failed or cancelled
-          throw new Error(`Biometric authentication ${authResult}`);
+          return await action();
         }
-      } else {
-        // Fallback: Show confirmation dialog (to be implemented by UI component)
-        // For now, we'll use a simple confirm dialog
-        const shouldContinue = window.confirm(
-          `${fallbackTitle}\n\n${fallbackMessage}\n\nAction: ${reason}`
-        );
-        
-        if (!shouldContinue) {
-          throw new Error('Action cancelled by user');
-        }
-        
-        // User confirmed, execute the action
-        const result = await action();
-        return result;
+        throw new Error(`Biometric authentication ${authResult}`);
       }
+
+      // Fallback path when biometrics unavailable or disabled.
+      if (fallbackMode === 'skip') {
+        return await action();
+      }
+
+      if (fallbackMode === 'external-ui') {
+        // The outer component (e.g. AdminApiKeyManager) already rendered
+        // <BiometricConfirmationModal /> and the user has already clicked
+        // "Continue" before we reach this point. No second confirmation.
+        return await action();
+      }
+
+      if (fallbackResolver) {
+        const confirmed = await Promise.resolve(
+          fallbackResolver({ title: fallbackTitle, message: fallbackMessage, reason, highRisk }),
+        );
+        if (!confirmed) throw new Error('Action cancelled by user');
+        return await action();
+      }
+
+      // Default: safe window.confirm fallback for contexts with no UI wrapper.
+      const shouldContinue = window.confirm(
+        `${fallbackTitle}\n\n${fallbackMessage}\n\nAction: ${reason}`,
+      );
+      if (!shouldContinue) throw new Error('Action cancelled by user');
+      return await action();
     } finally {
       setIsLoading(false);
       isConfirmingRef.current = false;
@@ -218,6 +193,6 @@ export function useBiometricGate(): UseBiometricGateReturn {
     lastAuthResult,
     checkAvailability,
     confirmBeforeAction,
-    authenticate
+    authenticate,
   };
 }

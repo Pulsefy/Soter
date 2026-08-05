@@ -6,49 +6,50 @@ import {
   checkNetworkGuard,
   DEFAULT_CONFIG,
   NetworkMismatchError,
+  NetworkMismatchErrorCode,
 } from '../services/networkGuard';
 import { useWallet } from '../contexts/WalletContext';
 import { useNetworkStatus } from './useNetworkStatus';
 
 export interface NetworkGuardHookResult {
   /**
-   * Whether there is a network mismatch
+   * Whether there is a network mismatch.
    */
   isMismatch: boolean;
 
   /**
-   * The network mismatch result containing error details
+   * Full network mismatch result including error details.
    */
   mismatchResult: NetworkMismatchResult | null;
 
   /**
-   * Clear the current mismatch state
+   * Clear the current mismatch state.
    */
   clearMismatch: () => void;
 
   /**
-   * Check the current network state
+   * Imperatively check the current network state and return the result.
    */
   checkNetwork: () => NetworkMismatchResult;
 
   /**
-   * Block any action that requires signing if network is wrong
-   * @throws {NetworkMismatchError} if network is not correct
+   * Throw a NetworkMismatchError if the wallet is not on the correct network.
+   * @throws {NetworkMismatchError}
    */
   ensureCorrectNetworkForSigning: () => void;
 
   /**
-   * Get a human-readable error message for UI display
+   * Human-readable error message for display.
    */
   errorMessage: string | null;
 
   /**
-   * Get a human-readable remediation message
+   * Human-readable remediation message for display.
    */
   remediationMessage: string | null;
 
   /**
-   * The wallet's current network info
+   * Derived network info for the connected wallet.
    */
   walletNetworkInfo: {
     isTestnet: boolean;
@@ -59,10 +60,12 @@ export interface NetworkGuardHookResult {
 }
 
 /**
- * Hook that provides network guard functionality for wallet actions
+ * Provides network guard functionality for wallet actions.
+ *
+ * Consumes chainIds directly from WalletContext — no global side-channel required.
  */
 export const useNetworkGuard = (config?: Partial<NetworkGuardConfig>): NetworkGuardHookResult => {
-  const { publicKey, status: walletStatus } = useWallet();
+  const { publicKey, status: walletStatus, chainIds } = useWallet();
   const networkStatus = useNetworkStatus();
   const [lastMismatch, setLastMismatch] = useState<NetworkMismatchResult | null>(null);
 
@@ -71,20 +74,23 @@ export const useNetworkGuard = (config?: Partial<NetworkGuardConfig>): NetworkGu
     ...config,
   };
 
-  const guard = useMemo(() => {
-    return new OnChainNetworkGuard(
-      fullConfig.allowedNetworks[0] || 'TESTNET',
-      fullConfig.autoReconnect,
-    );
-  }, [fullConfig.allowedNetworks, fullConfig.autoReconnect]);
+  const guard = useMemo(
+    () =>
+      new OnChainNetworkGuard(
+        fullConfig.allowedNetworks[0] ?? 'TESTNET',
+        fullConfig.autoReconnect,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fullConfig.allowedNetworks[0], fullConfig.autoReconnect],
+  );
 
   const checkNetwork = (): NetworkMismatchResult => {
-    // If wallet is not connected, return a mismatch result
+    // Wallet not connected — surface as mismatch so callers don't need to check status separately
     if (walletStatus !== 'connected' || !publicKey) {
       const mismatchResult: NetworkMismatchResult = {
         isMismatch: true,
         error: new NetworkMismatchError(
-          'NO_NETWORK_CONNECTION' as any,
+          NetworkMismatchErrorCode.NO_NETWORK_CONNECTION,
           'Wallet is not connected.',
           'Please connect your wallet to continue.',
         ),
@@ -95,23 +101,14 @@ export const useNetworkGuard = (config?: Partial<NetworkGuardConfig>): NetworkGu
           isMainnet: false,
           isKnown: false,
         },
-        requiredNetwork: fullConfig.allowedNetworks[0] || 'TESTNET',
+        requiredNetwork: fullConfig.allowedNetworks[0] ?? 'TESTNET',
       };
       setLastMismatch(mismatchResult);
       return mismatchResult;
     }
 
-    // Get wallet chain IDs from the wallet context
-    // Note: We need to store chainIds in WalletContext - will update in next file
-    // For now, we'll use a placeholder approach where we detect from publicKey
-    // In the full implementation, we'll store chainIds in context
-    const chainIds = (global as any).__walletChainIds || [];
-
-    const result = checkNetworkGuard(
-      chainIds,
-      networkStatus,
-      fullConfig,
-    );
+    // Use chainIds from WalletContext — no global side-channel needed
+    const result = checkNetworkGuard(chainIds, networkStatus, fullConfig);
 
     if (result.isMismatch) {
       setLastMismatch(result);
@@ -125,13 +122,12 @@ export const useNetworkGuard = (config?: Partial<NetworkGuardConfig>): NetworkGu
   const ensureCorrectNetworkForSigning = (): void => {
     if (walletStatus !== 'connected' || !publicKey) {
       throw new NetworkMismatchError(
-        'NO_NETWORK_CONNECTION' as any,
+        NetworkMismatchErrorCode.NO_NETWORK_CONNECTION,
         'Wallet is not connected. Please connect your wallet before signing.',
         'Connect your Stellar wallet to continue.',
       );
     }
 
-    const chainIds = (global as any).__walletChainIds || [];
     guard.ensureCorrectNetworkForSigning(chainIds, networkStatus);
   };
 
@@ -139,11 +135,12 @@ export const useNetworkGuard = (config?: Partial<NetworkGuardConfig>): NetworkGu
     setLastMismatch(null);
   };
 
-  // Get the current mismatch result or check if there is one
+  // Derive the current mismatch lazily: use cached result or check if wallet is connected
   const currentMismatch = lastMismatch ?? (walletStatus === 'connected' ? checkNetwork() : null);
 
   const walletNetworkInfo = useMemo(() => {
-    if (!currentMismatch?.walletNetwork) {
+    const info = currentMismatch?.walletNetwork;
+    if (!info) {
       return {
         isTestnet: false,
         isMainnet: false,
@@ -151,8 +148,6 @@ export const useNetworkGuard = (config?: Partial<NetworkGuardConfig>): NetworkGu
         networkName: 'Unknown',
       };
     }
-
-    const info = currentMismatch.walletNetwork;
     return {
       isTestnet: info.isTestnet,
       isMainnet: info.isMainnet,

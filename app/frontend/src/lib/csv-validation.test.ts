@@ -1,11 +1,15 @@
-import Papa from 'papaparse';
 import {
   validateHeaders,
   capValidationErrors,
   MAX_DISPLAY_ERRORS,
   parseRecipientsCsv,
   validateRecipientsImport,
+  filterValidationRows,
+  buildStructuredValidationReport,
+  downloadImportReport,
+  INITIAL_REPORT_PAGE_SIZE,
   type ValidationResult,
+  type ValidationRowResult,
   type CsvPreviewRow,
 } from './csv-validation';
 
@@ -302,5 +306,202 @@ describe('validateRecipientsImport', () => {
     expect(last.rowsValidated).toBe(3);
     expect(last.totalRows).toBe(3);
     expect(last.percent).toBe(100);
+  });
+});
+
+// ── filterValidationRows ────────────────────────────────────────────────────
+
+describe('filterValidationRows', () => {
+  function makeResultRow(
+    rowNumber: number,
+    status: 'valid' | 'warning' | 'error',
+    values: Record<string, string> = {},
+    messages: Array<{ severity: 'warning' | 'error'; field?: string; message: string }> = [],
+  ): ValidationRowResult {
+    return { rowNumber, status, values, messages };
+  }
+
+  const rows: ValidationRowResult[] = [
+    makeResultRow(1, 'valid', { name: 'Alice', wallet: 'GABCDEFGHIJKLM' }),
+    makeResultRow(2, 'error', { name: 'Bob', wallet: '' }, [
+      { severity: 'error', field: 'wallet', message: 'Wallet address is required.' },
+    ]),
+    makeResultRow(3, 'warning', { name: 'Chidi', wallet: 'GCAB' }, [
+      { severity: 'warning', field: 'wallet', message: 'Wallet address looks shorter than expected.' },
+    ]),
+  ];
+
+  it('returns all rows when the query is empty and status is all', () => {
+    expect(filterValidationRows(rows, '', 'all')).toHaveLength(3);
+  });
+
+  it('filters by status', () => {
+    expect(filterValidationRows(rows, '', 'error').map(r => r.rowNumber)).toEqual([2]);
+    expect(filterValidationRows(rows, '', 'warning').map(r => r.rowNumber)).toEqual([3]);
+    expect(filterValidationRows(rows, '', 'valid').map(r => r.rowNumber)).toEqual([1]);
+  });
+
+  it('matches the query against row numbers', () => {
+    expect(filterValidationRows(rows, '2', 'all').map(r => r.rowNumber)).toEqual([2]);
+  });
+
+  it('matches the query against message text and fields', () => {
+    const byMessage = filterValidationRows(rows, 'shorter than expected', 'all');
+    expect(byMessage.map(r => r.rowNumber)).toEqual([3]);
+
+    const byField = filterValidationRows(rows, 'WALLET', 'error');
+    expect(byField.map(r => r.rowNumber)).toEqual([2]);
+  });
+
+  it('matches the query against row values case-insensitively', () => {
+    expect(filterValidationRows(rows, 'alice', 'all').map(r => r.rowNumber)).toEqual([1]);
+    expect(filterValidationRows(rows, 'CHIDI', 'all').map(r => r.rowNumber)).toEqual([3]);
+  });
+
+  it('combines query and status filter', () => {
+    expect(filterValidationRows(rows, 'required', 'error').map(r => r.rowNumber)).toEqual([2]);
+    expect(filterValidationRows(rows, 'required', 'valid')).toHaveLength(0);
+  });
+
+  it('returns an empty list when nothing matches', () => {
+    expect(filterValidationRows(rows, 'zzz-not-present', 'all')).toHaveLength(0);
+  });
+});
+
+// ── buildStructuredValidationReport ────────────────────────────────────────
+
+describe('buildStructuredValidationReport', () => {
+  const result: ValidationResult = {
+    summary: { totalRows: 2, validRows: 1, warningRows: 0, errorRows: 1 },
+    rows: [
+      { rowNumber: 1, status: 'valid', values: { name: 'Alice', wallet: 'GABCDEFGHIJKLM', phone: '123' }, messages: [] },
+      {
+        rowNumber: 2,
+        status: 'error',
+        values: { name: 'Bob', wallet: '', phone: '456' },
+        messages: [{ severity: 'error', field: 'wallet', message: 'Wallet address is required.' }],
+      },
+    ],
+  };
+
+  it('includes metadata lines and the structured header row', async () => {
+    const blob = buildStructuredValidationReport(result, {
+      campaignId: 'camp-9',
+      generatedAt: '2026-07-25T00:00:00.000Z',
+      reportId: 'rpt-test',
+      source: 'backend',
+    });
+
+    expect(blob.type).toContain('text/csv');
+
+    const text = await blob.text();
+    const lines = text.split('\n');
+    expect(lines[0]).toBe('# Soter recipient import validation report');
+    expect(lines).toContain('# campaignId: camp-9');
+    expect(lines).toContain('# reportId: rpt-test');
+    expect(lines).toContain('# source: backend');
+    expect(lines).toContain('# errorRows: 1');
+    expect(lines).toContain('rowNumber,status,severity,field,message,name,wallet,phone');
+    expect(lines).toContain('1,valid,,,,Alice,GABCDEFGHIJKLM,123');
+    expect(lines).toContain('2,error,error,wallet,Wallet address is required.,Bob,,456');
+  });
+
+  it('escapes values containing commas and quotes', async () => {
+    const messy: ValidationResult = {
+      summary: { totalRows: 1, validRows: 0, warningRows: 1, errorRows: 0 },
+      rows: [
+        {
+          rowNumber: 1,
+          status: 'warning',
+          values: { name: 'Ada, "The Compiler"', wallet: 'GCAB', phone: '123' },
+          messages: [{ severity: 'warning', field: 'wallet', message: 'Wallet address looks shorter than expected.' }],
+        },
+      ],
+    };
+
+    const blob = buildStructuredValidationReport(messy, {
+      campaignId: 'camp-1',
+      generatedAt: '2026-07-25T00:00:00.000Z',
+      source: 'local',
+    });
+
+    const text = await blob.text();
+    expect(text).toContain('"Ada, ""The Compiler"""');
+  });
+});
+
+// ── downloadImportReport ───────────────────────────────────────────────────
+
+describe('downloadImportReport', () => {
+  const campaignId = 'camp-1';
+  const fallback: ValidationResult = {
+    summary: { totalRows: 1, validRows: 1, warningRows: 0, errorRows: 0 },
+    rows: [{ rowNumber: 1, status: 'valid', values: { name: 'Alice' }, messages: [] }],
+  };
+
+  beforeEach(() => {
+    mockFetchClient.mockReset();
+  });
+
+  it('returns the backend-generated report when the endpoint responds', async () => {
+    const backendCsv = '# source: backend\nrowNumber,status,severity,field,message\n1,valid,,,\n';
+    mockFetchClient.mockResolvedValue(
+      new Response(backendCsv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'X-Report-Id': 'rpt-123',
+          'X-Report-Generated-At': '2026-07-25T09:00:00.000Z',
+        },
+      }),
+    );
+
+    const report = await downloadImportReport(campaignId, makeFile('name,wallet,phone\nAlice,GC,1'), fallback);
+
+    expect(report.meta.source).toBe('backend');
+    expect(report.meta.reportId).toBe('rpt-123');
+    expect(report.meta.generatedAt).toBe('2026-07-25T09:00:00.000Z');
+    expect(report.filename).toBe('recipient-import-report-camp-1.csv');
+    await expect(report.blob.text()).resolves.toContain('# source: backend');
+
+    const [calledUrl, calledInit] = mockFetchClient.mock.calls[0];
+    expect(String(calledUrl)).toContain('/recipients/import/report');
+    expect(calledInit.method).toBe('POST');
+    expect(calledInit.body).toBeInstanceOf(FormData);
+  });
+
+  it('falls back to a locally generated structured report when the backend fails', async () => {
+    mockFetchClient.mockRejectedValue(new Error('Network error'));
+
+    const report = await downloadImportReport(campaignId, makeFile('name,wallet,phone\nAlice,GC,1'), fallback);
+
+    expect(report.meta.source).toBe('local');
+    const text = await report.blob.text();
+    expect(text).toContain('# source: local');
+    expect(text).toContain('# campaignId: camp-1');
+    expect(text).toContain('rowNumber,status,severity,field,message,name,wallet,phone');
+  });
+
+  it('falls back to the local report when the backend returns a non-OK status', async () => {
+    mockFetchClient.mockResolvedValue(new Response('nope', { status: 500 }));
+
+    const report = await downloadImportReport(campaignId, makeFile('name,wallet,phone\nAlice,GC,1'), fallback);
+    expect(report.meta.source).toBe('local');
+  });
+
+  it('falls back to the local report when the backend responds with an empty body', async () => {
+    mockFetchClient.mockResolvedValue(new Response('', { status: 200 }));
+
+    const report = await downloadImportReport(campaignId, makeFile('name,wallet,phone\nAlice,GC,1'), fallback);
+    expect(report.meta.source).toBe('local');
+  });
+});
+
+// ── report windowing constants ─────────────────────────────────────────────
+
+describe('report windowing', () => {
+  it('exposes a sane initial page size for large reports', () => {
+    expect(INITIAL_REPORT_PAGE_SIZE).toBeGreaterThan(0);
+    expect(INITIAL_REPORT_PAGE_SIZE).toBeLessThanOrEqual(100);
   });
 });

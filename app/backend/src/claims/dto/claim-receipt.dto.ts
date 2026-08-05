@@ -1,5 +1,19 @@
 import { ApiProperty } from '@nestjs/swagger';
 
+export class ClaimTimelineEntryDto {
+  @ApiProperty({ description: 'Status the claim transitioned to' })
+  status: string;
+
+  @ApiProperty({ description: 'ISO timestamp of the status change' })
+  timestamp: string;
+
+  @ApiProperty({ description: 'Transaction hash if this was an on-chain action', required: false })
+  transactionHash?: string;
+
+  @ApiProperty({ description: 'Explorer URL for the transaction', required: false })
+  explorerUrl?: string;
+}
+
 export class ClaimReceiptDto {
   @ApiProperty({
     description: 'Unique claim identifier',
@@ -58,6 +72,23 @@ export class ClaimReceiptDto {
     required: false,
   })
   recipientRef?: string;
+
+  @ApiProperty({
+    description: 'On-chain transaction hash (set after disbursement)',
+    example: 'd54a7f5e7c7e0f6d9d3c9f9a5e2b1c8d4e7f0a9b8c7d6e5f4a3b2c1d0e9f8a7b',
+    required: false,
+  })
+  transactionHash?: string;
+
+  @ApiProperty({
+    description: 'Blockchain explorer link for the transaction',
+    example: 'https://stellar.expert/explorer/testnet/tx/d54a7f5e...',
+    required: false,
+  })
+  explorerLink?: string;
+
+  @ApiProperty({ description: 'Status change timeline', type: [ClaimTimelineEntryDto] })
+  timeline: ClaimTimelineEntryDto[];
 }
 
 export class ClaimShareResponseDto {

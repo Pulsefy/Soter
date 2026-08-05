@@ -1,14 +1,18 @@
-import { Controller, Get, Version } from '@nestjs/common';
+import { Controller, Get, Version, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiOkResponse } from '@nestjs/swagger';
 import { AppService } from './app.service';
 import { API_VERSIONS } from './common/constants/api-version.constants';
 import { Public } from './common/decorators/public.decorator';
 import { Deprecated } from './common/decorators/deprecated.decorator';
+import { ReleaseConfigService } from './release-config.service';
 
 @ApiTags('App')
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  constructor(
+    private readonly appService: AppService,
+    private readonly releaseConfigService: ReleaseConfigService,
+  ) {}
 
   @Get()
   @Version(API_VERSIONS.V1)
@@ -54,5 +58,17 @@ export class AppController {
   })
   deprecatedTest() {
     return { message: 'This endpoint is deprecated' };
+  }
+
+  @Public()
+  @Get('config/version')
+  @Version(API_VERSIONS.V1)
+  @ApiOperation({
+    summary: 'Get platform-specific release configuration',
+    description:
+      'Returns version info, release notes, and force-upgrade requirements for the given platform.',
+  })
+  getConfigVersion(@Query('platform') platform = 'web') {
+    return this.releaseConfigService.getConfig(platform);
   }
 }

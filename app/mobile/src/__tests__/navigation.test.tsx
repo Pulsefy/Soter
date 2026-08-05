@@ -56,6 +56,8 @@ jest.mock('../services/aidApi', () => ({
     status: 'verified',
     claimId: 'claim-aid-1',
     createdAt: '2026-01-01T00:00:00Z',
+    verifiedAt: '2026-01-01T01:00:00Z',
+    approvalTransactionHash: 'a'.repeat(64),
   }),
   getMockAidDetails: jest.fn(),
 }));
@@ -153,5 +155,21 @@ describe('Navigation: Home -> AidOverview -> AidDetails', () => {
     await waitFor(() => {
       expect(getByText(/Your proof of claim completion/i)).toBeTruthy();
     });
+  });
+
+  it('shows claim status timeline with pending onchain milestones and hash actions', async () => {
+    const { getByText } = render(
+      <TestNavigator initialRoute="AidDetails" initialParams={{ aidId: 'aid-1' }} />,
+    );
+
+    await waitFor(() => expect(getByText('Status Timeline')).toBeTruthy());
+
+    expect(getByText('Verification')).toBeTruthy();
+    expect(getByText('Approval')).toBeTruthy();
+    expect(getByText('Claim')).toBeTruthy();
+    expect(getByText('Disbursement')).toBeTruthy();
+    expect(getByText(/Explorer aaaaaaaa...aaaaaa/i)).toBeTruthy();
+    expect(getByText('Copy hash')).toBeTruthy();
+    expect(getByText('Pending onchain update')).toBeTruthy();
   });
 });

@@ -4,6 +4,7 @@ Tests for the standardized error response envelope (Issue #244).
 Every error response must conform to:
   {"error": {"code": str, "message": str, "details": any|null}}
 """
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -18,7 +19,9 @@ def assert_envelope(data: dict, expected_code: str):
     assert "error" in data, f"Missing 'error' key: {data}"
     err = data["error"]
     assert "code" in err and "message" in err, f"Malformed error detail: {err}"
-    assert err["code"] == expected_code, f"Expected code {expected_code!r}, got {err['code']!r}"
+    assert (
+        err["code"] == expected_code
+    ), f"Expected code {expected_code!r}, got {err['code']!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -43,14 +46,20 @@ class TestValidationError:
         # /v1/ai/inference expects {"type": ...}; send empty body
         r = client.post("/v1/ai/inference", json={})
         # type has a default so send truly invalid payload
-        r = client.post("/v1/ai/inference", content="not-json",
-                        headers={"Content-Type": "application/json"})
+        r = client.post(
+            "/v1/ai/inference",
+            content="not-json",
+            headers={"Content-Type": "application/json"},
+        )
         assert r.status_code == 422
         assert_envelope(r.json(), "VALIDATION_ERROR")
 
     def test_422_details_present(self):
-        r = client.post("/v1/ai/inference", content="not-json",
-                        headers={"Content-Type": "application/json"})
+        r = client.post(
+            "/v1/ai/inference",
+            content="not-json",
+            headers={"Content-Type": "application/json"},
+        )
         assert r.json()["error"]["details"] is not None
 
 

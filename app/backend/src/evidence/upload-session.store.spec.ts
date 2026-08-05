@@ -106,6 +106,7 @@ describe('UploadSessionStore', () => {
 
       const result = await store.createSession(
         {
+          orgId: null,
           ownerId: 'owner-1',
           fileName: 'evidence.txt',
           mimeType: 'text/plain',

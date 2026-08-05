@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
+ethnum = "1.5.3"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

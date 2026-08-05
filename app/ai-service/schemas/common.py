@@ -12,10 +12,7 @@ class AnchorMetadata(BaseModel):
     model_config = {
         "json_schema_extra": {
             "examples": [
-                {
-                    "campaign_ref": "campaign-2024-001",
-                    "claim_id": "claim-abc123"
-                }
+                {"campaign_ref": "campaign-2024-001", "claim_id": "claim-abc123"}
             ]
         }
     }

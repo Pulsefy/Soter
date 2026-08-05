@@ -54,7 +54,7 @@ export interface NetworkGuardConfig {
   showRemediationUI: boolean;
 }
 
-const DEFAULT_CONFIG: NetworkGuardConfig = {
+export const DEFAULT_CONFIG: NetworkGuardConfig = {
   requiredChainId: 'testnet',
   allowedNetworks: ['TESTNET'],
   autoReconnect: false,

@@ -77,7 +77,7 @@ export class SeedService {
           description: DEMO_TENANT_SEED.description,
           region: DEMO_TENANT_SEED.region,
           isTenantMarker: true,
-        } as Prisma.InputJsonValue,
+        },
       },
     });
 

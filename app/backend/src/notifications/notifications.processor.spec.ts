@@ -13,7 +13,11 @@ describe('NotificationProcessor', () => {
       update: jest.Mock;
     };
   };
-  let metricsMock: { incrementCallbackFailure: jest.Mock };
+  let metricsMock: {
+  incrementCallbackFailure: jest.Mock;
+  incrementNotificationDeliveryAttempt: jest.Mock;
+  incrementNotificationDeliveryFailureByCategory: jest.Mock;
+};
 
   const makeJob = (
     overrides: Partial<{
@@ -42,7 +46,11 @@ describe('NotificationProcessor', () => {
         update: jest.fn().mockResolvedValue({}),
       },
     };
-    metricsMock = { incrementCallbackFailure: jest.fn() };
+    metricsMock = {
+  incrementCallbackFailure: jest.fn(),
+  incrementNotificationDeliveryAttempt: jest.fn(),
+  incrementNotificationDeliveryFailureByCategory: jest.fn(),
+};
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -155,7 +163,7 @@ describe('NotificationProcessor', () => {
   describe('onFailed', () => {
     it('should update outbox record to failed with retryCount increment and lastError when outboxId is present and exhausted', async () => {
       const job = makeJob({ outboxId: 'outbox-abc' });
-      job.opts = { attempts: 1 } as any;
+      job.opts = { attempts: 1 };
       job.attemptsMade = 1;
       const error = new Error('Something went wrong');
 
@@ -178,7 +186,7 @@ describe('NotificationProcessor', () => {
 
     it('should keep status enqueued while retries remain and still increment retryCount', async () => {
       const job = makeJob({ outboxId: 'outbox-abc' });
-      job.opts = { attempts: 3 } as any;
+      job.opts = { attempts: 3 };
       job.attemptsMade = 1;
       const error = new Error('Temporary failure');
 

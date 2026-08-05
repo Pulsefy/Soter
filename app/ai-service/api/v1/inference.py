@@ -22,17 +22,26 @@ router = APIRouter(tags=["inference"])
 
 class ContractMetadata(BaseModel):
     """Contract-aware metadata for verification results."""
+
     campaign_id: str = Field(..., description="Campaign identifier (UUID)")
     claim_id: str = Field(..., description="Claim identifier (UUID)")
-    package_id: str = Field(..., description="Package identifier for on-chain anchoring")
-    transaction_hash: Optional[str] = Field(None, description="On-chain transaction hash")
+    package_id: str = Field(
+        ..., description="Package identifier for on-chain anchoring"
+    )
+    transaction_hash: Optional[str] = Field(
+        None, description="On-chain transaction hash"
+    )
     contract_address: Optional[str] = Field(None, description="Smart contract address")
-    network: Optional[str] = Field("testnet", description="Stellar network (testnet/mainnet)")
+    network: Optional[str] = Field(
+        "testnet", description="Stellar network (testnet/mainnet)"
+    )
     chain_id: Optional[str] = Field("testnet", description="Chain identifier")
     version: Optional[str] = Field("1.0.0", description="Metadata version")
-    timestamp: Optional[datetime] = Field(default_factory=datetime.utcnow, description="Metadata timestamp")
+    timestamp: Optional[datetime] = Field(
+        default_factory=datetime.utcnow, description="Metadata timestamp"
+    )
 
-    @validator('campaign_id', 'claim_id')
+    @validator("campaign_id", "claim_id")
     def validate_uuid(cls, v):
         """Validate that the ID is a valid UUID."""
         try:
@@ -40,22 +49,22 @@ class ContractMetadata(BaseModel):
             return v
         except ValueError:
             raise ValueError(f"Invalid UUID: {v}")
-    
-    @validator('network')
+
+    @validator("network")
     def validate_network(cls, v):
         """Validate network is one of the allowed values."""
-        if v not in ['testnet', 'mainnet', 'public']:
+        if v not in ["testnet", "mainnet", "public"]:
             raise ValueError(f"network must be one of: testnet, mainnet, public")
         return v
 
 
 class InferenceRequest(BaseModel):
     """Request model for AI inference endpoints."""
-    
+
     type: str = "inference"
     data: Optional[Dict[str, Any]] = None
     priority: Optional[str] = "normal"
-    
+
     # Contract-aware metadata fields
     campaign_id: Optional[str] = None
     claim_id: Optional[str] = None
@@ -63,7 +72,7 @@ class InferenceRequest(BaseModel):
     transaction_hash: Optional[str] = None
     contract_address: Optional[str] = None
     network: Optional[str] = "testnet"
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -72,14 +81,14 @@ class InferenceRequest(BaseModel):
                 "campaign_id": "123e4567-e89b-12d3-a456-426614174000",
                 "claim_id": "123e4567-e89b-12d3-a456-426614174001",
                 "package_id": "pkg_abc123def",
-                "network": "testnet"
+                "network": "testnet",
             }
         }
 
 
 class TaskStatusResponse(BaseModel):
     """Response model for task status."""
-    
+
     task_id: str
     status: str
     result: Optional[Any] = None
@@ -94,15 +103,15 @@ async def create_inference_task(
 ):
     """
     Create a background task for heavy AI inference.
-    
+
     Offloads time-consuming AI tasks to background workers. Use the
     returned ``task_id`` to poll for results via ``GET /ai/status/{task_id}``.
-    
+
     Contract-aware metadata fields are used to anchor verification results
     to on-chain events during Testnet demos.
     """
     logger.info(f"Creating inference task of type: {request.type}")
-    
+
     # Validate metadata if provided
     metadata_errors = []
     if request.campaign_id:
@@ -110,20 +119,20 @@ async def create_inference_task(
             uuid.UUID(request.campaign_id)
         except ValueError:
             metadata_errors.append(f"Invalid campaign_id: {request.campaign_id}")
-    
+
     if request.claim_id:
         try:
             uuid.UUID(request.claim_id)
         except ValueError:
             metadata_errors.append(f"Invalid claim_id: {request.claim_id}")
-    
-    if request.package_id and not request.package_id.startswith('pkg_'):
+
+    if request.package_id and not request.package_id.startswith("pkg_"):
         metadata_errors.append(f"Invalid package_id format: {request.package_id}")
-    
+
     if metadata_errors:
         raise HTTPException(
             status_code=400,
-            detail=f"Metadata validation failed: {'; '.join(metadata_errors)}"
+            detail=f"Metadata validation failed: {'; '.join(metadata_errors)}",
         )
 
     try:
@@ -132,19 +141,20 @@ async def create_inference_task(
             "data": request.data or {},
             "priority": request.priority or "normal",
         }
-        
+
         # Add metadata if provided
         if request.campaign_id:
             payload["metadata"] = {
                 "campaign_id": request.campaign_id,
                 "claim_id": request.claim_id,
-                "package_id": request.package_id or f"pkg_{request.claim_id[:8] if request.claim_id else 'unknown'}",
+                "package_id": request.package_id
+                or f"pkg_{request.claim_id[:8] if request.claim_id else 'unknown'}",
                 "transaction_hash": request.transaction_hash,
                 "contract_address": request.contract_address,
                 "network": request.network or "testnet",
                 "timestamp": datetime.utcnow().isoformat(),
             }
-        
+
         task_id = tasks.create_task(
             task_type=request.type,
             payload=payload,
@@ -170,10 +180,10 @@ async def create_inference_task(
 async def get_task_status(task_id: str):
     """
     Get the current status of a background inference task.
-    
+
     Poll this endpoint after creating a task. Possible status values:
     ``pending``, ``processing``, ``completed``, ``failed``.
-    
+
     When completed, the result will include contract-aware metadata
     that can be anchored to on-chain events.
     """
@@ -184,7 +194,7 @@ async def get_task_status(task_id: str):
 async def get_job_status(task_id: str):
     """
     Get the current status of a queued AI job.
-    
+
     This is the canonical poll endpoint for backend clients. Possible
     status values: ``pending``, ``processing``, ``retrying``, ``completed``,
     ``failed``, ``cancelled``.
@@ -201,13 +211,17 @@ async def _get_task_status(task_id: str):
 
         if status_info.get("status") == "not_found":
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-        
+
         # Ensure metadata is included in response
         if status_info.get("result") and isinstance(status_info["result"], dict):
             # If result has metadata, ensure it's properly formatted
-            if "metadata" not in status_info["result"] and "campaign_id" in status_info.get("payload", {}):
+            if "metadata" not in status_info[
+                "result"
+            ] and "campaign_id" in status_info.get("payload", {}):
                 # Reconstruct metadata from payload
-                status_info["result"]["metadata"] = status_info["payload"].get("metadata")
+                status_info["result"]["metadata"] = status_info["payload"].get(
+                    "metadata"
+                )
 
         return status_info
 
@@ -226,12 +240,17 @@ async def cancel_task(task_id: str):
     logger.info(f"Attempting to cancel task: {task_id}")
 
     try:
-        from celery.result import AsyncResult
+        import metrics
 
-        result = AsyncResult(task_id, app=tasks.get_celery_app())
-        result.revoke(terminate=True)
+        # Get task status to identify task type (if available) before cancelling
+        status_info = tasks.get_task_status(task_id)
+        task_type = "unknown"
+        if status_info.get("status") != "not_found":
+            # For simplicity, default to unknown if we can't determine it
+            task_type = "inference"
 
-        tasks.update_task_status(task_id, "cancelled")
+        tasks.cancel_task(task_id)
+        metrics.JOB_CANCELLED_TOTAL.labels(task_type=task_type).inc()
 
         return {
             "success": True,
@@ -243,3 +262,31 @@ async def cancel_task(task_id: str):
     except Exception as e:
         logger.error(f"Failed to cancel task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to cancel task: {str(e)}")
+
+
+@router.post("/ai/task/{task_id}/expire")
+async def expire_task(task_id: str):
+    """Expire a pending or in-progress inference task."""
+    logger.info(f"Attempting to expire task: {task_id}")
+
+    try:
+        import metrics
+
+        status_info = tasks.get_task_status(task_id)
+        task_type = "unknown"
+        if status_info.get("status") != "not_found":
+            task_type = "inference"
+
+        tasks.expire_task(task_id)
+        metrics.JOB_EXPIRED_TOTAL.labels(task_type=task_type).inc()
+
+        return {
+            "success": True,
+            "task_id": task_id,
+            "status": "expired",
+            "message": "Task has been expired",
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to expire task: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to expire task: {str(e)}")
