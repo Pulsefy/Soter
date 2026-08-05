@@ -1,5 +1,6 @@
-import React, { PropsWithChildren, createContext, useContext, useEffect, useState } from 'react';
+import React, { PropsWithChildren, createContext, useContext, useEffect, useState, useRef } from 'react';
 import * as ExpoLinking from 'expo-linking';
+import { useNotification } from './NotificationContext';
 import {
   ConnectedWalletSession,
   WalletConnectionStatus,
@@ -78,6 +79,11 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
   const [isOnCorrectNetwork, setIsOnCorrectNetwork] = useState<boolean>(false);
 
   const networkStatus = useNetworkStatus();
+  
+  // NEW: Notification syncing
+  const { syncToken, revokeToken } = useNotification();
+  // Use a ref to track if we've synced the token for the current connected session to avoid loops
+  const hasSyncedTokenRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -147,7 +153,13 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
       setWalletNetworkInfo(networkInfo);
       setIsOnCorrectNetwork(networkInfo.isKnown && networkInfo.isTestnet);
     }
-  }, [chainIds, status, networkStatus]);
+    
+    // Auto-sync token if publicKey changes and we haven't synced yet
+    if (status === 'connected' && publicKey && !hasSyncedTokenRef.current) {
+      hasSyncedTokenRef.current = true;
+      void syncToken(publicKey);
+    }
+  }, [chainIds, status, networkStatus, publicKey, syncToken]);
 
   const resetWalletState = () => {
     setTopic(null);
@@ -209,6 +221,13 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
 
     try {
       await disconnectWalletSession(activeTopic);
+      
+      // Revoke push token for this wallet
+      if (idleState.publicKey) {
+         void revokeToken(idleState.publicKey);
+      } else if (publicKey) {
+         void revokeToken(publicKey);
+      }
     } catch (disconnectError) {
       setError(getErrorMessage(disconnectError));
       setStatus('error');

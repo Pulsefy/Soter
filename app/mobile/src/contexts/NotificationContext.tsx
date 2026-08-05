@@ -32,6 +32,12 @@ interface NotificationContextValue {
   consumeDeepLink: () => void;
   /** Manually request notification permission (e.g. from Settings) */
   requestPermission: () => Promise<boolean>;
+  /** Sync the current token to the backend for the given wallet */
+  syncToken: (walletPublicKey: string) => Promise<void>;
+  /** Revoke the current token from the backend (on sign-out) */
+  revokeToken: (walletPublicKey: string) => Promise<void>;
+  /** Any error that occurred during the last sync */
+  syncError: string | null;
 }
 
 const NotificationContext = createContext<NotificationContextValue>({
@@ -40,6 +46,9 @@ const NotificationContext = createContext<NotificationContextValue>({
   pendingDeepLink: null,
   consumeDeepLink: () => {},
   requestPermission: async () => false,
+  syncToken: async () => {},
+  revokeToken: async () => {},
+  syncError: null,
 });
 
 const PROCESSED_IDS_KEY = 'SOTER_PROCESSED_NOTIFICATION_IDS';
@@ -74,6 +83,7 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [pendingDeepLink, setPendingDeepLink] = useState<DeepLinkTarget | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Keep refs so listeners always see the latest navigation ref
   const navigationRef = useRef<any>(null);
@@ -91,7 +101,6 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
       setExpoPushToken(token);
       if (token) {
         console.log('[Notifications] Expo push token:', token);
-        // TODO: send token to backend for per-user push targeting
       }
     }
   }, []);
@@ -201,6 +210,40 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
     return granted;
   }, []);
 
+  const syncToken = useCallback(async (walletPublicKey: string) => {
+    if (!expoPushToken) return;
+    try {
+      setSyncError(null);
+      const { registerDeviceToken } = await import('../services/deviceTokenApi');
+      const { Platform } = await import('react-native');
+      const { default: DeviceInfo } = await import('expo-device');
+      const Constants = (await import('expo-constants')).default;
+
+      await registerDeviceToken({
+        platform: Platform.OS === 'ios' ? 'ios' : 'android',
+        deviceId: DeviceInfo.osBuildId || DeviceInfo.osInternalBuildId || 'unknown',
+        token: expoPushToken,
+        deviceName: DeviceInfo.deviceName || undefined,
+        appVersion: Constants.expoConfig?.version || '1.0.0',
+      }, walletPublicKey);
+      console.log('[Notifications] Token synced to backend for', walletPublicKey);
+    } catch (error) {
+      console.error('[Notifications] Failed to sync token:', error);
+      setSyncError(error instanceof Error ? error.message : 'Unknown sync error');
+    }
+  }, [expoPushToken]);
+
+  const revokeToken = useCallback(async (walletPublicKey: string) => {
+    if (!expoPushToken) return;
+    try {
+      const { revokeDeviceTokenByToken } = await import('../services/deviceTokenApi');
+      await revokeDeviceTokenByToken(expoPushToken, walletPublicKey);
+      console.log('[Notifications] Token revoked on backend for', walletPublicKey);
+    } catch (error) {
+      console.error('[Notifications] Failed to revoke token:', error);
+    }
+  }, [expoPushToken]);
+
   const value = useMemo<NotificationContextValue>(
     () => ({
       permissionGranted,
@@ -208,8 +251,11 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
       pendingDeepLink,
       consumeDeepLink,
       requestPermission,
+      syncToken,
+      revokeToken,
+      syncError,
     }),
-    [permissionGranted, expoPushToken, pendingDeepLink, consumeDeepLink, requestPermission],
+    [permissionGranted, expoPushToken, pendingDeepLink, consumeDeepLink, requestPermission, syncToken, revokeToken, syncError],
   );
 
   return (

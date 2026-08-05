@@ -22,6 +22,7 @@ import { ApiResponseDto } from '../common/dto/api-response.dto';
 import { DeviceTokensService } from './device-tokens.service';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
 import { RevokeDeviceTokenDto } from './dto/revoke-device-token.dto';
+import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('Device Tokens')
 @ApiBearerAuth('JWT-auth')
@@ -37,13 +38,17 @@ export class DeviceTokensController {
   })
   @ApiCreatedResponse({ description: 'Device token registered or updated.' })
   @ApiBadRequestResponse({ description: 'Invalid payload.' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid credentials.' })
+  @Public()
   async register(@Body() dto: RegisterDeviceTokenDto, @Req() req: Request) {
+    const headerUserId = req.headers['x-user-id'] as string;
     const actor = {
-      userId: req.user?.id,
+      userId: req.user?.id || headerUserId,
       orgId: req.user?.orgId as string | undefined,
       role: req.user?.role as string | undefined,
     };
+    if (!actor.userId) {
+      return ApiResponseDto.badRequest('Missing user identity (JWT or x-user-id)');
+    }
     const token = await this.deviceTokens.register(dto, actor);
     return ApiResponseDto.ok(token, 'Device token registered');
   }
@@ -102,6 +107,33 @@ export class DeviceTokensController {
       role: req.user?.role as string | undefined,
     };
     const token = await this.deviceTokens.revoke(id, dto.reason, actor);
+    return ApiResponseDto.ok(token, 'Device token revoked');
+  }
+
+  @Post('revoke-by-token')
+  @ApiOperation({
+    summary: 'Revoke a device token using the token string',
+    description: 'Revokes a device notification token (soft delete) for mobile clients.',
+  })
+  @ApiOkResponse({ description: 'Device token revoked.' })
+  @ApiBadRequestResponse({
+    description: 'Cannot revoke already revoked token.',
+  })
+  @Public()
+  async revokeByToken(
+    @Body() dto: { token: string; reason?: string },
+    @Req() req: Request,
+  ) {
+    const headerUserId = req.headers['x-user-id'] as string;
+    const actor = {
+      userId: req.user?.id || headerUserId,
+      orgId: req.user?.orgId as string | undefined,
+      role: req.user?.role as string | undefined,
+    };
+    if (!actor.userId) {
+      return ApiResponseDto.badRequest('Missing user identity (JWT or x-user-id)');
+    }
+    const token = await this.deviceTokens.revokeByToken(dto.token, dto.reason, actor);
     return ApiResponseDto.ok(token, 'Device token revoked');
   }
 
