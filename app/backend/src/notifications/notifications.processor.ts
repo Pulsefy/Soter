@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 import { DlqService } from '../jobs/dlq.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import { classifyNotificationFailure } from './notification-failure-classifier';
 
 @Processor('notifications', {
   concurrency: parseInt(process.env.QUEUE_CONCURRENCY || '5'),
@@ -104,6 +105,32 @@ export class NotificationProcessor extends WorkerHost {
         `Failed to update outbox record ${job.data.outboxId} to sent: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+
+    this.metricsService.incrementNotificationDeliveryAttempt(
+      job.data.type,
+      'success',
+    );
+
+    try {
+      const startedAt = job.processedOn ? new Date(job.processedOn) : new Date();
+      const completedAt = new Date();
+      await this.prisma.notificationDeliveryAttempt.create({
+        data: {
+          outboxId: job.data.outboxId,
+          attemptNumber: job.attemptsMade + 1,
+          outcome: 'success',
+          startedAt,
+          completedAt,
+          durationMs: completedAt.getTime() - startedAt.getTime(),
+        },
+      });
+    } catch (err) {
+      // Swallow — worker events must not throw. The outbox status update
+      // above is the source of truth; this is best-effort history.
+      this.logger.error(
+        `Failed to record delivery attempt for outbox ${job.data.outboxId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   @OnWorkerEvent('failed')
@@ -147,6 +174,39 @@ export class NotificationProcessor extends WorkerHost {
       // Swallow — worker events must not throw
       this.logger.error(
         `Failed to update outbox record ${job.data.outboxId} to ${status}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const failureCategory = classifyNotificationFailure(error);
+    this.metricsService.incrementNotificationDeliveryAttempt(
+      job.data.type,
+      'failed',
+    );
+    this.metricsService.incrementNotificationDeliveryFailureByCategory(
+      job.data.type,
+      failureCategory,
+    );
+
+    try {
+      const startedAt = job.processedOn ? new Date(job.processedOn) : new Date();
+      const completedAt = new Date();
+      await this.prisma.notificationDeliveryAttempt.create({
+        data: {
+          outboxId: job.data.outboxId,
+          attemptNumber: job.attemptsMade,
+          outcome: 'failed',
+          failureCategory,
+          errorMessage: error.message,
+          startedAt,
+          completedAt,
+          durationMs: completedAt.getTime() - startedAt.getTime(),
+        },
+      });
+    } catch (err) {
+      // Swallow — worker events must not throw. The outbox status update
+      // above is the source of truth; this is best-effort history.
+      this.logger.error(
+        `Failed to record delivery attempt for outbox ${job.data.outboxId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

@@ -41,6 +41,12 @@ export class MetricsService {
     public webhookDeliveryDuration: Histogram<string>,
     @InjectMetric('callback_failures_total')
     public callbackFailuresCounter: Counter<string>,
+
+    // Notification Delivery Metrics (issue #716)
+    @InjectMetric('notification_delivery_attempts_total')
+    public notificationDeliveryAttemptsCounter: Counter<string>,
+    @InjectMetric('notification_delivery_failures_by_category_total')
+    public notificationDeliveryFailuresByCategoryCounter: Counter<string>,
     @InjectMetric('error_rate_total')
     public errorRateCounter: Counter<string>,
     @InjectMetric('analytics_cache_hits_total')
@@ -252,6 +258,33 @@ export class MetricsService {
     this.callbackFailuresCounter.inc({
       callback_type: callbackType,
       reason: reason.slice(0, 80),
+    });
+  }
+
+  /**
+   * Records a notification delivery attempt outcome (issue #716).
+   * Call once per attempt, for both success and failure.
+   */
+  incrementNotificationDeliveryAttempt(
+    type: string,
+    outcome: 'success' | 'failed',
+  ): void {
+    this.notificationDeliveryAttemptsCounter.inc({ type, outcome });
+  }
+
+  /**
+   * Records a failed notification delivery attempt's bounded failure
+   * category (see notification-failure-classifier.ts). Deliberately does
+   * NOT accept raw error text as a label, unlike incrementCallbackFailure
+   * above — category is a small fixed set, so this stays low-cardinality.
+   */
+  incrementNotificationDeliveryFailureByCategory(
+    type: string,
+    failureCategory: string,
+  ): void {
+    this.notificationDeliveryFailuresByCategoryCounter.inc({
+      type,
+      failure_category: failureCategory,
     });
   }
 

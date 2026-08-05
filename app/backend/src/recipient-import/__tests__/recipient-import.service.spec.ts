@@ -305,4 +305,37 @@ describe('RecipientImportService', () => {
       });
     });
   });
+
+  describe('generateReportCsv', () => {
+    it('should generate CSV report when job has errors', async () => {
+      (prismaService.importJob.findUnique as jest.Mock).mockResolvedValue({
+        id: 'import-job-1',
+        errors: JSON.stringify([
+          { row: 2, field: 'amount', message: 'Invalid amount', value: 'abc' },
+        ]),
+      });
+
+      const result = await service.generateReportCsv('import-job-1');
+      expect(result).toContain('row,field,message,value');
+      expect(result).toContain('2,"amount","Invalid amount","abc"');
+    });
+
+    it('should return no errors message when job has no errors', async () => {
+      (prismaService.importJob.findUnique as jest.Mock).mockResolvedValue({
+        id: 'import-job-1',
+        errors: null,
+      });
+
+      const result = await service.generateReportCsv('import-job-1');
+      expect(result).toContain('No errors found for this import.');
+    });
+
+    it('should throw NotFoundException if job does not exist', async () => {
+      (prismaService.importJob.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(service.generateReportCsv('non-existent')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
 });

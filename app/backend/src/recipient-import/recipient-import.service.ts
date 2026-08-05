@@ -302,4 +302,41 @@ export class RecipientImportService {
   getBatchSize(): number {
     return BATCH_SIZE;
   }
+
+  async generateReportCsv(jobId: string): Promise<string> {
+    const job = await this.prisma.importJob.findUnique({
+      where: { id: jobId },
+    });
+
+    if (!job) {
+      throw new NotFoundException(`Import job ${jobId} not found`);
+    }
+
+    let errors: ImportError[] = [];
+    if (job.errors) {
+      try {
+        errors = JSON.parse(job.errors) as ImportError[];
+      } catch {
+        errors = [];
+      }
+    }
+
+    if (errors.length === 0) {
+      return 'row,field,message,value\nNo errors found for this import.';
+    }
+
+    const header = 'row,field,message,value\n';
+
+    const rows = errors
+      .map(err => {
+        const rowNum = err.row ?? '';
+        const field = (err.field ?? '').replace(/"/g, '""');
+        const message = (err.message ?? '').replace(/"/g, '""');
+        const value = (err.value ?? '').replace(/"/g, '""');
+        return `${rowNum},"${field}","${message}","${value}"`;
+      })
+      .join('\n');
+
+    return header + rows;
+  }
 }

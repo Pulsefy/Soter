@@ -20,6 +20,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { RequestCorrelationMiddleware } from './middleware/request-correlation.middleware';
 import { SecurityModule } from './common/security/security.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { RecipientsModule } from './recipients/recipients.module';
 import { APP_GUARD } from '@nestjs/core';
 import { ApiKeyGuard } from './common/guards/api-key.guard';
 import { RolesGuard } from './auth/roles.guard';
@@ -112,6 +113,7 @@ import { validateNetworkConfig } from './config/network-config.validation';
     SecurityModule,
     TestErrorModule,
     CampaignsModule,
+    RecipientsModule,
     ObservabilityModule,
     ClaimsModule,
     NotificationsModule,

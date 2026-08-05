@@ -97,6 +97,18 @@ export const metricsProviders = [
     labelNames: ['callback_type', 'reason'],
   }),
 
+  // Notification Delivery Metrics (issue #716)
+  makeCounterProvider({
+    name: 'notification_delivery_attempts_total',
+    help: 'Total number of notification delivery attempts, labelled by type and outcome',
+    labelNames: ['type', 'outcome'],
+  }),
+  makeCounterProvider({
+    name: 'notification_delivery_failures_by_category_total',
+    help: 'Total number of failed notification delivery attempts, labelled by type and a bounded failure category (not raw error text)',
+    labelNames: ['type', 'failure_category'],
+  }),
+
   // Error Rate Metrics
   makeCounterProvider({
     name: 'error_rate_total',

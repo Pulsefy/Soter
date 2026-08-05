@@ -162,6 +162,22 @@ describe('ApiKeyGuard', () => {
     );
   });
 
+  it('should reject expired keys', async () => {
+    mockPrismaService.apiKey.findFirst.mockResolvedValue({
+      id: 'expired-1',
+      key: 'expired-key',
+      role: AppRole.operator,
+      scopes: '["read"]',
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+
+    const context = createContext({ 'x-api-key': 'expired-key' });
+    await expect(guard.canActivate(context as any)).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(mockPrismaService.apiKey.update).not.toHaveBeenCalled();
+  });
+
   it('should allow public routes without API key', async () => {
     mockReflector.getAllAndOverride.mockReturnValueOnce(true);
     const context = createContext({});
