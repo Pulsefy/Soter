@@ -570,9 +570,9 @@ def create_task(task_type: str, payload: Dict[str, Any]) -> str:
     task_id = str(uuid.uuid4())
 
     # Initialize task status
-    update_task_status(task_id, "pending")
-
-    ensure_queue_capacity()
+    update_task_status(task_id, 'pending')
+    
+    ensure_queue_capacity(priority=payload.get('priority'), task_type=task_type)
 
     try:
         # Queue the task using the lazy-registered task

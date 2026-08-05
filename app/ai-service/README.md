@@ -152,32 +152,27 @@ Response body:
 }
 ```
 
-### Dead-Letter Replay
+### Load Shedding
 
-Failed callback deliveries (webhook POSTs to the backend that keep 4xx/5xx-ing)
-and async jobs that exhaust their Celery retry budget are captured in an
-in-memory dead-letter queue instead of being silently dropped, so operators
-can recover from transient outages without manual patching.
+The service rejects incoming work with `503` and a standard error envelope
+(`{"error": {"code": "SERVICE_OVERLOADED", "message", "details"}}`) when it's
+under pressure, instead of queuing work it can't reliably finish:
 
-- **GET** `/v1/ai/dead-letter` - List dead-letter items (`?kind=callback|async_job&status=pending|succeeded|exhausted`)
-- **GET** `/v1/ai/dead-letter/{item_id}` - Get a single item, including its full replay audit log
-- **POST** `/v1/ai/dead-letter/{item_id}/replay` - Replay a single item (resend the callback, or re-run the async job)
+- **Memory** - shed when host RAM exceeds `LOAD_SHED_MEMORY_THRESHOLD_PERCENT` (default 90%).
+- **Queue depth, priority-aware** - shed when the Celery queue depth exceeds
+  `LOAD_SHED_MAX_CELERY_QUEUE_DEPTH` (default 100), scaled by the job's declared
+  `priority` (`low`/`normal`/`high`/`urgent`, on `POST /v1/ai/inference`): low-priority
+  backlog is shed at half the configured depth, urgent jobs tolerate 3x. Middleware
+  performs a cheap pre-check at the "normal" tier before the body is parsed; the
+  precise, priority-scaled check runs again right before a job is queued.
+- **Provider health** - shed when configured LLM providers (OpenAI/Groq) are all
+  unavailable, both for the synchronous `POST /ai/humanitarian/verify` route and
+  for async jobs queued via `/v1/ai/inference` with `"type": "humanitarian_verification"`,
+  so work that would fail once dequeued is rejected up front instead.
 
-All three endpoints require an `X-User-Role` header (`admin`, `operator`, or
-`reviewer` to read; `admin` or `operator` to replay). Replay is rate-limited
-two ways: a per-item cooldown (`DEAD_LETTER_REPLAY_COOLDOWN_SECONDS`, default
-10s) enforced between attempts on the same item, and a per-client request
-rate limit (`DEAD_LETTER_REPLAY_RATE_LIMIT`, default `10/minute`) on the
-route itself. Items that fail `DEAD_LETTER_MAX_REPLAY_ATTEMPTS` times
-(default 5) move to `exhausted` and stop accepting further replays.
-
-Every replay attempt - success or failure - is appended to the item's
-`audit_log` with the actor (`X-User-Id`), outcome, and error.
-
-```bash
-curl -X POST "http://localhost:8000/v1/ai/dead-letter/callback:task-123/replay" \
-  -H "X-User-Role: operator" -H "X-User-Id: alice"
-```
+Every shed response is counted in `requests_shed_total{reason,method,endpoint}`;
+queue-pressure sheds are also broken down in `queue_shed_by_priority_total{priority}`
+(both scraped at `GET /ai/metrics`).
 
 ## Project Structure
 

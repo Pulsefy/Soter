@@ -1,8 +1,18 @@
 """
-Load-shedding for the AI service under pressure (Issue #621).
+Load-shedding for the AI service under pressure (Issue #621, tuned for
+queue depth / provider health / job priority in Issue #777).
 
 Rejects incoming work with HTTP 503 and a standardized error envelope when
 system memory, the Celery queue, or configured LLM providers are overloaded.
+
+Priority awareness: the request-level middleware check (``evaluate_load_shed``)
+runs before the request body is parsed, so it only ever sees the default
+("normal") priority tier - it acts as a coarse, cheap outer gate. The
+precise, priority-aware decision happens in ``ensure_queue_capacity``, called
+from ``tasks.create_task`` once the job's declared ``priority`` and
+``task_type`` are known. Higher-priority jobs tolerate a deeper queue before
+being shed; lower-priority jobs are shed sooner so backlog pressure is felt
+by low-value work first.
 """
 
 import logging
@@ -28,14 +38,46 @@ REASON_MESSAGES = {
     "provider_down": "Service temporarily unavailable: AI providers are currently down",
 }
 
+# Job priority tiers, from most to least tolerant of a deep queue. A tier's
+# multiplier scales `load_shed_max_celery_queue_depth` to get the effective
+# threshold at which that tier gets shed - e.g. "low" priority jobs are shed
+# at half the configured depth, "urgent" jobs tolerate 3x the depth.
+DEFAULT_PRIORITY = "normal"
+PRIORITY_QUEUE_MULTIPLIERS = {
+    "low": 0.5,
+    "normal": 1.0,
+    "high": 1.5,
+    "urgent": 3.0,
+}
 
-def record_shed_request(reason: str, method: str, endpoint: str) -> None:
+# Async task types that call out to an LLM provider. Job creation for these
+# types is shed early (before queuing) when all configured providers are
+# unavailable, instead of queuing work that's guaranteed to fail once dequeued.
+LLM_DEPENDENT_TASK_TYPES = {"humanitarian_verification"}
+
+
+def _priority_multiplier(priority: Optional[str]) -> float:
+    key = (priority or DEFAULT_PRIORITY).lower()
+    return PRIORITY_QUEUE_MULTIPLIERS.get(key, 1.0)
+
+
+def _task_requires_llm_provider(task_type: Optional[str]) -> bool:
+    return task_type in LLM_DEPENDENT_TASK_TYPES
+
+
+def record_shed_request(
+    reason: str, method: str, endpoint: str, priority: Optional[str] = None
+) -> None:
     metrics.REQUESTS_SHED_TOTAL.labels(
         reason=reason, method=method, endpoint=endpoint
     ).inc()
     metrics.REQUEST_COUNT.labels(
         method=method, endpoint=endpoint, http_status=503
     ).inc()
+    if reason == "queue_full":
+        metrics.QUEUE_SHED_BY_PRIORITY_TOTAL.labels(
+            priority=priority or DEFAULT_PRIORITY
+        ).inc()
 
 
 def build_shed_response(
@@ -44,8 +86,8 @@ def build_shed_response(
     endpoint: str,
     details: Optional[Dict[str, Any]] = None,
 ) -> JSONResponse:
-    record_shed_request(reason, method, endpoint)
     payload_details: Dict[str, Any] = {"reason": reason, **(details or {})}
+    record_shed_request(reason, method, endpoint, priority=payload_details.get("priority"))
     return JSONResponse(
         status_code=503,
         headers={"Retry-After": str(RETRY_AFTER_SECONDS)},
@@ -90,7 +132,18 @@ def check_memory_pressure() -> Optional[str]:
     return None
 
 
-def check_queue_pressure() -> Optional[Tuple[str, Dict[str, Any]]]:
+def check_queue_pressure(
+    priority: Optional[str] = None,
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """
+    Check Celery queue depth against a priority-scaled threshold.
+
+    ``priority`` is None at the middleware layer (body not parsed yet),
+    which resolves to the "normal" tier - identical behavior to the
+    pre-Issue-777 flat threshold. Callers that know the job's declared
+    priority (``ensure_queue_capacity``) get a threshold scaled by that
+    tier, so low-priority backlog is shed well before high-priority work.
+    """
     if settings.app_env == "test":
         return None
 
@@ -99,10 +152,16 @@ def check_queue_pressure() -> Optional[Tuple[str, Dict[str, Any]]]:
         # Broker unreachable is not a queue-depth overload signal. Let the
         # request proceed so validation and enqueue logic can handle it.
         return None
-    if depth >= settings.load_shed_max_celery_queue_depth:
+
+    multiplier = _priority_multiplier(priority)
+    effective_max_depth = settings.load_shed_max_celery_queue_depth * multiplier
+
+    if depth >= effective_max_depth:
         return "queue_full", {
             "queue_depth": depth,
             "max_queue_depth": settings.load_shed_max_celery_queue_depth,
+            "effective_max_queue_depth": effective_max_depth,
+            "priority": priority or DEFAULT_PRIORITY,
         }
     return None
 
@@ -167,8 +226,19 @@ def evaluate_load_shed(request: Request) -> Optional[JSONResponse]:
     return None
 
 
-def ensure_queue_capacity() -> None:
-    queue_result = check_queue_pressure()
+def ensure_queue_capacity(
+    priority: Optional[str] = None, task_type: Optional[str] = None
+) -> None:
+    """
+    Final, precise load-shed check performed right before a job is queued.
+
+    Unlike the middleware's coarse pre-check, this runs with the job's real
+    ``priority`` and ``task_type`` in hand: the queue-depth threshold scales
+    with priority, and jobs that require an LLM provider are shed outright
+    when all configured providers are unavailable - instead of queuing work
+    that Celery will retry and eventually dead-letter (Issue #776) anyway.
+    """
+    queue_result = check_queue_pressure(priority=priority)
     if queue_result:
         reason, details = queue_result
         raise LoadShedError(
@@ -177,4 +247,11 @@ def ensure_queue_capacity() -> None:
                 reason, "Service temporarily unavailable due to high load"
             ),
             details=details,
+        )
+
+    if _task_requires_llm_provider(task_type) and are_llm_providers_down():
+        raise LoadShedError(
+            "provider_down",
+            REASON_MESSAGES.get("provider_down", "Service temporarily unavailable due to high load"),
+            details={"task_type": task_type},
         )
