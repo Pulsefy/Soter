@@ -63,6 +63,23 @@ CACHE_INVALIDATION_TOTAL = Counter(
     ["reason"],
 )
 
+# Provider health metrics (Issue #770)
+PROVIDER_HEALTH_STATUS = Gauge(
+    "provider_health_status",
+    "Provider health status: 0=healthy, 1=degraded, 2=down",
+    ["provider_name"],
+)
+PROVIDER_FAILURES_TOTAL = Counter(
+    "provider_failures_total",
+    "Total provider failures recorded by the health registry",
+    ["provider_name", "error_code"],
+)
+PROVIDER_HEALTH_CHECK_TOTAL = Counter(
+    "provider_health_check_total",
+    "Total provider health checks performed",
+    ["overall_status"],
+)
+
 
 def check_system_resources(memory_threshold_percent: float = 90.0) -> bool:
     """

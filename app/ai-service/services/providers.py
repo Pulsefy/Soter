@@ -184,12 +184,16 @@ class OpenAIProvider(ModelProvider):
                 response.raise_for_status()
                 data = response.json()
         except httpx.TimeoutException as exc:
+            from services.provider_health import provider_health_registry
+            provider_health_registry.record_failure(provider_name, error_code="AI_TIMEOUT")
             raise AIServiceError(
                 message=f"LLM request timed out after {req_timeout}s",
                 code="AI_TIMEOUT",
                 details={"provider": provider_name, "timeout_seconds": req_timeout},
             ) from exc
         except httpx.HTTPStatusError as exc:
+            from services.provider_health import provider_health_registry
+            provider_health_registry.record_failure(provider_name, error_code=f"HTTP_{exc.response.status_code}")
             raise AIServiceError(
                 message=f"LLM request failed with status {exc.response.status_code}",
                 code="AI_PROVIDER_ERROR",
@@ -199,6 +203,8 @@ class OpenAIProvider(ModelProvider):
                 },
             ) from exc
         except Exception as exc:
+            from services.provider_health import provider_health_registry
+            provider_health_registry.record_failure(provider_name, error_code="AI_CONNECTION_ERROR")
             raise AIServiceError(
                 message=f"LLM connection error: {exc}",
                 code="AI_CONNECTION_ERROR",
@@ -211,6 +217,9 @@ class OpenAIProvider(ModelProvider):
             raise RuntimeError(f"Unexpected LLM response format: {data}") from exc
         if not content:
             raise RuntimeError("LLM returned empty content")
+
+        from services.provider_health import provider_health_registry
+        provider_health_registry.record_success(provider_name)
 
         return LLMResponse(
             content=str(content),
