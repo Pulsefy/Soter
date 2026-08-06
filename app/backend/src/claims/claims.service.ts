@@ -12,6 +12,7 @@ import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { ClaimReceiptDto, SendReceiptShareDto } from './dto/claim-receipt.dto';
+import { explorerTxUrl } from '../common/utils/explorer-url.util';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
 import {
   ClaimStatus,
@@ -114,7 +115,6 @@ export class ClaimsService {
   }
 
   async create(createClaimDto: CreateClaimDto) {
-    // Check if campaign exists
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: createClaimDto.campaignId },
     });
@@ -122,7 +122,6 @@ export class ClaimsService {
       throw new NotFoundException('Campaign not found');
     }
 
-    // Enforce campaign funding cap
     await this.budgetService.assertWithinBudget(
       createClaimDto.campaignId,
       createClaimDto.amount,
@@ -149,7 +148,6 @@ export class ClaimsService {
 
     claim.recipientRef = this.encryptionService.decrypt(claim.recipientRef);
 
-    // Stub audit hook
     void this.auditLog('claim', claim.id, 'created', {
       status: claim.status,
       tokenAddress: createClaimDto.tokenAddress,
@@ -223,7 +221,6 @@ export class ClaimsService {
       );
     }
 
-    // Store receiptPointer on the claim record if provided
     if (receiptPointer) {
       await this.prisma.claim.update({
         where: { id },
@@ -231,20 +228,18 @@ export class ClaimsService {
       });
     }
 
-    // Create Soroban transaction record with comprehensive lifecycle tracking
     let sorobanTransaction: SorobanTransaction | undefined;
     if (this.onchainEnabled && this.onchainAdapter) {
       const packageId = this.generateMockPackageId(id);
       const tokenAddress = this.getTokenAddressForClaim(claim);
       const correlationId = `disburse-${id}-${Date.now()}`;
 
-      // Create transaction record in database with full lifecycle support
       sorobanTransaction =
         await this.sorobanTransactionService.createTransaction({
           claimId: id,
           operation: SorobanOperationType.disburse_claim,
           packageId,
-          operatorAddress: 'admin', // In production, get from authenticated context
+          operatorAddress: 'admin',
           recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
           amount: claim.amount.toString(),
           tokenAddress,
@@ -258,12 +253,11 @@ export class ClaimsService {
           maxAttempts: 5,
         });
 
-      // Schedule for immediate execution with retry capabilities
       await this.sorobanTransactionScheduler.scheduleTransaction(
         sorobanTransaction.id,
         {
           correlationId,
-          priority: 1, // High priority for disbursements
+          priority: 1,
         },
       );
 
@@ -278,15 +272,12 @@ export class ClaimsService {
         },
       );
 
-      // Emit metrics for transaction creation
       this.metricsService.incrementCounter('soroban_disbursement_scheduled', {
         claimId: id,
         transactionId: sorobanTransaction.id,
       });
     }
 
-    // Update claim status to disbursed (optimistic update)
-    // The Soroban transaction will be processed asynchronously with full retry logic
     const updatedClaim = await this.transitionStatus(
       id,
       ClaimStatus.approved,
@@ -305,10 +296,6 @@ export class ClaimsService {
     return updatedClaim;
   }
 
-  /**
-   * Generate a deterministic mock package ID from claim ID
-   * In production, this would come from the createClaim on-chain call
-   */
   private generateMockPackageId(claimId: string): string {
     const hash = createHash('sha256')
       .update(`package-${claimId}`)
@@ -316,11 +303,6 @@ export class ClaimsService {
     return BigInt('0x' + hash.substring(0, 16)).toString();
   }
 
-  /**
-   * Get token address for a claim
-   * In production, this should be retrieved from the claim record
-   * For now, uses a default or derives from campaign metadata
-   */
   private getTokenAddressForClaim(
     claim: {
       metadata?: any;
@@ -560,9 +542,6 @@ export class ClaimsService {
     console.log(`Audit: ${entity} ${entityId} ${action}`, metadata);
   }
 
-  /**
-   * Build a blockchain explorer link for a transaction hash.
-   */
   private buildExplorerLink(transactionHash: string): string | null {
     const network =
       this.configService.get<string>('STELLAR_NETWORK')?.toLowerCase() ??
@@ -576,12 +555,7 @@ export class ClaimsService {
     return `${explorerBase}/testnet/tx/${transactionHash}`;
   }
 
-  /**
-   * Resolve a claim from either a claim ID or a package (campaign) identifier.
-   * When given a package ID, returns the most recent claim for that package.
-   */
   private async resolveClaimByIdentifier(identifier: string): Promise<any> {
-    // 1. Try direct claim ID lookup
     try {
       const directClaim = await this.findOne(identifier);
       if (directClaim) return directClaim;
@@ -589,7 +563,6 @@ export class ClaimsService {
       // not found via claim ID - fall through
     }
 
-    // 2. Try as package / campaign identifier, most recent claim first
     const claimsForPackage = await this.prisma.claim.findMany({
       where: {
         deletedAt: null,
@@ -610,9 +583,6 @@ export class ClaimsService {
     throw new NotFoundException('Claim not found');
   }
 
-  /**
-   * Look up the on-chain disbursement transaction hash for a claim via audit logs.
-   */
   private async findDisbursementTransaction(
     claimId: string,
   ): Promise<{ transactionHash: string; status: string } | null> {
@@ -634,9 +604,6 @@ export class ClaimsService {
     };
   }
 
-  /**
-   * Generate a receipt DTO for a claim, resolvable by claim ID or package ID.
-   */
   async getReceipt(identifier: string): Promise<ClaimReceiptDto> {
     const claim = await this.resolveClaimByIdentifier(identifier);
 
@@ -652,6 +619,8 @@ export class ClaimsService {
       ? (this.buildExplorerLink(transactionHash) ?? undefined)
       : undefined;
 
+    const timeline = await this.buildTimeline(claim.id);
+
     return {
       claimId: claim.id,
       packageId: claim.campaignId,
@@ -662,14 +631,31 @@ export class ClaimsService {
       recipientRef: claim.recipientRef,
       transactionHash,
       explorerLink,
-      receiptPointer: claim.receiptPointer ?? undefined,
+      timeline,
     };
   }
 
-  /**
-   * Generate and share a claim receipt
-   * Supports email, SMS, and inline sharing
-   */
+  private async buildTimeline(claimId: string) {
+    const logs = await this.prisma.auditLog.findMany({
+      where: { entityId: claimId, entity: 'claim' },
+      orderBy: { timestamp: 'asc' },
+    });
+
+    return logs
+      .filter((log) => log.action.startsWith('status_changed_to_'))
+      .map((log) => {
+        const metadata = log.metadata as Record<string, any> | null;
+        const txHash = metadata?.transactionHash as string | undefined;
+        const network = this.configService.get<string>('STELLAR_NETWORK') ?? 'testnet';
+        return {
+          status: log.action.replace('status_changed_to_', ''),
+          timestamp: log.timestamp.toISOString(),
+          transactionHash: txHash,
+          explorerUrl: txHash ? explorerTxUrl(txHash, network) : undefined,
+        };
+      });
+  }
+
   async shareReceipt(
     id: string,
     shareDto: SendReceiptShareDto,
@@ -715,9 +701,6 @@ export class ClaimsService {
     };
   }
 
-  /**
-   * Generate formatted receipt text
-   */
   private generateReceiptText(receipt: ClaimReceiptDto): string {
     const lines = [
       '═══════════════════════════════════════',
@@ -756,10 +739,6 @@ export class ClaimsService {
     return lines.join('\n');
   }
 
-  /**
-   * Send receipt via email
-   * Stub implementation - replace with actual email service
-   */
   private sendReceiptViaEmail(
     emailAddresses: string[],
     receipt: ClaimReceiptDto,
@@ -782,10 +761,6 @@ export class ClaimsService {
     }
   }
 
-  /**
-   * Send receipt via SMS
-   * Stub implementation - replace with actual SMS service
-   */
   private sendReceiptViaSMS(
     phoneNumbers: string[],
     receipt: ClaimReceiptDto,
@@ -805,7 +780,6 @@ export class ClaimsService {
     }
   }
 
-  /** Batch size used when streaming exports; bounds memory to O(batch), not O(total rows). */
   private static readonly EXPORT_BATCH_SIZE = 500;
 
   private static readonly CSV_HEADER =
@@ -874,17 +848,10 @@ export class ClaimsService {
     };
   }
 
-  /** Count of claims matching the export filters, for the X-Total-Count header. */
   async countExport(query: ExportClaimsQueryDto): Promise<number> {
     return this.prisma.claim.count({ where: this.buildExportWhere(query) });
   }
 
-  /**
-   * Streams claim export rows using cursor-based pagination, fetching one
-   * bounded batch at a time instead of loading the full matching set into
-   * memory. See ClaimsController#exportClaims for how this is piped
-   * directly into the HTTP response.
-   */
   async *streamExportRows(
     query: ExportClaimsQueryDto,
   ): AsyncGenerator<ClaimExportRow> {
@@ -905,7 +872,6 @@ export class ClaimsService {
     }
   }
 
-  /** Streams the export as CSV text chunks: header first, then one line per row. */
   async *streamExportCsv(query: ExportClaimsQueryDto): AsyncGenerator<string> {
     yield ClaimsService.CSV_HEADER + '\r\n';
 

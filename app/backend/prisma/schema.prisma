@@ -492,11 +492,16 @@ model ApiKey {
   replacedById String?
   replacedBy   ApiKey?  @relation("ApiKeyReplacement", fields: [replacedById], references: [id])
   replacedFrom ApiKey[] @relation("ApiKeyReplacement")
+  /// Optional absolute expiry. Null means no scheduled expiry.
+  expiresAt     DateTime?
+  /// Last time an expiry/rotation reminder was surfaced for this key.
+  lastRemindedAt DateTime?
 
   @@index([ngoId])
   @@index([orgId])
   @@index([revokedAt])
   @@index([lastUsedAt])
+  @@index([expiresAt])
 }
 
 model InternalNote {
@@ -633,10 +638,39 @@ model NotificationOutbox {
   createdAt     DateTime                 @default(now())
   updatedAt     DateTime                 @updatedAt
 
+  attempts      NotificationDeliveryAttempt[]
+
   @@index([status])
   @@index([recipient])
   @@index([scheduledFor])
   @@index([createdAt])
+}
+
+/// Records every individual delivery attempt for a NotificationOutbox
+/// record (issue #716). NotificationOutbox only ever holds the *latest*
+/// attempt (lastAttemptAt/lastError get overwritten on each retry), so
+/// this table is what actually makes a status timeline possible.
+enum DeliveryAttemptOutcome {
+  success
+  failed
+}
+
+model NotificationDeliveryAttempt {
+  id              String                 @id @default(cuid())
+  outboxId        String
+  outbox          NotificationOutbox     @relation(fields: [outboxId], references: [id])
+  attemptNumber   Int
+  outcome         DeliveryAttemptOutcome
+  failureCategory String?
+  errorMessage    String?
+  startedAt       DateTime
+  completedAt     DateTime               @default(now())
+  durationMs      Int?
+
+  @@index([outboxId])
+  @@index([outcome])
+  @@index([failureCategory])
+  @@index([startedAt])
 }
 
 /// Stores idempotency keys to prevent duplicate requests

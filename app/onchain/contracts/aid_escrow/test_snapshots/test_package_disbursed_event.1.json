@@ -1047,6 +1047,14 @@
                 },
                 {
                   "key": {
+                    "symbol": "receipt_hash"
+                  },
+                  "val": {
+                    "string": ""
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "recipient"
                   },
                   "val": {

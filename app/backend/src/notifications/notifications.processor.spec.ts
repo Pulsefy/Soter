@@ -13,7 +13,11 @@ describe('NotificationProcessor', () => {
       update: jest.Mock;
     };
   };
-  let metricsMock: { incrementCallbackFailure: jest.Mock };
+  let metricsMock: {
+  incrementCallbackFailure: jest.Mock;
+  incrementNotificationDeliveryAttempt: jest.Mock;
+  incrementNotificationDeliveryFailureByCategory: jest.Mock;
+};
 
   const makeJob = (
     overrides: Partial<{
@@ -42,7 +46,11 @@ describe('NotificationProcessor', () => {
         update: jest.fn().mockResolvedValue({}),
       },
     };
-    metricsMock = { incrementCallbackFailure: jest.fn() };
+    metricsMock = {
+  incrementCallbackFailure: jest.fn(),
+  incrementNotificationDeliveryAttempt: jest.fn(),
+  incrementNotificationDeliveryFailureByCategory: jest.fn(),
+};
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

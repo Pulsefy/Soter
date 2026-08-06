@@ -334,4 +334,51 @@ export class VerificationInboxService {
       orderBy: { createdAt: 'asc' },
     });
   }
+
+  async bulkUpdateStatus(
+    action: 'approve' | 'reject' | 'requeue',
+    ids: string[],
+    reviewerId: string,
+    nextStepMessage?: string,
+    rejectionReason?: string,
+    internalNote?: string,
+  ) {
+    const succeeded: { id: string; status: string }[] = [];
+    const failed: { id: string; error: string }[] = [];
+
+    const status: VerificationStatus =
+      action === 'approve'
+        ? 'approved'
+        : action === 'reject'
+          ? 'rejected'
+          : 'needs_resubmission';
+
+    for (const id of ids) {
+      try {
+        const updated = await this.updateStatus(
+          id,
+          status,
+          reviewerId,
+          nextStepMessage,
+          rejectionReason,
+          internalNote,
+        );
+
+        succeeded.push({
+          id: updated.id,
+          status: updated.status,
+        });
+      } catch (error) {
+        failed.push({
+          id,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
+    return {
+      succeeded,
+      failed,
+    };
+  }
 }

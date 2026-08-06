@@ -1,10 +1,4 @@
-import { closeSync, openSync } from 'node:fs';
 import { defineConfig } from 'prisma/config';
-
-if (process.env.CI === 'true') {
-  closeSync(openSync('prisma/test.db', 'a'));
-  process.env.DATABASE_URL = 'file:./test.db';
-}
 
 export default defineConfig({
   schema: 'prisma/schema.prisma',

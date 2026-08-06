@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
@@ -8,6 +8,7 @@ import {
   UseInterceptors,
   HttpException,
   HttpStatus,
+  Res,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -16,6 +17,7 @@ import {
   ApiOkResponse,
   ApiConsumes,
   ApiBody,
+  ApiProduces,
 } from '@nestjs/swagger';
 import { RecipientImportService } from './recipient-import.service';
 import {
@@ -25,6 +27,7 @@ import {
 import { writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { Response } from 'express';
 
 @ApiTags('Recipient Import')
 @Controller('recipient-import')
@@ -36,7 +39,7 @@ export class RecipientImportController {
   @Post('upload')
   @UseInterceptors(
     FileInterceptor('file', {
-      limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+      limits: { fileSize: 50 * 1024 * 1024 },
     }),
   )
   @ApiOperation({
@@ -83,8 +86,9 @@ export class RecipientImportController {
     try {
       mkdirSync(uploadDir, { recursive: true });
     } catch {
-      // directory may already exist
+      // Ignore directory already exists error
     }
+
     const filePath = join(uploadDir, `${Date.now()}-${file.originalname}`);
     writeFileSync(filePath, file.buffer);
 
@@ -117,5 +121,39 @@ export class RecipientImportController {
     @Param('jobId') jobId: string,
   ): Promise<ImportJobResponseDto> {
     return this.recipientImportService.getJobStatus(jobId);
+  }
+
+  @Get(':jobId/report')
+  @ApiOperation({
+    summary: 'Download structured validation report (CSV)',
+    description:
+      'Returns a downloadable CSV file containing all row-level validation errors for the import job.',
+  })
+  @ApiProduces('text/csv')
+  @ApiOkResponse({
+    description: 'CSV file containing import validation errors',
+    content: {
+      'text/csv': {
+        schema: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  async downloadReport(
+    @Param('jobId') jobId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const csvContent =
+      await this.recipientImportService.generateReportCsv(jobId);
+
+    const filename = `import-report-${jobId}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', Buffer.byteLength(csvContent, 'utf8'));
+
+    res.status(HttpStatus.OK).send(csvContent);
   }
 }

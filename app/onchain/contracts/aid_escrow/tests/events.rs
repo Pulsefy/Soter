@@ -90,6 +90,12 @@ fn assert_field_exists(env: &Env, data: &Val, field: &str) {
     );
 }
 
+fn data_string(env: &Env, data: &Val, field: &str) -> soroban_sdk::String {
+    let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(env, data).unwrap();
+    let val = map.get(sym(env, field)).expect("missing field");
+    soroban_sdk::String::try_from_val(env, &val).expect("not string")
+}
+
 #[test]
 fn test_escrow_funded_event() {
     let env = Env::default();
@@ -178,6 +184,11 @@ fn test_package_claimed_event() {
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), recipient);
     assert_field_exists(&env, &data, "timestamp");
+    // receipt_hash is absent from metadata -> must be an empty string
+    assert_eq!(
+        data_string(&env, &data, "receipt_hash"),
+        soroban_sdk::String::from_str(&env, "")
+    );
 }
 
 #[test]
@@ -212,6 +223,11 @@ fn test_package_disbursed_event() {
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), admin);
     assert_field_exists(&env, &data, "timestamp");
+    // receipt_hash is absent from metadata -> must be an empty string
+    assert_eq!(
+        data_string(&env, &data, "receipt_hash"),
+        soroban_sdk::String::from_str(&env, "")
+    );
 }
 
 #[test]
