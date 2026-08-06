@@ -4,21 +4,32 @@ on:
   push:
     paths:
       - 'app/ai-service/**'
+      - 'scrubber.py'
+      - 'tests/**'
+      - '.github/workflows/ci-python-tests.yml'
   pull_request:
     paths:
       - 'app/ai-service/**'
+      - 'scrubber.py'
+      - 'tests/**'
+      - '.github/workflows/ci-python-tests.yml'
 
 jobs:
-  test:
+  # -----------------------------------------------------------------------
+  # Existing: AI-service tests
+  # -----------------------------------------------------------------------
+  ai-service-tests:
+    name: AI Service Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
+          cache: 'pip'
 
       - name: Install dependencies
         working-directory: app/ai-service
@@ -31,3 +42,43 @@ jobs:
         working-directory: app/ai-service
         run: |
           pytest -q
+
+  # -----------------------------------------------------------------------
+  # New: PII scrubber unit tests + regression benchmark
+  # -----------------------------------------------------------------------
+  pii-scrubber:
+    name: PII Scrubber – Tests & Benchmark
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Run unit tests
+        run: |
+          pytest tests/test_pii_scrubber.py -v
+
+      - name: Run regression benchmark
+        run: |
+          python3 tests/benchmark_pii.py \
+            --output benchmark_report.json \
+            --min-accuracy 95
+
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pii-benchmark-report
+          path: benchmark_report.json
+          retention-days: 30

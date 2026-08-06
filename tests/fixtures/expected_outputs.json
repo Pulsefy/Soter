@@ -1,18 +1,90 @@
 [
   {
-    "name": "email test",
+    "name": "email basic",
     "expected": "Contact me at [REDACTED_EMAIL]"
   },
   {
-    "name": "phone test",
+    "name": "phone basic",
     "expected": "Call me on [REDACTED_PHONE]"
   },
   {
-    "name": "id test",
-    "expected": "My ID is [REDACTED_ID]"
+    "name": "id basic",
+    "expected": "My ID is [REDACTED_PHONE]"
   },
   {
     "name": "safe text",
     "expected": "The sky is blue"
+  },
+  {
+    "name": "false-positive: year should not be redacted",
+    "expected": "The project launched in 2024 and runs on Node 20"
+  },
+  {
+    "name": "false-positive: software version should not be redacted",
+    "expected": "Please upgrade to version 3.11.4 of Python"
+  },
+  {
+    "name": "false-positive: currency price should not be redacted",
+    "expected": "The aid package costs $4500 and ships in 2024"
+  },
+  {
+    "name": "false-positive: date with slashes should not be redacted",
+    "expected": "She was born on 2001/03/15 and the event is 2024/07/28"
+  },
+  {
+    "name": "false-positive: date with dashes should not be redacted",
+    "expected": "Meeting scheduled for 2024-07-28 at 14:00"
+  },
+  {
+    "name": "false-positive: port number should not be redacted",
+    "expected": "The server listens on port 8080 and fallback 3000"
+  },
+  {
+    "name": "false-positive: sentence with no PII",
+    "expected": "Aid recipient confirmed receipt of food supplies on the agreed date"
+  },
+  {
+    "name": "false-negative: email with subdomain",
+    "expected": "Reach me at [REDACTED_EMAIL] for verification"
+  },
+  {
+    "name": "false-negative: email with plus addressing",
+    "expected": "Send updates to [REDACTED_EMAIL]"
+  },
+  {
+    "name": "false-negative: local phone no country code",
+    "expected": "Call our office at [REDACTED_PHONE] for support"
+  },
+  {
+    "name": "false-negative: phone with parentheses",
+    "expected": "Dial [REDACTED_PHONE] for the field team"
+  },
+  {
+    "name": "false-negative: national ID format",
+    "expected": "Recipient national ID: [REDACTED_PHONE]"
+  },
+  {
+    "name": "false-negative: mixed PII in sentence",
+    "expected": "Contact [REDACTED_EMAIL] or call [REDACTED_PHONE] to verify ID [REDACTED_PHONE]"
+  },
+  {
+    "name": "edge: multiple emails in one string",
+    "expected": "CC: [REDACTED_EMAIL] and [REDACTED_EMAIL] for the report"
+  },
+  {
+    "name": "edge: email next to punctuation",
+    "expected": "Reply to [REDACTED_EMAIL], please confirm by EOD."
+  },
+  {
+    "name": "edge: safe numbers below threshold",
+    "expected": "Step 1 of 3: fill in the 42-field form on page 99"
+  },
+  {
+    "name": "edge: text with only a year",
+    "expected": "Programme started in 1998"
+  },
+  {
+    "name": "edge: ID embedded in longer text",
+    "expected": "Beneficiary code BN-[REDACTED_PHONE] has been registered"
   }
 ]

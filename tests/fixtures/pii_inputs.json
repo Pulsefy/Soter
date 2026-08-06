@@ -1,18 +1,93 @@
 [
   {
-    "name": "email test",
+    "name": "email basic",
     "input": "Contact me at john@example.com"
   },
   {
-    "name": "phone test",
+    "name": "phone basic",
     "input": "Call me on +234 801 234 5678"
   },
   {
-    "name": "id test",
+    "name": "id basic",
     "input": "My ID is 12345678"
   },
   {
     "name": "safe text",
     "input": "The sky is blue"
+  },
+
+  {
+    "name": "false-positive: year should not be redacted",
+    "input": "The project launched in 2024 and runs on Node 20"
+  },
+  {
+    "name": "false-positive: software version should not be redacted",
+    "input": "Please upgrade to version 3.11.4 of Python"
+  },
+  {
+    "name": "false-positive: currency price should not be redacted",
+    "input": "The aid package costs $4500 and ships in 2024"
+  },
+  {
+    "name": "false-positive: date with slashes should not be redacted",
+    "input": "She was born on 2001/03/15 and the event is 2024/07/28"
+  },
+  {
+    "name": "false-positive: date with dashes should not be redacted",
+    "input": "Meeting scheduled for 2024-07-28 at 14:00"
+  },
+  {
+    "name": "false-positive: port number should not be redacted",
+    "input": "The server listens on port 8080 and fallback 3000"
+  },
+  {
+    "name": "false-positive: sentence with no PII",
+    "input": "Aid recipient confirmed receipt of food supplies on the agreed date"
+  },
+
+  {
+    "name": "false-negative: email with subdomain",
+    "input": "Reach me at alice@mail.ngoedu.org for verification"
+  },
+  {
+    "name": "false-negative: email with plus addressing",
+    "input": "Send updates to bob+alerts@example.com"
+  },
+  {
+    "name": "false-negative: local phone no country code",
+    "input": "Call our office at 080-1234-5678 for support"
+  },
+  {
+    "name": "false-negative: phone with parentheses",
+    "input": "Dial (080) 1234 5678 for the field team"
+  },
+  {
+    "name": "false-negative: national ID format",
+    "input": "Recipient national ID: 19876543210"
+  },
+  {
+    "name": "false-negative: mixed PII in sentence",
+    "input": "Contact jane.doe@redcross.org or call +1-800-555-0199 to verify ID 99887766"
+  },
+
+  {
+    "name": "edge: multiple emails in one string",
+    "input": "CC: alpha@example.com and beta@domain.org for the report"
+  },
+  {
+    "name": "edge: email next to punctuation",
+    "input": "Reply to info@soter.io, please confirm by EOD."
+  },
+  {
+    "name": "edge: safe numbers below threshold",
+    "input": "Step 1 of 3: fill in the 42-field form on page 99"
+  },
+  {
+    "name": "edge: text with only a year",
+    "input": "Programme started in 1998"
+  },
+  {
+    "name": "edge: ID embedded in longer text",
+    "input": "Beneficiary code BN-00293847 has been registered"
   }
 ]
