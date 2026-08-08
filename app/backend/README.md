@@ -41,7 +41,9 @@ All environment variables are documented in [`.env.example`](.env.example) with 
 | **Blockchain (Stellar/Soroban)** |
 | `STELLAR_RPC_URL` | Stellar RPC endpoint for Soroban interactions | `https://soroban-testnet.stellar.org` | Yes |
 | `STELLAR_NETWORK_PASSPHRASE` | Network passphrase (auto-detected if not set) | Auto-detected | No |
-| `SOROBAN_CONTRACT_ID` | Deployed AidEscrow contract ID | None | No* |
+| `CONTRACT_REGISTRY_PATH` | Canonical onchain deployment registry artifact to sync at startup | `../onchain/deployments/registry.json` | No |
+| `CONTRACT_REGISTRY_SYNC_DISABLED` | Disable startup sync from the onchain registry artifact | `false` | No |
+| `AID_ESCROW_CONTRACT_ID` | Env fallback for deployed AidEscrow contract ID when registry data is unavailable | None | No* |
 | **AI & Verification** |
 | `OPENAI_API_KEY` | OpenAI API key for server-side verification | Empty (disabled) | No** |
 | `VERIFICATION_MODE` | Verification mode: `client-side` or `server-side` | `client-side` | No |
