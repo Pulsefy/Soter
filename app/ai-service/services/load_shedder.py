@@ -141,13 +141,14 @@ def _is_llm_route(path: str, method: str) -> bool:
 def evaluate_load_shed(request: Request) -> Optional[JSONResponse]:
     path = request.url.path
     method = request.method
+    route_path = metrics.get_route_path(request)
 
     memory_reason = check_memory_pressure()
     if memory_reason:
         return build_shed_response(
             memory_reason,
             method,
-            path,
+            route_path,
             details={
                 "threshold_percent": settings.load_shed_memory_threshold_percent,
             },
@@ -157,12 +158,12 @@ def evaluate_load_shed(request: Request) -> Optional[JSONResponse]:
         queue_result = check_queue_pressure()
         if queue_result:
             reason, details = queue_result
-            return build_shed_response(reason, method, path, details=details)
+            return build_shed_response(reason, method, route_path, details=details)
 
     if _is_llm_route(path, method):
         provider_reason = check_provider_pressure()
         if provider_reason:
-            return build_shed_response(provider_reason, method, path)
+            return build_shed_response(provider_reason, method, route_path)
 
     return None
 

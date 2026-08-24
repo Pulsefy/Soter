@@ -431,12 +431,13 @@ async def monitor_requests(request: Request, call_next):
         raise e
     finally:
         latency = time.time() - start_time
+        route_path = metrics.get_route_path(request)
         metrics.REQUEST_COUNT.labels(
             method=request.method,
-            endpoint=path,
+            endpoint=route_path,
             http_status=status_code,
         ).inc()
-        metrics.REQUEST_LATENCY.labels(method=request.method, endpoint=path).observe(
+        metrics.REQUEST_LATENCY.labels(method=request.method, endpoint=route_path).observe(
             latency
         )
 

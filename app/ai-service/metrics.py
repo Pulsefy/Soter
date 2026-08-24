@@ -1,8 +1,31 @@
+"""
+Prometheus Metrics for the AI Service.
+
+Guidance for adding new metrics:
+- Ensure all labels have a strict, small cardinality bound (e.g., < 50 unique values).
+- NEVER use unbounded values like UUIDs, claim IDs, artifact IDs, error strings, or user input as labels.
+- For API paths, use the matched route template (e.g., /v1/claims/{claim_id}) rather than the raw URL path.
+- The /metrics endpoint response size must be kept small (ideally < 1MB) to ensure scrape reliability.
+- If you need to track unbounded values, use structured logging instead of metrics.
+"""
 import logging
 import psutil
+from fastapi import Request
+from starlette.routing import Match
 from prometheus_client import Counter, Histogram, Gauge
 
 logger = logging.getLogger(__name__)
+
+def get_route_path(request: Request) -> str:
+    """
+    Get the matched route path template (e.g., /v1/items/{item_id}) to prevent cardinality explosion.
+    If no route is matched, returns 'unmatched_route'.
+    """
+    for route in request.app.routes:
+        match, _ = route.matches(request.scope)
+        if match == Match.FULL:
+            return getattr(route, "path", "unmatched_route")
+    return "unmatched_route"
 
 # System metrics
 MEMORY_USAGE_PERCENT = Gauge(
