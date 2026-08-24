@@ -33,36 +33,50 @@ pub struct DelegateHistory {
 
 /// Loads the full delegate map from persistent storage.
 fn load_delegates(env: &Env) -> Map<u64, Address> {
-    env.storage()
+    let map = env.storage()
         .persistent()
         .get(&KEY_DELEGATES)
-        .unwrap_or_else(|| Map::new(env))
+        .unwrap_or_else(|| Map::new(env));
+    if env.storage().persistent().has(&KEY_DELEGATES) {
+        crate::bump_persistent_ttl(env, &KEY_DELEGATES);
+    }
+    map
 }
 
 /// Persists the delegate map.
 fn save_delegates(env: &Env, map: &Map<u64, Address>) {
     env.storage().persistent().set(&KEY_DELEGATES, map);
+    crate::bump_persistent_ttl(env, &KEY_DELEGATES);
 }
 
 /// Loads delegate expiry information.
 fn load_delegate_expiry(env: &Env) -> Map<u64, u64> {
-    env.storage()
+    let map = env.storage()
         .persistent()
         .get(&KEY_DELEGATE_EXPIRY)
-        .unwrap_or_else(|| Map::new(env))
+        .unwrap_or_else(|| Map::new(env));
+    if env.storage().persistent().has(&KEY_DELEGATE_EXPIRY) {
+        crate::bump_persistent_ttl(env, &KEY_DELEGATE_EXPIRY);
+    }
+    map
 }
 
 /// Persists delegate expiry information.
 fn save_delegate_expiry(env: &Env, map: &Map<u64, u64>) {
     env.storage().persistent().set(&KEY_DELEGATE_EXPIRY, map);
+    crate::bump_persistent_ttl(env, &KEY_DELEGATE_EXPIRY);
 }
 
 /// Loads delegate history for audit trail.
 fn load_delegate_history(env: &Env) -> Vec<DelegateHistory> {
-    env.storage()
+    let history = env.storage()
         .persistent()
         .get(&KEY_DELEGATE_HISTORY)
-        .unwrap_or_else(|| Vec::new(env))
+        .unwrap_or_else(|| Vec::new(env));
+    if env.storage().persistent().has(&KEY_DELEGATE_HISTORY) {
+        crate::bump_persistent_ttl(env, &KEY_DELEGATE_HISTORY);
+    }
+    history
 }
 
 /// Persists delegate history.
@@ -70,6 +84,7 @@ fn save_delegate_history(env: &Env, history: &Vec<DelegateHistory>) {
     env.storage()
         .persistent()
         .set(&KEY_DELEGATE_HISTORY, history);
+    crate::bump_persistent_ttl(env, &KEY_DELEGATE_HISTORY);
 }
 
 /// Checks if a delegate has expired.
@@ -88,8 +103,10 @@ fn validate_package_state(env: &Env, package_id: u64) -> Result<(), Error> {
     if !env.storage().persistent().has(&package_key) {
         return Err(Error::PackageNotFound);
     }
+    crate::bump_persistent_ttl(env, &package_key);
 
     let package: crate::Package = env.storage().persistent().get(&package_key).unwrap();
+    crate::bump_persistent_ttl(env, &package_key);
 
     // Cannot modify delegates for claimed packages
     if package.status == PackageStatus::Claimed {
@@ -166,6 +183,7 @@ pub fn set_delegate(
     // Get package to validate delegate is not the recipient
     let package_key = (symbol_short!("pkg"), package_id);
     let package: crate::Package = env.storage().persistent().get(&package_key).unwrap();
+    crate::bump_persistent_ttl(env, &package_key);
 
     // Prevent setting delegate to the same address as recipient
     if delegate == &package.recipient {

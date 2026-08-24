@@ -44,6 +44,15 @@ const KEY_TOTAL_CLAIMED: Symbol = symbol_short!("claimed"); // Map<Address, i128
 const KEY_PENDING_ADMIN: Symbol = symbol_short!("pend_adm");
 const META_MERKLE_ROOT_KEY: &str = "merkle_root";
 
+// TTL policy is expressed in ledger sequences, not seconds. Entries are bumped
+// on every successful read and write so inactive packages remain claimable.
+pub const INSTANCE_TTL_THRESHOLD: u32 = 100_000;
+pub const INSTANCE_TTL_EXTEND_TO: u32 = 200_000;
+pub const PERSISTENT_TTL_THRESHOLD: u32 = 100_000;
+pub const PERSISTENT_TTL_EXTEND_TO: u32 = 200_000;
+pub const TEMPORARY_TTL_THRESHOLD: u32 = 0;
+pub const TEMPORARY_TTL_EXTEND_TO: u32 = 0;
+
 // --- Data Types ---
 
 #[contracttype]
@@ -305,6 +314,23 @@ pub struct TokenRemoved {
 #[contract]
 pub struct AidEscrow;
 
+pub(crate) fn bump_instance_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+}
+
+pub(crate) fn bump_persistent_ttl<K>(env: &Env, key: &K)
+where
+    K: soroban_sdk::IntoVal<Env, Val>,
+{
+    env.storage().persistent().extend_ttl(
+        key,
+        PERSISTENT_TTL_THRESHOLD,
+        PERSISTENT_TTL_EXTEND_TO,
+    );
+}
+
 #[contractimpl]
 impl AidEscrow {
     // --- Admin & Config ---
@@ -328,6 +354,8 @@ impl AidEscrow {
             allowed_tokens: Vec::new(&env),
         };
         env.storage().instance().set(&KEY_CONFIG, &config);
+        bump_instance_ttl(&env);
+        bump_instance_ttl(&env);
         Ok(())
     }
 
@@ -336,17 +364,23 @@ impl AidEscrow {
     /// # Errors
     /// Returns `Error::NotInitialized` if the contract has not been initialized.
     pub fn get_admin(env: Env) -> Result<Address, Error> {
-        env.storage()
+        let admin = env.storage()
             .instance()
             .get(&KEY_ADMIN)
-            .ok_or(Error::NotInitialized)
+            .ok_or(Error::NotInitialized)?;
+        bump_instance_ttl(&env);
+        Ok(admin)
     }
 
     /// Returns the pending admin address, if one has been nominated.
     ///
     /// Returns `None` if no transfer is in progress.
     pub fn get_pending_admin(env: Env) -> Option<Address> {
-        env.storage().instance().get(&KEY_PENDING_ADMIN)
+        let pending = env.storage().instance().get(&KEY_PENDING_ADMIN);
+        if pending.is_some() {
+            bump_instance_ttl(&env);
+        }
+        pending
     }
 
     /// Admin-only. Nominates `new_admin` as the pending administrator.
@@ -368,6 +402,7 @@ impl AidEscrow {
         }
 
         env.storage().instance().set(&KEY_PENDING_ADMIN, &new_admin);
+        bump_instance_ttl(&env);
 
         let timestamp = env.ledger().timestamp();
         AdminTransferInitiated {
@@ -397,6 +432,7 @@ impl AidEscrow {
 
         env.storage().instance().set(&KEY_ADMIN, &pending_admin);
         env.storage().instance().remove(&KEY_PENDING_ADMIN);
+        bump_instance_ttl(&env);
 
         let timestamp = env.ledger().timestamp();
         AdminTransferAccepted {
@@ -421,6 +457,7 @@ impl AidEscrow {
         }
 
         env.storage().instance().remove(&KEY_PENDING_ADMIN);
+        bump_instance_ttl(&env);
 
         let timestamp = env.ledger().timestamp();
         AdminTransferCancelled { admin, timestamp }.publish(&env);
@@ -431,7 +468,9 @@ impl AidEscrow {
     /// Returns the current contract version.
     /// Defaults to `0` if the contract has never been initialized.
     pub fn get_version(env: Env) -> u32 {
-        env.storage().instance().get(&KEY_VERSION).unwrap_or(0)
+        let version = env.storage().instance().get(&KEY_VERSION).unwrap_or(0);
+        bump_instance_ttl(&env);
+        version
     }
 
     /// Returns the semantic version of the contract package.
@@ -463,6 +502,7 @@ impl AidEscrow {
         }
 
         env.storage().instance().set(&KEY_VERSION, &new_version);
+        bump_instance_ttl(&env);
         Ok(())
     }
 
@@ -484,6 +524,7 @@ impl AidEscrow {
         env.storage()
             .instance()
             .set(&KEY_DISTRIBUTORS, &distributors);
+        bump_instance_ttl(&env);
 
         Ok(())
     }
@@ -505,6 +546,7 @@ impl AidEscrow {
         env.storage()
             .instance()
             .set(&KEY_DISTRIBUTORS, &distributors);
+        bump_instance_ttl(&env);
 
         Ok(())
     }
@@ -531,6 +573,8 @@ impl AidEscrow {
         }
 
         env.storage().instance().set(&KEY_CONFIG, &config);
+        bump_instance_ttl(&env);
+        bump_instance_ttl(&env);
         Ok(())
     }
 
@@ -544,6 +588,7 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &true);
+        bump_instance_ttl(&env);
         ContractPausedEvent { admin }.publish(&env);
         Ok(())
     }
@@ -557,6 +602,7 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &false);
+        bump_instance_ttl(&env);
         ContractUnpausedEvent { admin }.publish(&env);
         Ok(())
     }
@@ -569,6 +615,7 @@ impl AidEscrow {
 
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &true);
+        bump_instance_ttl(&env);
 
         ActionPausedEvent { admin, action }.publish(&env);
         Ok(())
@@ -582,6 +629,7 @@ impl AidEscrow {
 
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &false);
+        bump_instance_ttl(&env);
 
         ActionUnpausedEvent { admin, action }.publish(&env);
         Ok(())
@@ -598,23 +646,29 @@ impl AidEscrow {
             Err(_) => return false,
         };
 
-        env.storage().instance().get(&key).unwrap_or(false)
+        let paused = env.storage().instance().get(&key).unwrap_or(false);
+        bump_instance_ttl(&env);
+        paused
     }
 
     /// Returns `true` if the contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
-        env.storage().instance().get(&KEY_PAUSED).unwrap_or(false)
+        let paused = env.storage().instance().get(&KEY_PAUSED).unwrap_or(false);
+        bump_instance_ttl(&env);
+        paused
     }
 
     /// Returns the current contract configuration.
     /// Falls back to defaults (`min_amount: 1`, `max_expires_in: 0`, empty token list)
     /// if no config has been explicitly set.
     pub fn get_config(env: Env) -> Config {
-        env.storage().instance().get(&KEY_CONFIG).unwrap_or(Config {
+        let config = env.storage().instance().get(&KEY_CONFIG).unwrap_or(Config {
             min_amount: 1,
             max_expires_in: 0,
             allowed_tokens: Vec::new(&env),
-        })
+        });
+        bump_instance_ttl(&env);
+        config
     }
 
     // --- Funding & Packages ---
@@ -746,6 +800,7 @@ impl AidEscrow {
         // --- STATE UPDATES ---
         locked_map.set(token.clone(), current_locked + amount);
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+        bump_instance_ttl(&env);
 
         let created_at = env.ledger().timestamp();
         let claim_starts_at = Self::resolve_claim_starts_at(&env, &metadata, created_at)?;
@@ -767,6 +822,7 @@ impl AidEscrow {
         };
 
         env.storage().persistent().set(&key, &package);
+        bump_persistent_ttl(&env, &key);
 
         let counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
         if id >= counter {
@@ -776,6 +832,7 @@ impl AidEscrow {
         let idx: u64 = env.storage().instance().get(&KEY_PKG_IDX).unwrap_or(0);
         let idx_key = (symbol_short!("pidx"), idx);
         env.storage().persistent().set(&idx_key, &id);
+        bump_persistent_ttl(&env, &idx_key);
         env.storage().instance().set(&KEY_PKG_IDX, &(idx + 1));
 
         PackageCreated {
@@ -893,10 +950,12 @@ impl AidEscrow {
             };
 
             env.storage().persistent().set(&key, &package);
+            bump_persistent_ttl(&env, &key);
 
             // Track package index for aggregation
             let idx_key = (symbol_short!("pidx"), idx);
             env.storage().persistent().set(&idx_key, &id);
+            bump_persistent_ttl(&env, &idx_key);
             idx += 1;
 
             // Update locked
@@ -920,6 +979,8 @@ impl AidEscrow {
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
         env.storage().instance().set(&KEY_PKG_COUNTER, &counter);
         env.storage().instance().set(&KEY_PKG_IDX, &idx);
+        bump_instance_ttl(&env);
+        bump_instance_ttl(&env);
 
         // Emit batch event
         BatchCreatedEvent {
@@ -1093,6 +1154,7 @@ impl AidEscrow {
 
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&key, &package);
+        bump_persistent_ttl(&env, &key);
 
         Self::decrement_locked(&env, &package.token, package.amount);
 
@@ -1106,6 +1168,7 @@ impl AidEscrow {
         env.storage()
             .instance()
             .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+        bump_instance_ttl(&env);
 
         PackageClaimedByRelayer {
             package_id: id,
@@ -1150,6 +1213,7 @@ impl AidEscrow {
         // State Transition
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&key, &package);
+        bump_persistent_ttl(&env, &key);
 
         // Update Locked
         Self::decrement_locked(&env, &package.token, package.amount);
@@ -1188,6 +1252,7 @@ impl AidEscrow {
         // State Transition
         package.status = PackageStatus::Cancelled;
         env.storage().persistent().set(&key, &package);
+        bump_persistent_ttl(&env, &key);
 
         // Unlock funds (return to pool)
         Self::decrement_locked(&env, &package.token, package.amount);
@@ -1255,6 +1320,7 @@ impl AidEscrow {
         // State Transition
         package.status = PackageStatus::Refunded;
         env.storage().persistent().set(&key, &package);
+        bump_persistent_ttl(&env, &key);
 
         let timestamp = env.ledger().timestamp();
         PackageRefunded {
@@ -1297,6 +1363,7 @@ impl AidEscrow {
         // 4. Update status to Cancelled and persist
         package.status = PackageStatus::Cancelled;
         env.storage().persistent().set(&key, &package);
+        bump_persistent_ttl(&env, &key);
 
         // 5. Unlock funds (Decrement the global locked amount so funds return to the pool)
         Self::decrement_locked(&env, &package.token, package.amount);
@@ -1372,6 +1439,8 @@ impl AidEscrow {
 
         package.expires_at = new_expires_at;
         env.storage().persistent().set(&key, &package);
+        bump_persistent_ttl(&env, &key);
+        bump_persistent_ttl(&env, &key);
 
         ExtendedEvent {
             package_id: id,
@@ -1438,7 +1507,9 @@ impl AidEscrow {
     // --- Helpers ---
 
     fn check_action_paused(env: &Env, action: Symbol) -> Result<(), Error> {
-        if env.storage().instance().get(&KEY_PAUSED).unwrap_or(false) {
+        let globally_paused = env.storage().instance().get(&KEY_PAUSED).unwrap_or(false);
+        bump_instance_ttl(env);
+        if globally_paused {
             return Err(Error::ContractPaused);
         }
 
@@ -1447,7 +1518,9 @@ impl AidEscrow {
             Err(_) => return Ok(()),
         };
 
-        if env.storage().instance().get(&key).unwrap_or(false) {
+        let action_paused = env.storage().instance().get(&key).unwrap_or(false);
+        bump_instance_ttl(env);
+        if action_paused {
             return Err(Error::ContractPaused);
         }
         Ok(())
@@ -1483,6 +1556,8 @@ impl AidEscrow {
 
         locked_map.set(token.clone(), new_locked);
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+        bump_instance_ttl(env);
+        bump_instance_ttl(env);
     }
 
     fn validate_token(env: &Env, token: &Address) -> Result<u32, Error> {
@@ -1574,6 +1649,7 @@ impl AidEscrow {
         // State Transition
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(key, package);
+        bump_persistent_ttl(env, key);
 
         // Update Global Locked (Bookkeeping)
         Self::decrement_locked(env, &package.token, package.amount);
@@ -1771,6 +1847,7 @@ impl AidEscrow {
             .instance()
             .get(&KEY_DISTRIBUTORS)
             .unwrap_or(Map::new(env));
+        bump_instance_ttl(env);
         if distributors.get(operator.clone()).unwrap_or(false) {
             Ok(())
         } else {
@@ -1784,10 +1861,12 @@ impl AidEscrow {
     /// Returns `Error::PackageNotFound` if no package exists with the given `id`.
     pub fn get_package(env: Env, id: u64) -> Result<Package, Error> {
         let key = (symbol_short!("pkg"), id);
-        env.storage()
+        let package = env.storage()
             .persistent()
             .get(&key)
-            .ok_or(Error::PackageNotFound)
+            .ok_or(Error::PackageNotFound)?;
+        bump_persistent_ttl(&env, &key);
+        Ok(package)
     }
 
     /// Returns only the status of a package.
@@ -1810,6 +1889,7 @@ impl AidEscrow {
     /// This is a read-only view intended for dashboards and analytics.
     pub fn get_aggregates(env: Env, token: Address) -> Aggregates {
         let count: u64 = env.storage().instance().get(&KEY_PKG_IDX).unwrap_or(0);
+        bump_instance_ttl(&env);
 
         let mut total_committed: i128 = 0;
         let mut total_claimed: i128 = 0;
@@ -1818,8 +1898,10 @@ impl AidEscrow {
         for i in 0..count {
             let idx_key = (symbol_short!("pidx"), i);
             if let Some(pkg_id) = env.storage().persistent().get::<_, u64>(&idx_key) {
+                bump_persistent_ttl(&env, &idx_key);
                 let pkg_key = (symbol_short!("pkg"), pkg_id);
                 if let Some(package) = env.storage().persistent().get::<_, Package>(&pkg_key) {
+                    bump_persistent_ttl(&env, &pkg_key);
                     if package.token == token {
                         match package.status {
                             PackageStatus::Created => {
@@ -1853,12 +1935,14 @@ impl AidEscrow {
     /// storage and is safe to use for dashboard metrics.
     pub fn get_campaign_package_count(env: Env, campaign_ref: String) -> u64 {
         let count: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        bump_instance_ttl(&env);
         let campaign_key = Symbol::new(&env, "campaign_ref");
         let mut matches = 0;
 
         for id in 0..count {
             let key = (symbol_short!("pkg"), id);
             if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                bump_persistent_ttl(&env, &key);
                 if package.metadata.get(campaign_key.clone()).as_ref() == Some(&campaign_ref) {
                     matches += 1;
                 }
@@ -1874,12 +1958,14 @@ impl AidEscrow {
     /// over persisted package records and counts only packages whose status is `Claimed`.
     pub fn get_campaign_claim_count(env: Env, campaign_ref: String) -> u64 {
         let count: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        bump_instance_ttl(&env);
         let campaign_key = Symbol::new(&env, "campaign_ref");
         let mut matches = 0;
 
         for id in 0..count {
             let key = (symbol_short!("pkg"), id);
             if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                bump_persistent_ttl(&env, &key);
                 if package.status == PackageStatus::Claimed
                     && package.metadata.get(campaign_key.clone()).as_ref() == Some(&campaign_ref)
                 {
@@ -1897,11 +1983,13 @@ impl AidEscrow {
     /// counter as an upper bound over assigned IDs and skipping gaps.
     pub fn get_recipient_package_count(env: Env, recipient: Address) -> u64 {
         let count: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        bump_instance_ttl(&env);
         let mut matches = 0;
 
         for id in 0..count {
             let key = (symbol_short!("pkg"), id);
             if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                bump_persistent_ttl(&env, &key);
                 if package.recipient == recipient {
                     matches += 1;
                 }
@@ -1928,6 +2016,7 @@ impl AidEscrow {
         limit: u32,
     ) -> Vec<u64> {
         let package_counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        bump_instance_ttl(&env);
         let mut result: Vec<u64> = Vec::new(&env);
 
         // Calculate the end position: cursor + limit or package_counter, whichever comes first
@@ -1941,6 +2030,7 @@ impl AidEscrow {
         for id in cursor..end_pos {
             let key = (symbol_short!("pkg"), id);
             if let Some(package) = env.storage().persistent().get::<_, Package>(&key) {
+                bump_persistent_ttl(&env, &key);
                 if package.recipient == recipient {
                     result.push_back(id);
                 }
@@ -1980,6 +2070,7 @@ impl AidEscrow {
             .persistent()
             .get(&key)
             .ok_or(Error::PackageNotFound)?;
+        bump_persistent_ttl(&env, &key);
 
         if package.status == PackageStatus::Claimed {
             return Err(Error::PackageNotActive);

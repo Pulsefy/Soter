@@ -23,6 +23,25 @@ locked aid packages for recipients. Each package holds a specific amount of a
 token until the recipient claims it, an admin disburses it, or the package
 expires and is refunded.
 
+## Storage TTL and Archival Policy
+
+Soroban storage entries can be archived when their ledger-sequence TTL reaches
+zero. An archived package cannot be read or claimed until it is restored, so
+the contract deliberately bumps long-lived entries after successful reads and
+writes:
+
+| Storage class | Used for | Threshold | Extend-to | Policy |
+|---|---|---:|---:|---|
+| Instance | Admin, config, pause flags, counters, and aggregate maps | 100,000 ledgers | 200,000 ledgers | Bumped when accessed or updated |
+| Persistent | Packages, package indexes, delegates, expiry maps, and audit history | 100,000 ledgers | 200,000 ledgers | Bumped when the specific entry is accessed or updated |
+| Temporary | None | 0 | 0 | No temporary contract state is used |
+
+The values are ledger sequences rather than wall-clock seconds. Reads only bump
+entries that exist; writes bump the newly created or updated entry. This policy
+does not resurrect an already archived entry. Operators must restore archived
+entries with Soroban archival tooling before calling a contract method that
+needs them, then normal reads and writes resume TTL maintenance.
+
 ## Public Functions
 
 ### Admin & Config

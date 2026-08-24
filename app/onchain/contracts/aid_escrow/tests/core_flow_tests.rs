@@ -1,15 +1,50 @@
 #![cfg(test)]
 
-use aid_escrow::{AidEscrow, AidEscrowClient, Error, PackageStatus};
+use aid_escrow::{
+    AidEscrow, AidEscrowClient, Error, Package, PackageStatus, PERSISTENT_TTL_EXTEND_TO,
+};
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
+    symbol_short,
+    testutils::{Address as _, Ledger, Storage},
     token::{StellarAssetClient, TokenClient},
-    Address, Env, Map,
+    Address, Env, Map, Vec,
 };
 
 // Standard Stellar Asset decimals is 7.
 // Our contract requires whole token amounts (multiples of 10^7).
 const UNIT: i128 = 10_000_000;
+
+#[test]
+fn persistent_package_ttl_is_extended_when_read() {
+    let env = Env::default();
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    let recipient = Address::generate(&env);
+    let package_id = 7;
+    let key = (symbol_short!("pkg"), package_id);
+    let package = Package {
+        id: package_id,
+        recipient,
+        amount: UNIT,
+        token: Address::generate(&env),
+        status: PackageStatus::Created,
+        created_at: 0,
+        expires_at: 0,
+        claim_starts_at: 0,
+        metadata: Map::new(&env),
+    };
+
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&key, &package);
+    });
+    let before = env.as_contract(&contract_id, || env.storage().persistent().get_ttl(&key));
+
+    client.get_package(&package_id);
+
+    let after = env.as_contract(&contract_id, || env.storage().persistent().get_ttl(&key));
+    assert!(after > before);
+    assert!(after >= PERSISTENT_TTL_EXTEND_TO);
+}
 
 fn setup_token(env: &Env, admin: &Address) -> (TokenClient<'static>, StellarAssetClient<'static>) {
     let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
