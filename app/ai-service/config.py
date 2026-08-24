@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import secrets
-from typing import Literal, Optional
+from typing import Dict, Literal, Optional
 
 from pydantic import model_validator, HttpUrl
 from pydantic_core import PydanticUndefined
@@ -126,6 +126,18 @@ class Settings(BaseSettings):
     # Proof-of-life settings
     proof_of_life_confidence_threshold: float = 0.65
     proof_of_life_min_face_size: int = 80
+
+    # Token usage & cost accounting (Issue #981)
+    # Estimated USD cost per 1,000 tokens, keyed by model name. Models without
+    # an entry fall back to the default rates below (0 = cost not tracked).
+    # Overridable via env as JSON, e.g.
+    # TOKEN_COST_RATES='{"gpt-4o-mini": {"prompt": 0.00015, "completion": 0.0006}}'
+    token_cost_rates: Dict[str, Dict[str, float]] = {
+        "gpt-4o-mini": {"prompt": 0.00015, "completion": 0.0006},
+        "llama-3.3-70b-versatile": {"prompt": 0.00059, "completion": 0.00079},
+    }
+    token_cost_default_prompt_rate: float = 0.0
+    token_cost_default_completion_rate: float = 0.0
 
     # Verification artifact access settings
     verification_artifacts_dir: str = "./artifacts/verification"
@@ -272,6 +284,34 @@ class Settings(BaseSettings):
             )
         if not 1 <= int(self.port) <= 65535:
             _add("PORT", f"must be between 1 and 65535 (got {self.port})")
+
+        # --- Token cost rates must be non-negative ------------------------
+        for rate_key, rate_value in (
+            ("TOKEN_COST_DEFAULT_PROMPT_RATE", self.token_cost_default_prompt_rate),
+            (
+                "TOKEN_COST_DEFAULT_COMPLETION_RATE",
+                self.token_cost_default_completion_rate,
+            ),
+        ):
+            if rate_value < 0:
+                _add(rate_key, f"must be non-negative (got {rate_value})")
+        if isinstance(self.token_cost_rates, dict):
+            for model_name, model_rates in self.token_cost_rates.items():
+                if not isinstance(model_rates, dict):
+                    _add(
+                        "TOKEN_COST_RATES",
+                        f"entry for '{model_name}' must be an object with "
+                        "'prompt'/'completion' keys",
+                    )
+                    continue
+                for direction in ("prompt", "completion"):
+                    value = model_rates.get(direction)
+                    if value is None or not isinstance(value, (int, float)) or value < 0:
+                        _add(
+                            "TOKEN_COST_RATES",
+                            f"'{model_name}.{direction}' must be a "
+                            f"non-negative number (got {value})",
+                        )
 
         # --- CORS origins: entries must be absolute origins --------------
         for key, raw in (

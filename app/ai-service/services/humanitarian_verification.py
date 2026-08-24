@@ -9,7 +9,12 @@ import metrics
 from config import settings
 from services.humanitarian_prompt import HumanitarianPromptEngine
 from services.circuit_breaker import CircuitBreaker
-from services.providers import ProviderRegistry, ModelProvider, LLMResponse
+from services.providers import (
+    ProviderRegistry,
+    ModelProvider,
+    LLMResponse,
+    usage_endpoint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +92,14 @@ class HumanitarianVerificationService:
                             model,
                             prompt_variant,
                         )
-                        response = provider.llm_chat(
-                            system_prompt=prompt["system"],
-                            user_prompt=prompt["user"],
-                            model=model,
-                            timeout=timeout,
-                        )
+                        response: LLMResponse
+                        with usage_endpoint("humanitarian_verification"):
+                            response = provider.llm_chat(
+                                system_prompt=prompt["system"],
+                                user_prompt=prompt["user"],
+                                model=model,
+                                timeout=timeout,
+                            )
                         parsed = self._parse_json_response(response.content)
                         breaker.record_success()
                         return {

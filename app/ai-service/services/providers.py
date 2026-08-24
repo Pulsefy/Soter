@@ -1,6 +1,7 @@
 """Abstract provider interface and concrete implementations for LLM and OCR.
 
 Issue #615 — Provider Interface for LLM + OCR
+Issue #981 — Token usage & cost accounting per request
 
 Defines a uniform ``ModelProvider`` abstraction with two capability methods:
 
@@ -10,19 +11,27 @@ Defines a uniform ``ModelProvider`` abstraction with two capability methods:
 Concrete providers implement only the capabilities they support; unsupported
 operations raise ``NotImplementedError``.  A thin ``ProviderRegistry`` resolves
 the right provider for a given capability and provider name.
+
+LLM providers additionally capture the token usage reported by the upstream
+API (when available) and export it as Prometheus metrics labelled by provider,
+model and calling endpoint, alongside an estimated USD cost derived from the
+configurable per-model rates in ``config.settings.token_cost_rates``.
 """
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import time
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
 
+import metrics
 from config import settings
 from exceptions import AIServiceError
 
@@ -36,12 +45,172 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LLMResponse:
-    """Structured return value from an LLM provider."""
+    """Structured return value from an LLM provider.
+
+    Token fields are ``None`` when the provider did not report usage for the
+    request; missing usage is accounted separately rather than as zero.
+    """
 
     content: str
     provider: str
     model: str
     latency_ms: int = 0
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Token usage & cost accounting (Issue #981)
+# ---------------------------------------------------------------------------
+
+#: Endpoint attribution for metrics. Callers wrap provider dispatch in
+#: ``usage_endpoint(...)`` so spend can be attributed per API capability.
+_usage_endpoint: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "usage_endpoint", default=None
+)
+
+_BUILTIN_ENDPOINT_LABELS = frozenset({"humanitarian_verification"})
+_BUILTIN_PROVIDER_LABELS = frozenset({"openai", "groq", "test", "tesseract"})
+_UNKNOWN_MODEL_LABEL = "other"
+_UNATTRIBUTED_ENDPOINT_LABEL = "unattributed"
+_TEST_MODEL_LABEL = "test-provider/fixture"
+
+
+@contextmanager
+def usage_endpoint(endpoint: str):
+    """Attribute token usage recorded inside the block to ``endpoint``."""
+    token = _usage_endpoint.set(endpoint)
+    try:
+        yield
+    finally:
+        _usage_endpoint.reset(token)
+
+
+def _normalize_provider_label(provider: Optional[str]) -> str:
+    name = (provider or "").strip()
+    if not name:
+        return "unknown"
+    return name if name in _BUILTIN_PROVIDER_LABELS else _UNKNOWN_MODEL_LABEL
+
+
+def _normalize_model_label(model: Optional[str]) -> str:
+    name = (model or "").strip()
+    if not name:
+        return _UNKNOWN_MODEL_LABEL
+    if name == _TEST_MODEL_LABEL:
+        return name
+    allowlist: Set[str] = set()
+    rates = getattr(settings, "token_cost_rates", None)
+    if isinstance(rates, dict):
+        allowlist.update(str(key) for key in rates)
+    for attr in ("openai_model", "groq_model"):
+        value = getattr(settings, attr, None)
+        if isinstance(value, str):
+            allowlist.add(value)
+    return name if name in allowlist else _UNKNOWN_MODEL_LABEL
+
+
+def _normalize_endpoint_label(endpoint: Optional[str]) -> str:
+    name = (endpoint or "").strip()
+    if not name:
+        return _UNATTRIBUTED_ENDPOINT_LABEL
+    return name if name in _BUILTIN_ENDPOINT_LABELS else _UNKNOWN_MODEL_LABEL
+
+
+def current_usage_endpoint() -> str:
+    """Return the normalized endpoint label for the current context."""
+    return _normalize_endpoint_label(_usage_endpoint.get())
+
+
+def get_model_cost_rates(model: str) -> Tuple[float, float]:
+    """Return ``(prompt_rate, completion_rate)`` USD per 1k tokens for ``model``."""
+    rates = getattr(settings, "token_cost_rates", None)
+    if isinstance(rates, dict):
+        entry = rates.get(model)
+        if isinstance(entry, dict):
+            prompt_rate = entry.get("prompt")
+            completion_rate = entry.get("completion")
+            if (
+                isinstance(prompt_rate, (int, float))
+                and prompt_rate >= 0
+                and isinstance(completion_rate, (int, float))
+                and completion_rate >= 0
+            ):
+                return float(prompt_rate), float(completion_rate)
+
+    default_prompt = getattr(settings, "token_cost_default_prompt_rate", 0.0)
+    default_completion = getattr(settings, "token_cost_default_completion_rate", 0.0)
+    prompt_rate = default_prompt if isinstance(default_prompt, (int, float)) else 0.0
+    completion_rate = (
+        default_completion if isinstance(default_completion, (int, float)) else 0.0
+    )
+    return max(0.0, float(prompt_rate)), max(0.0, float(completion_rate))
+
+
+def estimate_token_cost_usd(
+    model: str, prompt_tokens: int, completion_tokens: int
+) -> float:
+    """Estimate USD cost for the given token counts using configured rates."""
+    prompt_rate, completion_rate = get_model_cost_rates(model)
+    cost = (prompt_tokens / 1000.0) * prompt_rate
+    cost += (completion_tokens / 1000.0) * completion_rate
+    return max(0.0, cost)
+
+
+def _usage_int_or_none(value: Any) -> Optional[int]:
+    """Coerce a provider-reported usage value to a non-negative int or None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return max(0, int(value))
+
+
+def record_llm_token_usage(response: LLMResponse) -> None:
+    """Export token usage/cost metrics for a completed LLM request.
+
+    Requests where the provider did not report usage are counted separately
+    via ``ai_token_usage_unavailable_total`` instead of being recorded as
+    zero tokens.
+    """
+    try:
+        provider_label = _normalize_provider_label(response.provider)
+        # Cost is estimated from the raw model name so unconfigured models can
+        # still fall back to the default rates before label normalization.
+        cost_model = (response.model or "").strip() or _UNKNOWN_MODEL_LABEL
+        model_label = _normalize_model_label(response.model)
+        endpoint_label = current_usage_endpoint()
+        labels = {
+            "provider": provider_label,
+            "model": model_label,
+            "endpoint": endpoint_label,
+        }
+
+        prompt_tokens = response.prompt_tokens
+        completion_tokens = response.completion_tokens
+        if prompt_tokens is None and completion_tokens is None:
+            metrics.TOKEN_USAGE_UNAVAILABLE_TOTAL.labels(**labels).inc()
+            return
+
+        prompt_count = int(prompt_tokens or 0)
+        completion_count = int(completion_tokens or 0)
+        if prompt_count > 0:
+            metrics.TOKEN_USAGE_TOTAL.labels(**labels, token_type="prompt").inc(
+                prompt_count
+            )
+        if completion_count > 0:
+            metrics.TOKEN_USAGE_TOTAL.labels(
+                **labels, token_type="completion"
+            ).inc(completion_count)
+        if prompt_count > 0 or completion_count > 0:
+            cost = estimate_token_cost_usd(cost_model, prompt_count, completion_count)
+            if cost > 0:
+                metrics.TOKEN_COST_ESTIMATED_USD_TOTAL.labels(**labels).inc(cost)
+        else:
+            # Provider reported a usage object but no positive token counts;
+            # treat as unavailable rather than silently recording zeros.
+            metrics.TOKEN_USAGE_UNAVAILABLE_TOTAL.labels(**labels).inc()
+    except Exception:  # pragma: no cover - accounting must never break requests
+        logger.exception("Failed to record LLM token usage")
 
 
 @dataclass
@@ -159,7 +328,9 @@ class OpenAIProvider(ModelProvider):
                 separators=(",", ":"),
                 sort_keys=True,
             )
-            return LLMResponse(content=stable, provider=provider_name, model=model)
+            response = LLMResponse(content=stable, provider=provider_name, model=model)
+            record_llm_token_usage(response)
+            return response
 
         payload = {
             "model": model,
@@ -212,12 +383,19 @@ class OpenAIProvider(ModelProvider):
         if not content:
             raise RuntimeError("LLM returned empty content")
 
-        return LLMResponse(
+        usage = data.get("usage") if isinstance(data, dict) else None
+        usage = usage if isinstance(usage, dict) else {}
+        llm_response = LLMResponse(
             content=str(content),
             provider=provider_name,
             model=model,
             latency_ms=int((time.time() - start) * 1000),
+            prompt_tokens=_usage_int_or_none(usage.get("prompt_tokens")),
+            completion_tokens=_usage_int_or_none(usage.get("completion_tokens")),
+            total_tokens=_usage_int_or_none(usage.get("total_tokens")),
         )
+        record_llm_token_usage(llm_response)
+        return llm_response
 
 
 # ---------------------------------------------------------------------------
@@ -286,9 +464,11 @@ class FixtureProvider(ModelProvider):
             request_data={"system_prompt": system_prompt, "user_prompt": user_prompt},
         )
         content = json.dumps(response, separators=(",", ":"), sort_keys=True)
-        return LLMResponse(
+        llm_response = LLMResponse(
             content=content, provider="test", model="test-provider/fixture"
         )
+        record_llm_token_usage(llm_response)
+        return llm_response
 
     def ocr_extract(
         self,

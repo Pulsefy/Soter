@@ -56,6 +56,27 @@ JOB_CANCELLED_TOTAL = Counter(
 )
 JOB_EXPIRED_TOTAL = Counter("job_expired_total", "Total jobs expired", ["task_type"])
 
+# Token usage & estimated cost metrics (Issue #981)
+# Labels are kept bounded: provider/model/endpoint values are normalized to
+# fixed allowlists (see services/providers.py) so cardinality cannot grow
+# with traffic. Requests where the provider does not report usage are counted
+# separately instead of being folded into zero-token counts.
+TOKEN_USAGE_TOTAL = Counter(
+    "ai_token_usage",
+    "LLM tokens consumed, labelled by provider, model, endpoint and token type",
+    ["provider", "model", "endpoint", "token_type"],
+)
+TOKEN_COST_ESTIMATED_USD_TOTAL = Counter(
+    "ai_token_cost_estimated_usd",
+    "Estimated USD cost of LLM tokens consumed",
+    ["provider", "model", "endpoint"],
+)
+TOKEN_USAGE_UNAVAILABLE_TOTAL = Counter(
+    "ai_token_usage_unavailable",
+    "LLM requests where the provider did not report token usage",
+    ["provider", "model", "endpoint"],
+)
+
 # Cache invalidation metrics
 CACHE_INVALIDATION_TOTAL = Counter(
     "cache_invalidation_total",
