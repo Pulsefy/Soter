@@ -9,6 +9,21 @@ class FraudExplanationCode(str, Enum):
     # Additional codes can be added here as new detection rules are implemented
 
 
+class FraudBand(str, Enum):
+    """
+    Human-readable risk band derived from the normalised fraud_risk_score.
+
+    Band boundaries are driven by the service's configured thresholds:
+      pass    : score < fraud_review_threshold (default 0.40)
+      review  : fraud_review_threshold <= score < fraud_reject_threshold (default 0.75)
+      reject  : score >= fraud_reject_threshold (default 0.75)
+    """
+
+    PASS = "pass"
+    REVIEW = "review"
+    REJECT = "reject"
+
+
 class ClaimMetadata(BaseModel):
     claim_id: str = Field(examples=["claim-abc123"])
     ip_address: Optional[str] = Field(None, examples=["192.168.1.1"])
@@ -65,6 +80,14 @@ class FraudDetectionRequest(BaseModel):
 class ClaimFraudResult(BaseModel):
     claim_id: str = Field(examples=["claim-abc123"])
     fraud_risk_score: float = Field(ge=0.0, le=1.0, examples=[0.15, 0.95])
+    band: FraudBand = Field(
+        examples=[FraudBand.PASS, FraudBand.REJECT],
+        description=(
+            "Risk band derived from fraud_risk_score and current threshold configuration. "
+            "pass = score < review_threshold; review = review_threshold <= score < reject_threshold; "
+            "reject = score >= reject_threshold."
+        ),
+    )
     is_flagged: bool = Field(examples=[False, True])
     code: Optional[FraudExplanationCode] = Field(
         None, examples=[FraudExplanationCode.ANOMALY_DETECTED]
@@ -77,11 +100,13 @@ class ClaimFraudResult(BaseModel):
                 {
                     "claim_id": "claim-abc123",
                     "fraud_risk_score": 0.15,
+                    "band": "pass",
                     "is_flagged": False,
                 },
                 {
                     "claim_id": "claim-def456",
                     "fraud_risk_score": 0.95,
+                    "band": "reject",
                     "is_flagged": True,
                     "code": "ANOMALY_DETECTED",
                     "reason": "Statistical outlier in amount",
@@ -104,11 +129,13 @@ class FraudDetectionResponse(BaseModel):
                         {
                             "claim_id": "claim-abc123",
                             "fraud_risk_score": 0.15,
+                            "band": "pass",
                             "is_flagged": False,
                         },
                         {
                             "claim_id": "claim-def456",
                             "fraud_risk_score": 0.95,
+                            "band": "reject",
                             "is_flagged": True,
                             "code": "ANOMALY_DETECTED",
                             "reason": "Statistical outlier in amount",

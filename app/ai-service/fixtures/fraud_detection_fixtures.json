@@ -1,0 +1,58 @@
+[
+  {
+    "description": "Batch A – 8 normal inliers + 1 high-amount outlier + 1 different-IP outlier",
+    "claims": [
+      {"claim_id": "A-001", "ip_address": "10.0.0.1", "evidence_hash": "abc001", "amount": 100.0, "location": "Kano, Nigeria"},
+      {"claim_id": "A-002", "ip_address": "10.0.0.1", "evidence_hash": "abc002", "amount": 102.0, "location": "Kano, Nigeria"},
+      {"claim_id": "A-003", "ip_address": "10.0.0.1", "evidence_hash": "abc003", "amount": 98.0,  "location": "Kano, Nigeria"},
+      {"claim_id": "A-004", "ip_address": "10.0.0.2", "evidence_hash": "abc004", "amount": 101.0, "location": "Kano, Nigeria"},
+      {"claim_id": "A-005", "ip_address": "10.0.0.2", "evidence_hash": "abc005", "amount": 99.0,  "location": "Kano, Nigeria"},
+      {"claim_id": "A-006", "ip_address": "10.0.0.2", "evidence_hash": "abc006", "amount": 100.5, "location": "Kano, Nigeria"},
+      {"claim_id": "A-007", "ip_address": "10.0.0.3", "evidence_hash": "abc007", "amount": 103.0, "location": "Kano, Nigeria"},
+      {"claim_id": "A-008", "ip_address": "10.0.0.3", "evidence_hash": "abc008", "amount": 97.0,  "location": "Kano, Nigeria"},
+      {"claim_id": "A-OUT-amount", "ip_address": "10.0.0.3", "evidence_hash": "xyz999", "amount": 9999.0, "location": "Kano, Nigeria"},
+      {"claim_id": "A-OUT-ip",     "ip_address": "203.0.113.99", "evidence_hash": "abc010", "amount": 100.0, "location": "Kano, Nigeria"}
+    ],
+    "expected_outlier_ids": ["A-OUT-amount", "A-OUT-ip"]
+  },
+  {
+    "description": "Batch B – duplicate evidence hashes (potential copy-paste fraud)",
+    "claims": [
+      {"claim_id": "B-001", "ip_address": "10.1.0.1", "evidence_hash": "DUPE-HASH", "amount": 150.0, "location": "Lagos, Nigeria"},
+      {"claim_id": "B-002", "ip_address": "10.1.0.2", "evidence_hash": "DUPE-HASH", "amount": 150.0, "location": "Lagos, Nigeria"},
+      {"claim_id": "B-003", "ip_address": "10.1.0.3", "evidence_hash": "DUPE-HASH", "amount": 150.0, "location": "Lagos, Nigeria"},
+      {"claim_id": "B-004", "ip_address": "10.1.0.4", "evidence_hash": "DUPE-HASH", "amount": 150.0, "location": "Lagos, Nigeria"},
+      {"claim_id": "B-005", "ip_address": "10.1.0.5", "evidence_hash": "unique-hash", "amount": 155.0, "location": "Lagos, Nigeria"}
+    ],
+    "expected_outlier_ids": ["B-005"]
+  },
+  {
+    "description": "Batch C – geographically dispersed claims (varied locations)",
+    "claims": [
+      {"claim_id": "C-001", "ip_address": "172.16.0.1", "evidence_hash": "c001", "amount": 200.0, "location": "Abuja, Nigeria"},
+      {"claim_id": "C-002", "ip_address": "172.16.0.2", "evidence_hash": "c002", "amount": 200.0, "location": "Abuja, Nigeria"},
+      {"claim_id": "C-003", "ip_address": "172.16.0.3", "evidence_hash": "c003", "amount": 200.0, "location": "Abuja, Nigeria"},
+      {"claim_id": "C-004", "ip_address": "172.16.0.4", "evidence_hash": "c004", "amount": 200.0, "location": "Abuja, Nigeria"},
+      {"claim_id": "C-OUT-loc", "ip_address": "172.16.0.5", "evidence_hash": "c005", "amount": 200.0, "location": "Nairobi, Kenya"}
+    ],
+    "expected_outlier_ids": ["C-OUT-loc"]
+  },
+  {
+    "description": "Batch D – single claim (neutral baseline, no LOF)",
+    "claims": [
+      {"claim_id": "D-001", "ip_address": "192.168.1.1", "evidence_hash": "solo", "amount": 75.0, "location": "Dakar, Senegal"}
+    ],
+    "expected_outlier_ids": []
+  },
+  {
+    "description": "Batch E – uniform batch (all identical except claim_id; all should score near 0)",
+    "claims": [
+      {"claim_id": "E-001", "ip_address": "10.2.0.1", "evidence_hash": "uniform", "amount": 50.0, "location": "Accra, Ghana"},
+      {"claim_id": "E-002", "ip_address": "10.2.0.1", "evidence_hash": "uniform", "amount": 50.0, "location": "Accra, Ghana"},
+      {"claim_id": "E-003", "ip_address": "10.2.0.1", "evidence_hash": "uniform", "amount": 50.0, "location": "Accra, Ghana"},
+      {"claim_id": "E-004", "ip_address": "10.2.0.1", "evidence_hash": "uniform", "amount": 50.0, "location": "Accra, Ghana"},
+      {"claim_id": "E-005", "ip_address": "10.2.0.1", "evidence_hash": "uniform", "amount": 50.0, "location": "Accra, Ghana"}
+    ],
+    "expected_outlier_ids": []
+  }
+]

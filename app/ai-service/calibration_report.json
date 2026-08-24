@@ -1,0 +1,242 @@
+{
+  "generated_at": "2026-08-24T12:32:39.701313+00:00",
+  "thresholds": {
+    "fraud_review_threshold": 0.4,
+    "fraud_reject_threshold": 0.75,
+    "fraud_lof_outlier_threshold": -1.5
+  },
+  "batches": [
+    {
+      "description": "Batch A \u2013 8 normal inliers + 1 high-amount outlier + 1 different-IP outlier",
+      "batch_size": 10,
+      "expected_outlier_ids": [
+        "A-OUT-amount",
+        "A-OUT-ip"
+      ],
+      "flagged_ids": [
+        "A-OUT-amount"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 1,
+      "precision": 1.0,
+      "recall": 0.5,
+      "results": [
+        {
+          "claim_id": "A-001",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "A-002",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "A-003",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "A-004",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "A-005",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "A-006",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "A-007",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "A-008",
+          "fraud_risk_score": 0.0001,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "A-OUT-amount",
+          "fraud_risk_score": 1.0,
+          "band": "reject",
+          "is_flagged": true
+        },
+        {
+          "claim_id": "A-OUT-ip",
+          "fraud_risk_score": 0.0001,
+          "band": "pass",
+          "is_flagged": false
+        }
+      ]
+    },
+    {
+      "description": "Batch B \u2013 duplicate evidence hashes (potential copy-paste fraud)",
+      "batch_size": 5,
+      "expected_outlier_ids": [
+        "B-005"
+      ],
+      "flagged_ids": [
+        "B-005"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "results": [
+        {
+          "claim_id": "B-001",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "B-002",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "B-003",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "B-004",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "B-005",
+          "fraud_risk_score": 1.0,
+          "band": "reject",
+          "is_flagged": true
+        }
+      ]
+    },
+    {
+      "description": "Batch C \u2013 geographically dispersed claims (varied locations)",
+      "batch_size": 5,
+      "expected_outlier_ids": [
+        "C-OUT-loc"
+      ],
+      "flagged_ids": [],
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 1,
+      "precision": null,
+      "recall": 0.0,
+      "results": [
+        {
+          "claim_id": "C-001",
+          "fraud_risk_score": 0.7971,
+          "band": "reject",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "C-002",
+          "fraud_risk_score": 0.7971,
+          "band": "reject",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "C-003",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "C-004",
+          "fraud_risk_score": 0.7859,
+          "band": "reject",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "C-OUT-loc",
+          "fraud_risk_score": 1.0,
+          "band": "reject",
+          "is_flagged": false
+        }
+      ]
+    },
+    {
+      "description": "Batch D \u2013 single claim (neutral baseline, no LOF)",
+      "batch_size": 1,
+      "expected_outlier_ids": [],
+      "flagged_ids": [],
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "results": [
+        {
+          "claim_id": "D-001",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        }
+      ]
+    },
+    {
+      "description": "Batch E \u2013 uniform batch (all identical except claim_id; all should score near 0)",
+      "batch_size": 5,
+      "expected_outlier_ids": [],
+      "flagged_ids": [],
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "results": [
+        {
+          "claim_id": "E-001",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "E-002",
+          "fraud_risk_score": 0.0,
+          "band": "pass",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "E-003",
+          "fraud_risk_score": 0.5385,
+          "band": "review",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "E-004",
+          "fraud_risk_score": 1.0,
+          "band": "reject",
+          "is_flagged": false
+        },
+        {
+          "claim_id": "E-005",
+          "fraud_risk_score": 0.0088,
+          "band": "pass",
+          "is_flagged": false
+        }
+      ]
+    }
+  ]
+}

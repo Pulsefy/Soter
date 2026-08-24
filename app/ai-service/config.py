@@ -93,6 +93,32 @@ class Settings(BaseSettings):
     proof_of_life_confidence_threshold: float = 0.65
     proof_of_life_min_face_size: int = 80
 
+    # ---------------------------------------------------------------------------
+    # Fraud detection threshold configuration
+    # ---------------------------------------------------------------------------
+    # Scores are normalised LOF values in [0, 1] where 1 = highest risk.
+    #
+    # Band definitions (inclusive lower, exclusive upper):
+    #   pass    : score < fraud_review_threshold
+    #   review  : fraud_review_threshold <= score < fraud_reject_threshold
+    #   reject  : score >= fraud_reject_threshold
+    #
+    # Calibration basis (2026-08-24, fixture set of 20 synthetic claims):
+    #   - Typical inlier normalised score: 0.00–0.35
+    #   - Boundary region (minor anomalies): 0.35–0.75
+    #   - Clear outliers: 0.75–1.00
+    #
+    # Override via environment variables:
+    #   FRAUD_REVIEW_THRESHOLD=0.40
+    #   FRAUD_REJECT_THRESHOLD=0.75
+    fraud_review_threshold: float = 0.40
+    fraud_reject_threshold: float = 0.75
+
+    # LOF negative outlier factor threshold used to set is_flagged.
+    # More negative = more anomalous; threshold applied to raw LOF score.
+    # Default matches historical hard-coded value of -1.5.
+    fraud_lof_outlier_threshold: float = -1.5
+
     # Verification artifact access settings
     verification_artifacts_dir: str = "./artifacts/verification"
     verification_artifact_url_ttl_seconds: int = 300
@@ -111,6 +137,16 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+
+    @model_validator(mode="after")
+    def validate_fraud_thresholds(self) -> "Settings":
+        if not (0.0 < self.fraud_review_threshold < self.fraud_reject_threshold <= 1.0):
+            raise ValueError(
+                "Fraud thresholds must satisfy: "
+                "0 < fraud_review_threshold < fraud_reject_threshold <= 1.0. "
+                f"Got review={self.fraud_review_threshold}, reject={self.fraud_reject_threshold}"
+            )
+        return self
 
     @model_validator(mode="after")
     def apply_environment_defaults(self) -> "Settings":
