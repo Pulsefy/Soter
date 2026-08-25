@@ -1,0 +1,14 @@
+{
+  "profile": "android-low-end-emulator",
+  "device": {
+    "apiLevel": 35,
+    "cores": 2,
+    "ramMb": 1536,
+    "coldBoot": true,
+    "snapshots": false
+  },
+  "metric": "cold_start_to_interactive",
+  "budgetMs": 3000,
+  "tolerancePct": 20,
+  "iterations": 5
+}

@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VersionInfo, UpdateState } from '../types/update';
 import { fetchVersionInfo, compareVersions } from '../services/updateService';
+import { markStartupPhase } from '../performance/startup';
 
 interface UpdateContextType extends UpdateState {
   markReleaseNotesSeen: () => Promise<void>;
@@ -28,6 +29,7 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const checkUpdates = async () => {
     try {
       setIsLoading(true);
+      markStartupPhase('update_check_start');
       const versionInfo = await fetchVersionInfo();
       
       const updateAvailable = compareVersions(versionInfo.latestVersion, currentVersion) > 0;
@@ -48,6 +50,7 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } catch (error) {
       console.error('UpdateProvider: Failed to check for updates', error);
     } finally {
+      markStartupPhase('update_check_end');
       setIsLoading(false);
     }
   };

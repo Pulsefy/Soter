@@ -23,6 +23,7 @@ import { SaverModeProvider } from './src/contexts/SaverModeContext';
 import { UpdateProvider, useUpdate } from './src/contexts/UpdateContext';
 import { ReleaseNotesModal } from './src/components/ReleaseNotesModal';
 import { ForceUpgradeScreen } from './src/screens/ForceUpgradeScreen';
+import { markStartupPhase } from './src/performance/startup';
 
 // ---------------------------------------------------------------------------
 // Deep-link configuration for React Navigation
@@ -93,7 +94,10 @@ const AppInner = () => {
             linking={linking}
             theme={navTheme}
             ref={navigationRef}
-            onReady={() => setIsNavReady(true)}
+            onReady={() => {
+              markStartupPhase('navigation_ready');
+              setIsNavReady(true);
+            }}
           >
             <AppNavigator />
             <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
@@ -110,6 +114,8 @@ const AppInner = () => {
 // ---------------------------------------------------------------------------
 
 export default function App() {
+  markStartupPhase('app_render');
+
   return (
     <SafeAreaProvider>
       <ThemeProvider>

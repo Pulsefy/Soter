@@ -1,0 +1,49 @@
+name: Mobile startup performance
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "app/mobile/**"
+      - ".github/workflows/mobile-startup.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "app/mobile/**"
+      - ".github/workflows/mobile-startup.yml"
+  workflow_dispatch:
+
+jobs:
+  startup-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 1536M
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: -no-snapshot -no-window -noaudio -no-boot-anim
+          script: |
+            pnpm install --frozen-lockfile
+            cd app/mobile
+            npx expo prebuild --non-interactive
+            npx expo run:android --variant release
+            node scripts/startup-performance.mjs
+      - name: Upload startup report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-startup-report
+          path: app/mobile/performance/startup-report.json
