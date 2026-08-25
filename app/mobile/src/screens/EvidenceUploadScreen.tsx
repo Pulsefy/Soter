@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -78,13 +79,46 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
     await compressPhoto(result.assets[0].uri);
   }, [compressPhoto]);
 
+  const openSettings = useCallback(async () => {
+    try {
+      if (Platform.OS === 'ios') {
+        await Linking.openURL('app-settings:');
+      } else {
+        await Linking.openSettings();
+      }
+    } catch {
+      console.warn('Could not open settings');
+    }
+  }, []);
+
   const takePhoto = useCallback(async () => {
     setStatusMessage(null);
     setError(null);
 
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission required', 'Camera access is required to capture evidence.');
+      // Check if we can ask again or if it's permanently blocked
+      if (!permission.canAskAgain) {
+        Alert.alert(
+          'Camera Access Blocked',
+          'Camera access has been blocked. Please enable it in your device settings to capture evidence photos.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: openSettings },
+            { text: 'Use Photo Library', onPress: pickImage },
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Camera Permission Required',
+          'Camera access is needed to capture evidence photos. Would you like to try again or choose from your photo library?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Try Again', onPress: takePhoto },
+            { text: 'Use Photo Library', onPress: pickImage },
+          ]
+        );
+      }
       return;
     }
 
@@ -99,7 +133,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
     }
 
     await compressPhoto(result.assets[0].uri);
-  }, [compressPhoto]);
+  }, [compressPhoto, openSettings, pickImage]);
 
   const handleUpload = useCallback(async () => {
     if (!compressedBase64) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Text,
   View,
@@ -14,6 +14,8 @@ import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
 import { useSync } from '../contexts/SyncContext';
 import { createScanDeduper } from './scanDeduper';
+import { useCameraPermission } from '../hooks/useCameraPermission';
+import { CameraPermissionDenied } from '../components/CameraPermissionDenied';
 
 type BulkScannerScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'BulkScanner'>;
 
@@ -31,7 +33,6 @@ interface SessionStats {
 type ScanResult = { status: 'success' | 'error' | 'skipped'; message: string };
 
 export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastScanResult, setLastScanResult] = useState<ScanResult | null>(null);
   const [stats, setStats] = useState<SessionStats>({
@@ -45,14 +46,16 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
   const { queueClaimConfirmation, isConnected } = useSync();
   const [isDuplicateScan] = useState(() => createScanDeduper());
 
-  useEffect(() => {
-    const getBarCodeScannerPermissions = async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
-      setHasPermission(status === 'granted');
-    };
-
-    getBarCodeScannerPermissions();
-  }, []);
+  const {
+    permissionState,
+    isGranted,
+    isDenied,
+    isBlocked,
+    isChecking,
+    requestPermission,
+    openSettings,
+    statusMessage,
+  } = useCameraPermission();
 
   const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
     if (isProcessing) return;
@@ -102,25 +105,30 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
     }, 2000);
   };
 
-  if (hasPermission === null) {
+  // ── Permission: checking/requesting ──────────────────────────────────────
+  if (isChecking || permissionState === 'undetermined' || permissionState === 'requesting') {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.textPrimary }}>Requesting camera permission…</Text>
+        <ActivityIndicator size="large" color={colors.brand.primary} />
+        <Text style={{ color: colors.textPrimary, marginTop: 16 }}>
+          Requesting camera permission…
+        </Text>
       </View>
     );
   }
 
-  if (hasPermission === false) {
+  // ── Permission: denied or blocked ───────────────────────────────────────
+  if (isDenied || isBlocked) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.textPrimary, marginBottom: 20 }}>No access to camera</Text>
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: colors.brand.primary }]}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.buttonText}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+      <CameraPermissionDenied
+        permissionState={permissionState}
+        statusMessage={statusMessage}
+        canRequestAgain={isDenied}
+        onRequestPermission={requestPermission}
+        onOpenSettings={openSettings}
+        onGoBack={() => navigation.goBack()}
+        context="scanner"
+      />
     );
   }
 

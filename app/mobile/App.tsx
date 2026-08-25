@@ -6,6 +6,7 @@ import {
 } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ErrorBoundary } from '@sentry/react-native';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import {
   RootStackParamList,
@@ -21,6 +22,10 @@ import {
 } from './src/contexts/NotificationContext';
 import { SaverModeProvider } from './src/contexts/SaverModeContext';
 import { UpdateProvider, useUpdate } from './src/contexts/UpdateContext';
+import {
+  CrashReportingProvider,
+  useCrashReporting,
+} from './src/contexts/CrashReportingContext';
 import { ReleaseNotesModal } from './src/components/ReleaseNotesModal';
 import { ForceUpgradeScreen } from './src/screens/ForceUpgradeScreen';
 
@@ -109,18 +114,43 @@ const AppInner = () => {
 // Root – wraps providers from the outside in
 // ---------------------------------------------------------------------------
 
+/**
+ * Wrapper that reads the crash-reporting preference and renders the Sentry
+ * ErrorBoundary around the rest of the app.
+ */
+const CrashReportingGate: React.FC = () => {
+  const { isLoading } = useCrashReporting();
+  // While the preference is loading, render nothing to avoid a flash of the
+  // wrong state. The CrashReportingProvider already handles init.
+  if (isLoading) return null;
+
+  return (
+    <ErrorBoundary
+      onError={(error, errorInfo) => {
+        // The ErrorBoundary already reports to Sentry automatically.
+        // We just log for development diagnostics.
+        console.warn('[CrashReportingGate] Caught by ErrorBoundary:', error);
+      }}
+    >
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <UpdateProvider>
+            <SaverModeProvider>
+              <NotificationProvider>
+                <AppInner />
+              </NotificationProvider>
+            </SaverModeProvider>
+          </UpdateProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
+  );
+};
+
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <UpdateProvider>
-          <SaverModeProvider>
-            <NotificationProvider>
-              <AppInner />
-            </NotificationProvider>
-          </SaverModeProvider>
-        </UpdateProvider>
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <CrashReportingProvider>
+      <CrashReportingGate />
+    </CrashReportingProvider>
   );
 }

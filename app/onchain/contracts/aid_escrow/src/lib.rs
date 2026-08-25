@@ -40,6 +40,7 @@ const KEY_PAUSE_CREATE: Symbol = symbol_short!("p_create");
 const KEY_PAUSE_CLAIM: Symbol = symbol_short!("p_claim");
 const KEY_PAUSE_REFUND: Symbol = symbol_short!("p_refund");
 const KEY_PAUSE_WITHDRAW: Symbol = symbol_short!("p_wdrw");
+const KEY_CAMPAIGN_PAUSED: Symbol = symbol_short!("camp_pzd"); // Map<String, bool>
 const KEY_TOTAL_CLAIMED: Symbol = symbol_short!("claimed"); // Map<Address, i128>
 const KEY_PENDING_ADMIN: Symbol = symbol_short!("pend_adm");
 const META_MERKLE_ROOT_KEY: &str = "merkle_root";
@@ -52,6 +53,9 @@ pub const PERSISTENT_TTL_THRESHOLD: u32 = 100_000;
 pub const PERSISTENT_TTL_EXTEND_TO: u32 = 200_000;
 pub const TEMPORARY_TTL_THRESHOLD: u32 = 0;
 pub const TEMPORARY_TTL_EXTEND_TO: u32 = 0;
+/// Upper bound on the number of package ids accepted by `batch_claim` in a
+/// single invocation, keeping the call within Soroban resource limits.
+pub const MAX_BATCH_CLAIM_SIZE: u32 = 25;
 
 // --- Data Types ---
 
@@ -96,6 +100,43 @@ pub struct Aggregates {
     pub total_expired_cancelled: i128,
 }
 
+/// Outcome of a single package claim attempt made as part of a `batch_claim`
+/// call. `batch_claim` never fails a whole batch because one package could
+/// not be claimed; instead each id resolves to one of these statuses.
+#[contracttype]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u32)]
+pub enum ClaimStatus {
+    /// Package was claimed and the payout was transferred.
+    Success = 0,
+    /// No package exists with the given id.
+    NotFound = 1,
+    /// Package status is not `Created` (already claimed, cancelled, or refunded).
+    NotActive = 2,
+    /// Current ledger time is before the package's `claim_starts_at`.
+    ClaimTooEarly = 3,
+    /// Package has passed its `expires_at` timestamp.
+    Expired = 4,
+    /// Package is guarded by a Merkle allowlist; use `claim_with_proof` instead.
+    RequiresProof = 5,
+    /// Caller is neither the package's recipient nor an authorised delegate.
+    Unauthorized = 6,
+    /// The package's campaign is paused.
+    CampaignPaused = 7,
+    /// Eligibility checks passed but the token transfer failed.
+    TransferFailed = 8,
+}
+
+/// Per-package result returned by `batch_claim`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BatchClaimResult {
+    pub package_id: u64,
+    pub status: ClaimStatus,
+    /// Amount transferred to the claimant; zero unless `status` is `Success`.
+    pub amount: i128,
+}
+
 #[contracterror]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Error {
@@ -120,6 +161,7 @@ pub enum Error {
     TokenTransferFailed = 18,
     NoPendingTransfer = 19,
     InvalidPendingAdmin = 20,
+    BatchTooLarge = 21,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -236,6 +278,21 @@ pub struct ActionPausedEvent {
 pub struct ActionUnpausedEvent {
     pub admin: Address,
     pub action: Symbol,
+}
+
+/// Emitted when an admin pauses a single campaign, identified by the
+/// `campaign_ref` metadata value shared by its packages.
+#[contractevent]
+pub struct CampaignPausedEvent {
+    pub admin: Address,
+    pub campaign_ref: String,
+}
+
+/// Emitted when an admin unpauses a single campaign.
+#[contractevent]
+pub struct CampaignUnpausedEvent {
+    pub admin: Address,
+    pub campaign_ref: String,
 }
 
 /// Emitted when a delegate is added/updated for a package.
@@ -658,6 +715,75 @@ impl AidEscrow {
         paused
     }
 
+    /// Admin-only. Pauses a single campaign, identified by the `campaign_ref`
+    /// metadata value shared by its packages.
+    /// While paused, `claim`, `disburse`, and `refund` are blocked for any
+    /// package tagged with this `campaign_ref`; other campaigns are unaffected.
+    /// Emits a `CampaignPausedEvent`.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
+    pub fn pause_campaign(env: Env, campaign_ref: String) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let mut paused: Map<String, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_PAUSED)
+            .unwrap_or(Map::new(&env));
+        paused.set(campaign_ref.clone(), true);
+        env.storage().instance().set(&KEY_CAMPAIGN_PAUSED, &paused);
+
+        CampaignPausedEvent {
+            admin,
+            campaign_ref,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Admin-only. Unpauses a single campaign.
+    /// Emits a `CampaignUnpausedEvent`.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
+    pub fn unpause_campaign(env: Env, campaign_ref: String) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let mut paused: Map<String, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_PAUSED)
+            .unwrap_or(Map::new(&env));
+        paused.set(campaign_ref.clone(), false);
+        env.storage().instance().set(&KEY_CAMPAIGN_PAUSED, &paused);
+
+        CampaignUnpausedEvent {
+            admin,
+            campaign_ref,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Returns `true` if `campaign_ref` is currently paused, either directly
+    /// or because the contract is globally paused (global pause always takes
+    /// precedence over campaign-level state).
+    pub fn is_campaign_paused(env: Env, campaign_ref: String) -> bool {
+        if Self::is_paused(env.clone()) {
+            return true;
+        }
+
+        let paused: Map<String, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_PAUSED)
+            .unwrap_or(Map::new(&env));
+        paused.get(campaign_ref).unwrap_or(false)
+    }
+
     /// Returns the current contract configuration.
     /// Falls back to defaults (`min_amount: 1`, `max_expires_in: 0`, empty token list)
     /// if no config has been explicitly set.
@@ -1005,6 +1131,8 @@ impl AidEscrow {
             .get(&key)
             .ok_or(Error::PackageNotFound)?;
 
+        Self::check_campaign_paused(&env, &package.metadata)?;
+
         if package.status != PackageStatus::Created {
             return Err(Error::PackageNotActive);
         }
@@ -1060,6 +1188,8 @@ impl AidEscrow {
             .persistent()
             .get(&key)
             .ok_or(Error::PackageNotFound)?;
+
+        Self::check_campaign_paused(&env, &package.metadata)?;
 
         if package.status != PackageStatus::Created {
             return Err(Error::PackageNotActive);
@@ -1117,6 +1247,8 @@ impl AidEscrow {
             .persistent()
             .get(&key)
             .ok_or(Error::PackageNotFound)?;
+
+        Self::check_campaign_paused(&env, &package.metadata)?;
 
         if package.status != PackageStatus::Created {
             return Err(Error::PackageNotActive);
@@ -1182,6 +1314,91 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Claims multiple packages in a single invocation.
+    ///
+    /// `claimant` must authorize the call once; eligibility (ownership or
+    /// active delegation, timing, campaign pause, Merkle-gating) is then
+    /// checked independently for each package id. A package failing its
+    /// checks does not abort the batch or affect any other package - its
+    /// outcome is simply recorded as a non-`Success` `ClaimStatus` in the
+    /// returned results. Fund transfers and accounting updates only happen
+    /// for packages that resolve to `ClaimStatus::Success`.
+    ///
+    /// Returns `Err(Error::BatchTooLarge)` if more than
+    /// `MAX_BATCH_CLAIM_SIZE` ids are supplied, without touching any package.
+    pub fn batch_claim(
+        env: Env,
+        claimant: Address,
+        ids: Vec<u64>,
+    ) -> Result<Vec<BatchClaimResult>, Error> {
+        Self::check_action_paused(&env, symbol_short!("claim"))?;
+
+        if ids.len() > MAX_BATCH_CLAIM_SIZE {
+            return Err(Error::BatchTooLarge);
+        }
+
+        claimant.require_auth();
+
+        let now = env.ledger().timestamp();
+        let mut results = Vec::new(&env);
+        for id in ids.iter() {
+            results.push_back(Self::claim_one_for_batch(&env, &claimant, id, now));
+        }
+
+        Ok(results)
+    }
+
+    /// Evaluates and, if eligible, finalizes a single package claim as part
+    /// of `batch_claim`. Never panics on an ineligible package; the reason
+    /// is reported back via `ClaimStatus` instead.
+    fn claim_one_for_batch(env: &Env, claimant: &Address, id: u64, now: u64) -> BatchClaimResult {
+        let not_claimable = |status: ClaimStatus| BatchClaimResult {
+            package_id: id,
+            status,
+            amount: 0,
+        };
+
+        let key = (symbol_short!("pkg"), id);
+        let mut package: Package = match env.storage().persistent().get(&key) {
+            Some(p) => p,
+            None => return not_claimable(ClaimStatus::NotFound),
+        };
+
+        if Self::check_campaign_paused(env, &package.metadata).is_err() {
+            return not_claimable(ClaimStatus::CampaignPaused);
+        }
+
+        if package.status != PackageStatus::Created {
+            return not_claimable(ClaimStatus::NotActive);
+        }
+
+        if now < package.claim_starts_at {
+            return not_claimable(ClaimStatus::ClaimTooEarly);
+        }
+
+        if package.expires_at > 0 && now > package.expires_at {
+            return not_claimable(ClaimStatus::Expired);
+        }
+
+        if Self::merkle_root_from_metadata(env, &package.metadata).is_some() {
+            return not_claimable(ClaimStatus::RequiresProof);
+        }
+
+        if !delegate::is_authorised_claimer(env, id, &package.recipient, claimant) {
+            return not_claimable(ClaimStatus::Unauthorized);
+        }
+
+        let amount = package.amount;
+        match Self::finalize_claim(env, &key, &mut package, id, claimant, claimant, now) {
+            Ok(()) => BatchClaimResult {
+                package_id: id,
+                status: ClaimStatus::Success,
+                amount,
+            },
+            Err(_) => not_claimable(ClaimStatus::TransferFailed),
+        }
+    }
+
     // --- Admin Actions ---
 
     /// Admin manually triggers disbursement (overrides recipient claim need, strictly checks status).
@@ -1195,6 +1412,8 @@ impl AidEscrow {
             .persistent()
             .get(&key)
             .ok_or(Error::PackageNotFound)?;
+
+        Self::check_campaign_paused(&env, &package.metadata)?;
 
         if package.status != PackageStatus::Created {
             return Err(Error::PackageNotActive);
@@ -1281,6 +1500,8 @@ impl AidEscrow {
             .persistent()
             .get(&key)
             .ok_or(Error::PackageNotFound)?;
+
+        Self::check_campaign_paused(&env, &package.metadata)?;
 
         // Can only refund if Expired or Cancelled.
         // If Created, must Revoke first. If Claimed, impossible.
@@ -1538,6 +1759,36 @@ impl AidEscrow {
         } else {
             Err(Error::InvalidState)
         }
+    }
+
+    /// Extracts the `campaign_ref` metadata value from a package, if present.
+    fn campaign_ref_from_metadata(env: &Env, metadata: &Map<Symbol, String>) -> Option<String> {
+        let key = Symbol::new(env, "campaign_ref");
+        metadata.get(key)
+    }
+
+    /// Blocks the caller's action if the package's campaign is paused, or if
+    /// the contract is globally paused. Global pause always takes precedence;
+    /// packages without a `campaign_ref` are never blocked by campaign state.
+    fn check_campaign_paused(env: &Env, metadata: &Map<Symbol, String>) -> Result<(), Error> {
+        if Self::is_paused(env.clone()) {
+            return Err(Error::ContractPaused);
+        }
+
+        let campaign_ref = match Self::campaign_ref_from_metadata(env, metadata) {
+            Some(r) => r,
+            None => return Ok(()),
+        };
+
+        let paused: Map<String, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_PAUSED)
+            .unwrap_or(Map::new(env));
+        if paused.get(campaign_ref).unwrap_or(false) {
+            return Err(Error::ContractPaused);
+        }
+        Ok(())
     }
 
     fn decrement_locked(env: &Env, token: &Address, amount: i128) {
@@ -2330,6 +2581,13 @@ impl AidEscrow {
     pub fn cleanup_expired_delegates(env: Env, admin: Address) -> Result<u32, Error> {
         admin.require_auth();
         crate::delegate::cleanup_expired_delegates(&env, &admin)
+    }
+
+    /// Sweeps expired delegate entries in bounded batches to reclaim storage rent.
+    /// Safe to call repeatedly and by any address (no admin auth required).
+    /// Emits a `DelegateRevoked` event per cleared delegate.
+    pub fn sweep_expired_delegates(env: Env, limit: u32) -> Result<u32, Error> {
+        crate::delegate::sweep_expired_delegates(&env, limit)
     }
 }
 

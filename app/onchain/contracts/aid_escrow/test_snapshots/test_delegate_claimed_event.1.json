@@ -520,7 +520,7 @@
                             "symbol": "reason"
                           },
                           "val": {
-                            "string": "Admin delegate assignment"
+                            "symbol": "delegate_set"
                           }
                         }
                       ]
@@ -572,7 +572,7 @@
                             "symbol": "reason"
                           },
                           "val": {
-                            "string": "Delegate cleared after claim"
+                            "symbol": "delegate_cleared"
                           }
                         }
                       ]
@@ -1323,6 +1323,14 @@
                   },
                   "val": {
                     "u64": "42"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "receipt_hash"
+                  },
+                  "val": {
+                    "string": ""
                   }
                 },
                 {

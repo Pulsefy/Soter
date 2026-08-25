@@ -40,6 +40,14 @@
           "color": "#1E90FF",
           "sounds": []
         }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "soter",
+          "project": "mobile",
+          "authToken": "SENTRY_AUTH_TOKEN"
+        }
       ]
     ],
     "experiments": {

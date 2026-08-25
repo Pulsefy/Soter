@@ -337,3 +337,65 @@ fn test_cleanup_expired_delegates() {
     // Second delegate should remain
     assert_eq!(client.get_delegate(&2), Some(delegate2));
 }
+
+#[test]
+fn test_sweep_expired_delegates_by_any_address() {
+    let (env, client, admin, recipient, delegate1, token_client, _) = setup();
+    let delegate2 = Address::generate(&env);
+
+    let token = token_client.address.clone();
+    create_package(&client, &admin, &recipient, &token, 10);
+    create_package(&client, &admin, &recipient, &token, 11);
+
+    let now = env.ledger().timestamp();
+    client.set_delegate_with_expiry(&admin, &10, &delegate1, &(now + 30));
+    client.set_delegate_with_expiry(&admin, &11, &delegate2, &(now + 30));
+
+    // Advance to boundary time (exact expiry timestamp)
+    env.ledger().set_timestamp(now + 30);
+
+    // get_delegate and get_delegate_info must return None immediately
+    assert_eq!(client.get_delegate(&10), None);
+    assert_eq!(client.get_delegate_info(&10), None);
+    assert_eq!(client.get_delegate(&11), None);
+    assert_eq!(client.get_delegate_info(&11), None);
+
+    // Stranger (non-admin, any address) calls sweep in batch of 1
+    let swept = client.sweep_expired_delegates(&1);
+    assert_eq!(swept, 1);
+
+    // Stranger calls sweep for remaining expired delegate
+    let swept_remaining = client.sweep_expired_delegates(&10);
+    assert_eq!(swept_remaining, 1);
+
+    // Repeated call returns 0 cleanly
+    assert_eq!(client.sweep_expired_delegates(&10), 0);
+}
+
+#[test]
+fn test_get_delegate_boundary_and_expiry_semantics() {
+    let (env, client, admin, recipient, delegate, token_client, _) = setup();
+    let token = token_client.address.clone();
+    create_package(&client, &admin, &recipient, &token, 1);
+
+    let now = env.ledger().timestamp();
+    let expiry = now + 100;
+    client.set_delegate_with_expiry(&admin, &1, &delegate, &expiry);
+
+    // Unexpired (now < expiry)
+    env.ledger().set_timestamp(expiry - 1);
+    assert_eq!(client.get_delegate(&1), Some(delegate.clone()));
+    let info = client.get_delegate_info(&1);
+    assert!(info.is_some());
+    assert_eq!(info.unwrap(), (delegate.clone(), Some(expiry)));
+
+    // Boundary time (now == expiry) -> expired!
+    env.ledger().set_timestamp(expiry);
+    assert_eq!(client.get_delegate(&1), None);
+    assert_eq!(client.get_delegate_info(&1), None);
+
+    // Expired (now > expiry) -> expired!
+    env.ledger().set_timestamp(expiry + 10);
+    assert_eq!(client.get_delegate(&1), None);
+    assert_eq!(client.get_delegate_info(&1), None);
+}

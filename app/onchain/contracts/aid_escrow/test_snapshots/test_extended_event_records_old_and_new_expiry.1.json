@@ -935,14 +935,6 @@
                 },
                 {
                   "key": {
-                    "symbol": "package_id"
-                  },
-                  "val": {
-                    "u64": "42"
-                  }
-                },
-                {
-                  "key": {
                     "symbol": "new_expires_at"
                   },
                   "val": {
@@ -955,6 +947,14 @@
                   },
                   "val": {
                     "u64": "86400"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "package_id"
+                  },
+                  "val": {
+                    "u64": "42"
                   }
                 }
               ]

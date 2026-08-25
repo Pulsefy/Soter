@@ -16,6 +16,7 @@ import { AppColors } from '../theme/useAppTheme';
 import { useBiometric } from '../contexts/BiometricContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
+import { useCrashReporting } from '../contexts/CrashReportingContext';
 import { config } from '../config';
 
 const STELLAR_LAB_FAUCET_URL = 'https://lab.stellar.org/account/fund';
@@ -33,6 +34,10 @@ export const SettingsScreen: React.FC = () => {
     toggleManual,
     toggleAutoDetect,
   } = useSaverMode();
+  const {
+    enabled: crashReportingEnabled,
+    toggle: toggleCrashReporting,
+  } = useCrashReporting();
 
   const handleNotificationToggle = async (value: boolean) => {
     if (value) {
@@ -188,6 +193,49 @@ export const SettingsScreen: React.FC = () => {
             accessibilityElementsHidden
           />
         </View>
+
+        <Text
+          style={styles.sectionHeader}
+          accessibilityRole="header"
+        >
+          Crash Reporting
+        </Text>
+
+        <View
+          style={styles.row}
+          accessible
+          accessibilityRole="switch"
+          accessibilityLabel="Crash Reporting"
+          accessibilityHint="Help improve the app by sending anonymous crash reports. No personal data or evidence is collected."
+          accessibilityValue={{ text: crashReportingEnabled ? 'on' : 'off' }}
+          accessibilityState={{ checked: crashReportingEnabled }}
+          onAccessibilityTap={() =>
+            void toggleCrashReporting(!crashReportingEnabled)
+          }
+        >
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>Crash Reporting</Text>
+            <Text style={styles.rowSubtitle}>
+              Send anonymous crash reports to help fix issues. No personal data
+              or evidence content is collected.
+            </Text>
+          </View>
+          <Switch
+            value={crashReportingEnabled}
+            onValueChange={(v) => void toggleCrashReporting(v)}
+            trackColor={{ false: colors.border, true: colors.brand.primary }}
+            thumbColor="#FFFFFF"
+            importantForAccessibility="no-hide-descendants"
+            accessibilityElementsHidden
+          />
+        </View>
+
+        {!crashReportingEnabled && (
+          <Text style={styles.hint} accessibilityRole="alert">
+            Crash reporting is off. Crashes will not be sent to the development
+            team.
+          </Text>
+        )}
 
         <Text
           style={styles.sectionHeader}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Text,
   View,
@@ -6,12 +6,15 @@ import {
   Dimensions,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { BarCodeScanner } from 'expo-barcode-scanner';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
 import { createScanDeduper } from './scanDeduper';
+import { useCameraPermission } from '../hooks/useCameraPermission';
+import { CameraPermissionDenied } from '../components/CameraPermissionDenied';
 
 type ScannerScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Scanner'>;
 
@@ -45,19 +48,20 @@ export const parseAidIdFromQRCode = (data: string): string | null => {
 };
 
 export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
   const [isDuplicateScan] = useState(() => createScanDeduper());
   const { colors } = useTheme();
 
-  useEffect(() => {
-    const getBarCodeScannerPermissions = async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
-      setHasPermission(status === 'granted');
-    };
-
-    getBarCodeScannerPermissions();
-  }, []);
+  const {
+    permissionState,
+    isGranted,
+    isDenied,
+    isBlocked,
+    isChecking,
+    requestPermission,
+    openSettings,
+    statusMessage,
+  } = useCameraPermission();
 
   const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
     if (isDuplicateScan(data.trim())) return;
@@ -78,8 +82,8 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
     );
   };
 
-  // ── Permission: requesting ───────────────────────────────────────────────
-  if (hasPermission === null) {
+  // ── Permission: checking/requesting ──────────────────────────────────────
+  if (isChecking || permissionState === 'undetermined' || permissionState === 'requesting') {
     return (
       <View
         style={[styles.container, { backgroundColor: colors.background }]}
@@ -87,34 +91,26 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
         accessibilityLabel="Requesting camera permission to scan QR codes"
         accessibilityLiveRegion="polite"
       >
-        <Text style={{ color: colors.textPrimary }}>
+        <ActivityIndicator size="large" color={colors.brand.primary} />
+        <Text style={{ color: colors.textPrimary, marginTop: 16 }}>
           Requesting camera permission…
         </Text>
       </View>
     );
   }
 
-  // ── Permission: denied ───────────────────────────────────────────────────
-  if (hasPermission === false) {
+  // ── Permission: denied or blocked ───────────────────────────────────────
+  if (isDenied || isBlocked) {
     return (
-      <View
-        style={[styles.container, { backgroundColor: colors.background }]}
-        accessible
-        accessibilityLabel="Camera access denied. Cannot scan QR codes."
-      >
-        <Text style={{ color: colors.textPrimary, marginBottom: 20 }}>
-          No access to camera
-        </Text>
-        <TouchableOpacity
-          style={[styles.permissionButton, { backgroundColor: colors.brand.primary }]}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-          accessibilityHint="Returns to the previous screen"
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.permissionButtonText}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+      <CameraPermissionDenied
+        permissionState={permissionState}
+        statusMessage={statusMessage}
+        canRequestAgain={isDenied}
+        onRequestPermission={requestPermission}
+        onOpenSettings={openSettings}
+        onGoBack={() => navigation.goBack()}
+        context="scanner"
+      />
     );
   }
 

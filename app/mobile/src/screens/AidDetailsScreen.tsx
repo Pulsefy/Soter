@@ -33,7 +33,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const { aidId } = route.params;
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { biometricEnabled, authenticate } = useBiometric();
+  const { biometricEnabled, authenticate, confirmValueAction } = useBiometric();
   const { active: saverModeActive, source: saverModeSource } = useSaverMode();
 
   // null = not yet attempted, true = granted, false = denied
@@ -171,6 +171,11 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
 
+    const confirmed = await confirmValueAction('Confirm claim submission');
+    if (!confirmed) {
+      return;
+    }
+
     setConfirming(true);
 
     try {
@@ -194,7 +199,15 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       setConfirming(false);
     }
-  }, [aidId, details, isConnected, loadDetails, navigation, queueClaimConfirmation]);
+  }, [
+    aidId,
+    confirmValueAction,
+    details,
+    isConnected,
+    loadDetails,
+    navigation,
+    queueClaimConfirmation,
+  ]);
 
   // ── Auth states ──────────────────────────────────────────────────────────
 
@@ -371,7 +384,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       <ClaimStatusTimeline details={details} colors={colors} styles={styles} />
 
       {details.status === 'disbursed' ? (
-        <View style={styles.claimCompleteCard} accessibilityRole="status">
+        <View style={styles.claimCompleteCard} accessibilityLiveRegion="polite">
           <Text style={styles.claimCompleteTitle}>Claim completed</Text>
           <Text style={styles.claimCompleteText}>
             This package has been disbursed. You can view your claim receipt now.
@@ -437,7 +450,13 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         <TouchableOpacity
           accessibilityRole="button"
           style={[styles.button, { backgroundColor: colors.success }]}
-          onPress={() => navigation.navigate('ClaimReceipt', { claimId: details.claimId })}
+          onPress={async () => {
+            const confirmed = await confirmValueAction('Confirm receipt access');
+            if (!confirmed) {
+              return;
+            }
+            navigation.navigate('ClaimReceipt', { claimId: details.claimId });
+          }}
           activeOpacity={0.8}
         >
           <Text style={styles.buttonText}>View Receipt</Text>

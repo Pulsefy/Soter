@@ -43,6 +43,8 @@ section using the `#[contractevent]` derive.
 | `contract_unpaused_event` | `unpause`           | Admin unpauses the whole contract.                     |
 | `action_paused_event`     | `pause_action`      | Admin pauses a single action (create/claim/withdraw).  |
 | `action_unpaused_event`   | `unpause_action`    | Admin unpauses a single action.                        |
+| `campaign_paused_event`   | `pause_campaign`    | Admin pauses a single campaign (`campaign_ref`).       |
+| `campaign_unpaused_event` | `unpause_campaign`  | Admin unpauses a single campaign.                      |
 
 > Function names refer to the public entrypoints in `src/lib.rs`.
 
@@ -71,6 +73,8 @@ Pool / administrative events:
 | `ContractUnpausedEvent` | `admin: Address`                                                          |
 | `ActionPausedEvent`     | `admin: Address`, `action: Symbol`                                        |
 | `ActionUnpausedEvent`   | `admin: Address`, `action: Symbol`                                        |
+| `CampaignPausedEvent`   | `admin: Address`, `campaign_ref: String`                                  |
+| `CampaignUnpausedEvent` | `admin: Address`, `campaign_ref: String`                                  |
 
 ## Identifier stability (audit)
 
@@ -90,10 +94,16 @@ Pool / administrative events:
 ## Sensitive-metadata review (audit)
 
 Packages carry an arbitrary `metadata: Map<Symbol, String>` (used for values
-such as `campaign_ref`). **No event payload includes this map or any value
-from it.** Events expose only structural fields (ids, addresses, amounts,
-timestamps), so free-form or potentially sensitive metadata is never leaked
-through the event stream.
+such as `campaign_ref`). **No package lifecycle event payload includes this
+map or any value from it.** Events expose only structural fields (ids,
+addresses, amounts, timestamps), so free-form or potentially sensitive
+package metadata is never leaked through the event stream.
+
+The one exception is `CampaignPausedEvent` / `CampaignUnpausedEvent`, whose
+`campaign_ref` field is not incidental package metadata but the admin's own
+call argument to `pause_campaign` / `unpause_campaign` — the same value is
+already public as the transaction input, so echoing it in the event is not a
+metadata leak.
 
 Consequences for indexers:
 

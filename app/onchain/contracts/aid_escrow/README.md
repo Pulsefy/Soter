@@ -59,6 +59,12 @@ needs them, then normal reads and writes resume TTL maintenance.
 | `pause(env)` | Admin | Pauses the contract (blocks package creation and claims). |
 | `unpause(env)` | Admin | Unpauses the contract. |
 | `is_paused(env)` | — | Returns true if the contract is paused. |
+| `pause_action(env, action)` | Admin | Pauses a single action (`create`/`claim`/`refund`/`withdraw`). |
+| `unpause_action(env, action)` | Admin | Unpauses a single action. |
+| `is_action_paused(env, action)` | — | Returns true if the action is paused (or the contract is globally paused). |
+| `pause_campaign(env, campaign_ref)` | Admin | Pauses `claim`/`disburse`/`refund` for packages tagged with this `campaign_ref`. |
+| `unpause_campaign(env, campaign_ref)` | Admin | Unpauses the campaign. |
+| `is_campaign_paused(env, campaign_ref)` | — | Returns true if the campaign is paused (or the contract is globally paused). |
 
 ### Funding
 

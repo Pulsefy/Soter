@@ -12,6 +12,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { config } from '../config';
+import { useBiometric } from '../contexts/BiometricContext';
 
 export interface ClaimReceiptData {
   claimId: string;
@@ -73,6 +74,7 @@ function FieldCopyButton({ value, label, colors }: { value: string; label: strin
 export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compact = false }) => {
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const { confirmValueAction } = useBiometric();
 
   // We should ideally use theme colors here but it's okay to map statuses to some semantic tokens
   // if available, but for now we'll stick to semantic hex overrides that are readable.
@@ -129,6 +131,11 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compa
   }, [claim, formattedDate]);
 
   const handleShare = async () => {
+    const confirmed = await confirmValueAction('Confirm receipt sharing');
+    if (!confirmed) {
+      return;
+    }
+
     setSharing(true);
     try {
       await Share.share({
@@ -144,6 +151,11 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compa
   };
 
   const handleCopy = async () => {
+    const confirmed = await confirmValueAction('Confirm receipt copy');
+    if (!confirmed) {
+      return;
+    }
+
     try {
       await Clipboard.setStringAsync(receiptText);
       setCopied(true);
