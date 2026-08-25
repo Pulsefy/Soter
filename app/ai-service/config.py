@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import secrets
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import model_validator, HttpUrl
 from pydantic_core import PydanticUndefined
@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     ai_deterministic_mode: bool = False
     test_provider_mode: bool = False
     llm_timeout_seconds: int = 30
+
+    # Explicit LLM fallback order (comma-separated list of provider names).
+    # Allowed values: openai, groq, test
+    # When unset the registry falls back to the implicit built-in order.
+    # Example: LLM_PROVIDER_ORDER=groq,openai   (try Groq first, then OpenAI)
+    llm_provider_order: Optional[str] = None
 
     # Request throttling
     request_rate_limit: str = "10/minute"
@@ -201,6 +207,29 @@ class Settings(BaseSettings):
 
         def _add(key: str, problem: str) -> None:
             errors.append(f"{key}: {problem}")
+
+        # --- LLM provider order ------------------------------------------
+        _KNOWN_LLM_PROVIDERS = {"openai", "groq", "test"}
+        if self.llm_provider_order is not None:
+            entries = [
+                e.strip() for e in self.llm_provider_order.split(",") if e.strip()
+            ]
+            if not entries:
+                _add(
+                    "LLM_PROVIDER_ORDER",
+                    "must not be blank when set; provide a comma-separated list "
+                    f"of provider names from {sorted(_KNOWN_LLM_PROVIDERS)}",
+                )
+            else:
+                unknown = [e for e in entries if e not in _KNOWN_LLM_PROVIDERS]
+                if unknown:
+                    _add(
+                        "LLM_PROVIDER_ORDER",
+                        f"contains unknown provider(s): {unknown}. "
+                        f"Allowed values: {sorted(_KNOWN_LLM_PROVIDERS)}",
+                    )
+                if len(entries) != len(set(entries)):
+                    _add("LLM_PROVIDER_ORDER", "contains duplicate provider names")
 
         # --- Provider keys: set-but-blank is malformed -------------------
         if self.openai_api_key is not None and not self.openai_api_key.strip():
@@ -342,6 +371,12 @@ class Settings(BaseSettings):
         if self.groq_api_key:
             return "groq"
         return None
+
+    def parsed_llm_provider_order(self) -> List[str]:
+        """Return the ordered provider list from LLM_PROVIDER_ORDER, or [] if unset."""
+        if not self.llm_provider_order:
+            return []
+        return [e.strip() for e in self.llm_provider_order.split(",") if e.strip()]
 
     def get_cors_allowed_origins(self) -> list[str]:
         """

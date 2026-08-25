@@ -104,7 +104,9 @@ class TestHumanitarianVerificationService:
         mock_registry.resolve_llm.return_value = []
         monkeypatch.setattr(self.service, "registry", mock_registry)
 
-        with pytest.raises(RuntimeError):
+        from exceptions import AllProvidersExhaustedError
+
+        with pytest.raises(AllProvidersExhaustedError):
             self.service.verify_claim(
                 aid_claim="Food distribution completed.",
                 supporting_evidence=[],

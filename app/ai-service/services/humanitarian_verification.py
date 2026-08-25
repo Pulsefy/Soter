@@ -7,6 +7,7 @@ import time
 import metrics
 
 from config import settings
+from exceptions import AllProvidersExhaustedError
 from services.humanitarian_prompt import HumanitarianPromptEngine
 from services.circuit_breaker import CircuitBreaker
 from services.providers import ProviderRegistry, ModelProvider, LLMResponse
@@ -39,6 +40,19 @@ class HumanitarianVerificationService:
         provider_preference: str = "auto",
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
+        """Verify a humanitarian aid claim using configured LLM providers.
+
+        The method iterates through the fallback list in the order defined by
+        ``LLM_PROVIDER_ORDER`` (or the built-in implicit order when unset).
+        Providers with an open circuit breaker are skipped automatically.
+
+        Returns a dict that always contains a ``provider`` key recording which
+        provider actually served the request.
+
+        Raises:
+            AllProvidersExhaustedError: when every provider in the fallback
+                list has been tried (and failed) or is circuit-open.
+        """
         start_time = time.time()
         try:
             evidence = supporting_evidence or []
@@ -55,17 +69,22 @@ class HumanitarianVerificationService:
                 context_factors=context,
             )
 
-            providers = self.registry.resolve_llm(provider_preference)
+            providers = self.registry.resolve_llm(
+                provider_preference, breaker_map=self.breakers
+            )
             if not providers:
-                raise RuntimeError(
-                    "No LLM providers configured for humanitarian verification"
+                raise AllProvidersExhaustedError(
+                    providers_tried=[],
+                    errors=["No LLM providers configured or all circuits are open"],
                 )
 
             errors: List[str] = []
+            providers_tried: List[str] = []
 
             for provider_name, provider in providers:
                 breaker = self._get_breaker(provider_name)
                 if not breaker.allow_request():
+                    # breaker_map already filters these out, but guard defensively
                     logger.warning(
                         "Circuit breaker is OPEN for provider=%s. Skipping.",
                         provider_name,
@@ -75,6 +94,7 @@ class HumanitarianVerificationService:
                     )
                     continue
 
+                providers_tried.append(provider_name)
                 model = self._get_model_for_provider(provider_name)
                 for prompt_variant, prompt in (
                     ("primary", primary_prompt),
@@ -95,6 +115,8 @@ class HumanitarianVerificationService:
                         )
                         parsed = self._parse_json_response(response.content)
                         breaker.record_success()
+                        # ``provider`` is always present in the result dict so
+                        # callers can record which backend served the request.
                         return {
                             "provider": provider_name,
                             "model": model,
@@ -110,8 +132,9 @@ class HumanitarianVerificationService:
                             "Humanitarian verification attempt failed: %s", err
                         )
 
-            raise RuntimeError(
-                "All humanitarian verification attempts failed: " + " | ".join(errors)
+            raise AllProvidersExhaustedError(
+                providers_tried=providers_tried,
+                errors=errors,
             )
         finally:
             latency = time.time() - start_time

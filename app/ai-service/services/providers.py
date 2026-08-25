@@ -419,15 +419,36 @@ class ProviderRegistry:
             raise ValueError(f"Unknown provider: {name}") from None
 
     def available_llm_providers(self) -> List[str]:
-        """Return ordered list of available LLM provider names based on config."""
-        available: List[str] = []
+        """Return ordered list of available LLM provider names based on config.
+
+        When ``LLM_PROVIDER_ORDER`` is set in configuration the explicit list
+        drives the ordering.  Only providers that are actually available (API
+        key present, or test/fixture mode active) are included; entries in the
+        configured order that are not available are silently dropped so the
+        fallback list never contains dead entries.
+
+        When ``LLM_PROVIDER_ORDER`` is not set the previous implicit ordering
+        (test → openai → groq) is preserved for backwards compatibility.
+        """
+        # Determine which providers are available at all.
+        available_set: List[str] = []
         if settings.test_provider_mode:
-            available.append("test")
+            available_set.append("test")
         if settings.openai_api_key:
-            available.append("openai")
+            available_set.append("openai")
         if settings.groq_api_key:
-            available.append("groq")
-        return available
+            available_set.append("groq")
+
+        configured_order = settings.parsed_llm_provider_order()
+        if configured_order:
+            # Preserve the configured order but only include available providers.
+            ordered = [p for p in configured_order if p in available_set]
+            # Append any available providers not explicitly listed (safety net).
+            ordered += [p for p in available_set if p not in ordered]
+            return ordered
+
+        # Legacy implicit order.
+        return available_set
 
     def available_ocr_providers(self) -> List[str]:
         """Return ordered list of available OCR provider names."""
@@ -438,24 +459,76 @@ class ProviderRegistry:
         available.append("tesseract")
         return available
 
-    def resolve_llm(self, preference: str = "auto") -> List[Tuple[str, ModelProvider]]:
-        """Return (name, provider) pairs in attempt order for LLM chat."""
+    def resolve_llm(
+        self,
+        preference: str = "auto",
+        *,
+        breaker_map: Optional[Dict[str, Any]] = None,
+    ) -> List[Tuple[str, ModelProvider]]:
+        """Return (name, provider) pairs in attempt order for LLM chat.
+
+        Args:
+            preference: Provider name to prefer (placed first), or ``"auto"``
+                to use the order from ``LLM_PROVIDER_ORDER`` / the implicit
+                fallback list.  The special value ``"test"`` pins to the
+                fixture provider only.
+            breaker_map: Optional mapping of ``{provider_name: CircuitBreaker}``.
+                When supplied, providers whose circuit breaker is in the OPEN
+                state are excluded from the returned list so callers do not
+                waste attempts on known-failing providers.
+
+        Returns:
+            Ordered list of ``(name, provider)`` tuples ready for sequential
+            fallback.  May be empty if no providers are available or all are
+            circuit-open.
+        """
         available = self.available_llm_providers()
         pref = (preference or "auto").lower()
         if pref == "test" and "test" in available:
-            return [("test", self.get("test"))]
-        if pref in available:
-            ordered = [pref] + [p for p in available if p != pref]
+            candidates = ["test"]
+        elif pref in available:
+            candidates = [pref] + [p for p in available if p != pref]
         else:
-            ordered = available
-        return [(name, self.get(name)) for name in ordered]
+            candidates = available
 
-    def resolve_ocr(self, preference: str = "auto") -> List[Tuple[str, ModelProvider]]:
-        """Return (name, provider) pairs in attempt order for OCR."""
+        if breaker_map:
+            candidates = [
+                p
+                for p in candidates
+                if p not in breaker_map or breaker_map[p].allow_request()
+            ]
+
+        return [(name, self.get(name)) for name in candidates]
+
+    def resolve_ocr(
+        self,
+        preference: str = "auto",
+        *,
+        breaker_map: Optional[Dict[str, Any]] = None,
+    ) -> List[Tuple[str, ModelProvider]]:
+        """Return (name, provider) pairs in attempt order for OCR.
+
+        Args:
+            preference: Provider name to prefer, or ``"auto"``.
+            breaker_map: Optional mapping of ``{provider_name: CircuitBreaker}``.
+                Open-circuit providers are excluded from the returned list.
+
+        Returns:
+            Ordered list of ``(name, provider)`` tuples ready for sequential
+            fallback.
+        """
         available = self.available_ocr_providers()
         pref = (preference or "auto").lower()
         if pref in available:
-            ordered = [pref] + [p for p in available if p != pref]
+            candidates = [pref] + [p for p in available if p != pref]
         else:
-            ordered = available
-        return [(name, self.get(name)) for name in ordered]
+            candidates = available
+
+        if breaker_map:
+            candidates = [
+                p
+                for p in candidates
+                if p not in breaker_map or breaker_map[p].allow_request()
+            ]
+
+        return [(name, self.get(name)) for name in candidates]
