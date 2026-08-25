@@ -30,6 +30,13 @@ class LanguageHint(str, Enum):
     jpn = "jpn"
 
 
+class ConfidenceBand(str, Enum):
+    high = "high"
+    medium = "medium"
+    low = "low"
+    unknown = "unknown"
+
+
 class OCRFieldResult(BaseModel):
     value: str = Field(examples=["John Doe"])
     confidence: float = Field(0.0, examples=[0.95])
@@ -50,6 +57,13 @@ class OCRData(BaseModel):
     )
     raw_text: str = Field(examples=["John Doe\nID: 123456789"])
     processing_time_ms: int = Field(examples=[1500])
+    overall_confidence: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0, examples=[0.85]
+    )
+    confidence_band: ConfidenceBand = Field(
+        default=ConfidenceBand.unknown, examples=[ConfidenceBand.medium]
+    )
+    review_required: bool = Field(default=False, examples=[False])
 
     model_config = {
         "json_schema_extra": {
@@ -61,6 +75,9 @@ class OCRData(BaseModel):
                     },
                     "raw_text": "John Doe\nID: 123456789",
                     "processing_time_ms": 1500,
+                    "overall_confidence": 0.92,
+                    "confidence_band": "high",
+                    "review_required": False,
                 }
             ]
         }
@@ -88,6 +105,9 @@ class OCRResponse(BaseModel):
                         },
                         "raw_text": "John Doe\nID: 123456789",
                         "processing_time_ms": 1500,
+                        "overall_confidence": 0.92,
+                        "confidence_band": "high",
+                        "review_required": False,
                     },
                     "processing_time_ms": 1500,
                     "anchor_metadata": {
