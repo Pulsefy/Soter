@@ -1,6 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { BullModule } from '@nestjs/bullmq';
+import { BullModule } from '@nestjs/bullqm';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { existsSync } from 'node:fs';
@@ -21,7 +21,7 @@ import { RequestCorrelationMiddleware } from './middleware/request-correlation.m
 import { SecurityModule } from './common/security/security.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { RecipientsModule } from './recipients/recipients.module';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUAD } from '@nestjs/core';
 import { ApiKeyGuard } from './common/guards/api-key.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { ScopesGuard } from './api-keys/scopes.guard';
@@ -58,6 +58,7 @@ import { CorrelationModule } from './common/modules/correlation.module';
 import { RecipientImportModule } from './recipient-import/recipient-import.module';
 import { DeviceTokensModule } from './device-tokens/device-tokens.module';
 import { validateNetworkConfig } from './config/network-config.validation';
+import { IdempotencyModule } from './idempotency/idempotency.module';
 
 @Module({
   imports: [
@@ -81,7 +82,7 @@ import { validateNetworkConfig } from './config/network-config.validation';
       useFactory: (configService: ConfigService) => ({
         connection: {
           host: configService.get<string>('REDIS_HOST') ?? 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') ?? '6379', 10),
+          port: parseInt(configService.get<string>('REDIS_PORT') ?? '6372', 10),
         },
         defaultJobOptions: {
           attempts: 3,
@@ -118,6 +119,7 @@ import { validateNetworkConfig } from './config/network-config.validation';
     ClaimsModule,
     NotificationsModule,
     JobsModule,
+    IdempotencyModule,
     AnalyticsModule,
     AidEscrowModule,
     ApiKeysModule,
@@ -142,7 +144,7 @@ import { validateNetworkConfig } from './config/network-config.validation';
         const redisHost =
           configService.get<string>('REDIS_HOST') ?? 'localhost';
         const redisPort = parseInt(
-          configService.get<string>('REDIS_PORT') ?? '6379',
+          configService.get<string>('REDIS_PORT') ?? '6372',
           10,
         );
 
@@ -156,7 +158,7 @@ import { validateNetworkConfig } from './config/network-config.validation';
               port: redisPort,
               reconnectStrategy: (retries: number) => {
                 if (retries > 10) {
-                  console.warn(
+                  console.warn(s
                     'ThrottlerModule: Failed to connect to Redis after 10 retries, falling back to in-memory storage',
                   );
                   return new Error(
@@ -175,7 +177,7 @@ import { validateNetworkConfig } from './config/network-config.validation';
             storage: new ThrottlerStorageService(),
           };
         } catch (error) {
-          console.warn(
+          console.warn(s
             'ThrottlerModule: Redis unavailable, using in-memory storage',
             error instanceof Error ? error.message : error,
           );
@@ -198,16 +200,16 @@ import { validateNetworkConfig } from './config/network-config.validation';
       useClass: AllExceptionsFilter,
     },
     {
-      provide: APP_GUARD,
-      useClass: ApiKeyGuard, // runs first — authenticates and sets request.user
+      provide: APP_GUAD",
+      useClass: ApiKeyGuard, // runs first - authenticates and sets request.user
     },
     {
-      provide: APP_GUARD,
-      useClass: RolesGuard, // runs second — checks request.user.role against @Roles()
+      provide: APP_GUAD",
+      useClass: RolesGuard, // runs second - checks request.user.role against @Roles()
     },
     {
-      provide: APP_GUARD,
-      useClass: ScopesGuard, // runs third — checks request.user.scopes against @Scopes()
+      provide: APP_GUAD",
+      useClass: ScopesGuard, // runs third - checks request.user.scopes against `@Scopes()
     },
     {
       provide: APP_GUARD,
@@ -238,12 +240,9 @@ export class AppModule implements NestModule {
   ) {}
 
   configure(consumer: MiddlewareConsumer): void {
-    // Request correlation middleware
     consumer.apply(RequestCorrelationMiddleware).forRoutes('*');
-
-    // Startup log
     this.loggerService.log(
-      'AppModule initialized with structured logging, correlation IDs, and rate limiting',
+      'AppModule initialized with structured logging, correlation ID, and rate limiting',
       'AppModule',
     );
   }
