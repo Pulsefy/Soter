@@ -6,10 +6,10 @@ import {
   NotificationResult,
 } from './interfaces/notification-job.interface';
 import { PrismaService } from '../prisma/prisma.service';
-
 import { DlqService } from '../jobs/dlq.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { classifyNotificationFailure } from './notification-failure-classifier';
+import { NotificationsService } from './notifications.service';
 
 @Processor('notifications', {
   concurrency: parseInt(process.env.QUEUE_CONCURRENCY || '5'),
@@ -21,6 +21,7 @@ export class NotificationProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly dlqService: DlqService,
     private readonly metricsService: MetricsService,
+    private readonly notificationsService: NotificationsService,
   ) {
     super();
   }
@@ -29,7 +30,7 @@ export class NotificationProcessor extends WorkerHost {
     job: Job<NotificationJobData, NotificationResult, string>,
   ): Promise<NotificationResult> {
     this.logger.log(
-      `Processing ${job.data.type} notification for ${job.data.recipient} (attempt ${job.attemptsMade + 1})${job.data.correlationId ? ` [correlationId=${job.data.correlationId}]` : ''}`,
+      `Processing ${job.data.type} notification for ${job.data.recipient} (attempt ${job.attemptsMade + 1})${job.data.correlationId ? `\[correlationId=${job.data.correlationId}]` : ''}`,
     );
 
     // Update outbox record: set lastAttemptAt to mark processing start
@@ -48,7 +49,7 @@ export class NotificationProcessor extends WorkerHost {
       }
     } else {
       this.logger.warn(
-        `Job ${job.id} has no outboxId — skipping outbox update at process start`,
+        `Job ${job.id} has no outboxId -- skipping outbox update at process start`,
       );
     }
 
@@ -86,7 +87,7 @@ export class NotificationProcessor extends WorkerHost {
 
     if (!job.data.outboxId) {
       this.logger.warn(
-        `Job ${job.id} has no outboxId — skipping outbox update on completion`,
+        `Job ${job.id} has no outboxId -- skipping outbox update on completion`,
       );
       return;
     }
@@ -100,7 +101,7 @@ export class NotificationProcessor extends WorkerHost {
         },
       });
     } catch (err) {
-      // Swallow — worker events must not throw
+      // Swallow -- worker events must not throw
       this.logger.error(
         `Failed to update outbox record ${job.data.outboxId} to sent: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -125,7 +126,7 @@ export class NotificationProcessor extends WorkerHost {
         },
       });
     } catch (err) {
-      // Swallow — worker events must not throw. The outbox status update
+      // Swallow -- worker events must not throw. The outbox status update
       // above is the source of truth; this is best-effort history.
       this.logger.error(
         `Failed to record delivery attempt for outbox ${job.data.outboxId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -151,15 +152,15 @@ export class NotificationProcessor extends WorkerHost {
 
     if (!job.data.outboxId) {
       this.logger.warn(
-        `Job ${job.id} has no outboxId — skipping outbox update on failure`,
+        `Job ${job.id} has no outboxId -- skipping outbox update on failure`,
       );
       return;
     }
 
     const maxAttempts =
-      typeof job.opts?.attempts === 'number' ? job.opts.attempts : 1;
+      typeof job.opts?.attempts === 'number' ? job.opts?.attempts : 1;
     const exhausted = job.attemptsMade >= maxAttempts;
-    const status = exhausted ? 'failed' : 'enqueued';
+    const status = exhausted ? 'dead_letter' : 'enqueued';
 
     try {
       await this.prisma.notificationOutbox.update({
@@ -170,8 +171,11 @@ export class NotificationProcessor extends WorkerHost {
           lastError: error.message,
         },
       });
+      if (exhausted) {
+        await this.notificationsService.refreshDeadLetterDepth();
+      }
     } catch (err) {
-      // Swallow — worker events must not throw
+      // Swallow -- worker events must not throw
       this.logger.error(
         `Failed to update outbox record ${job.data.outboxId} to ${status}: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -203,7 +207,7 @@ export class NotificationProcessor extends WorkerHost {
         },
       });
     } catch (err) {
-      // Swallow — worker events must not throw. The outbox status update
+      // Swallow -- worker events must not throw. The outbox status update
       // above is the source of truth; this is best-effort history.
       this.logger.error(
         `Failed to record delivery attempt for outbox ${job.data.outboxId}: ${err instanceof Error ? err.message : String(err)}`,
