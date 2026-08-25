@@ -14,28 +14,36 @@ export interface IdempotencyRecord {
 
 export class IdempotencyStore {
   private pool: Pool;
+  private readonly retentionMs: number;
 
-  constructor(pool: Pool) {
+  constructor(pool: Pool, retentionMs = 30 * 24 * 60 * 60 * 1000) {
     this.pool = pool;
+    this.retentionMs = retentionMs;
   }
 
   public async tryAcquire(
     key: IdempotencyKey,
     fingerprint: RequestFingerprint,
   ): Promise<IdempotencyRecord | undefined> {
+    const expiresAt = new Date(Date.now() + this.retentionMs);
     const insertResult = await this.pool.query(
-      `INSERT INTO idempotency_records (idempotency_key, request_fingerprint, status)
-           VALUES ($1, $2, 'processing')
-               ON CONFLICT (idempotency_key) DO NOTHING
+      `INSERT INTO idempotency_records (idempotency_key, request_fingerprint, status, expires_at)
+           VALUES ($1, $2, 'processing', $3)
+       ON CONFLICT (idempotency_key) DO UPDATE
+           SET request_fingerprint = EXCLUDED.request_fingerprint,
+               status = 'processing',
+               response_body = NULL,
+               response_status = NULL,
+               expires_at = EXCLUDED.expires_at
+           WHERE idempotency_records.expires_at < now()
        RETURNING idempotency_key`,
-      [key.asString(), fingerprint.asString()],
+      [key.asString(), fingerprint.asString(), expiresAt],
     );
 
     if (insertResult.rows.length > 0) {
-      return undefined; // Fresh key — proceed!
+      return undefined;
     }
 
-    // Key exists — fetch it
     const { rows } = await this.pool.query(
       `SELECT idempotency_key, request_fingerprint, status, response_body, response_status
            FROM idempotency_records WHERE idempotency_key = $1`,
@@ -66,11 +74,16 @@ export class IdempotencyStore {
     );
   }
 
-  public async cleanup(maxAgeHours: number): Promise<number> {
+  public async cleanup(batchSize: number, maxExpiry: Date = new Date()): Promise<number> {
     const result = await this.pool.query(
       `DELETE FROM idempotency_records
-           WHERE created_at < now() - ($1::int || ' hours')::interval`,
-      [maxAgeHours],
+       WHERE idempotency_key IN ([
+         SELECT idempotency_key FROM idempotency_records
+         WHERE expires_at < $1
+         ORDER BY expires_at
+         LIMIT $2
+       )]`,
+      [maxExpiry, batchSize],
     );
     return result.rowCount ?? 0;
   }
