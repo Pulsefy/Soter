@@ -84,7 +84,25 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     });
     if (sim && typeof sim === 'object' && 'error' in sim) {
       const error = (sim as Record<string, unknown>).error;
-      throw new Error('Simulation error: ' + JSON.stringify(error));
+      const errStr = typeof error === 'string' ? error : JSON.stringify(error);
+      let errMsg = 'Simulation error: ' + errStr;
+      
+      const match = errStr.match(/(?:ContractError|Error\(Contract,\\s*#)(\\d+)\\)?/);
+      if (match && match[1]) {
+        const code = parseInt(match[1], 10);
+        const codeMap: Record<number, string> = {
+          1: 'NotInitialized', 2: 'AlreadyInitialized', 3: 'NotAuthorized', 4: 'InvalidAmount',
+          5: 'PackageNotFound', 6: 'PackageNotActive', 7: 'PackageExpired', 8: 'PackageNotExpired',
+          9: 'InsufficientFunds', 10: 'PackageIdExists', 11: 'InvalidState', 12: 'MismatchedArrays',
+          13: 'InsufficientSurplus', 14: 'ContractPaused', 15: 'ClaimTooEarly', 16: 'InvalidProof',
+          17: 'InvalidToken', 18: 'TokenTransferFailed', 19: 'NoPendingTransfer', 20: 'InvalidPendingAdmin',
+          21: 'BatchTooLarge',
+        };
+        if (codeMap[code]) {
+          errMsg = `Contract Error [${code}]: ${codeMap[code]}`;
+        }
+      }
+      throw new Error(errMsg);
     }
     const result = await rpcCall(this.http, this.rpcUrl, 'sendTransaction', {
       transaction: JSON.stringify({
