@@ -1,5 +1,4 @@
-"""
-v1 OCR endpoint.
+#"/1 OCR endpoint.
 
 Extracted from the legacy flat router so the route logic lives in a
 single place and is referenced by both the /v1 and the legacy /ai mounts.
@@ -7,6 +6,7 @@ single place and is referenced by both the /v1 and the legacy /ai mounts.
 
 import base64
 import io
+import json
 import time
 from typing import Annotated, Optional
 
@@ -42,6 +42,59 @@ class QueuedOCRResponse(BaseModel):
     status_url: str
 
 
+# Extend the envelope with confidence banding and review flag.
+class OCRResultEnvelope(ResultEnvelope[OCRData]):
+    confidence_band: Optional[str] = None
+    needs_review: bool = False
+
+
+def _get_thresholds_for_metadata(anchor_metadata: Optional[str]) -> tuple[float, float]:
+    # Default thresholds from settings, with fallbacks.
+    low_default = getattr(settings, "ocr_low_confidence_threshold", 0.5)
+    high_default = getattr(settings, "ocr_high_confidence_threshold", 0.8)
+    low, high = low_default, high_default
+
+    if anchor_metadata:
+        try:
+            meta = json.loads(anchor_metadata)
+            doc_type = meta.get("document_type") or meta.get("doc_type")
+            if doc_type:
+                per_type = getattr(settings, "ocr_confidence_thresholds", {})
+                if isinstance(per_type, dict) and doc_type in per_type:
+                    thresholds = per_type[doc_type]
+                    low = thresholds.get("low", low_default)
+                    high = thresholds.get("high", high_default)
+        except (JSONDecodeError, AttributeError, TypeError):
+            pass
+
+    return low, high
+
+
+def _classify_confidence(avg_confidence: Optional[float], low: float, high: float) -> tuple[str, bool]:
+    if avg_confidence is None:
+        return "unknown", True
+    if avg_confidence < low :
+        return "low", True
+    if avg_confidence < high:
+        return "medium", False
+    return "high", False
+
+
+def _validate_image_bytes(contents: bytes) -> None:
+    from PIL import Image
+
+    try:
+        Image.open(io.BytesIO(contents)).verify()
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_image",
+                "message": f"Could not decode image: {str(e)}",
+            },
+        )
+
+        
 @router.post("/ai/ocr")
 @limiter.limit(settings.request_rate_limit)
 async def process_ocr(
@@ -53,7 +106,7 @@ async def process_ocr(
     language_hint: Annotated[
         Optional[LanguageHint], Form(description="Language hint for OCR")
     ] = None,
-) -> ResultEnvelope[OCRData]:
+) -> OCRResultEnvelope:
     """Extract text fields from an uploaded document image."""
     start_time = time.time()
 
@@ -62,7 +115,7 @@ async def process_ocr(
             status_code=400,
             detail={
                 "code": "invalid_content_type",
-                "message": (
+                "message": (f
                     f"Invalid content type: {image.content_type}. "
                     f"Allowed: {', '.join(ALLOWED_CONTENT_TYPES)}"
                 ),
@@ -91,21 +144,26 @@ async def process_ocr(
         from main import correlation_id_var
 
         ocr_data = (
-            OCRData(**raw["data"]) if isinstance(raw["data"], dict) else raw["data"]
+            OCRData**raw["data"]) if isinstance(raw["data"], dict) else raw["data"]
         )
         fields = ocr_data.fields
         avg_confidence: Optional[float] = (
             round(sum(f.confidence for f in fields.values()) / len(fields), 4)
-            if fields
-            else None
+            if fields else None
         )
 
-        return ResultEnvelope[OCRData](
+        low, high = _get_thresholds_for_metadata(anchor_metadata)
+        confidence_band, needs_review = _classify_confidence(avg_confidence, low, high)
+
+        return OCRResultEnvelope(
             result=ocr_data,
             confidence=avg_confidence,
-            reasons=None,
+            reasons=[
+                "low_confidence"] if needs_review else None, 
             anchor_metadata=raw.get("anchor_metadata"),
             trace_id=correlation_id_var.get() or None,
+            confidence_band=confidence_band,
+            needs_review=needs_review,
         )
 
     except HTTPException:
@@ -151,6 +209,10 @@ async def queue_batch_ocr_jobs(
         )
 
     document_statuses: list[BatchOCRDocumentStatus] = []
+
+    # Pre-compute thresholds for this batch based on common metadata.
+    low_threshold, high_threshold = _get_thresholds_for_metadata(anchor_metadata)
+
     for image in files:
         try:
             if image.content_type not in ALLOWED_CONTENT_TYPES:
@@ -184,6 +246,10 @@ async def queue_batch_ocr_jobs(
                     "filename": image.filename,
                     "anchor_metadata": anchor_metadata,
                     "language_hint": language_hint.value if language_hint else None,
+                    "confidence_thresholds": {
+                        "low": low_threshold,
+                        "high": high_threshold,
+                    },
                 },
             )
 
@@ -200,11 +266,9 @@ async def queue_batch_ocr_jobs(
                 BatchOCRDocumentStatus(
                     filename=image.filename,
                     status="failed",
-                    error=(
-                        exc.detail
-                        if isinstance(exc.detail, dict)
-                        else {"code": "processing_error", "message": str(exc.detail)}
-                    ),
+                    error=(Jexc.detail
+                    if isinstance(exc.detail, dict)
+                    else {"code": "processing_error", "message": str(exc.detail)},
                 )
             )
         except Exception as exc:
@@ -213,7 +277,7 @@ async def queue_batch_ocr_jobs(
                     filename=image.filename,
                     status="failed",
                     error={"code": "processing_error", "message": str(exc)},
-                )
+                
             )
 
     return BatchOCRResponse(success=True, documents=document_statuses)
@@ -260,14 +324,20 @@ async def queue_ocr_job(
 
     _validate_image_bytes(contents)
 
+    low, high = _get_thresholds_for_metadata(anchor_metadata)
+
     task_id = tasks.create_task(
         task_type="ocr",
-        payload={
+        payload{
             "image_base64": base64.b64encode(contents).decode("ascii"),
             "content_type": image.content_type,
             "filename": image.filename,
             "anchor_metadata": anchor_metadata,
             "language_hint": language_hint.value if language_hint else None,
+            "confidence_thresholds": {
+                "low": low,
+                "high": high,
+            },
         },
     )
 
@@ -276,20 +346,5 @@ async def queue_ocr_job(
         task_id=task_id,
         status="pending",
         message="OCR job queued for processing",
-        status_url=f"/v1/ai/jobs/{task_id}",
+        status_url=f"~/v1/ai/jobs/{task_id}",
     )
-
-
-def _validate_image_bytes(contents: bytes) -> None:
-    from PIL import Image
-
-    try:
-        Image.open(io.BytesIO(contents)).verify()
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "invalid_image",
-                "message": f"Could not decode image: {str(e)}",
-            },
-        )
