@@ -22,7 +22,17 @@ REQUEST_LATENCY = Histogram(
 REQUESTS_SHED_TOTAL = Counter(
     "requests_shed_total",
     "Requests rejected due to overload (load shedding)",
-    ["reason", "method", "endpoint"],
+    ["reason", "method", "endpoint", "priority", "provider_health"],
+)
+LOAD_SHED_QUEUE_DEPTH = Gauge(
+    "load_shed_queue_depth",
+    "Queue depth at time of load shedding",
+    ["priority"],
+)
+LOAD_SHED_DECISIONS = Counter(
+    "load_shed_decisions_total",
+    "Load shedding decisions made",
+    ["decision", "reason", "priority"],
 )
 CELERY_QUEUE_DEPTH = Gauge(
     "celery_queue_depth", "Pending tasks in the Celery default queue"

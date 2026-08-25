@@ -584,7 +584,9 @@ def create_task(task_type: str, payload: Dict[str, Any]) -> str:
     # Initialize task status
     update_task_status(task_id, "pending")
 
-    ensure_queue_capacity()
+    # Extract priority from payload for queue-aware load shedding
+    priority = payload.get("priority", "normal")
+    ensure_queue_capacity(priority=priority)
 
     try:
         # Queue the task using the lazy-registered task

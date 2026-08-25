@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     # Load shedding settings
     load_shed_memory_threshold_percent: float = 90.0
     load_shed_max_celery_queue_depth: int = 100
+    load_shed_queue_priority_multiplier: float = 0.5
+    load_shed_high_priority_queue_threshold: int = 150
+    load_shed_provider_degradation_threshold: float = 0.5
 
     # Dead-letter replay settings
     dead_letter_max_replay_attempts: int = 5
