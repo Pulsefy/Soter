@@ -19,6 +19,22 @@ class AIServiceError(Exception):
         return f"[{self.code}] {self.message}"
 
 
+class AIProviderMalformedResponseError(AIServiceError):
+    """Raised when a provider response cannot be validated against its schema."""
+
+    def __init__(self, message: str, details: Optional[Any] = None):
+        super().__init__(
+            message, code="AI_PROVIDER_MALFORMED_RESPONSE", details=details
+        )
+
+
+class AIProviderRefusalError(AIServiceError):
+    """Raised when a provider declines to perform the requested task."""
+
+    def __init__(self, message: str, details: Optional[Any] = None):
+        super().__init__(message, code="AI_PROVIDER_REFUSAL", details=details)
+
+
 class LoadShedError(Exception):
     """Raised when the service must reject work due to overload."""
 

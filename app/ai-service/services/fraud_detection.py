@@ -95,6 +95,11 @@ def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
             )
         )
 
+    # Re-validate the complete result contract before returning it.
+    results = [
+        ClaimFraudResult.model_validate(result.model_dump()) for result in results
+    ]
+
     logger.info(
         "Fraud detection complete: %d claims, %d flagged",
         len(claims),

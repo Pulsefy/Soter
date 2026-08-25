@@ -8,6 +8,7 @@ from services.providers import (
     LLMResponse,
     ModelProvider,
 )
+from exceptions import AIProviderMalformedResponseError, AIProviderRefusalError
 import metrics
 from unittest.mock import patch, MagicMock
 
@@ -138,6 +139,65 @@ class TestHumanitarianVerificationService:
 
         assert parsed["verdict"] == "credible"
         assert parsed["confidence"] == 0.9
+
+    def test_malformed_response_is_repaired_once(self, monkeypatch):
+        mock_provider = MagicMock(spec=ModelProvider)
+        mock_provider.llm_chat.side_effect = [
+            LLMResponse(content='{"verdict":"credible"', provider="openai", model="m"),
+            LLMResponse(
+                content='{"verdict":"credible","confidence":0.8,"summary":"repaired"}',
+                provider="openai",
+                model="m",
+            ),
+        ]
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", mock_provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda _: "m")
+
+        result = self.service.verify_claim(
+            "A sufficiently long aid claim.", provider_preference="openai"
+        )
+
+        assert result["verification"]["summary"] == "repaired"
+        assert mock_provider.llm_chat.call_count == 2
+        assert (
+            "Reformat" in mock_provider.llm_chat.call_args_list[1].kwargs["user_prompt"]
+        )
+
+    def test_persistent_malformed_response_is_typed(self, monkeypatch):
+        mock_provider = MagicMock(spec=ModelProvider)
+        mock_provider.llm_chat.return_value = LLMResponse(
+            content="This is prose, not JSON.", provider="openai", model="m"
+        )
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", mock_provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda _: "m")
+
+        with pytest.raises(AIProviderMalformedResponseError):
+            self.service.verify_claim(
+                "A sufficiently long aid claim.", provider_preference="openai"
+            )
+
+        assert mock_provider.llm_chat.call_count == 4  # repair for primary and fallback
+
+    def test_provider_refusal_is_typed_and_not_repaired(self, monkeypatch):
+        mock_provider = MagicMock(spec=ModelProvider)
+        mock_provider.llm_chat.return_value = LLMResponse(
+            content="I cannot comply with this request.", provider="openai", model="m"
+        )
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", mock_provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda _: "m")
+
+        with pytest.raises(AIProviderRefusalError):
+            self.service.verify_claim(
+                "A sufficiently long aid claim.", provider_preference="openai"
+            )
+
+        assert mock_provider.llm_chat.call_count == 2
 
     def test_verify_claim_returns_deterministic_response_when_enabled(
         self, monkeypatch
