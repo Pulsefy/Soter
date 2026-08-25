@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 from services.circuit_breaker import CircuitBreaker
 from services.humanitarian_verification import HumanitarianVerificationService
 from services.providers import ProviderRegistry, LLMResponse, ModelProvider
-from exceptions import AIServiceError
+from exceptions import AIServiceError, AllProvidersExhaustedError
 from config import settings
 
 
@@ -130,7 +130,7 @@ class TestHumanitarianVerificationServiceCircuitBreaker:
             self.service, "_get_model_for_provider", lambda p: "test-model"
         )
 
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(AllProvidersExhaustedError) as exc_info:
             self.service.verify_claim(
                 aid_claim="Food aid reached target demographic.",
                 supporting_evidence=[],

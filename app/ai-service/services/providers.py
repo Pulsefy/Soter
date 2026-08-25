@@ -42,6 +42,13 @@ class LLMResponse:
     provider: str
     model: str
     latency_ms: int = 0
+    # Which provider actually served this request.  Always the same as
+    # ``provider``; exposed under a dedicated name so callers can reference
+    # it without knowing the internal field layout.
+    served_by: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.served_by = self.provider
 
 
 @dataclass
@@ -439,15 +446,44 @@ class ProviderRegistry:
         return available
 
     def resolve_llm(self, preference: str = "auto") -> List[Tuple[str, ModelProvider]]:
-        """Return (name, provider) pairs in attempt order for LLM chat."""
+        """Return (name, provider) pairs in attempt order for LLM chat.
+
+        Resolution rules (applied in order):
+        1. ``preference == "test"`` — test provider only (fast path for fixtures).
+        2. ``preference`` names a specific provider — that provider first, then
+           the rest in their natural order.
+        3. ``preference == "auto"`` — use ``settings.llm_provider_order`` when it
+           is non-empty; otherwise fall back to the implicit code order returned
+           by :meth:`available_llm_providers`.
+
+        Providers that are not in :meth:`available_llm_providers` (because no API
+        key is configured) are silently dropped from the result.
+        """
         available = self.available_llm_providers()
         pref = (preference or "auto").lower()
+
         if pref == "test" and "test" in available:
             return [("test", self.get("test"))]
-        if pref in available:
+
+        if pref not in ("auto",) and pref in available:
+            # Explicit preference: requested provider first, then the rest.
             ordered = [pref] + [p for p in available if p != pref]
+        elif pref == "auto" and settings.llm_provider_order:
+            # Configured order: only include entries that are actually available.
+            seen: set = set()
+            ordered = []
+            for name in settings.llm_provider_order:
+                if name in available and name not in seen:
+                    ordered.append(name)
+                    seen.add(name)
+            # Append any available provider not mentioned in the configured list.
+            for name in available:
+                if name not in seen:
+                    ordered.append(name)
+                    seen.add(name)
         else:
             ordered = available
+
         return [(name, self.get(name)) for name in ordered]
 
     def resolve_ocr(self, preference: str = "auto") -> List[Tuple[str, ModelProvider]]:

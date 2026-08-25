@@ -7,6 +7,7 @@ import time
 import metrics
 
 from config import settings
+from exceptions import AllProvidersExhaustedError
 from services.humanitarian_prompt import HumanitarianPromptEngine
 from services.circuit_breaker import CircuitBreaker
 from services.providers import ProviderRegistry, ModelProvider, LLMResponse
@@ -57,11 +58,13 @@ class HumanitarianVerificationService:
 
             providers = self.registry.resolve_llm(provider_preference)
             if not providers:
-                raise RuntimeError(
-                    "No LLM providers configured for humanitarian verification"
+                raise AllProvidersExhaustedError(
+                    attempted_providers=[],
+                    per_provider_errors=["No LLM providers configured for humanitarian verification"],
                 )
 
             errors: List[str] = []
+            attempted: List[str] = []
 
             for provider_name, provider in providers:
                 breaker = self._get_breaker(provider_name)
@@ -70,11 +73,13 @@ class HumanitarianVerificationService:
                         "Circuit breaker is OPEN for provider=%s. Skipping.",
                         provider_name,
                     )
+                    attempted.append(f"(skipped) {provider_name}")
                     errors.append(
                         f"provider={provider_name}, error=Circuit breaker is OPEN"
                     )
                     continue
 
+                attempted.append(provider_name)
                 model = self._get_model_for_provider(provider_name)
                 for prompt_variant, prompt in (
                     ("primary", primary_prompt),
@@ -97,6 +102,7 @@ class HumanitarianVerificationService:
                         breaker.record_success()
                         return {
                             "provider": provider_name,
+                            "served_by": response.served_by,
                             "model": model,
                             "prompt_variant": prompt_variant,
                             "verification": parsed,
@@ -110,8 +116,9 @@ class HumanitarianVerificationService:
                             "Humanitarian verification attempt failed: %s", err
                         )
 
-            raise RuntimeError(
-                "All humanitarian verification attempts failed: " + " | ".join(errors)
+            raise AllProvidersExhaustedError(
+                attempted_providers=attempted,
+                per_provider_errors=errors,
             )
         finally:
             latency = time.time() - start_time

@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import secrets
-from typing import Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from pydantic import model_validator, HttpUrl
 from pydantic_core import PydanticUndefined
@@ -78,6 +78,14 @@ class Settings(BaseSettings):
     test_provider_mode: bool = False
     llm_timeout_seconds: int = 30
 
+    # Explicit LLM provider fallback order.
+    # Comma-separated list of provider names that controls the order in which
+    # providers are tried when provider_preference is "auto".
+    # Supported values: openai, groq, test
+    # Example: LLM_PROVIDER_ORDER=groq,openai   (cheapest-first / lowest-latency-first)
+    # When empty (the default) the implicit code order is used: test > openai > groq.
+    llm_provider_order: List[str] = []
+
     # Request throttling
     request_rate_limit: str = "10/minute"
 
@@ -145,6 +153,18 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _parse_list_fields(cls, values: Any) -> Any:  # type: ignore[override]
+        """Convert comma-separated env strings to lists where needed."""
+        if isinstance(values, dict):
+            raw = values.get("llm_provider_order")
+            if isinstance(raw, str):
+                values["llm_provider_order"] = [
+                    p.strip() for p in raw.split(",") if p.strip()
+                ]
+        return values
 
     @model_validator(mode="after")
     def apply_environment_defaults(self) -> "Settings":
@@ -297,6 +317,20 @@ class Settings(BaseSettings):
                 "production requires at least one provider API key or "
                 "TEST_PROVIDER_MODE=true",
             )
+
+        # --- LLM provider order: entries must be known provider names ----
+        _KNOWN_LLM_PROVIDERS = {"openai", "groq", "test"}
+        for entry in self.llm_provider_order:
+            entry = entry.strip()
+            if not entry:
+                continue
+            if entry not in _KNOWN_LLM_PROVIDERS:
+                _add(
+                    "LLM_PROVIDER_ORDER",
+                    f"unknown provider {entry!r}; valid values are "
+                    f"{', '.join(sorted(_KNOWN_LLM_PROVIDERS))}",
+                )
+                break
 
         if errors:
             summary = "\n  - ".join(errors)

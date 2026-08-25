@@ -1,6 +1,7 @@
 import pytest
 
 from config import settings
+from exceptions import AllProvidersExhaustedError
 from services.humanitarian_verification import HumanitarianVerificationService
 from services.providers import (
     ProviderRegistry,
@@ -104,12 +105,15 @@ class TestHumanitarianVerificationService:
         mock_registry.resolve_llm.return_value = []
         monkeypatch.setattr(self.service, "registry", mock_registry)
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(AllProvidersExhaustedError) as exc_info:
             self.service.verify_claim(
                 aid_claim="Food distribution completed.",
                 supporting_evidence=[],
                 context_factors={},
             )
+
+        assert exc_info.value.code == "ALL_PROVIDERS_EXHAUSTED"
+        assert exc_info.value.attempted_providers == []
 
     def test_get_model_version_resolves_provider_and_model(self, monkeypatch):
         mock_registry = MagicMock(spec=ProviderRegistry)
