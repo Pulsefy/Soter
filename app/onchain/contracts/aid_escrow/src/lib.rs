@@ -117,8 +117,16 @@ pub enum Error {
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
 // Topic = struct name in snake_case (e.g. package_created). Do not rename without versioning.
 
+/// Schema version stamped onto every emitted event topic as the second topic
+/// element (e.g. `(package_created, v1)`).
+///
+/// Topic[0] is the stable event name; topic[1] is the schema version.
+/// Bump this constant (and update `EVENTS.md`) whenever an event's topic set
+/// or payload shape changes in a way that could break existing indexers.
+pub const EVENT_SCHEMA_VERSION: &str = "v1";
+
 /// Emitted when the escrow pool is funded. Actor = funder.
-#[contractevent]
+#[contractevent(topics = ["escrow_funded", "v1"])]
 pub struct EscrowFunded {
     pub from: Address,
     pub token: Address,
@@ -126,7 +134,7 @@ pub struct EscrowFunded {
     pub timestamp: u64,
 }
 
-#[contractevent]
+#[contractevent(topics = ["package_created", "v1"])]
 pub struct PackageCreated {
     pub package_id: u64,
     pub recipient: Address,
@@ -135,7 +143,7 @@ pub struct PackageCreated {
     pub timestamp: u64,
 }
 
-#[contractevent]
+#[contractevent(topics = ["package_claimed", "v1"])]
 pub struct PackageClaimed {
     pub package_id: u64,
     pub recipient: Address,
@@ -147,7 +155,7 @@ pub struct PackageClaimed {
     pub receipt_hash: String,
 }
 
-#[contractevent]
+#[contractevent(topics = ["package_claimed_by_relayer", "v1"])]
 pub struct PackageClaimedByRelayer {
     pub package_id: u64,
     pub recipient: Address,
@@ -156,7 +164,7 @@ pub struct PackageClaimedByRelayer {
     pub timestamp: u64,
 }
 
-#[contractevent]
+#[contractevent(topics = ["package_disbursed", "v1"])]
 pub struct PackageDisbursed {
     pub package_id: u64,
     pub recipient: Address,
@@ -168,7 +176,7 @@ pub struct PackageDisbursed {
     pub receipt_hash: String,
 }
 
-#[contractevent]
+#[contractevent(topics = ["package_revoked", "v1"])]
 pub struct PackageRevoked {
     pub package_id: u64,
     pub recipient: Address,
@@ -177,7 +185,7 @@ pub struct PackageRevoked {
     pub timestamp: u64,
 }
 
-#[contractevent]
+#[contractevent(topics = ["package_refunded", "v1"])]
 pub struct PackageRefunded {
     pub package_id: u64,
     pub recipient: Address,
@@ -186,14 +194,14 @@ pub struct PackageRefunded {
     pub timestamp: u64,
 }
 
-#[contractevent]
+#[contractevent(topics = ["batch_created_event", "v1"])]
 pub struct BatchCreatedEvent {
     pub ids: Vec<u64>,
     pub admin: Address,
     pub total_amount: i128,
 }
 
-#[contractevent]
+#[contractevent(topics = ["extended_event", "v1"])]
 pub struct ExtendedEvent {
     pub package_id: u64,
     pub admin: Address,
@@ -201,30 +209,30 @@ pub struct ExtendedEvent {
     pub new_expires_at: u64,
 }
 
-#[contractevent]
+#[contractevent(topics = ["surplus_withdrawn_event", "v1"])]
 pub struct SurplusWithdrawnEvent {
     pub to: Address,
     pub token: Address,
     pub amount: i128,
 }
 
-#[contractevent]
+#[contractevent(topics = ["contract_paused_event", "v1"])]
 pub struct ContractPausedEvent {
     pub admin: Address,
 }
 
-#[contractevent]
+#[contractevent(topics = ["contract_unpaused_event", "v1"])]
 pub struct ContractUnpausedEvent {
     pub admin: Address,
 }
 
-#[contractevent]
+#[contractevent(topics = ["action_paused_event", "v1"])]
 pub struct ActionPausedEvent {
     pub admin: Address,
     pub action: Symbol,
 }
 
-#[contractevent]
+#[contractevent(topics = ["action_unpaused_event", "v1"])]
 pub struct ActionUnpausedEvent {
     pub admin: Address,
     pub action: Symbol,
@@ -232,14 +240,14 @@ pub struct ActionUnpausedEvent {
 
 /// Emitted when an admin pauses a single campaign, identified by the
 /// `campaign_ref` metadata value shared by its packages.
-#[contractevent]
+#[contractevent(topics = ["campaign_paused_event", "v1"])]
 pub struct CampaignPausedEvent {
     pub admin: Address,
     pub campaign_ref: String,
 }
 
 /// Emitted when an admin unpauses a single campaign.
-#[contractevent]
+#[contractevent(topics = ["campaign_unpaused_event", "v1"])]
 pub struct CampaignUnpausedEvent {
     pub admin: Address,
     pub campaign_ref: String,
@@ -247,7 +255,7 @@ pub struct CampaignUnpausedEvent {
 
 /// Emitted when a delegate is added/updated for a package.
 /// Includes package context for indexer-friendly reconstruction.
-#[contractevent]
+#[contractevent(topics = ["delegate_added", "v1"])]
 pub struct DelegateAdded {
     pub package_id: u64,
     pub recipient: Address,
@@ -259,7 +267,7 @@ pub struct DelegateAdded {
 
 /// Emitted when a delegate is revoked/removed for a package.
 /// Includes package context for indexer-friendly reconstruction.
-#[contractevent]
+#[contractevent(topics = ["delegate_revoked", "v1"])]
 pub struct DelegateRevoked {
     pub package_id: u64,
     pub recipient: Address,
@@ -270,7 +278,7 @@ pub struct DelegateRevoked {
 
 /// Emitted when a delegate claims a package on behalf of the recipient.
 /// Includes package context for indexer-friendly reconstruction.
-#[contractevent]
+#[contractevent(topics = ["delegate_claimed", "v1"])]
 pub struct DelegateClaimed {
     pub package_id: u64,
     pub recipient: Address,
@@ -281,7 +289,7 @@ pub struct DelegateClaimed {
 }
 
 /// Emitted when the current admin nominates a pending admin.
-#[contractevent]
+#[contractevent(topics = ["admin_transfer_initiated", "v1"])]
 pub struct AdminTransferInitiated {
     pub admin: Address,
     pub pending_admin: Address,
@@ -289,21 +297,21 @@ pub struct AdminTransferInitiated {
 }
 
 /// Emitted when the pending admin accepts the admin role.
-#[contractevent]
+#[contractevent(topics = ["admin_transfer_accepted", "v1"])]
 pub struct AdminTransferAccepted {
     pub admin: Address,
     pub timestamp: u64,
 }
 
 /// Emitted when the current admin cancels a pending admin transfer.
-#[contractevent]
+#[contractevent(topics = ["admin_transfer_cancelled", "v1"])]
 pub struct AdminTransferCancelled {
     pub admin: Address,
     pub timestamp: u64,
 }
 
 /// Emitted when a token is added to the allowed tokens allowlist.
-#[contractevent]
+#[contractevent(topics = ["token_added", "v1"])]
 pub struct TokenAdded {
     pub admin: Address,
     pub token: Address,
@@ -311,7 +319,7 @@ pub struct TokenAdded {
 }
 
 /// Emitted when a token is removed from the allowed tokens allowlist.
-#[contractevent]
+#[contractevent(topics = ["token_removed", "v1"])]
 pub struct TokenRemoved {
     pub admin: Address,
     pub token: Address,

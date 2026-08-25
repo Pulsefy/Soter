@@ -1152,6 +1152,9 @@
             "topics": [
               {
                 "symbol": "package_created"
+              },
+              {
+                "symbol": "v1"
               }
             ],
             "data": {

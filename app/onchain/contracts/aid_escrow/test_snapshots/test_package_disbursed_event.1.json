@@ -1017,6 +1017,9 @@
             "topics": [
               {
                 "symbol": "package_disbursed"
+              },
+              {
+                "symbol": "v1"
               }
             ],
             "data": {

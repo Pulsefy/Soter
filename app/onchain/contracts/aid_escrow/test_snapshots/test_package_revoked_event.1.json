@@ -918,6 +918,9 @@
             "topics": [
               {
                 "symbol": "package_revoked"
+              },
+              {
+                "symbol": "v1"
               }
             ],
             "data": {

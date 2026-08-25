@@ -517,7 +517,7 @@
                             "symbol": "reason"
                           },
                           "val": {
-                            "string": "Admin delegate assignment"
+                            "symbol": "delegate_set"
                           }
                         }
                       ]
@@ -569,7 +569,7 @@
                             "symbol": "reason"
                           },
                           "val": {
-                            "string": "Delegate cleared after claim"
+                            "symbol": "delegate_cleared"
                           }
                         }
                       ]
@@ -1178,6 +1178,9 @@
             "topics": [
               {
                 "symbol": "delegate_revoked"
+              },
+              {
+                "symbol": "v1"
               }
             ],
             "data": {

@@ -629,6 +629,9 @@
             "topics": [
               {
                 "symbol": "escrow_funded"
+              },
+              {
+                "symbol": "v1"
               }
             ],
             "data": {

@@ -471,7 +471,7 @@
                             "symbol": "reason"
                           },
                           "val": {
-                            "string": "Admin delegate assignment"
+                            "symbol": "delegate_set"
                           }
                         }
                       ]
@@ -1089,6 +1089,9 @@
             "topics": [
               {
                 "symbol": "delegate_added"
+              },
+              {
+                "symbol": "v1"
               }
             ],
             "data": {

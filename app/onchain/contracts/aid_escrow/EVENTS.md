@@ -17,6 +17,9 @@ section using the `#[contractevent]` derive.
 
 - **Topic** = the event struct name converted to `snake_case`
   (e.g. `PackageCreated` -> `package_created`).
+- Every event topic is a two-element list: `(event_name, schema_version)`.
+  `topic[0]` is the stable event name; `topic[1]` is the event schema version
+  (currently `v1`, defined by `EVENT_SCHEMA_VERSION` in `src/lib.rs`).
 - Topics and payload field names/types are a **public interface**. Do not
   rename or reorder fields without a contract version bump. See
   [`VERSIONING.md`](./VERSIONING.md) and `get_version()` / `migrate()`.
@@ -24,6 +27,42 @@ section using the `#[contractevent]` derive.
   (stroops for the 7-decimal native asset), never fractional "human" units.
 - All `timestamp` values are the ledger close time in Unix seconds
   (`env.ledger().timestamp()`).
+
+## Schema versioning
+
+Every event emitted by this contract carries an explicit schema version as the
+second topic element: `(event_name, schema_version)`. The version is a single
+source of truth in the contract (`EVENT_SCHEMA_VERSION` in `src/lib.rs`) and is
+stamped onto the emitted topic list by the `#[contractevent(topics = [...])]`
+attributes.
+
+Compatibility policy for indexers:
+
+- **Read `topic[0]` for the event name** and **`topic[1]` for the schema
+  version**. Never assume the topic list length or the position of payload
+  fields beyond what the version guarantees.
+- The backend correlation service in `app/backend` maintains a set of known
+  schema versions. Events carrying a **known** version are correlated
+  normally; events carrying an **unknown** version are still correlated (so a
+  version bump never blocks disbursement), but a warning is logged so the
+  indexer operator can update the service.
+- Unknown versions MUST be flagged, not silently ignored, because a version
+  bump signals that the payload shape may differ from what the indexer parses.
+
+Versioning rule for future event changes:
+
+- Any change to an event's **topic set** (names, order, types), **payload
+  field names/types**, or **payload shape** (map keys, data format) is a
+  **breaking change** and requires bumping `EVENT_SCHEMA_VERSION`
+  (e.g. `v1` -> `v2`) together with a contract version bump per
+  [`VERSIONING.md`](./VERSIONING.md).
+- New events can be added under the current schema version as long as they
+  follow the documented topic shape and do not alter existing events.
+- When bumping the version, update this document's `Event catalog`, the
+  version stated above, `EVENT_SCHEMA_VERSION` in `src/lib.rs`, and the known
+  version set in the backend correlation service. Existing indexers that only
+  match `topic[0]` continue to work; indexers that match on version should
+  register the new version explicitly.
 
 ## Event catalog
 
@@ -133,11 +172,19 @@ create / claim / boundary scenarios. Because snapshots are regenerated and
 diffed on every `cargo test` run, any accidental change to an event topic or
 payload shape shows up as a snapshot diff in CI.
 
+Schema-version coverage: `tests/events.rs::test_all_emitted_events_carry_schema_version_topic`
+triggers the full event surface and asserts that every emitted topic list has
+the schema version as `topic[1]`, so a regression to an unversioned event fails
+the suite directly (not just as a snapshot diff).
+
 Recommended assertions when adding new event-emitting behavior:
 
 1. After the action, read `env.events().all()` and assert the expected topic is
    present exactly once.
 2. Assert the decoded payload fields match the inputs (e.g. `package_id`,
    `amount`, `recipient`).
-3. Regenerate and commit the affected `test_snapshots/*.json` so the snapshot
+3. Assert the emitted topic list carries the schema version as `topic[1]`
+   (the helper `assert_all_events_carry_schema_version` in `tests/events.rs`
+   can be reused).
+4. Regenerate and commit the affected `test_snapshots/*.json` so the snapshot
    diff stays authoritative.

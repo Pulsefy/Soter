@@ -1,7 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { xdr } from '@stellar/stellar-sdk';
 import {
   SorobanEventCorrelationService,
   SorobanEvent,
+  extractEventSchemaVersion,
+  KNOWN_EVENT_SCHEMA_VERSIONS,
 } from './soroban-event-correlation.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
@@ -51,7 +54,60 @@ describe('SorobanEventCorrelationService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  function symbolTopic(name: string): xdr.ScVal {
+    return xdr.ScVal.scvSymbol(name);
+  }
+
+  describe('extractEventSchemaVersion', () => {
+    it('should extract the version from the second topic element', () => {
+      const topics = [symbolTopic('package_created'), symbolTopic('v1')];
+      expect(extractEventSchemaVersion(topics)).toBe('v1');
+    });
+
+    it('should return null when only the event name topic exists', () => {
+      const topics = [symbolTopic('package_created')];
+      expect(extractEventSchemaVersion(topics)).toBeNull();
+    });
+
+    it('should return null for empty or missing topic lists', () => {
+      expect(extractEventSchemaVersion([])).toBeNull();
+      expect(extractEventSchemaVersion(undefined)).toBeNull();
+    });
+
+    it('should not treat a non-string second topic as a version', () => {
+      const topics = [
+        symbolTopic('package_created'),
+        xdr.ScVal.scvU64(new xdr.Uint64(0)),
+      ];
+      expect(extractEventSchemaVersion(topics)).toBeNull();
+    });
+  });
+
+  describe('schema version tolerance', () => {
+    it('should register the current schema version as known', () => {
+      expect(KNOWN_EVENT_SCHEMA_VERSIONS.has('v1')).toBe(true);
+    });
+
+    it('should warn for unknown schema versions', () => {
+      const warnSpy = jest
+        .spyOn(service['logger'], 'warn')
+        .mockImplementation(() => undefined);
+      service['logUnknownSchemaVersion']('package_created', 'v2');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("unknown schema version 'v2'"),
+      );
+    });
+
+    it('should not warn for known schema versions', () => {
+      const warnSpy = jest
+        .spyOn(service['logger'], 'warn')
+        .mockImplementation(() => undefined);
+      service['logUnknownSchemaVersion']('package_created', 'v1');
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe('extractIdentifiers', () => {

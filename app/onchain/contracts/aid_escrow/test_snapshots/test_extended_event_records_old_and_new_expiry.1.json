@@ -921,6 +921,9 @@
             "topics": [
               {
                 "symbol": "extended_event"
+              },
+              {
+                "symbol": "v1"
               }
             ],
             "data": {
@@ -931,14 +934,6 @@
                   },
                   "val": {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "package_id"
-                  },
-                  "val": {
-                    "u64": "42"
                   }
                 },
                 {
@@ -955,6 +950,14 @@
                   },
                   "val": {
                     "u64": "86400"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "package_id"
+                  },
+                  "val": {
+                    "u64": "42"
                   }
                 }
               ]

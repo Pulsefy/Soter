@@ -947,6 +947,9 @@
             "topics": [
               {
                 "symbol": "package_refunded"
+              },
+              {
+                "symbol": "v1"
               }
             ],
             "data": {

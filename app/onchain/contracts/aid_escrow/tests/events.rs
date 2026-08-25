@@ -644,3 +644,165 @@ fn test_token_removed_event() {
     assert_eq!(data_address(&env, &data, "token"), token_client.address);
     assert_field_exists(&env, &data, "timestamp");
 }
+
+/// Asserts that every contract event emitted so far carries the schema version
+/// as its second topic element: `(event_name, schema_version)`.
+fn assert_all_events_carry_schema_version(env: &Env, contract_id: &Address) {
+    let events = contract_events(env, contract_id);
+    assert!(
+        !events.is_empty(),
+        "expected at least one contract event to be emitted"
+    );
+    let expected = Symbol::new(env, aid_escrow::EVENT_SCHEMA_VERSION);
+    for (_, topics, _) in events.iter() {
+        let name = topics
+            .first()
+            .and_then(|v| Symbol::try_from_val(env, &v).ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "<unknown>".to_string());
+        assert!(
+            topics.len() >= 2,
+            "event '{name}' is missing the schema version topic"
+        );
+        let version = topics
+            .get(1)
+            .and_then(|v| Symbol::try_from_val(env, &v).ok());
+        assert_eq!(
+            version,
+            Some(expected.clone()),
+            "event '{name}' does not carry the expected schema version '{}'",
+            aid_escrow::EVENT_SCHEMA_VERSION
+        );
+    }
+}
+
+/// Every event type the contract emits must carry the schema version as the
+/// second topic element. This test triggers the full event surface and then
+/// scans the emitted topic lists.
+#[test]
+fn test_all_emitted_events_carry_schema_version_topic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let new_admin_2 = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let recipient_2 = Address::generate(&env);
+    let delegate = Address::generate(&env);
+    let relayer = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(10 * UNIT));
+
+    let now = env.ledger().timestamp();
+    let expires_at = now + 86400;
+    let campaign_ref = soroban_sdk::String::from_str(&env, "campaign-1");
+
+    // Token allowlist events.
+    client.add_allowed_token(&token_client.address);
+    client.remove_allowed_token(&token_client.address);
+    client.add_allowed_token(&token_client.address);
+
+    // Individual package lifecycle events.
+    client.create_package(
+        &admin,
+        &1,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &expires_at,
+        &Map::new(&env),
+    );
+    client.create_package(
+        &admin,
+        &2,
+        &recipient_2,
+        &UNIT,
+        &token_client.address,
+        &expires_at,
+        &Map::new(&env),
+    );
+    client.create_package(
+        &admin,
+        &3,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &(now + 100),
+        &Map::new(&env),
+    );
+    client.create_package(
+        &admin,
+        &4,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &expires_at,
+        &Map::new(&env),
+    );
+    client.create_package(
+        &admin,
+        &5,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &expires_at,
+        &Map::new(&env),
+    );
+
+    // Batch creation events.
+    let recipients = Vec::from_array(&env, [recipient.clone(), recipient_2.clone()]);
+    let amounts = Vec::from_array(&env, [UNIT, UNIT]);
+    let metadatas = Vec::from_array(&env, [Map::new(&env), Map::new(&env)]);
+    client.batch_create_packages(
+        &admin,
+        &recipients,
+        &amounts,
+        &token_client.address,
+        &86400,
+        &metadatas,
+    );
+
+    // Pause / unpause events (contract, action, campaign).
+    client.pause();
+    client.unpause();
+    client.pause_action(&sym(&env, "create"));
+    client.unpause_action(&sym(&env, "create"));
+    client.pause_campaign(&campaign_ref);
+    client.unpause_campaign(&campaign_ref);
+
+    // Admin transfer events.
+    client.transfer_admin(&new_admin);
+    client.cancel_admin_transfer();
+    client.transfer_admin(&new_admin_2);
+    client.accept_admin();
+
+    // Delegate events.
+    client.set_delegate(&new_admin_2, &2, &delegate);
+    client.revoke_delegate(&new_admin_2, &2);
+    client.set_delegate(&new_admin_2, &4, &delegate);
+    client.claim_with_proof(&4, &delegate, &Vec::new(&env));
+
+    // Claim paths.
+    client.claim(&1);
+    client.claim_with_relayer(&5, &recipient, &relayer);
+
+    // Admin disbursement and expiry extension.
+    client.disburse(&2);
+    client.extend_expiry(&6, &(expires_at + 600));
+
+    // Refund an expired package.
+    env.ledger().set_timestamp(now + 200);
+    client.refund(&3);
+
+    // Withdraw surplus.
+    client.withdraw_surplus(&admin, &UNIT, &token_client.address);
+
+    assert_all_events_carry_schema_version(&env, &contract_id);
+}

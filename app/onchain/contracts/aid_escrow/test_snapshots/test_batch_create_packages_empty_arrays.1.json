@@ -426,6 +426,9 @@
             "topics": [
               {
                 "symbol": "batch_created_event"
+              },
+              {
+                "symbol": "v1"
               }
             ],
             "data": {

@@ -30,6 +30,7 @@ export interface CorrelationJobData {
 
 export interface SorobanEvent {
   topic: string;
+  schemaVersion?: string;
   payload: unknown;
   txHash: string;
   ledger: number;
@@ -40,6 +41,38 @@ interface ExtractedContractEvent {
   topic: xdr.ScVal[];
   value: xdr.ScVal;
   contractId: string;
+}
+
+/**
+ * Known event schema versions emitted by the aid_escrow contract.
+ *
+ * Topics are emitted as `(event_name, schema_version)`. Events carrying a
+ * known version are correlated normally; unknown versions are still correlated
+ * (so a contract version bump never blocks disbursement) but a warning is
+ * logged so indexer operators update this set.
+ *
+ * Keep in sync with `EVENT_SCHEMA_VERSION` in
+ * `app/onchain/contracts/aid_escrow/src/lib.rs`.
+ */
+export const KNOWN_EVENT_SCHEMA_VERSIONS = new Set<string>(['v1']);
+
+/**
+ * Extract the schema version from an event's topic list.
+ *
+ * Contract events emit `(event_name, schema_version, ...)`, so the version is
+ * the second topic element when present. Returns `null` for events with fewer
+ * than two topics (e.g. legacy events or system events).
+ */
+export function extractEventSchemaVersion(
+  topics: xdr.ScVal[] | undefined,
+): string | null {
+  if (topics && topics.length > 1) {
+    const native = scValToNative(topics[1]);
+    if (typeof native === 'string') {
+      return native;
+    }
+  }
+  return null;
 }
 
 @Injectable()
@@ -255,10 +288,14 @@ export class SorobanEventCorrelationService {
         const topic = this.extractEventTopic(event);
         if (!topic) continue;
 
+        const schemaVersion = extractEventSchemaVersion(event.topic);
+        this.logUnknownSchemaVersion(topic, schemaVersion);
+
         const payload = this.parseEventPayload(event);
 
         events.push({
           topic,
+          schemaVersion: schemaVersion || undefined,
           payload,
           txHash: event.txHash || '',
           ledger: event.ledger || 0,
@@ -281,6 +318,24 @@ export class SorobanEventCorrelationService {
       }
     }
     return null;
+  }
+
+  /**
+   * Tolerate unknown event schema versions: log a warning but keep the event
+   * eligible for correlation so a contract version bump never silently drops
+   * or blocks events.
+   */
+  private logUnknownSchemaVersion(
+    topic: string,
+    schemaVersion: string | null,
+  ): void {
+    if (schemaVersion && !KNOWN_EVENT_SCHEMA_VERSIONS.has(schemaVersion)) {
+      this.logger.warn(
+        `Event '${topic}' carries unknown schema version '${schemaVersion}'. ` +
+          `Update KNOWN_EVENT_SCHEMA_VERSIONS in the correlation service to ` +
+          `register this version.`,
+      );
+    }
   }
 
   /**
@@ -528,13 +583,19 @@ export class SorobanEventCorrelationService {
       );
 
       const sorobanEvents: SorobanEvent[] = contractEvents
-        .map((e, idx) => ({
-          topic: this.extractEventTopic(e) || '',
-          payload: this.parseEventPayload(e),
-          txHash,
-          ledger: result.ledger || 0,
-          eventIndex: idx,
-        }))
+        .map((e, idx) => {
+          const topic = this.extractEventTopic(e) || '';
+          const schemaVersion = extractEventSchemaVersion(e.topic);
+          this.logUnknownSchemaVersion(topic, schemaVersion);
+          return {
+            topic,
+            schemaVersion: schemaVersion || undefined,
+            payload: this.parseEventPayload(e),
+            txHash,
+            ledger: result.ledger || 0,
+            eventIndex: idx,
+          };
+        })
         .filter(e => e.topic);
 
       return this.processEvents(sorobanEvents, correlationSource);
