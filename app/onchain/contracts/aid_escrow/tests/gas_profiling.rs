@@ -6,6 +6,8 @@ use soroban_sdk::{
     token::StellarAssetClient,
     Address, Env, Map, Vec,
 };
+use serde::Deserialize;
+use std::{collections::HashMap, fs, path::Path};
 
 // ---------------------------------------------------------------------------
 // Constants for 7-decimal tokens (Standard Stellar Asset)
@@ -101,6 +103,67 @@ fn print_budget_metrics(operation: &str, metrics: &BudgetMetrics) {
     println!();
 }
 
+#[derive(Deserialize)]
+struct BudgetEntry {
+    cpu: u64,
+    memory: u64,
+}
+
+#[derive(Deserialize)]
+struct BudgetsFile {
+    tolerance_percent: f64,
+    budgets: HashMap<String, BudgetEntry>,
+}
+
+fn load_budgets() -> Option<BudgetsFile> {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = Path::new(manifest_dir).join("GAS_BUDGETS.json");
+    match fs::read_to_string(&path) {
+        Ok(s) => match serde_json::from_str::<BudgetsFile>(&s) {
+            Ok(b) => Some(b),
+            Err(e) => {
+                println!("Failed to parse budgets file {}: {}", path.display(), e);
+                None
+            }
+        },
+        Err(e) => {
+            println!("Failed to read budgets file {}: {}", path.display(), e);
+            None
+        }
+    }
+}
+
+fn assert_within_budget(operation: &str, metrics: &BudgetMetrics) {
+    if let Some(budgets) = load_budgets() {
+        if let Some(entry) = budgets.budgets.get(operation) {
+            let tol = budgets.tolerance_percent / 100.0;
+            let allowed_cpu = (entry.cpu as f64 * (1.0 + tol)).ceil() as u64;
+            let allowed_mem = (entry.memory as f64 * (1.0 + tol)).ceil() as u64;
+
+            if metrics.cpu_instructions > allowed_cpu {
+                let delta = metrics.cpu_instructions.saturating_sub(entry.cpu);
+                panic!(
+                    "Gas budget exceeded for '{}': CPU used {} (budget {}), delta {}",
+                    operation, metrics.cpu_instructions, entry.cpu, delta
+                );
+            }
+
+            if metrics.memory_bytes > allowed_mem {
+                let delta = metrics.memory_bytes.saturating_sub(entry.memory);
+                panic!(
+                    "Gas budget exceeded for '{}': Memory used {} (budget {}), delta {}",
+                    operation, metrics.memory_bytes, entry.memory, delta
+                );
+            }
+        } else {
+            // No budget committed for this operation; skip gating but warn.
+            println!("No budget entry for '{}', skipping budget assertion", operation);
+        }
+    } else {
+        println!("No budgets loaded; skipping budget assertions");
+    }
+}
+
 // ===========================================================================
 // Gas Profiling Tests
 // ===========================================================================
@@ -140,6 +203,7 @@ fn profile_single_create_package() {
     };
 
     print_budget_metrics("Single create_package", &metrics);
+    assert_within_budget("Single create_package", &metrics);
 }
 
 #[test]
@@ -202,10 +266,9 @@ fn profile_batch_create(batch_size: u32) {
         memory_bytes: after.memory_bytes.saturating_sub(before.memory_bytes),
     };
 
-    print_budget_metrics(
-        &format!("Batch create_packages (size: {})", batch_size),
-        &metrics,
-    );
+    let op_name = format!("Batch create_packages (size: {})", batch_size);
+    print_budget_metrics(&op_name, &metrics);
+    assert_within_budget(&op_name, &metrics);
 
     // Calculate per-package metrics
     let per_package_cpu = metrics.cpu_instructions / batch_size as u64;
@@ -287,6 +350,7 @@ fn profile_single_claim() {
     };
 
     print_budget_metrics("Single claim", &metrics);
+    assert_within_budget("Single claim", &metrics);
 }
 
 #[test]
@@ -410,6 +474,7 @@ fn profile_claim_with_proof() {
     };
 
     print_budget_metrics("Claim with Merkle proof", &metrics);
+    assert_within_budget("Claim with Merkle proof", &metrics);
 }
 
 #[test]
@@ -436,6 +501,7 @@ fn profile_fund_operation() {
     };
 
     print_budget_metrics("Fund operation (1 token)", &metrics);
+    assert_within_budget("Fund operation (1 token)", &metrics);
 }
 
 #[test]
@@ -474,6 +540,7 @@ fn profile_get_package() {
     };
 
     print_budget_metrics("Get package", &metrics);
+    assert_within_budget("Get package", &metrics);
 }
 
 #[test]
@@ -514,8 +581,7 @@ fn profile_get_aggregates() {
         memory_bytes: after.memory_bytes.saturating_sub(before.memory_bytes),
     };
 
-    print_budget_metrics(
-        &format!("Get aggregates ({} packages)", batch_size),
-        &metrics,
-    );
+    let agg_name = format!("Get aggregates ({} packages)", batch_size);
+    print_budget_metrics(&agg_name, &metrics);
+    assert_within_budget(&agg_name, &metrics);
 }

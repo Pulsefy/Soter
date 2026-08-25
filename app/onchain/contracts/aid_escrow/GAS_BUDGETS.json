@@ -1,0 +1,16 @@
+{
+  "tolerance_percent": 5.0,
+  "budgets": {
+    "Single create_package": { "cpu": 87508, "memory": 17667 },
+    "Batch create_packages (size: 10)": { "cpu": 584710, "memory": 123066 },
+    "Batch create_packages (size: 25)": { "cpu": 1958279, "memory": 442401 },
+    "Batch create_packages (size: 50)": { "cpu": 5559545, "memory": 1350626 },
+    "Batch create_packages (size: 100)": { "cpu": 17573866, "memory": 4577076 },
+    "Batch create_packages (size: 200)": { "cpu": 60633076, "memory": 16669976 },
+    "Single claim": { "cpu": 78143, "memory": 11020 },
+    "Claim with Merkle proof": { "cpu": 157326, "memory": 18945 },
+    "Fund operation (1 token)": { "cpu": 110627, "memory": 16179 },
+    "Get package": { "cpu": 20000, "memory": 8000 },
+    "Get aggregates (50 packages)": { "cpu": 2000000, "memory": 500000 }
+  }
+}
