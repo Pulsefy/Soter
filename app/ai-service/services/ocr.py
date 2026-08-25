@@ -7,7 +7,7 @@ from PIL import Image
 
 import metrics
 from config import settings
-from services.preprocessing import ImagePreprocessor
+from services.preprocessing import ImagePreprocessor, ImageQualityGate, QualityThresholds
 from services.providers import ProviderRegistry, OCRField, OCRResponse
 
 
@@ -78,13 +78,30 @@ class FieldDetector:
 
 class OCRService:
     def __init__(self, registry: Optional[ProviderRegistry] = None):
+        from config import settings
+
         self.preprocessor = ImagePreprocessor()
         self.field_detector = FieldDetector()
         self.registry = registry or ProviderRegistry()
+        self.quality_gate = ImageQualityGate(
+            QualityThresholds(
+                min_width=settings.image_quality_min_width,
+                min_height=settings.image_quality_min_height,
+                min_mean_brightness=settings.image_quality_min_brightness,
+                max_mean_brightness=settings.image_quality_max_brightness,
+                min_laplacian_variance=settings.image_quality_min_laplacian_variance,
+            )
+        )
 
     def process_image(
         self, image: Image.Image, language_hint: Optional[str] = None
     ) -> OCRResult:
+        gate_result = self.quality_gate.run(image)
+        if not gate_result.passed:
+            raise ValueError(
+                "Image quality gate failed: " + "; ".join(gate_result.rejections)
+            )
+
         providers = self.registry.resolve_ocr()
         if not providers:
             return OCRResult(fields={}, raw_text="", processing_time_ms=0)

@@ -72,9 +72,18 @@ async def process_ocr(
             )
 
         start_inference = time.time()
-        result = ocr_service.process_image(
-            img, language_hint=language_hint.value if language_hint else None
-        )
+        try:
+            result = ocr_service.process_image(
+                img, language_hint=language_hint.value if language_hint else None
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "image_quality_gate_failed",
+                    "message": str(e),
+                },
+            )
         inference_latency = time.time() - start_inference
 
         metrics.INFERENCE_LATENCY.labels(task_type="ocr").observe(inference_latency)

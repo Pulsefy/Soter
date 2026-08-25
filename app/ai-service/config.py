@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     proof_of_life_confidence_threshold: float = 0.65
     proof_of_life_min_face_size: int = 80
 
+    # Image quality gate settings (checked before dispatch to paid providers)
+    image_quality_min_width: int = 200
+    image_quality_min_height: int = 200
+    image_quality_min_brightness: float = 20.0
+    image_quality_max_brightness: float = 235.0
+    image_quality_min_laplacian_variance: float = 80.0
+
     # Verification artifact access settings
     verification_artifacts_dir: str = "./artifacts/verification"
     verification_artifact_url_ttl_seconds: int = 300

@@ -63,6 +63,13 @@ CACHE_INVALIDATION_TOTAL = Counter(
     ["reason"],
 )
 
+# Image quality gate metrics
+IMAGE_QUALITY_GATE_REJECTIONS_TOTAL = Counter(
+    "image_quality_gate_rejections_total",
+    "Images rejected by the quality gate before inference",
+    ["reason"],
+)
+
 
 def check_system_resources(memory_threshold_percent: float = 90.0) -> bool:
     """
