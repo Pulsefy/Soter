@@ -7,11 +7,22 @@ import time
 import metrics
 
 from config import settings
+from exceptions import ProviderOutputError, ProviderRefusalError
 from services.humanitarian_prompt import HumanitarianPromptEngine
 from services.circuit_breaker import CircuitBreaker
+from services.provider_output_validator import (
+    ProviderOutputValidator,
+    HUMANITARIAN_PRIMARY_KEYS,
+)
 from services.providers import ProviderRegistry, ModelProvider, LLMResponse
 
 logger = logging.getLogger(__name__)
+
+# Keys expected at minimum in a well-formed verification response.
+_VERIFICATION_REQUIRED_KEYS = HUMANITARIAN_PRIMARY_KEYS
+
+# How many parse/repair cycles to attempt before surfacing a typed error.
+_MAX_REPAIR_ATTEMPTS = 2
 
 
 class HumanitarianVerificationService:
@@ -21,6 +32,10 @@ class HumanitarianVerificationService:
         self.prompt_engine = HumanitarianPromptEngine()
         self.registry = registry or ProviderRegistry()
         self.breakers: Dict[str, CircuitBreaker] = {}
+        self._validator = ProviderOutputValidator(
+            required_keys=_VERIFICATION_REQUIRED_KEYS,
+            max_repair_attempts=_MAX_REPAIR_ATTEMPTS,
+        )
 
     def _get_breaker(self, provider_name: str) -> CircuitBreaker:
         if provider_name not in self.breakers:
@@ -93,7 +108,13 @@ class HumanitarianVerificationService:
                             model=model,
                             timeout=timeout,
                         )
+
+                        # Validate + repair the raw provider output before use.
+                        # ProviderRefusalError and ProviderOutputError are
+                        # propagated as structured failures; they do NOT trip
+                        # the circuit breaker because the transport succeeded.
                         parsed = self._parse_json_response(response.content)
+
                         breaker.record_success()
                         return {
                             "provider": provider_name,
@@ -102,7 +123,42 @@ class HumanitarianVerificationService:
                             "verification": parsed,
                             "raw_response": response.content,
                         }
+
+                    except ProviderRefusalError as exc:
+                        # Refusal is a definitive answer from the provider —
+                        # no point retrying the same prompt variant.  Record
+                        # a soft failure (not a circuit-breaker trip) and
+                        # surface a structured message.
+                        err = (
+                            f"provider={provider_name}, model={model}, "
+                            f"prompt={prompt_variant}, refusal_reason={exc.refusal_reason}"
+                        )
+                        errors.append(err)
+                        logger.warning(
+                            "Provider refused request: %s", err
+                        )
+                        # Skip remaining prompt variants for this provider —
+                        # a refusal on primary almost always repeats on fallback.
+                        break
+
+                    except ProviderOutputError as exc:
+                        # Malformed output after all repair attempts.  The
+                        # transport worked but the content was unusable.
+                        # Do NOT trip the circuit breaker; try the next
+                        # prompt variant / provider instead.
+                        err = (
+                            f"provider={provider_name}, model={model}, "
+                            f"prompt={prompt_variant}, output_error={exc}, "
+                            f"attempts={exc.attempts}"
+                        )
+                        errors.append(err)
+                        logger.warning(
+                            "Provider output validation failed: %s", err
+                        )
+
                     except Exception as exc:
+                        # Transport-level or unexpected errors do trip the
+                        # circuit breaker.
                         breaker.record_failure()
                         err = f"provider={provider_name}, model={model}, prompt={prompt_variant}, error={exc}"
                         errors.append(err)
@@ -146,12 +202,17 @@ class HumanitarianVerificationService:
         raise ValueError(f"Unsupported provider: {provider}")
 
     def _parse_json_response(self, content: str) -> Dict[str, Any]:
-        normalized = content.strip()
-        if normalized.startswith("```"):
-            normalized = normalized.strip("`")
-            if normalized.startswith("json"):
-                normalized = normalized[4:].strip()
-        parsed = json.loads(normalized)
-        if not isinstance(parsed, dict):
-            raise RuntimeError("LLM response must be a JSON object")
-        return parsed
+        """Validate *content* against the expected schema.
+
+        Delegates to :class:`~services.provider_output_validator.ProviderOutputValidator`
+        which handles markdown fences, truncated-JSON repair, refusal
+        detection, and required-key validation.
+
+        Raises
+        ------
+        ProviderRefusalError
+            If the provider refused the request (content-policy / safety).
+        ProviderOutputError
+            If the content cannot be parsed or validated after repair attempts.
+        """
+        return self._validator.validate(content)

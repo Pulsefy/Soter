@@ -133,7 +133,7 @@ class TestHumanitarianVerificationService:
         assert self.service.get_model_version("auto") == "none:none"
 
     def test_parse_json_response_supports_markdown_block(self):
-        content = '```json\n{"verdict":"credible","confidence":0.9}\n```'
+        content = '```json\n{"verdict":"credible","confidence":0.9,"summary":"Claim is supported by evidence."}\n```'
         parsed = self.service._parse_json_response(content)
 
         assert parsed["verdict"] == "credible"
