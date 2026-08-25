@@ -1,13 +1,56 @@
-from typing import Generic, List, Optional, TypeVar
+from typing import Annotated, Generic, List, Optional, TypeVar
 from pydantic import BaseModel, Field
 
 T = TypeVar("T")
 
+# Reusable type alias for an optional, validated correlation identifier.
+#
+# Rules (all three fields share the same constraints):
+#   • None / omitted  → valid (field is optional)
+#   • Empty string    → invalid (min_length=1)
+#   • Length > 128    → invalid (max_length=128)
+#   • Characters      → alphanumeric, hyphen, underscore only
+#                       (pattern rejects control characters, spaces, and other
+#                        special characters that would be unsafe in log lines,
+#                        storage keys, and on-chain anchoring)
+#
+# The pattern requires the first character to be alphanumeric so that
+# identifiers can never start with a separator.
+_IdentifierStr = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9\-_]*$",
+    ),
+]
+
 
 class AnchorMetadata(BaseModel):
-    campaign_ref: Optional[str] = Field(None, examples=["campaign-2024-001"])
-    claim_id: Optional[str] = Field(None, examples=["claim-abc123"])
-    package_id: Optional[str] = Field(None, examples=["package-x7y8z9"])
+    campaign_ref: Optional[_IdentifierStr] = Field(
+        None,
+        description=(
+            "Correlation reference for the aid campaign. "
+            "1–128 characters; alphanumeric, hyphens, and underscores only."
+        ),
+        examples=["campaign-2024-001"],
+    )
+    claim_id: Optional[_IdentifierStr] = Field(
+        None,
+        description=(
+            "Correlation ID for the individual aid claim. "
+            "1–128 characters; alphanumeric, hyphens, and underscores only."
+        ),
+        examples=["claim-abc123"],
+    )
+    package_id: Optional[_IdentifierStr] = Field(
+        None,
+        description=(
+            "Correlation ID for the aid package. "
+            "1–128 characters; alphanumeric, hyphens, and underscores only."
+        ),
+        examples=["package-x7y8z9"],
+    )
 
     model_config = {
         "json_schema_extra": {
