@@ -45,6 +45,7 @@ from schemas.humanitarian import (
 )
 from services.humanitarian_verification import HumanitarianVerificationService
 from services.evidence_access_control import EvidenceAccessControl
+from services.decision_audit import DecisionAuditStore
 
 # Context variable for correlation ID
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
@@ -146,8 +147,18 @@ async def lifespan(app: FastAPI):
     # same keys via TestClient.app.state.
     app.state.artifact_access_control = evidence_access_control
     app.state.humanitarian_verification_service = humanitarian_verification_service
+    app.state.decision_audit_store = decision_audit_store
     app.state.is_shutting_down = False
     app.state.active_requests = 0
+
+    # Enforce the audit-record retention window at boot (and again on every
+    # decision endpoint call the store itself never blocks on this).
+    try:
+        pruned = decision_audit_store.prune()
+        if pruned:
+            logger.info("Pruned %d expired decision audit records", pruned)
+    except Exception as exc:
+        logger.error("Failed to prune decision audit records: %s", exc)
 
     yield
     logger.info("Shutting down Soter AI Service...")
@@ -193,6 +204,15 @@ artifact_access_service_instance = ArtifactAccessService(
 )
 evidence_access_control = EvidenceAccessControl(artifact_access_service_instance)
 
+# Structured decision audit store: durable, queryable records of every
+# verification / fraud decision. Created at module-init time so both the
+# production app and ``TestClient(app)`` have it resolvable on ``app.state``.
+decision_audit_store = DecisionAuditStore(
+    db_path=settings.decision_audit_db_path,
+    retention_days=settings.decision_audit_retention_days,
+    enabled=settings.decision_audit_enabled,
+)
+
 # Wire the long-lived collaborators onto ``app.state`` at module-init time so
 # the production app *and* ``TestClient(app)`` (which does not enter lifespan
 # unless used as a context manager) both have these resolvable.  ``lifespan``
@@ -200,6 +220,7 @@ evidence_access_control = EvidenceAccessControl(artifact_access_service_instance
 # scenarios stay consistent.
 app.state.humanitarian_verification_service = humanitarian_verification_service
 app.state.artifact_access_control = evidence_access_control
+app.state.decision_audit_store = decision_audit_store
 
 
 class InferenceRequest(BaseModel):

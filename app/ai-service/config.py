@@ -132,6 +132,16 @@ class Settings(BaseSettings):
     verification_artifact_url_ttl_seconds: int = 300
     artifact_signing_secret: str = secrets.token_urlsafe(32)
 
+    # Structured decision audit store (Issue #990)
+    # Every verification / fraud decision writes a durable, queryable audit
+    # record (inputs, provider, model, prompt version, outcome) into a local
+    # SQLite database. Records survive process restarts, are queryable by
+    # trace id / claim id / campaign reference, and are pruned after the
+    # configured retention window.
+    decision_audit_enabled: bool = True
+    decision_audit_db_path: str = "./data/decision_audit.db"
+    decision_audit_retention_days: int = 90
+
     # CORS configuration
     # Comma-separated list of allowed origins for production
     cors_allowed_origins: str = ""
@@ -259,6 +269,10 @@ class Settings(BaseSettings):
                 self.verification_artifact_url_ttl_seconds,
             ),
             ("PROOF_OF_LIFE_MIN_FACE_SIZE", self.proof_of_life_min_face_size),
+            (
+                "DECISION_AUDIT_RETENTION_DAYS",
+                self.decision_audit_retention_days,
+            ),
         )
         for key, value in positive_numeric_settings:
             if value <= 0:

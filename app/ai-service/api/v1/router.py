@@ -15,6 +15,7 @@ from api.v1 import (
     anonymize,
     humanitarian,
     fraud,
+    audit,
     artifacts,
     uploads,
     dead_letter,
@@ -28,6 +29,7 @@ v1_router.include_router(proof_of_life.router)
 v1_router.include_router(anonymize.router)
 v1_router.include_router(humanitarian.router)
 v1_router.include_router(fraud.router)
+v1_router.include_router(audit.router)
 v1_router.include_router(artifacts.router)
 v1_router.include_router(uploads.router)
 v1_router.include_router(dead_letter.router)

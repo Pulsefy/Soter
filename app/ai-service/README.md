@@ -179,6 +179,40 @@ curl -X POST "http://localhost:8000/v1/ai/dead-letter/callback:task-123/replay" 
   -H "X-User-Role: operator" -H "X-User-Id: alice"
 ```
 
+### Structured Decision Audit Records
+
+Every verification (`/v1/ai/humanitarian/verify`) and fraud (`/v1/fraud/detect`)
+decision writes a **structured audit record** capturing the inputs, provider,
+model, prompt version, outcome, confidence, and reasons behind the decision.
+Records are stored in a local SQLite database so they survive process
+restarts, and are queryable by **trace id**, **claim id**, and **campaign
+reference**.
+
+- **GET** `/v1/ai/audit/decisions` - List records
+  (`?trace_id=&claim_id=&campaign_ref=&decision_type=&limit=&offset=`)
+
+All free-form fields (`inputs`, `outcome`, `reasons`) are redacted with
+`logging_redaction.redact` before persistence, so PII and secrets never reach
+disk and are never returned by the query endpoint.
+
+#### Retention policy
+
+- **Configurable retention window:** `DECISION_AUDIT_RETENTION_DAYS`
+  (default `90`). Records older than this window are deleted by
+  `DecisionAuditStore.prune()`, which runs automatically at service startup.
+- **Storage location:** `DECISION_AUDIT_DB_PATH` (default
+  `./data/decision_audit.db`). The directory is created automatically and is
+  excluded from git.
+- **Disabling auditing:** set `DECISION_AUDIT_ENABLED=false` to make
+  `record_decision` a no-op (writes and queries return empty) without code
+  changes.
+- Auditing is **fail-safe**: a persistence error is logged and never raised,
+  so audit failures can never break a verification or fraud response.
+
+```bash
+curl "http://localhost:8000/v1/ai/audit/decisions?claim_id=claim-abc123"
+```
+
 ## Project Structure
 
 ```

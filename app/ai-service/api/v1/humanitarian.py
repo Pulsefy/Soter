@@ -253,6 +253,35 @@ async def verify_humanitarian_claim(
                 reasons = [str(r) for r in raw_reason]
                 break
 
+        # Persist a structured decision audit record (inputs, provider, model,
+        # prompt version, outcome) so the reasoning behind this decision can be
+        # reconstructed later. Recording must never break the response.
+        try:
+            audit_store = getattr(state, "decision_audit_store", None)
+            if audit_store is not None:
+                anchor = request.anchor_metadata
+                audit_store.record_decision(
+                    trace_id=correlation_id or None,
+                    decision_type="humanitarian_verification",
+                    provider=raw.get("provider"),
+                    model=raw.get("model"),
+                    prompt_version=raw.get("prompt_variant"),
+                    claim_id=anchor.claim_id if anchor else None,
+                    campaign_ref=anchor.campaign_ref if anchor else None,
+                    outcome=verification,
+                    confidence=confidence,
+                    reasons=reasons,
+                    inputs={
+                        "aid_claim": request.aid_claim,
+                        "supporting_evidence": request.supporting_evidence,
+                        "context_factors": request.context_factors,
+                        "provider_preference": request.provider_preference,
+                        "artifact_ids": request.artifact_ids,
+                    },
+                )
+        except Exception as exc:
+            logger.error("Failed to record decision audit record: %s", exc)
+
         return ResultEnvelope[Dict[str, Any]](
             result=raw,
             confidence=confidence,

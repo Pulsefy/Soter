@@ -43,3 +43,6 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Local runtime data (e.g. SQLite decision-audit store)
+data/
