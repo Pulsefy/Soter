@@ -51,6 +51,12 @@ pub const KEY_PAUSE_CLAIM: Symbol = symbol_short!("p_claim");
 pub const KEY_PAUSE_REFUND: Symbol = symbol_short!("p_refund");
 /// Per-action pause flag for `withdraw_surplus` (`bool`).
 pub const KEY_PAUSE_WITHDRAW: Symbol = symbol_short!("p_wdrw");
+/// Minimum seconds that must elapse between a surplus-withdrawal proposal
+/// and its execution. `0` means no delay is enforced.
+pub const KEY_SURPLUS_DELAY: Symbol = symbol_short!("surp_dly");
+/// The currently-pending surplus-withdrawal proposal (`PendingSurplusWithdrawal`).
+/// Absent when no proposal is active.
+pub const KEY_PENDING_SURPLUS: Symbol = symbol_short!("pend_surp");
 /// Campaign pause registry (`Map<String, bool>` keyed by `campaign_ref`).
 pub const KEY_CAMPAIGN_PAUSED: Symbol = symbol_short!("camp_pzd");
 /// Per-token amount currently escrowed (`Map<Address, i128>`, token -> locked).
@@ -119,7 +125,7 @@ mod tests {
     use super::*;
 
     /// Every singleton key, both storage families.
-    fn singleton_keys() -> [Symbol; 19] {
+    fn singleton_keys() -> [Symbol; 21] {
         [
             KEY_ADMIN,
             KEY_PENDING_ADMIN,
@@ -131,6 +137,8 @@ mod tests {
             KEY_PAUSE_CLAIM,
             KEY_PAUSE_REFUND,
             KEY_PAUSE_WITHDRAW,
+            KEY_SURPLUS_DELAY,
+            KEY_PENDING_SURPLUS,
             KEY_CAMPAIGN_PAUSED,
             KEY_TOTAL_LOCKED,
             KEY_TOTAL_CLAIMED,

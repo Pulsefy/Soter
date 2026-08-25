@@ -37,6 +37,7 @@ pub use crate::keys::{
     KEY_DELEGATE_EXPIRY, KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM,
     KEY_PAUSE_CREATE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN, KEY_PKG_COUNTER,
     KEY_PKG_IDX, KEY_RECIPIENT_LAST_CLAIM, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
+    KEY_SURPLUS_DELAY, KEY_PENDING_SURPLUS,
 };
 
 /// Upper bound on the number of package ids accepted by `batch_claim` in a
@@ -128,6 +129,22 @@ pub struct BatchClaimResult {
     pub amount: i128,
 }
 
+/// A queued-but-not-yet-executed surplus-withdrawal proposal.
+/// Created by `propose_withdraw_surplus`; consumed or deleted by
+/// `withdraw_surplus` / `cancel_withdraw_surplus`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingSurplusWithdrawal {
+    /// Destination address for the funds.
+    pub to: Address,
+    /// Token contract address.
+    pub token: Address,
+    /// Amount (in the token's smallest unit) to transfer.
+    pub amount: i128,
+    /// Earliest ledger timestamp at which execution is permitted.
+    pub execute_after: u64,
+}
+
 #[contracterror]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Error {
@@ -155,6 +172,10 @@ pub enum Error {
     BatchTooLarge = 21,
     /// The recipient has not yet completed the configured claim cooldown.
     ClaimCooldownActive = 22,
+    /// `withdraw_surplus` was called but no proposal is pending.
+    NoPendingSurplusWithdrawal = 23,
+    /// `withdraw_surplus` was called before the timelock delay elapsed.
+    WithdrawalTimelockNotMet = 24,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -260,6 +281,22 @@ pub struct SurplusWithdrawnEvent {
     pub to: Address,
     pub token: Address,
     pub amount: i128,
+}
+
+/// Emitted when a surplus-withdrawal proposal is created.
+#[contractevent]
+pub struct SurplusWithdrawalProposedEvent {
+    pub to: Address,
+    pub token: Address,
+    pub amount: i128,
+    /// Earliest ledger timestamp at which the proposal can be executed.
+    pub execute_after: u64,
+}
+
+/// Emitted when the admin cancels a pending surplus-withdrawal proposal.
+#[contractevent]
+pub struct SurplusWithdrawalCancelledEvent {
+    pub admin: Address,
 }
 
 #[contractevent]
@@ -1640,30 +1677,54 @@ impl AidEscrow {
         Ok(())
     }
 
-    /// Admin-only function to withdraw surplus (unallocated) funds from the contract.
-    /// Requirements: Admin auth, valid amount, sufficient surplus available.
-    /// Behavior: Transfers amount of token from contract to the specified address.
-    pub fn withdraw_surplus(
+    // --- Surplus-withdrawal timelock ---
+
+    /// Admin-only. Sets the minimum number of seconds between a surplus-withdrawal
+    /// proposal and its execution. Setting to `0` effectively removes the delay.
+    pub fn set_surplus_delay(env: Env, delay_seconds: u64) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&KEY_SURPLUS_DELAY, &delay_seconds);
+        Ok(())
+    }
+
+    /// Returns the configured surplus-withdrawal delay in seconds (default: 0).
+    pub fn get_surplus_delay(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&KEY_SURPLUS_DELAY)
+            .unwrap_or(0)
+    }
+
+    /// Admin-only. Proposes a surplus withdrawal that can be executed after
+    /// the configured delay has elapsed. Validates surplus availability at
+    /// proposal time so the admin gets immediate feedback.
+    ///
+    /// # Errors
+    /// - `ContractPaused` / action paused: action is paused.
+    /// - `InvalidAmount`: `amount` is zero or negative.
+    /// - `InvalidToken`: `token` is not in the allowlist.
+    /// - `InsufficientSurplus`: requested amount exceeds current surplus.
+    pub fn propose_withdraw_surplus(
         env: Env,
         to: Address,
         amount: i128,
         token: Address,
     ) -> Result<(), Error> {
         Self::check_action_paused(&env, symbol_short!("withdraw"))?;
-        // 1. Only the admin can withdraw surplus
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
 
-        // 2. Validate amount
         if amount <= 0 {
             return Err(Error::InvalidAmount);
         }
 
-        // 3. Get contract's current balance for the token
         Self::validate_token(&env, &token)?;
-        let contract_balance = Self::token_balance(&env, &token, &env.current_contract_address())?;
+        let contract_balance =
+            Self::token_balance(&env, &token, &env.current_contract_address())?;
 
-        // 4. Get total locked amount for the token
         let locked_map: Map<Address, i128> = env
             .storage()
             .instance()
@@ -1671,20 +1732,109 @@ impl AidEscrow {
             .unwrap_or(Map::new(&env));
         let total_locked = locked_map.get(token.clone()).unwrap_or(0);
 
-        // 5. Calculate available surplus and validate
         let available_surplus = contract_balance - total_locked;
         if amount > available_surplus {
             return Err(Error::InsufficientSurplus);
         }
 
-        // 6. Transfer funds from contract to recipient
-        Self::transfer_token(&env, &token, &env.current_contract_address(), &to, &amount)?;
+        let delay = Self::get_surplus_delay(env.clone());
+        let execute_after = env.ledger().timestamp() + delay;
 
-        // 7. Emit event
-        SurplusWithdrawnEvent {
+        let pending = PendingSurplusWithdrawal {
             to: to.clone(),
             token: token.clone(),
             amount,
+            execute_after,
+        };
+        env.storage()
+            .instance()
+            .set(&KEY_PENDING_SURPLUS, &pending);
+
+        SurplusWithdrawalProposedEvent {
+            to,
+            token,
+            amount,
+            execute_after,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Admin-only. Cancels the pending surplus-withdrawal proposal, if any.
+    ///
+    /// # Errors
+    /// - `NoPendingSurplusWithdrawal`: no proposal is currently pending.
+    pub fn cancel_withdraw_surplus(env: Env) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        if !env.storage().instance().has(&KEY_PENDING_SURPLUS) {
+            return Err(Error::NoPendingSurplusWithdrawal);
+        }
+        env.storage().instance().remove(&KEY_PENDING_SURPLUS);
+
+        SurplusWithdrawalCancelledEvent { admin }.publish(&env);
+        Ok(())
+    }
+
+    /// Returns the pending surplus-withdrawal proposal, or `None` if absent.
+    pub fn get_pending_surplus_withdrawal(env: Env) -> Option<PendingSurplusWithdrawal> {
+        env.storage().instance().get(&KEY_PENDING_SURPLUS)
+    }
+
+    /// Admin-only. Executes the pending surplus-withdrawal proposal after the
+    /// timelock delay has elapsed.
+    ///
+    /// # Errors
+    /// - `ContractPaused` / action paused: action is paused.
+    /// - `NoPendingSurplusWithdrawal`: no proposal is pending.
+    /// - `WithdrawalTimelockNotMet`: the delay has not yet elapsed.
+    /// - `InsufficientSurplus`: surplus has shrunk since the proposal.
+    pub fn withdraw_surplus(env: Env) -> Result<(), Error> {
+        Self::check_action_paused(&env, symbol_short!("withdraw"))?;
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let pending: PendingSurplusWithdrawal = env
+            .storage()
+            .instance()
+            .get(&KEY_PENDING_SURPLUS)
+            .ok_or(Error::NoPendingSurplusWithdrawal)?;
+
+        if env.ledger().timestamp() < pending.execute_after {
+            return Err(Error::WithdrawalTimelockNotMet);
+        }
+
+        // Re-validate surplus at execution time.
+        let contract_balance =
+            Self::token_balance(&env, &pending.token, &env.current_contract_address())?;
+        let locked_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_LOCKED)
+            .unwrap_or(Map::new(&env));
+        let total_locked = locked_map.get(pending.token.clone()).unwrap_or(0);
+        let available_surplus = contract_balance - total_locked;
+        if pending.amount > available_surplus {
+            return Err(Error::InsufficientSurplus);
+        }
+
+        // Clear proposal before transfer to prevent re-entrancy.
+        env.storage().instance().remove(&KEY_PENDING_SURPLUS);
+
+        Self::transfer_token(
+            &env,
+            &pending.token,
+            &env.current_contract_address(),
+            &pending.to,
+            &pending.amount,
+        )?;
+
+        SurplusWithdrawnEvent {
+            to: pending.to,
+            token: pending.token,
+            amount: pending.amount,
         }
         .publish(&env);
 
@@ -2902,5 +3052,186 @@ mod tests {
         assert_eq!(client.sweep_expired_packages(&10), 1);
         assert_eq!(client.get_package(&1).status, PackageStatus::Expired);
         assert_eq!(client.get_total_locked(&token), 0);
+    }
+
+    // --- Surplus-withdrawal timelock tests ---
+
+    /// Full happy-path: set delay → propose → advance time → execute.
+    #[test]
+    fn test_surplus_timelock_happy_path() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, token_client) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+        // Mint 20M, fund contract with 10M, leave 10M surplus.
+        sac.mint(&admin, &20_000_000);
+        client.fund(&token, &admin, &20_000_000);
+        client.create_package(
+            &admin,
+            &1,
+            &recipient,
+            &10_000_000,
+            &token,
+            &(env.ledger().timestamp() + 86400),
+            &Map::new(&env),
+        );
+
+        // Set a 100-second delay.
+        client.set_surplus_delay(&100);
+        assert_eq!(client.get_surplus_delay(), 100);
+
+        // Propose withdrawal; no pending withdrawal yet before this call.
+        assert!(client.get_pending_surplus_withdrawal().is_none());
+        client.propose_withdraw_surplus(&recipient, &5_000_000, &token);
+
+        let pending = client.get_pending_surplus_withdrawal().expect("pending must exist");
+        let now = env.ledger().timestamp();
+        assert_eq!(pending.to, recipient);
+        assert_eq!(pending.amount, 5_000_000);
+        assert_eq!(pending.execute_after, now + 100);
+
+        // Advance past the delay.
+        env.ledger().with_mut(|li| li.timestamp = now + 100);
+        let balance_before = token_client.balance(&recipient);
+        client.withdraw_surplus();
+        let balance_after = token_client.balance(&recipient);
+        assert_eq!(balance_after - balance_before, 5_000_000);
+
+        // Proposal is consumed.
+        assert!(client.get_pending_surplus_withdrawal().is_none());
+    }
+
+    /// Executing exactly at the boundary timestamp must succeed.
+    #[test]
+    fn test_surplus_timelock_exact_boundary() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, token_client) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+        sac.mint(&admin, &10_000_000);
+        client.fund(&token, &admin, &10_000_000);
+
+        client.set_surplus_delay(&50);
+        let now = env.ledger().timestamp();
+        client.propose_withdraw_surplus(&recipient, &10_000_000, &token);
+
+        // Move to exact execute_after timestamp.
+        env.ledger().with_mut(|li| li.timestamp = now + 50);
+        let before = token_client.balance(&recipient);
+        client.withdraw_surplus();
+        assert_eq!(token_client.balance(&recipient) - before, 10_000_000);
+    }
+
+    /// Executing one second before the delay elapses must fail with
+    /// `WithdrawalTimelockNotMet`.
+    #[test]
+    fn test_surplus_timelock_too_early() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+        sac.mint(&admin, &10_000_000);
+        client.fund(&token, &admin, &10_000_000);
+
+        client.set_surplus_delay(&100);
+        let now = env.ledger().timestamp();
+        client.propose_withdraw_surplus(&recipient, &5_000_000, &token);
+
+        // One second before execute_after.
+        env.ledger().with_mut(|li| li.timestamp = now + 99);
+        let result = client.try_withdraw_surplus();
+        assert_eq!(result, Err(Ok(Error::WithdrawalTimelockNotMet)));
+    }
+
+    /// Calling `withdraw_surplus` with no pending proposal fails with
+    /// `NoPendingSurplusWithdrawal`.
+    #[test]
+    fn test_surplus_withdraw_no_proposal() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+        sac.mint(&admin, &10_000_000);
+        client.fund(&token, &admin, &10_000_000);
+
+        let result = client.try_withdraw_surplus();
+        assert_eq!(result, Err(Ok(Error::NoPendingSurplusWithdrawal)));
+    }
+
+    /// Admin cancels a pending proposal; subsequent execute must fail.
+    #[test]
+    fn test_surplus_timelock_cancel() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+        sac.mint(&admin, &10_000_000);
+        client.fund(&token, &admin, &10_000_000);
+
+        client.set_surplus_delay(&100);
+        let now = env.ledger().timestamp();
+        client.propose_withdraw_surplus(&recipient, &5_000_000, &token);
+
+        // Pending proposal exists.
+        assert!(client.get_pending_surplus_withdrawal().is_some());
+
+        // Cancel it.
+        client.cancel_withdraw_surplus();
+        assert!(client.get_pending_surplus_withdrawal().is_none());
+
+        // Even after the delay window, execute must fail.
+        env.ledger().with_mut(|li| li.timestamp = now + 200);
+        let result = client.try_withdraw_surplus();
+        assert_eq!(result, Err(Ok(Error::NoPendingSurplusWithdrawal)));
+    }
+
+    /// Cancelling when no proposal is pending fails with
+    /// `NoPendingSurplusWithdrawal`.
+    #[test]
+    fn test_surplus_cancel_no_proposal() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        let result = client.try_cancel_withdraw_surplus();
+        assert_eq!(result, Err(Ok(Error::NoPendingSurplusWithdrawal)));
+    }
+
+    /// Zero delay: propose and execute in the same timestamp must succeed.
+    #[test]
+    fn test_surplus_zero_delay() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, token_client) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+        sac.mint(&admin, &10_000_000);
+        client.fund(&token, &admin, &10_000_000);
+
+        // Default delay is 0; no set_surplus_delay call needed.
+        assert_eq!(client.get_surplus_delay(), 0);
+        client.propose_withdraw_surplus(&recipient, &10_000_000, &token);
+
+        let before = token_client.balance(&recipient);
+        client.withdraw_surplus();
+        assert_eq!(token_client.balance(&recipient) - before, 10_000_000);
     }
 }
