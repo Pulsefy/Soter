@@ -54,11 +54,19 @@ describe('ClaimsService', () => {
     amountDisbursed: '1000000000',
     metadata: { adapter: 'mock' },
   });
+  const mockCreateClaim = jest.fn().mockResolvedValue({
+    packageId: '9876543210',
+    transactionHash: 'mock-create-tx-hash-123',
+    timestamp: new Date(),
+    status: 'success' as const,
+    metadata: { adapter: 'mock' },
+  });
   const mockOnchainAdapter: Partial<OnchainAdapter> & {
     revokeAidPackage: jest.Mock;
     refundAidPackage: jest.Mock;
   } = {
     disburse: mockDisburse,
+    createClaim: mockCreateClaim,
     revokeAidPackage: jest.fn().mockResolvedValue({
       transactionHash: 'mock-revoke-hash',
       timestamp: new Date(),
@@ -76,11 +84,14 @@ describe('ClaimsService', () => {
     incrementOnchainOperation: jest.fn(),
     recordOnchainDuration: jest.fn(),
     incrementCounter: jest.fn(),
+    incrementClaimsCreated: jest.fn(),
     incrementClaimsDisbursed: jest.fn(),
     incrementClaimsVerified: jest.fn(),
     incrementClaimsApproved: jest.fn(),
     recordClaimFunnelDuration: jest.fn(),
     adjustClaimsInFunnel: jest.fn(),
+    setClaimsInFunnel: jest.fn(),
+    recordSorobanTransactionLatency: jest.fn(),
   };
 
   const mockSorobanTxLifecycleService = {
@@ -117,6 +128,7 @@ describe('ClaimsService', () => {
             },
             sorobanTransaction: {
               create: jest.fn(),
+              findFirst: jest.fn().mockResolvedValue(null),
             },
             $transaction: jest.fn(),
           },
@@ -378,29 +390,18 @@ describe('ClaimsService', () => {
       expect(scheduleTxSpy).not.toHaveBeenCalled();
     });
 
-    it('should transition claim status even if onchain processing is handled separately', async () => {
-      const error = new Error('Onchain error');
-      jest.spyOn(mockOnchainAdapter, 'disburse').mockRejectedValue(error);
+    it('should throw and not transition status if onchain createClaim fails', async () => {
+      const error = new Error('Onchain create claim failed');
+      mockCreateClaim.mockRejectedValueOnce(error);
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
-      const transactionSpy = jest
-        .spyOn(prismaService, '$transaction')
-        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          return callback({
-            claim: {
-              update: jest.fn().mockResolvedValue({
-                ...mockClaim,
-                status: ClaimStatus.disbursed,
-                campaign: mockClaim.campaign,
-              }),
-            },
-          });
-        });
 
-      await service.disburse('claim-123');
+      await expect(service.disburse('claim-123')).rejects.toThrow(
+        'Onchain create claim failed',
+      );
 
-      expect(transactionSpy).toHaveBeenCalled();
+      expect(mockSorobanTxLifecycleService.createTransaction).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundException if claim does not exist', async () => {
@@ -408,6 +409,46 @@ describe('ClaimsService', () => {
 
       await expect(service.disburse('non-existent')).rejects.toThrow(
         NotFoundException,
+      );
+    });
+
+    it('should call onchainAdapter.createClaim with the real claim details', async () => {
+      const expectedClaim = {
+        ...mockClaim,
+        status: ClaimStatus.disbursed,
+      };
+
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+          return callback({
+            claim: {
+              update: jest.fn().mockResolvedValue(expectedClaim),
+            },
+          });
+        });
+
+      await service.disburse('claim-123');
+
+      expect(mockCreateClaim).toHaveBeenCalledWith(
+        expect.objectContaining({
+          claimId: 'claim-123',
+          recipientAddress: 'recipient-123',
+          amount: '100',
+          tokenAddress: expect.any(String),
+        }),
+      );
+
+      expect(
+        mockSorobanTxLifecycleService.createTransaction,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          packageId: '9876543210',
+        }),
       );
     });
 
@@ -503,6 +544,69 @@ describe('ClaimsService', () => {
           }),
         }),
       );
+    });
+
+    it('skips onchain cleanup when no Soroban transaction with package ID exists', async () => {
+      const expiredClaim = {
+        ...mockClaim,
+        status: ClaimStatus.requested,
+        expiresAt: new Date('2026-04-01T00:00:00.000Z'),
+      };
+
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValue([expiredClaim] as never);
+      jest.spyOn(prismaService.claim, 'update').mockResolvedValue({
+        ...expiredClaim,
+        status: ClaimStatus.archived,
+      } as never);
+      jest
+        .spyOn(prismaService.sorobanTransaction, 'findFirst')
+        .mockResolvedValue(null);
+
+      await service.cleanupExpiredClaims(new Date('2026-04-29T00:00:00.000Z'));
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'expired_cleanup',
+          metadata: expect.objectContaining({
+            onchain: expect.objectContaining({
+              attempted: false,
+              skippedReason: 'no_soroban_transaction_with_package_id',
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('uses real package ID from Soroban transaction for onchain cleanup', async () => {
+      const expiredClaim = {
+        ...mockClaim,
+        status: ClaimStatus.requested,
+        expiresAt: new Date('2026-04-01T00:00:00.000Z'),
+      };
+
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValue([expiredClaim] as never);
+      jest.spyOn(prismaService.claim, 'update').mockResolvedValue({
+        ...expiredClaim,
+        status: ClaimStatus.archived,
+      } as never);
+      jest
+        .spyOn(prismaService.sorobanTransaction, 'findFirst')
+        .mockResolvedValue({ packageId: '123456789' } as never);
+
+      await service.cleanupExpiredClaims(new Date('2026-04-29T00:00:00.000Z'));
+
+      expect(mockOnchainAdapter.revokeAidPackage).toHaveBeenCalledWith({
+        packageId: '123456789',
+        operatorAddress: 'system',
+      });
+      expect(mockOnchainAdapter.refundAidPackage).toHaveBeenCalledWith({
+        packageId: '123456789',
+        operatorAddress: 'system',
+      });
     });
   });
 

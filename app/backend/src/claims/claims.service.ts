@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { ClaimReceiptDto, SendReceiptShareDto } from './dto/claim-receipt.dto';
@@ -19,6 +18,7 @@ import {
   Prisma,
   SorobanOperationType,
   SorobanTransaction,
+  SorobanTransactionStatus,
 } from '@prisma/client';
 import {
   OnchainAdapter,
@@ -230,7 +230,25 @@ export class ClaimsService {
 
     let sorobanTransaction: SorobanTransaction | undefined;
     if (this.onchainEnabled && this.onchainAdapter) {
-      const packageId = this.generateMockPackageId(id);
+      let packageId: string;
+      try {
+        const claimResult = await this.onchainAdapter.createClaim({
+          claimId: id,
+          recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
+          amount: claim.amount.toString(),
+          tokenAddress: this.getTokenAddressForClaim(claim),
+          expiresAt: claim.expiresAt
+            ? Math.floor(claim.expiresAt.getTime() / 1000)
+            : Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+        });
+        packageId = claimResult.packageId;
+      } catch (error) {
+        this.logger.error(
+          'Failed to create onchain package for claim',
+          error instanceof Error ? error.stack : undefined,
+        );
+        throw error;
+      }
       const tokenAddress = this.getTokenAddressForClaim(claim);
       const correlationId = `disburse-${id}-${Date.now()}`;
 
@@ -296,11 +314,19 @@ export class ClaimsService {
     return updatedClaim;
   }
 
-  private generateMockPackageId(claimId: string): string {
-    const hash = createHash('sha256')
-      .update(`package-${claimId}`)
-      .digest('hex');
-    return BigInt('0x' + hash.substring(0, 16)).toString();
+  private async findPackageIdFromExistingTransactions(
+    claimId: string,
+  ): Promise<string | null> {
+    const tx = await this.prisma.sorobanTransaction.findFirst({
+      where: {
+        claimId,
+        status: SorobanTransactionStatus.confirmed,
+        packageId: { not: null },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { packageId: true },
+    });
+    return tx?.packageId ?? null;
   }
 
   private getTokenAddressForClaim(
@@ -452,7 +478,14 @@ export class ClaimsService {
       };
     }
 
-    const packageId = this.generateMockPackageId(claimId);
+    const packageId = await this.findPackageIdFromExistingTransactions(claimId);
+
+    if (!packageId) {
+      return {
+        attempted: false,
+        skippedReason: 'no_soroban_transaction_with_package_id',
+      };
+    }
 
     const revokeResult = await cleanupAdapter.revokeAidPackage({
       packageId,
