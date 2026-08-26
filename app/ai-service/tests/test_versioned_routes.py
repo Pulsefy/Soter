@@ -51,12 +51,16 @@ def mock_healthy_resources():
 @pytest.fixture(scope="module")
 def client():
     """TestClient that does NOT follow redirects – lets us inspect 308s."""
+    # Reset shutdown flag in case a previous test module's TestClient lifespan
+    # set it to True on the shared app object.
+    app.state.is_shutting_down = False
     return TestClient(app, follow_redirects=False)
 
 
 @pytest.fixture(scope="module")
 def following_client():
     """TestClient that follows redirects transparently."""
+    app.state.is_shutting_down = False
     return TestClient(app, follow_redirects=True)
 
 
