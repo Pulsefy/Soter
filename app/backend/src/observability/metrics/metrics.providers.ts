@@ -109,6 +109,13 @@ export const metricsProviders = [
     labelNames: ['type', 'failure_category'],
   }),
 
+  // Rate Limit Metrics
+  makeCounterProvider({
+    name: 'rate_limit_rejections_total',
+    help: 'Total number of requests rejected due to rate limiting',
+    labelNames: ['type', 'throttler_name'],
+  }),
+
   // Error Rate Metrics
   makeCounterProvider({
     name: 'error_rate_total',

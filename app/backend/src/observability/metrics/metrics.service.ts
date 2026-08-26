@@ -60,6 +60,10 @@ export class MetricsService {
     @InjectMetric('verification_queue_waiting_by_priority')
     public verificationQueueWaitingByPriorityGauge: Gauge<string>,
 
+    // Rate Limit Metrics
+    @InjectMetric('rate_limit_rejections_total')
+    public rateLimitRejectionsCounter: Counter<string>,
+
     // Claim funnel metrics
     @InjectMetric('claims_created_total')
     public claimsCreatedCounter: Counter<string>,
@@ -97,6 +101,13 @@ export class MetricsService {
       { priority: priorityLabel },
       count,
     );
+  }
+
+  /**
+   * Increment rate limit rejection counter
+   */
+  incrementRateLimitRejection(type: 'ip' | 'apikey', throttlerName: string): void {
+    this.rateLimitRejectionsCounter.inc({ type, throttler_name: throttlerName });
   }
 
   /**

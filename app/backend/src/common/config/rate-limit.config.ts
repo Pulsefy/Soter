@@ -10,6 +10,19 @@
  * All values in requests per minute per IP/API key
  */
 
+import { ApiKeyScope } from '../../api-keys/api-key-scope.enum';
+
+/**
+ * Multipliers for rate limits based on API key scope.
+ * The highest multiplier among the key's scopes will be applied.
+ */
+export const SCOPE_RATE_LIMIT_MULTIPLIERS: Record<ApiKeyScope, number> = {
+  [ApiKeyScope.read]: 1, // Standard limit
+  [ApiKeyScope.write]: 2, // 2x limit
+  [ApiKeyScope.admin]: 5, // 5x limit
+  [ApiKeyScope.webhook]: 10, // 10x limit
+};
+
 const parseNumber = (value: string | undefined, fallback: number): number => {
   if (value === undefined) {
     return fallback;
