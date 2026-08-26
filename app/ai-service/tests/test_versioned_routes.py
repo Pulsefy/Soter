@@ -112,14 +112,21 @@ class TestOCRLegacyPath:
 
     def test_legacy_ocr_valid_image_returns_200(self, client):
         from PIL import Image
+        from unittest.mock import patch
+        from services.preprocessing import QualityGateResult
 
         img = Image.new("RGB", (60, 60), color="blue")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        response = client.post(
-            "/ai/ocr",
-            files={"image": ("img.png", buf.getvalue(), "image/png")},
-        )
+        # Patch the quality gate so a tiny test image still counts as valid for this legacy test
+        with patch(
+            "api.routes.ocr_service.quality_gate.run",
+            return_value=QualityGateResult(passed=True),
+        ):
+            response = client.post(
+                "/ai/ocr",
+                files={"image": ("img.png", buf.getvalue(), "image/png")},
+            )
         assert response.status_code == 200
 
     def test_legacy_ocr_not_redirected(self, client):

@@ -80,9 +80,7 @@ class ImageQualityGate:
 
         if rejections:
             for reason in rejections:
-                metrics.IMAGE_QUALITY_GATE_REJECTIONS_TOTAL.labels(
-                    reason=reason
-                ).inc()
+                metrics.IMAGE_QUALITY_GATE_REJECTIONS_TOTAL.labels(reason=reason).inc()
             return QualityGateResult(passed=False, rejections=rejections)
 
         return QualityGateResult(passed=True)
@@ -91,9 +89,7 @@ class ImageQualityGate:
     # Individual checks
     # ------------------------------------------------------------------
 
-    def _check_resolution(
-        self, image: Image.Image, rejections: list[str]
-    ) -> None:
+    def _check_resolution(self, image: Image.Image, rejections: list[str]) -> None:
         width, height = image.size
         if width < self.thresholds.min_width or height < self.thresholds.min_height:
             reason = (
@@ -103,11 +99,13 @@ class ImageQualityGate:
             logger.warning("Quality gate: %s", reason)
             rejections.append(reason)
 
-    def _check_exposure(
-        self, image: Image.Image, rejections: list[str]
-    ) -> None:
+    def _check_exposure(self, image: Image.Image, rejections: list[str]) -> None:
+        if image.size[0] == 0 or image.size[1] == 0:
+            return
         gray = image.convert("L")
         arr = np.array(gray)
+        if arr.size == 0:
+            return
         mean_brightness = float(arr.mean())
 
         if mean_brightness < self.thresholds.min_mean_brightness:
@@ -125,11 +123,13 @@ class ImageQualityGate:
             logger.warning("Quality gate: %s", reason)
             rejections.append(reason)
 
-    def _check_blur(
-        self, image: Image.Image, rejections: list[str]
-    ) -> None:
+    def _check_blur(self, image: Image.Image, rejections: list[str]) -> None:
+        if image.size[0] == 0 or image.size[1] == 0:
+            return
         gray = image.convert("L")
         arr = np.array(gray)
+        if arr.size == 0:
+            return
         laplacian_var = float(cv2.Laplacian(arr, cv2.CV_64F).var())
 
         if laplacian_var < self.thresholds.min_laplacian_variance:
@@ -139,7 +139,6 @@ class ImageQualityGate:
             )
             logger.warning("Quality gate: %s", reason)
             rejections.append(reason)
-
 
 
 class ImagePreprocessor:

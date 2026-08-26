@@ -98,6 +98,7 @@ class TestOCRService:
         mock_labels.return_value.observe = mock_observe
 
         from PIL import Image
+        from services.preprocessing import QualityGateResult
 
         stub_response = OCRResponse(
             fields={
@@ -113,6 +114,11 @@ class TestOCRService:
         mock_registry = MagicMock(spec=ProviderRegistry)
         mock_registry.resolve_ocr.return_value = [("stub", stub_provider)]
         monkeypatch.setattr(self.ocr, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.ocr.quality_gate,
+            "run",
+            lambda img: QualityGateResult(passed=True),
+        )
 
         img = Image.new("RGB", (200, 100), color="white")
         result = self.ocr.process_image(img)
@@ -127,6 +133,7 @@ class TestOCRService:
         mock_labels.return_value.observe = mock_observe
 
         from PIL import Image
+        from services.preprocessing import QualityGateResult
 
         captured_hints = []
 
@@ -149,6 +156,11 @@ class TestOCRService:
             ("hint_capture", HintCapturingProvider())
         ]
         monkeypatch.setattr(self.ocr, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.ocr.quality_gate,
+            "run",
+            lambda img: QualityGateResult(passed=True),
+        )
 
         img = Image.new("RGB", (200, 100), color="white")
         result = self.ocr.process_image(img, language_hint="fra")
@@ -160,8 +172,8 @@ class TestOCRService:
         from PIL import Image
 
         img = Image.new("RGB", (0, 0), color="white")
-        result = self.ocr.process_image(img)
-        assert isinstance(result, OCRResult)
+        with pytest.raises(ValueError, match="Image quality gate failed"):
+            self.ocr.process_image(img)
 
 
 class TestOCRResult:

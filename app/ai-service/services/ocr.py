@@ -7,7 +7,11 @@ from PIL import Image
 
 import metrics
 from config import settings
-from services.preprocessing import ImagePreprocessor, ImageQualityGate, QualityThresholds
+from services.preprocessing import (
+    ImagePreprocessor,
+    ImageQualityGate,
+    QualityThresholds,
+)
 from services.providers import ProviderRegistry, OCRField, OCRResponse
 
 

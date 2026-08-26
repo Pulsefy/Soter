@@ -157,6 +157,11 @@ class TestOCRTestProviderStability:
         monkeypatch.setattr(settings, "test_provider_mode", True)
 
         from PIL import Image
+        from services.preprocessing import QualityGateResult
+
+        monkeypatch.setattr(
+            self.service.quality_gate, "run", lambda img: QualityGateResult(passed=True)
+        )
 
         img = Image.new("RGB", (100, 50), color="white")
 
@@ -171,6 +176,11 @@ class TestOCRTestProviderStability:
         monkeypatch.setattr(settings, "test_provider_mode", True)
 
         from PIL import Image
+        from services.preprocessing import QualityGateResult
+
+        monkeypatch.setattr(
+            self.service.quality_gate, "run", lambda img: QualityGateResult(passed=True)
+        )
 
         img = Image.new("RGB", (200, 100), color="white")
 
@@ -198,10 +208,14 @@ class TestOCRTestProviderStability:
         """Without test_provider_mode, OCR goes through the real dependency path."""
         from unittest.mock import MagicMock
         from PIL import Image
+        from services.preprocessing import QualityGateResult
 
         img = Image.new("RGB", (50, 50), color="red")
 
         monkeypatch.setattr(settings, "test_provider_mode", False)
+        monkeypatch.setattr(
+            self.service.quality_gate, "run", lambda img: QualityGateResult(passed=True)
+        )
 
         failing_provider = MagicMock()
         failing_provider.name = "failing"
@@ -286,6 +300,11 @@ class TestCrossEndpointStability:
         monkeypatch.setattr(settings, "groq_api_key", None)
 
         from PIL import Image
+        from services.preprocessing import QualityGateResult
+
+        monkeypatch.setattr(
+            self.ocr.quality_gate, "run", lambda img: QualityGateResult(passed=True)
+        )
 
         h = self.humanitarian.verify_claim("Test claim.", ["doc"], {})
         o = self.ocr.process_image(Image.new("RGB", (50, 50), color="white"))

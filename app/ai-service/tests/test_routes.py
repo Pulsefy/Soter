@@ -44,12 +44,43 @@ class TestOCRRoutes:
             "/ai/ocr",
             files={"image": ("test.png", buf.getvalue(), "image/png")},
         )
-        assert response.status_code == 200
+        assert response.status_code == 400
+        # Error is wrapped by main.http_exception_handler into {"error": {"code": ..., "message": ...}}
+        assert "image_quality_gate_failed" in response.text
+        assert "too small" in response.text
 
     def test_ocr_endpoint_processing_time_recorded(self):
         from PIL import Image
+        from api.routes import ocr_service
+        from services.ocr import OCRResult
+        from services.preprocessing import QualityGateResult
 
         img = Image.new("RGB", (100, 100), color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        mock_result = OCRResult(
+            fields={},
+            raw_text="",
+            processing_time_ms=10,
+        )
+        with patch.object(
+            ocr_service.quality_gate, "run", return_value=QualityGateResult(passed=True)
+        ):
+            with patch.object(ocr_service.registry, "resolve_ocr", return_value=[]):
+                response = client.post(
+                    "/ai/ocr",
+                    files={"image": ("test.png", buf.getvalue(), "image/png")},
+                )
+        assert response.status_code == 200
+        data = response.json()
+        # Legacy /ai/ocr returns OCRResponse (old flat shape)
+        assert "processing_time_ms" in data
+
+    def test_ocr_endpoint_quality_gate_rejected(self):
+        from PIL import Image
+
+        img = Image.new("RGB", (10, 10), color="white")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
@@ -57,10 +88,8 @@ class TestOCRRoutes:
             "/ai/ocr",
             files={"image": ("test.png", buf.getvalue(), "image/png")},
         )
-        assert response.status_code == 200
-        data = response.json()
-        # Legacy /ai/ocr returns OCRResponse (old flat shape)
-        assert "processing_time_ms" in data
+        assert response.status_code == 400
+        assert "image_quality_gate_failed" in response.text
 
     def test_ocr_endpoint_with_language_hint(self):
         from PIL import Image
