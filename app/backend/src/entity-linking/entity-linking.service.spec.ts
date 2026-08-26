@@ -44,6 +44,18 @@ describe('EntityLinkingService', () => {
           provide: PrismaService,
           useValue: mockPrisma,
         },
+        {
+          provide: require('@nestjs/config').ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('0.8') },
+        },
+        {
+          provide: require('../observability/metrics/metrics.service')
+            .MetricsService,
+          useValue: {
+            setEntityLinkReviewQueueDepth: jest.fn(),
+            recordEntityLinkReviewDecisionLatency: jest.fn(),
+          },
+        },
       ],
     }).compile();
 

@@ -4,6 +4,8 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { MetricsService } from '../observability/metrics/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateEntityLinkDto,
@@ -16,7 +18,18 @@ import {
 export class EntityLinkingService {
   private readonly logger = new Logger(EntityLinkingService.name);
 
-  constructor(private prisma: PrismaService) {}
+  private readonly reviewThreshold: number;
+
+  constructor(
+    private prisma: PrismaService,
+    private readonly configService: ConfigService,
+    private readonly metricsService: MetricsService,
+  ) {
+    this.reviewThreshold =
+      parseFloat(
+        this.configService.get<string>('ENTITY_LINK_REVIEW_THRESHOLD') || '0.8',
+      ) || 0.8;
+  }
 
   /**
    * Link an extracted entity to a canonical registry record
@@ -86,13 +99,39 @@ export class EntityLinkingService {
       }
     }
 
+    // Determine whether this should be auto-applied or sent to review
+    let reviewState = 'auto_applied';
+    if (dto.confidenceScore < this.reviewThreshold) {
+      // Send to review queue
+      linkData.isActive = false;
+      reviewState = 'pending_review';
+    } else {
+      linkData.isActive = true;
+      reviewState = 'auto_applied';
+    }
+
+    linkData.reviewState = reviewState;
+
     const link = await this.prisma.entityLink.create({
       data: linkData,
     });
 
     this.logger.log(
-      `Entity link created: ${link.id} with confidence ${link.confidenceScore}`,
+      `Entity link created: ${link.id} with confidence ${link.confidenceScore} (state=${linkData.reviewState})`,
     );
+
+    // Update review queue metric
+    if (reviewState === 'pending_review') {
+      // Count pending review links and set gauge
+      const pendingCount = await this.prisma.entityLink.count({
+        where: { reviewState: 'pending_review' },
+      });
+      try {
+        this.metricsService.setEntityLinkReviewQueueDepth(pendingCount);
+      } catch (e) {
+        this.logger.debug('Metrics update failed for review queue depth');
+      }
+    }
 
     return this.mapLinkResult(link);
   }
@@ -227,21 +266,82 @@ export class EntityLinkingService {
    */
   async reviewLink(
     linkId: string,
-    reviewData: { reviewedBy: string; isActive: boolean; reviewNotes?: string },
+    reviewData: {
+      reviewedBy: string;
+      isActive: boolean;
+      reviewNotes?: string;
+      registryId?: string; // Optional remap to specific registry record
+    },
   ): Promise<LinkEntityResult> {
     this.logger.log(
       `Reviewing entity link ${linkId} by ${reviewData.reviewedBy}`,
     );
 
+    const updateData: any = {
+      reviewedBy: reviewData.reviewedBy,
+      reviewedAt: new Date(),
+      isActive: reviewData.isActive,
+      reviewNotes: reviewData.reviewNotes,
+      reviewState: reviewData.isActive ? 'accepted' : 'rejected',
+    };
+
+    // If remapping to a registry ID, resolve it and attach
+    if (reviewData.registryId) {
+      const link = await this.prisma.entityLink.findUnique({
+        where: { id: linkId },
+      });
+      if (!link) {
+        throw new NotFoundException(`EntityLink ${linkId} not found`);
+      }
+
+      const resolvedId = await this.findRegistryRecordById(
+        link.entityType as string,
+        reviewData.registryId,
+      );
+
+      switch (link.entityType) {
+        case 'organization':
+          updateData.organizationId = resolvedId;
+          break;
+        case 'location':
+          updateData.locationId = resolvedId;
+          break;
+        case 'asset':
+          updateData.assetId = resolvedId;
+          break;
+        case 'project':
+          updateData.projectId = resolvedId;
+          break;
+      }
+
+      updateData.matchMethod = 'manual';
+      updateData.reviewState = 'remapped';
+    }
+
     const updated = await this.prisma.entityLink.update({
       where: { id: linkId },
-      data: {
-        reviewedBy: reviewData.reviewedBy,
-        reviewedAt: new Date(),
-        isActive: reviewData.isActive,
-        reviewNotes: reviewData.reviewNotes,
-      },
+      data: updateData,
     });
+
+    // Update metrics: decrement queue depth and record latency
+    try {
+      const pendingCount = await this.prisma.entityLink.count({
+        where: { reviewState: 'pending_review' },
+      });
+      this.metricsService.setEntityLinkReviewQueueDepth(pendingCount);
+
+      if (updated.reviewedAt && updated.createdAt) {
+        const latencySeconds =
+          (new Date(updated.reviewedAt).getTime() -
+            new Date(updated.createdAt).getTime()) /
+          1000;
+        this.metricsService.recordEntityLinkReviewDecisionLatency(
+          latencySeconds,
+        );
+      }
+    } catch (e) {
+      this.logger.debug('Metrics update failed for review decision');
+    }
 
     return this.mapLinkResult(updated);
   }
@@ -546,6 +646,7 @@ export class EntityLinkingService {
       isActive: link.isActive,
       reviewedBy: link.reviewedBy,
       reviewedAt: link.reviewedAt,
+      reviewState: link.reviewState ?? null,
       reviewNotes: link.reviewNotes,
       createdAt: link.createdAt,
       updatedAt: link.updatedAt,

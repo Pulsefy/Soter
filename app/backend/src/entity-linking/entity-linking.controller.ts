@@ -136,7 +136,12 @@ export class EntityLinkingController {
   async reviewLink(
     @Param('linkId') linkId: string,
     @Body()
-    reviewData: { reviewedBy: string; isActive: boolean; reviewNotes?: string },
+    reviewData: {
+      reviewedBy: string;
+      isActive: boolean;
+      reviewNotes?: string;
+      registryId?: string;
+    },
   ) {
     this.logger.log(`Reviewing entity link ${linkId}`);
     return this.entityLinkingService.reviewLink(linkId, reviewData);

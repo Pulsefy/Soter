@@ -26,6 +26,7 @@ export interface LinkEntityResult {
   isActive: boolean;
   reviewedBy: string | null;
   reviewedAt: Date | null;
+  reviewState?: string | null;
   reviewNotes: string | null;
   createdAt: Date;
   updatedAt: Date;
