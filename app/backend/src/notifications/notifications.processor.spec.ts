@@ -5,6 +5,8 @@ import { NotificationType } from './interfaces/notification-job.interface';
 import { Job } from 'bullmq';
 import { DlqService } from '../jobs/dlq.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import { DeliveryAdapterFactory } from './adapters/delivery-adapter.factory';
+import { IDeliveryAdapter } from './adapters/delivery-adapter.interface';
 
 describe('NotificationProcessor', () => {
   let processor: NotificationProcessor;
@@ -12,12 +14,19 @@ describe('NotificationProcessor', () => {
     notificationOutbox: {
       update: jest.Mock;
     };
+    notificationDeliveryAttempt: {
+      create: jest.Mock;
+    };
   };
   let metricsMock: {
-  incrementCallbackFailure: jest.Mock;
-  incrementNotificationDeliveryAttempt: jest.Mock;
-  incrementNotificationDeliveryFailureByCategory: jest.Mock;
-};
+    incrementCallbackFailure: jest.Mock;
+    incrementNotificationDeliveryAttempt: jest.Mock;
+    incrementNotificationDeliveryFailureByCategory: jest.Mock;
+  };
+  let adapterFactoryMock: {
+    getAdapter: jest.Mock;
+  };
+  let mockAdapter: jest.Mocked<IDeliveryAdapter>;
 
   const makeJob = (
     overrides: Partial<{
@@ -25,6 +34,7 @@ describe('NotificationProcessor', () => {
       type: string;
       recipient: string;
       message: string;
+      subject: string;
     }> = {},
   ): Job<any, any, string> =>
     ({
@@ -32,12 +42,14 @@ describe('NotificationProcessor', () => {
       data: {
         type: NotificationType.EMAIL,
         recipient: 'test@example.com',
+        subject: 'Test Subject',
         message: 'Test message',
         timestamp: Date.now(),
         outboxId: 'outbox-test-1',
         ...overrides,
       },
       attemptsMade: 0,
+      returnvalue: undefined,
     }) as unknown as Job<any, any, string>;
 
   beforeEach(async () => {
@@ -45,12 +57,33 @@ describe('NotificationProcessor', () => {
       notificationOutbox: {
         update: jest.fn().mockResolvedValue({}),
       },
+      notificationDeliveryAttempt: {
+        create: jest.fn().mockResolvedValue({}),
+      },
     };
     metricsMock = {
-  incrementCallbackFailure: jest.fn(),
-  incrementNotificationDeliveryAttempt: jest.fn(),
-  incrementNotificationDeliveryFailureByCategory: jest.fn(),
-};
+      incrementCallbackFailure: jest.fn(),
+      incrementNotificationDeliveryAttempt: jest.fn(),
+      incrementNotificationDeliveryFailureByCategory: jest.fn(),
+    };
+
+    mockAdapter = {
+      getType: jest.fn().mockReturnValue(NotificationType.EMAIL),
+      sendEmail: jest.fn().mockResolvedValue({
+        success: true,
+        providerMessageId: 'mock-msg-123',
+        metadata: { provider: 'mock' },
+      }),
+      sendSms: jest.fn().mockResolvedValue({
+        success: true,
+        providerMessageId: 'mock-sms-123',
+        metadata: { provider: 'mock' },
+      }),
+    };
+
+    adapterFactoryMock = {
+      getAdapter: jest.fn().mockReturnValue(mockAdapter),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -68,6 +101,10 @@ describe('NotificationProcessor', () => {
         {
           provide: MetricsService,
           useValue: metricsMock,
+        },
+        {
+          provide: DeliveryAdapterFactory,
+          useValue: adapterFactoryMock,
         },
       ],
     }).compile();
@@ -96,13 +133,51 @@ describe('NotificationProcessor', () => {
       expect(prismaMock.notificationOutbox.update).not.toHaveBeenCalled();
     });
 
-    it('should return a successful NotificationResult', async () => {
+    it('should return a successful NotificationResult with providerMessageId', async () => {
       const job = makeJob();
 
       const result = await processor.process(job);
 
       expect(result.success).toBe(true);
-      expect(result.messageId).toBeDefined();
+      expect(result.messageId).toBe('mock-msg-123');
+      expect(adapterFactoryMock.getAdapter).toHaveBeenCalledWith(
+        NotificationType.EMAIL,
+      );
+      expect(mockAdapter.sendEmail).toHaveBeenCalledWith({
+        recipient: 'test@example.com',
+        subject: 'Test Subject',
+        message: 'Test message',
+      });
+    });
+
+    it('should use SMS adapter for SMS notifications', async () => {
+      const job = makeJob({ type: NotificationType.SMS });
+
+      const result = await processor.process(job);
+
+      expect(result.success).toBe(true);
+      expect(result.messageId).toBe('mock-sms-123');
+      expect(adapterFactoryMock.getAdapter).toHaveBeenCalledWith(
+        NotificationType.SMS,
+      );
+      expect(mockAdapter.sendSms).toHaveBeenCalledWith({
+        recipient: 'test@example.com',
+        message: 'Test message',
+      });
+    });
+
+    it('should throw when adapter returns failure', async () => {
+      mockAdapter.sendEmail.mockResolvedValueOnce({
+        success: false,
+        error: 'Provider error',
+      });
+      const job = makeJob();
+
+      await expect(processor.process(job)).rejects.toThrow('Provider error');
+      expect(metricsMock.incrementCallbackFailure).toHaveBeenCalledWith(
+        'notification_delivery',
+        'Provider error',
+      );
     });
 
     it('should log correlationId when present in job data', async () => {
@@ -128,8 +203,9 @@ describe('NotificationProcessor', () => {
   });
 
   describe('onCompleted', () => {
-    it('should update outbox record to sent with sentAt when outboxId is present', async () => {
+    it('should update outbox record to sent with sentAt and providerMessageId when outboxId is present', async () => {
       const job = makeJob({ outboxId: 'outbox-abc' });
+      job.returnvalue = { success: true, messageId: 'provider-msg-123' };
 
       await processor.onCompleted(job);
 
@@ -138,6 +214,7 @@ describe('NotificationProcessor', () => {
         data: {
           status: 'sent',
           sentAt: expect.any(Date),
+          providerMessageId: 'provider-msg-123',
         },
       });
     });

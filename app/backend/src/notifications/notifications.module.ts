@@ -8,6 +8,10 @@ import { NotificationsController } from './notifications.controller';
 import { JobsModule } from '../jobs/jobs.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
 import { LoggerModule } from '../logger/logger.module';
+import { DeliveryAdapterFactory } from './adapters/delivery-adapter.factory';
+import { MockDeliveryAdapter } from './adapters/mock-delivery.adapter';
+import { SendGridEmailAdapter } from './adapters/sendgrid-email.adapter';
+import { TwilioSmsAdapter } from './adapters/twilio-sms.adapter';
 
 @Module({
   imports: [
@@ -28,7 +32,14 @@ import { LoggerModule } from '../logger/logger.module';
     LoggerModule,
   ],
   controllers: [OutboxController, NotificationsController],
-  providers: [NotificationsService, NotificationProcessor],
+  providers: [
+    NotificationsService,
+    NotificationProcessor,
+    DeliveryAdapterFactory,
+    MockDeliveryAdapter,
+    SendGridEmailAdapter,
+    TwilioSmsAdapter,
+  ],
   exports: [NotificationsService],
 })
 export class NotificationsModule {}

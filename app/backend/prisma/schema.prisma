@@ -631,21 +631,22 @@ enum NotificationOutboxStatus {
 }
 
 model NotificationOutbox {
-  id            String                   @id @default(cuid())
-  type          String                   // "email" | "sms"
-  recipient     String
-  subject       String?
-  message       String
-  status        NotificationOutboxStatus @default(pending)
-  retryCount    Int                      @default(0)
-  lastError     String?
-  lastAttemptAt DateTime?
-  scheduledFor  DateTime                 @default(now())
-  sentAt        DateTime?
-  jobId         String?
-  metadata      String?
-  createdAt     DateTime                 @default(now())
-  updatedAt     DateTime                 @updatedAt
+  id                 String                   @id @default(cuid())
+  type               String                   // "email" | "sms"
+  recipient          String
+  subject            String?
+  message            String
+  status             NotificationOutboxStatus @default(pending)
+  retryCount         Int                      @default(0)
+  lastError          String?
+  lastAttemptAt      DateTime?
+  scheduledFor       DateTime                 @default(now())
+  sentAt             DateTime?
+  jobId              String?
+  providerMessageId  String?                  // Provider-assigned message ID (e.g., SendGrid msg ID, Twilio SID)
+  metadata           String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
 
   attempts      NotificationDeliveryAttempt[]
 

@@ -4,12 +4,18 @@ import { Job } from 'bullmq';
 import {
   NotificationJobData,
   NotificationResult,
+  NotificationType,
 } from './interfaces/notification-job.interface';
 import { PrismaService } from '../prisma/prisma.service';
 
 import { DlqService } from '../jobs/dlq.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { classifyNotificationFailure } from './notification-failure-classifier';
+import { DeliveryAdapterFactory } from './adapters/delivery-adapter.factory';
+import {
+  EmailPayload,
+  SmsPayload,
+} from './adapters/delivery-adapter.interface';
 
 @Processor('notifications', {
   concurrency: parseInt(process.env.QUEUE_CONCURRENCY || '5'),
@@ -21,6 +27,7 @@ export class NotificationProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly dlqService: DlqService,
     private readonly metricsService: MetricsService,
+    private readonly adapterFactory: DeliveryAdapterFactory,
   ) {
     super();
   }
@@ -53,17 +60,48 @@ export class NotificationProcessor extends WorkerHost {
     }
 
     try {
-      // Mock: In production, integrate with SendGrid, Twilio, etc.
-      this.logger.debug(
-        `[Mock] Sending ${job.data.type} to ${job.data.recipient}: ${job.data.message}`,
-      );
+      // Get the appropriate adapter based on notification type and configuration
+      const adapter = this.adapterFactory.getAdapter(job.data.type);
 
-      // Simulate some processing time
-      await new Promise(resolve => setTimeout(resolve, 100));
+      let deliveryResult;
+
+      if (job.data.type === NotificationType.EMAIL) {
+        const emailPayload: EmailPayload = {
+          recipient: job.data.recipient,
+          subject: job.data.subject || 'Notification',
+          message: job.data.message,
+        };
+        deliveryResult = await adapter.sendEmail(emailPayload);
+      } else if (job.data.type === NotificationType.SMS) {
+        const smsPayload: SmsPayload = {
+          recipient: job.data.recipient,
+          message: job.data.message,
+        };
+        deliveryResult = await adapter.sendSms(smsPayload);
+      } else {
+        throw new Error(`Unsupported notification type: ${job.data.type}`);
+      }
+
+      if (!deliveryResult.success) {
+        // Provider-level failure (e.g., invalid API key, rate limit)
+        const error = new Error(
+          deliveryResult.error || 'Delivery provider returned failure',
+        );
+        this.metricsService.incrementCallbackFailure(
+          'notification_delivery',
+          deliveryResult.error || 'provider_failure',
+        );
+        throw error;
+      }
+
+      // Success: return provider message ID
+      this.logger.log(
+        `Successfully delivered ${job.data.type} to ${job.data.recipient} (providerMessageId: ${deliveryResult.providerMessageId})`,
+      );
 
       return {
         success: true,
-        messageId: `mock-msg-${Date.now()}`,
+        messageId: deliveryResult.providerMessageId || `unknown-${Date.now()}`,
       };
     } catch (error) {
       this.logger.error(
@@ -92,11 +130,15 @@ export class NotificationProcessor extends WorkerHost {
     }
 
     try {
+      // Extract provider message ID from job result
+      const providerMessageId = job.returnvalue?.messageId;
+
       await this.prisma.notificationOutbox.update({
         where: { id: job.data.outboxId },
         data: {
           status: 'sent',
           sentAt: new Date(),
+          providerMessageId: providerMessageId || null,
         },
       });
     } catch (err) {
