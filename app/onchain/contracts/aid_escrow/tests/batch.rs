@@ -216,3 +216,84 @@ fn test_batch_create_packages_empty_arrays() {
     );
     assert_eq!(ids.len(), 0);
 }
+
+#[test]
+fn test_batch_revoke_and_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient1 = Address::generate(&env);
+    let recipient2 = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(10 * UNIT));
+
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(recipient1.clone());
+    recipients.push_back(recipient2.clone());
+
+    let mut amounts = Vec::new(&env);
+    amounts.push_back(UNIT);
+    amounts.push_back(UNIT);
+
+    let ids = client.batch_create_packages(&admin, &recipients, &amounts, &token_client.address, &86400, &empty_metadata(&env, 2));
+
+    // Revoke both in batch
+    let revoked = client.batch_revoke(&ids);
+    assert_eq!(revoked.len(), 2);
+    assert_eq!(client.get_package(&ids.get(0).unwrap()).status, aid_escrow::PackageStatus::Cancelled);
+
+    // Second invocation should be idempotent (already cancelled)
+    let revoked2 = client.batch_revoke(&ids);
+    assert_eq!(revoked2.len(), 2);
+}
+
+#[test]
+fn test_batch_refund_and_partial_failure() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient1 = Address::generate(&env);
+    let recipient2 = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(10 * UNIT));
+
+    // create two packages, one we'll claim so refund batch should fail validation
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(recipient1.clone());
+    recipients.push_back(recipient2.clone());
+
+    let mut amounts = Vec::new(&env);
+    amounts.push_back(UNIT);
+    amounts.push_back(UNIT);
+
+    let ids = client.batch_create_packages(&admin, &recipients, &amounts, &token_client.address, &1, &empty_metadata(&env, 2));
+
+    // Claim the second package to make it ineligible for refund
+    client.claim(&ids.get(1).unwrap());
+
+    // Attempt batch_refund should error because one package is Claimed
+    let result = client.try_batch_refund(&ids);
+    assert!(result.is_err());
+
+    // Now revoke first package, then refund just first package successfully
+    client.batch_revoke(&Vec::from_array(&env, &[ids.get(0).unwrap().clone()]));
+    let single = Vec::from_array(&env, &[ids.get(0).unwrap().clone()]);
+    let refunded = client.batch_refund(&single);
+    assert_eq!(refunded.len(), 1);
+}

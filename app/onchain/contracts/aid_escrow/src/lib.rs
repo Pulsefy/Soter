@@ -989,6 +989,162 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// Admin-only. Batch revoke packages.
+    /// Accepts a bounded list of package ids and revokes each one.
+    /// Behavior: atomic validation first (rejects if any package is in an invalid state),
+    /// then applies revocations. Already-cancelled packages are treated as idempotent successes.
+    pub fn batch_revoke(env: Env, ids: Vec<u64>) -> Result<Vec<u64>, Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        // Validation pass: ensure all packages exist and are revokable (Created or already Cancelled)
+        for i in 0..ids.len() {
+            let id = ids.get(i).unwrap();
+            let key = (symbol_short!("pkg"), id);
+            let package: Package = env
+                .storage()
+                .persistent()
+                .get(&key)
+                .ok_or(Error::PackageNotFound)?;
+
+            match package.status {
+                PackageStatus::Created | PackageStatus::Cancelled => {}
+                _ => return Err(Error::InvalidState),
+            }
+        }
+
+        let mut ok_ids: Vec<u64> = Vec::new(&env);
+
+        // Apply pass: perform revocations for packages that are still Created.
+        for i in 0..ids.len() {
+            let id = ids.get(i).unwrap();
+            let key = (symbol_short!("pkg"), id);
+            let mut package: Package = env
+                .storage()
+                .persistent()
+                .get(&key)
+                .ok_or(Error::PackageNotFound)?;
+
+            if package.status == PackageStatus::Created {
+                package.status = PackageStatus::Cancelled;
+                env.storage().persistent().set(&key, &package);
+
+                // Unlock funds
+                Self::decrement_locked(&env, &package.token, package.amount);
+
+                let timestamp = env.ledger().timestamp();
+                PackageRevoked {
+                    package_id: id,
+                    recipient: package.recipient.clone(),
+                    amount: package.amount,
+                    actor: admin.clone(),
+                    timestamp,
+                }
+                .publish(&env);
+            }
+
+            ok_ids.push_back(id);
+        }
+
+        Ok(ok_ids)
+    }
+
+    /// Admin-only. Batch refund packages.
+    /// Accepts a bounded list of package ids and refunds each one to admin.
+    /// Atomic validation first: rejects the whole call if any package is in an invalid state
+    /// (e.g., Claimed). Already-refunded packages are treated as idempotent successes.
+    pub fn batch_refund(env: Env, ids: Vec<u64>) -> Result<Vec<u64>, Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let now = env.ledger().timestamp();
+
+        // Validation pass
+        for i in 0..ids.len() {
+            let id = ids.get(i).unwrap();
+            let key = (symbol_short!("pkg"), id);
+            let package: Package = env
+                .storage()
+                .persistent()
+                .get(&key)
+                .ok_or(Error::PackageNotFound)?;
+
+            // Determine acceptable statuses: Cancelled, Expired, Created(if actually expired), Refunded (idempotent)
+            match package.status {
+                PackageStatus::Created => {
+                    // Created packages can only be refunded if actually expired.
+                    if package.expires_at == 0 || now <= package.expires_at {
+                        return Err(Error::InvalidState);
+                    }
+                }
+                PackageStatus::Expired | PackageStatus::Cancelled | PackageStatus::Refunded => {
+                    // ok (Refunded is idempotent)
+                }
+                _ => return Err(Error::InvalidState),
+            }
+        }
+
+        let mut ok_ids: Vec<u64> = Vec::new(&env);
+
+        // Apply pass: perform transfers and state updates for packages not already Refunded
+        for i in 0..ids.len() {
+            let id = ids.get(i).unwrap();
+            let key = (symbol_short!("pkg"), id);
+            let mut package: Package = env
+                .storage()
+                .persistent()
+                .get(&key)
+                .ok_or(Error::PackageNotFound)?;
+
+            if package.status == PackageStatus::Refunded {
+                ok_ids.push_back(id);
+                continue;
+            }
+
+            // If Created but expired, reflect that before transfer
+            let mut should_unlock_locked = false;
+            if package.status == PackageStatus::Created {
+                // At this point validation already ensured it's expired
+                package.status = PackageStatus::Expired;
+                should_unlock_locked = true;
+            } else if package.status == PackageStatus::Expired {
+                should_unlock_locked = true;
+            } else if package.status == PackageStatus::Cancelled {
+                should_unlock_locked = false;
+            }
+
+            // Transfer Contract -> Admin
+            Self::transfer_token(
+                &env,
+                &package.token,
+                &env.current_contract_address(),
+                &admin,
+                &package.amount,
+            )?;
+
+            if should_unlock_locked {
+                Self::decrement_locked(&env, &package.token, package.amount);
+            }
+
+            package.status = PackageStatus::Refunded;
+            env.storage().persistent().set(&key, &package);
+
+            let timestamp = env.ledger().timestamp();
+            PackageRefunded {
+                package_id: id,
+                recipient: package.recipient.clone(),
+                amount: package.amount,
+                actor: admin.clone(),
+                timestamp,
+            }
+            .publish(&env);
+
+            ok_ids.push_back(id);
+        }
+
+        Ok(ok_ids)
+    }
+
     /// Admin-only package cancellation.
     /// Requirements: Admin auth, existing package, status must be 'Created'.
     pub fn cancel_package(env: Env, package_id: u64) -> Result<(), Error> {
