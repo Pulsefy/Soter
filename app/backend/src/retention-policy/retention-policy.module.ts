@@ -17,7 +17,11 @@ import { AuditModule } from '../audit/audit.module';
     BullModule.registerQueue({ name: RETENTION_PURGE_QUEUE }),
   ],
   controllers: [RetentionPolicyController],
-  providers: [RetentionPolicyService, RetentionPurgeProcessor, RetentionPurgeScheduler],
+  providers: [
+    RetentionPolicyService,
+    RetentionPurgeProcessor,
+    RetentionPurgeScheduler,
+  ],
   exports: [RetentionPolicyService],
 })
 export class RetentionPolicyModule {}

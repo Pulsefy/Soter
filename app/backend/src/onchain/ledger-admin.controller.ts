@@ -295,7 +295,8 @@ export class LedgerAdminController {
     description: 'Access denied - admin role required.',
   })
   async getStuckSorobanTransactions() {
-    const result = await this.sorobanTransactionLifecycleService.detectStuckTransactions();
+    const result =
+      await this.sorobanTransactionLifecycleService.detectStuckTransactions();
     return { success: true, data: result };
   }
 }

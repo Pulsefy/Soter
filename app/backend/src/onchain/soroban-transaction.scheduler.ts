@@ -191,7 +191,9 @@ export class SorobanTransactionScheduler {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to detect stuck Soroban transactions: ${errorMessage}`);
+      this.logger.error(
+        `Failed to detect stuck Soroban transactions: ${errorMessage}`,
+      );
       this.metricsService.incrementCounter('soroban_stuck_detection_failed', {
         error: errorMessage.substring(0, 100),
       });

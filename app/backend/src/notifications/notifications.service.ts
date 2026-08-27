@@ -194,7 +194,8 @@ export class NotificationsService {
     } = {};
 
     if (filters.outcome) where.outcome = filters.outcome;
-    if (filters.failureCategory) where.failureCategory = filters.failureCategory;
+    if (filters.failureCategory)
+      where.failureCategory = filters.failureCategory;
     if (filters.type) where.outbox = { type: filters.type };
     if (filters.from || filters.to) {
       where.startedAt = {

@@ -57,7 +57,7 @@ export function parseStorageConfig(
   env: Record<string, unknown>,
 ): StorageConfig {
   const raw = (env[STORAGE_DRIVER_ENV] as string | undefined)?.trim();
-  const driver = ((raw || DEFAULT_STORAGE_DRIVER) as StorageDriverType);
+  const driver = (raw || DEFAULT_STORAGE_DRIVER) as StorageDriverType;
 
   if (!VALID_STORAGE_DRIVERS.includes(driver)) {
     throw new Error(
@@ -80,11 +80,9 @@ export function parseStorageConfig(
       );
     }
     const endpoint =
-      (env[STORAGE_S3_ENDPOINT_ENV] as string | undefined)?.trim() ||
-      undefined;
+      (env[STORAGE_S3_ENDPOINT_ENV] as string | undefined)?.trim() || undefined;
     const forcePathStyleRaw = env[STORAGE_S3_FORCE_PATH_STYLE_ENV] as
-      | string
-      | undefined;
+      string | undefined;
     const forcePathStyle =
       forcePathStyleRaw === undefined
         ? !!endpoint
@@ -95,10 +93,13 @@ export function parseStorageConfig(
         bucket,
         region,
         endpoint,
-        accessKeyId: (env[STORAGE_S3_ACCESS_KEY_ID_ENV] as string | undefined)
-          ?.trim() || undefined,
-        secretAccessKey: (env[STORAGE_S3_SECRET_ACCESS_KEY_ENV] as string | undefined)
-          ?.trim() || undefined,
+        accessKeyId:
+          (env[STORAGE_S3_ACCESS_KEY_ID_ENV] as string | undefined)?.trim() ||
+          undefined,
+        secretAccessKey:
+          (
+            env[STORAGE_S3_SECRET_ACCESS_KEY_ENV] as string | undefined
+          )?.trim() || undefined,
         forcePathStyle,
       },
     };

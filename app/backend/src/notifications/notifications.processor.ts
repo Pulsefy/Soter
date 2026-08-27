@@ -112,7 +112,9 @@ export class NotificationProcessor extends WorkerHost {
     );
 
     try {
-      const startedAt = job.processedOn ? new Date(job.processedOn) : new Date();
+      const startedAt = job.processedOn
+        ? new Date(job.processedOn)
+        : new Date();
       const completedAt = new Date();
       await this.prisma.notificationDeliveryAttempt.create({
         data: {
@@ -188,7 +190,9 @@ export class NotificationProcessor extends WorkerHost {
     );
 
     try {
-      const startedAt = job.processedOn ? new Date(job.processedOn) : new Date();
+      const startedAt = job.processedOn
+        ? new Date(job.processedOn)
+        : new Date();
       const completedAt = new Date();
       await this.prisma.notificationDeliveryAttempt.create({
         data: {

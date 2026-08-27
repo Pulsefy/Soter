@@ -55,12 +55,10 @@ describe('VerificationInboxSseController', () => {
 
   it('emits review updates as SSE messages with id, type and JSON data', async () => {
     const received = firstValueFrom(
-      controller
-        .stream(reviewer)
-        .pipe(
-          filter(message => message.type !== INBOX_HEARTBEAT_EVENT),
-          take(1),
-        ),
+      controller.stream(reviewer).pipe(
+        filter(message => message.type !== INBOX_HEARTBEAT_EVENT),
+        take(1),
+      ),
     );
 
     events.publish('inbox.item.updated', payload('ver-1'));
@@ -78,12 +76,10 @@ describe('VerificationInboxSseController', () => {
 
   it('emits queue mutations as well as review decisions', async () => {
     const received = firstValueFrom(
-      controller
-        .stream(reviewer)
-        .pipe(
-          filter(message => message.type !== INBOX_HEARTBEAT_EVENT),
-          take(1),
-        ),
+      controller.stream(reviewer).pipe(
+        filter(message => message.type !== INBOX_HEARTBEAT_EVENT),
+        take(1),
+      ),
     );
 
     events.publish('inbox.queue.changed', payload('ver-9', 'pending_review'));
@@ -98,12 +94,10 @@ describe('VerificationInboxSseController', () => {
     events.publish('inbox.item.updated', payload('ver-2'));
 
     const message = await firstValueFrom(
-      controller
-        .stream(reviewer, '1')
-        .pipe(
-          filter(item => item.type !== INBOX_HEARTBEAT_EVENT),
-          take(1),
-        ),
+      controller.stream(reviewer, '1').pipe(
+        filter(item => item.type !== INBOX_HEARTBEAT_EVENT),
+        take(1),
+      ),
     );
 
     expect(message.id).toBe('2');
@@ -114,12 +108,10 @@ describe('VerificationInboxSseController', () => {
     events.publish('inbox.item.updated', payload('ver-1'));
 
     const viaQuery = await firstValueFrom(
-      controller
-        .stream(reviewer, undefined, '0')
-        .pipe(
-          filter(item => item.type !== INBOX_HEARTBEAT_EVENT),
-          take(1),
-        ),
+      controller.stream(reviewer, undefined, '0').pipe(
+        filter(item => item.type !== INBOX_HEARTBEAT_EVENT),
+        take(1),
+      ),
     );
 
     expect(viaQuery.data).toMatchObject({ verificationId: 'ver-1' });
@@ -127,12 +119,10 @@ describe('VerificationInboxSseController', () => {
 
   it('restricts a connection to the requested statuses', async () => {
     const received = firstValueFrom(
-      controller
-        .stream(reviewer, undefined, undefined, 'approved')
-        .pipe(
-          filter(message => message.type !== INBOX_HEARTBEAT_EVENT),
-          take(1),
-        ),
+      controller.stream(reviewer, undefined, undefined, 'approved').pipe(
+        filter(message => message.type !== INBOX_HEARTBEAT_EVENT),
+        take(1),
+      ),
     );
 
     events.publish('inbox.item.updated', payload('ver-1', 'rejected'));
@@ -145,12 +135,10 @@ describe('VerificationInboxSseController', () => {
 
   it('sends heartbeats so idle connections stay open', async () => {
     const heartbeat = await firstValueFrom(
-      controller
-        .stream(reviewer)
-        .pipe(
-          filter(message => message.type === INBOX_HEARTBEAT_EVENT),
-          take(1),
-        ),
+      controller.stream(reviewer).pipe(
+        filter(message => message.type === INBOX_HEARTBEAT_EVENT),
+        take(1),
+      ),
     );
 
     expect(heartbeat.data).toMatchObject({ reviewerId: 'reviewer-1' });

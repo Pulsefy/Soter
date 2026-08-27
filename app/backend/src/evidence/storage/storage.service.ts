@@ -48,7 +48,9 @@ export class StorageService {
   async upload(key: string, data: Buffer): Promise<string> {
     try {
       const result = await this.driver.upload(key, data);
-      this.logger.log(`Stored evidence under key "${result.key}" (${this.driver.type})`);
+      this.logger.log(
+        `Stored evidence under key "${result.key}" (${this.driver.type})`,
+      );
       return result.key;
     } catch (err) {
       if (err instanceof StorageError) throw err;

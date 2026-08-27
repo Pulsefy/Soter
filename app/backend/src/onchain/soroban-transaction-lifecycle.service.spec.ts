@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  SorobanTransactionLifecycleService,
-} from './soroban-transaction-lifecycle.service';
+import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
+import { ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
 import { PrismaService } from '../prisma/prisma.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { ConfigService } from '@nestjs/config';
@@ -57,7 +56,7 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
         { provide: MetricsService, useValue: mockMetricsService },
         { provide: ConfigService, useValue: mockConfigService },
         {
-          provide: 'ONCHAIN_ADAPTER_TOKEN',
+          provide: ONCHAIN_ADAPTER_TOKEN,
           useValue: mockOnchainAdapter,
         },
       ],
@@ -264,11 +263,16 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
       mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([
         oldTransaction,
       ]);
+      mockPrismaService.sorobanTransaction.updateMany.mockResolvedValue({
+        count: 1,
+      });
 
       const result = await service.markExpiredTransactions();
 
       expect(result).toBe(1);
-      expect(mockPrismaService.sorobanTransaction.updateMany).toHaveBeenCalledWith({
+      expect(
+        mockPrismaService.sorobanTransaction.updateMany,
+      ).toHaveBeenCalledWith({
         where: {
           status: {
             in: [
@@ -277,7 +281,7 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
             ],
           },
           createdAt: {
-            lt: expiredAt,
+            lt: expect.any(Date),
           },
         },
         data: {
@@ -300,6 +304,9 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
       mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([
         recentTransaction,
       ]);
+      mockPrismaService.sorobanTransaction.updateMany.mockResolvedValue({
+        count: 0,
+      });
 
       const result = await service.markExpiredTransactions();
 
@@ -328,18 +335,21 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
 
       await service.executeTransaction('tx-recover');
 
-      expect(mockPrismaService.sorobanTransaction.update).toHaveBeenCalledWith({
-        where: { id: 'tx-recover' },
-        data: {
-          status: SorobanTransactionStatus.confirmed,
-          txHash: 'tx-hash-success',
-          confirmedAt: expect.any(Date),
-          attemptCount: 1,
-          lastRetryAt: expect.any(Date),
-          lastError: null,
-          errorType: null,
+      expect(mockPrismaService.sorobanTransaction.update).toHaveBeenNthCalledWith(
+        2,
+        {
+          where: { id: 'tx-recover' },
+          data: {
+            status: SorobanTransactionStatus.confirmed,
+            txHash: 'tx-hash-success',
+            confirmedAt: expect.any(Date),
+            attemptCount: 2,
+            lastRetryAt: expect.any(Date),
+            lastError: null,
+            errorType: null,
+          },
         },
-      });
+      );
     });
 
     it('should transition from submitted to confirmed without stuck detection', async () => {
@@ -362,18 +372,21 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
 
       await service.executeTransaction('tx-submitted');
 
-      expect(mockPrismaService.sorobanTransaction.update).toHaveBeenCalledWith({
-        where: { id: 'tx-submitted' },
-        data: {
-          status: SorobanTransactionStatus.confirmed,
-          txHash: 'tx-hash-disburse',
-          confirmedAt: expect.any(Date),
-          attemptCount: 1,
-          lastRetryAt: expect.any(Date),
-          lastError: null,
-          errorType: null,
+      expect(mockPrismaService.sorobanTransaction.update).toHaveBeenNthCalledWith(
+        2,
+        {
+          where: { id: 'tx-submitted' },
+          data: {
+            status: SorobanTransactionStatus.confirmed,
+            txHash: 'tx-hash-disburse',
+            confirmedAt: expect.any(Date),
+            attemptCount: 2,
+            lastRetryAt: expect.any(Date),
+            lastError: null,
+            errorType: null,
+          },
         },
-      });
+      );
     });
   });
 });

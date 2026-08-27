@@ -190,7 +190,10 @@ describe('HealthController', () => {
         service: 'soter-backend',
         environment: 'test',
         providers: expect.objectContaining({
-          onchain: expect.objectContaining({ adapter: 'mock', network: 'testnet' }),
+          onchain: expect.objectContaining({
+            adapter: 'mock',
+            network: 'testnet',
+          }),
           ai: expect.objectContaining({
             active: expect.any(String),
             models: expect.objectContaining({

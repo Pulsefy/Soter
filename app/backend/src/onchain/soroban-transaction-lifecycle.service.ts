@@ -59,7 +59,8 @@ export class SorobanTransactionLifecycleService {
     private readonly onchainAdapter: OnchainAdapter,
   ) {
     this.STUCK_TRANSACTION_THRESHOLD_MS = parseInt(
-      this.configService.get<string>('STUCK_TRANSACTION_THRESHOLD_MS') || '300000',
+      this.configService.get<string>('STUCK_TRANSACTION_THRESHOLD_MS') ||
+        '300000',
       10,
     ); // 5 minutes default
   }
@@ -479,7 +480,10 @@ export class SorobanTransactionLifecycleService {
     const stuckTransactions = await this.prisma.sorobanTransaction.findMany({
       where: {
         status: {
-          in: [SorobanTransactionStatus.pending, SorobanTransactionStatus.submitted],
+          in: [
+            SorobanTransactionStatus.pending,
+            SorobanTransactionStatus.submitted,
+          ],
         },
         updatedAt: {
           lt: stuckThreshold,
@@ -498,17 +502,26 @@ export class SorobanTransactionLifecycleService {
         operations: stuckTransactions.map(t => t.operation),
       });
 
-      this.metricsService.setGauge('soroban_transaction_stuck_total', stuckCount);
+      this.metricsService.setGauge(
+        'soroban_transaction_stuck_total',
+        stuckCount,
+      );
 
-      const countsByOperation = stuckTransactions.reduce<Record<string, number>>((acc, tx) => {
+      const countsByOperation = stuckTransactions.reduce<
+        Record<string, number>
+      >((acc, tx) => {
         acc[tx.operation] = (acc[tx.operation] || 0) + 1;
         return acc;
       }, {});
 
       for (const [operation, count] of Object.entries(countsByOperation)) {
-        this.metricsService.setGauge('soroban_transaction_stuck_by_operation', count, {
-          operation,
-        });
+        this.metricsService.setGauge(
+          'soroban_transaction_stuck_by_operation',
+          count,
+          {
+            operation,
+          },
+        );
       }
     }
 
