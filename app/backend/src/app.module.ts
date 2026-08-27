@@ -39,6 +39,7 @@ import { ApiKeysModule } from './api-keys/api-keys.module';
 import { SessionModule } from './session/session.module';
 import { CommonServicesModule } from './common/services/common-services.module';
 import { EvidenceModule } from './evidence/evidence.module';
+import { StorageModule } from './evidence/storage/storage.module';
 import { RetentionPolicyModule } from './retention-policy/retention-policy.module';
 import { InvitesModule } from './orgs/invites.module';
 import { AdminSearchModule } from './search/admin-search.module';
@@ -57,13 +58,13 @@ import { WebhooksModule } from 'src/webhooks.module';
 import { CorrelationModule } from './common/modules/correlation.module';
 import { RecipientImportModule } from './recipient-import/recipient-import.module';
 import { DeviceTokensModule } from './device-tokens/device-tokens.module';
-import { validateNetworkConfig } from './config/network-config.validation';
+import { validateAppConfig } from './config/validation';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      validate: validateNetworkConfig,
+      validate: validateAppConfig,
       envFilePath: (() => {
         const candidates = [
           join(__dirname, '..', '.env'),
@@ -105,6 +106,7 @@ import { validateNetworkConfig } from './config/network-config.validation';
 
     LoggerModule,
     PrismaModule,
+    StorageModule,
     CacheModule,
     HealthModule,
     AidModule,

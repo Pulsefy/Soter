@@ -528,7 +528,8 @@ enum EvidenceStatus {
 model EvidenceQueueItem {
   id            String         @id @default(cuid())
   fileName      String
-  filePath      String?        // Path to local encrypted file
+  filePath      String?        // Staging path of the encrypted file before durable upload; null once stored
+  storageKey    String?        // Retrievable key in the selected StorageDriver (local path/key or S3 object key)
   fileHash      String         @unique // To prevent duplicate uploads globally
   fingerprint   String?        // Stable fingerprint for near-duplicate detection
   mimeType      String
