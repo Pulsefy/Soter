@@ -43,19 +43,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Enable KVM
-        run: |
-          sudo chmod 666 /dev/kvm
-
-      - name: Start emulator and build app
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_2
-          script: |
-            npm run android -- --no-dev --localhost &
-            npx expo export --platform android
+        run: sudo chmod 666 /dev/kvm
 
       - name: Install Maestro
         working-directory: .
@@ -63,8 +51,21 @@ jobs:
           curl -Ls https://get.maestro.mobile.dev | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
 
-      - name: Run field flows
-        run: maestro test e2e/field-flows.yaml --format junit --output artifacts/maestro.xml
+      - name: Run field flows on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          MAESTRO_CLI_NO_ANALYTICS: '1'
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          script: |
+            set -e
+            adb wait-for-device
+            adb shell input keyevent 82 || true
+            npx expo export --platform android
+            maestro test e2e/field-flows.yaml --format junit --output artifacts/maestro.xml
 
       - name: Upload E2E screenshots and logs
         if: always()
