@@ -19,7 +19,6 @@ describe('NotificationProcessor', () => {
     incrementNotificationDeliveryAttempt: jest.Mock;
     incrementNotificationDeliveryFailureByCategory: jest.Mock;
   };
-
   let emailAdapterMock: {
     send: jest.Mock;
   };
@@ -183,7 +182,7 @@ describe('NotificationProcessor', () => {
   });
 
   describe('onFailed', () => {
-    it('should update outbox record to failed with retryCount increment and lastError when outboxId is present and exhausted', async () => {
+    it('should move the outbox record to dead_letter with retryCount increment and lastError when exhausted', async () => {
       const job = makeJob({ outboxId: 'outbox-abc' });
       job.opts = { attempts: 1 };
       job.attemptsMade = 1;
@@ -199,7 +198,7 @@ describe('NotificationProcessor', () => {
       expect(prismaMock.notificationOutbox.update).toHaveBeenCalledWith({
         where: { id: 'outbox-abc' },
         data: {
-          status: 'failed',
+          status: 'dead_letter',
           retryCount: { increment: 1 },
           lastError: 'Something went wrong',
         },
