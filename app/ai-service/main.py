@@ -34,6 +34,8 @@ from api.routes import router as ocr_router
 # New versioned router
 from api.v1.router import v1_router
 
+from services.admin_circuit_breaker_routes import router as admin_circuit_breaker_router
+
 from config import settings
 from request_limits import RequestSizeLimitMiddleware, clamp_request_timeout
 import tasks
@@ -532,6 +534,9 @@ app.include_router(ocr_router)
 
 # Versioned router - canonical home for all routes going forward.
 app.include_router(v1_router)
+
+# Admin circuit breaker observability and manual reset routes.
+app.include_router(admin_circuit_breaker_router)
 
 
 @app.get("/ai/metrics")
