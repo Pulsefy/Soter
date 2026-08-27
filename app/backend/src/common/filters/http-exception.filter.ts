@@ -14,7 +14,7 @@ import {
   ERROR_CODES,
   getErrorCodeFromStatus,
 } from '../dto/error-response.dto';
-import { AppException } from '../constants/integration-error-codes';
+import { AppException } from '../constants/error-codes';
 
 export interface ErrorResponse {
   code: number;
@@ -36,15 +36,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
-    const traceId = request.headers['x-request-id'] as string | undefined;
+    const traceId =
+      (request.headers?.['x-request-id'] as string) ||
+      (request.headers?.['x-correlation-id'] as string) ||
+      (request as any).traceId ||
+      undefined;
     const correlationId = (request as any).correlationId || traceId;
 
     // Log the error
     this.logger.error(
-      `[${traceId ?? 'N/A'}] ${exception.constructor?.name ?? 'UnknownError'} | Status: ${
-        exception.status || HttpStatus.INTERNAL_SERVER_ERROR
-      } | Message: ${exception.message} | Path: ${request.url}`,
-      exception.stack,
+      `[${traceId ?? 'N/A'}] ${exception?.constructor?.name ?? 'UnknownError'} | Status: ${
+        exception?.status || exception?.statusCode || HttpStatus.INTERNAL_SERVER_ERROR
+      } | Message: ${exception?.message || 'Unknown error'} | Path: ${request?.url || 'N/A'}`,
+      exception?.stack,
       'AllExceptionsFilter',
     );
 
@@ -96,7 +100,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message: errorResponse.message,
       traceId: errorResponse.traceId,
       timestamp: errorResponse.timestamp || new Date().toISOString(),
-      path: errorResponse.path || request.url,
+      path: errorResponse.path || request?.url || '',
       details: errorResponse.details,
       errorCode:
         errorResponse.errorCode || getErrorCodeFromStatus(errorResponse.code),
@@ -122,7 +126,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       details: exception.details,
       traceId,
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path: request?.url || '',
       errorCode: exception.errorCode,
       correlationId,
     };
@@ -136,20 +140,38 @@ export class AllExceptionsFilter implements ExceptionFilter {
   ): ErrorResponse {
     const status = exception.getStatus();
     const exceptionResponse = exception.getResponse();
-    const message =
-      typeof exceptionResponse === 'string'
-        ? exceptionResponse
-        : (exceptionResponse as any).message || exception.message;
+    let message: string;
+    let details: any = undefined;
+    let errorCode: string | undefined = undefined;
+
+    if (typeof exceptionResponse === 'string') {
+      message = exceptionResponse;
+    } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
+      const resp = exceptionResponse as any;
+      if (Array.isArray(resp.message)) {
+        message = resp.message.join(', ');
+        details = resp;
+        errorCode = ERROR_CODES.VALIDATION_ERROR;
+      } else {
+        message = resp.message || exception.message;
+        details = resp.details !== undefined ? resp.details : resp;
+      }
+
+      if (resp.errorCode) {
+        errorCode = resp.errorCode;
+      }
+    } else {
+      message = exception.message;
+    }
 
     return {
       code: status,
       message: typeof message === 'string' ? message : JSON.stringify(message),
-      details:
-        typeof exceptionResponse === 'object' ? exceptionResponse : undefined,
+      details,
       traceId,
       timestamp: new Date().toISOString(),
-      path: request.url,
-      errorCode: getErrorCodeFromStatus(status),
+      path: request?.url || '',
+      errorCode: errorCode || getErrorCodeFromStatus(status),
       correlationId,
     };
   }
@@ -159,7 +181,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       exception?.constructor?.name?.includes('Prisma') ||
       exception?.clientVersion ||
       exception?.meta?.target ||
-      exception?.code?.startsWith('P')
+      (typeof exception?.code === 'string' && exception.code.startsWith('P'))
     );
   }
 
@@ -223,7 +245,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       details,
       traceId,
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path: request?.url || '',
       errorCode,
       correlationId,
     };
@@ -252,7 +274,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       },
       traceId,
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path: request?.url || '',
       errorCode: ERROR_CODES.VALIDATION_ERROR,
       correlationId,
     };
@@ -277,17 +299,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
   ): ErrorResponse {
     return {
       code: HttpStatus.INTERNAL_SERVER_ERROR,
-      message: exception.message || 'Internal server error',
+      message: exception?.message || 'Internal server error',
       details: {
-        error_type: exception.constructor?.name,
+        error_type: exception?.constructor?.name || 'Error',
         ...(typeof process !== 'undefined' &&
           process.env.NODE_ENV === 'development' && {
-            stack: exception.stack,
+            stack: exception?.stack,
           }),
       },
       traceId,
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path: request?.url || '',
       errorCode: ERROR_CODES.INTERNAL_SERVER_ERROR,
       correlationId,
     };
