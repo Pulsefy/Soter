@@ -62,7 +62,7 @@ jobs:
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics
           script: |
-            set -euo pipefail
+            set -eu
             adb wait-for-device
             adb shell input keyevent 82 || true
             CI=1 npx expo prebuild --no-install
