@@ -70,10 +70,7 @@ jobs:
             adb shell input keyevent 82 || true
             CI=1 npx expo prebuild --no-install
             cd android
-            if [ ! -x ./gradlew ]; then
-              printf '%s\n' 'Gradle wrapper was not generated; installing the project Gradle distribution.'
-              gradle wrapper --gradle-version 8.13 --distribution-type bin
-            fi
+            if [ ! -x ./gradlew ]; then gradle wrapper --gradle-version 8.13 --distribution-type bin; fi
             chmod +x ./gradlew
             ./gradlew assembleDebug --no-daemon --stacktrace
             adb install -r app/build/outputs/apk/debug/app-debug.apk
