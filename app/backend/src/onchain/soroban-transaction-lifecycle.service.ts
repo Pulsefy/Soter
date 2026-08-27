@@ -49,10 +49,7 @@ export class SorobanTransactionLifecycleService {
   private readonly TRANSACTION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
   // Stuck transaction detection threshold (configurable)
-  private readonly STUCK_TRANSACTION_THRESHOLD_MS = parseInt(
-    this.configService.get<string>('STUCK_TRANSACTION_THRESHOLD_MS') || '300000',
-    10,
-  ); // 5 minutes default
+  private readonly STUCK_TRANSACTION_THRESHOLD_MS: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -60,7 +57,12 @@ export class SorobanTransactionLifecycleService {
     private readonly configService: ConfigService,
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
-  ) {}
+  ) {
+    this.STUCK_TRANSACTION_THRESHOLD_MS = parseInt(
+      this.configService.get<string>('STUCK_TRANSACTION_THRESHOLD_MS') || '300000',
+      10,
+    ); // 5 minutes default
+  }
 
   /**
    * Create a new Soroban transaction record with lifecycle tracking

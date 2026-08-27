@@ -1,6 +1,5 @@
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { promises as fs } from 'fs';
 import * as crypto from 'crypto';
 
 import { StorageDriver } from './storage-driver.interface';

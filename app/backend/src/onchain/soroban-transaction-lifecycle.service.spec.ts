@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   SorobanTransactionLifecycleService,
-  CreateSorobanTransactionParams,
 } from './soroban-transaction-lifecycle.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
@@ -74,14 +73,6 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
   });
 
   describe('detectStuckTransactions', () => {
-    const baseParams: CreateSorobanTransactionParams = {
-      claimId: 'claim-1',
-      operation: SorobanOperationType.create_claim,
-      recipientAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ',
-      amount: '100',
-      tokenAddress: 'GTOKENADDRESS',
-    };
-
     it('should detect transactions stuck in pending state past threshold', async () => {
       const stuckTransaction = {
         id: 'tx-1',

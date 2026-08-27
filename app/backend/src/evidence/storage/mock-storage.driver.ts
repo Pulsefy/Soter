@@ -21,6 +21,7 @@ export class MockStorageDriver implements StorageDriver {
   private readonly store = new Map<string, Buffer>();
 
   async upload(key: string, data: Buffer): Promise<StorageUploadResult> {
+    await Promise.resolve();
     if (!Buffer.isBuffer(data)) {
       throw new StorageUploadError(key, 'data must be a Buffer');
     }
@@ -29,6 +30,7 @@ export class MockStorageDriver implements StorageDriver {
   }
 
   async download(key: string): Promise<Buffer> {
+    await Promise.resolve();
     const data = this.store.get(key);
     if (!data) {
       throw new StorageDownloadError(key, 'No such object in mock store');
@@ -37,12 +39,14 @@ export class MockStorageDriver implements StorageDriver {
   }
 
   async remove(key: string): Promise<void> {
+    await Promise.resolve();
     if (!this.store.delete(key)) {
       throw new StorageDeleteError(key, 'No such object in mock store');
     }
   }
 
   async exists(key: string): Promise<boolean> {
+    await Promise.resolve();
     return this.store.has(key);
   }
 

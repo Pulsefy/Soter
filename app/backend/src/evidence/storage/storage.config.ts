@@ -82,7 +82,9 @@ export function parseStorageConfig(
     const endpoint =
       (env[STORAGE_S3_ENDPOINT_ENV] as string | undefined)?.trim() ||
       undefined;
-    const forcePathStyleRaw = env[STORAGE_S3_FORCE_PATH_STYLE_ENV];
+    const forcePathStyleRaw = env[STORAGE_S3_FORCE_PATH_STYLE_ENV] as
+      | string
+      | undefined;
     const forcePathStyle =
       forcePathStyleRaw === undefined
         ? !!endpoint

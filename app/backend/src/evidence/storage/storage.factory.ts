@@ -37,7 +37,7 @@ export function createStorageDriver(config: StorageConfig): StorageDriver {
       return new MockStorageDriver();
     default:
       throw new StorageConfigError(
-        `Unsupported storage driver: ${config.driver}`,
+        `Unsupported storage driver: ${String(config.driver)}`,
       );
   }
 }
