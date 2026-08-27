@@ -286,7 +286,9 @@ export class NotificationsService {
     }
 
     const jobName =
-      record.type === NotificationType.SMS ? 'send-sms' : 'send-email';
+      (record.type as NotificationType) === NotificationType.SMS
+        ? 'send-sms'
+        : 'send-email';
     try {
       const job = await this.notificationsQueue.add(
         jobName,

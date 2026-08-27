@@ -4,6 +4,8 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { NotificationType } from './interfaces/notification-job.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
+import { AuditService } from '../audit/audit.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 describe('NotificationsService', () => {
   let service: NotificationsService;
@@ -81,12 +83,11 @@ describe('NotificationsService', () => {
           useValue: loggerMock,
         },
         {
-          provide: require('../audit/audit.service').AuditService,
+          provide: AuditService,
           useValue: { record: jest.fn().mockResolvedValue(undefined) },
         },
         {
-          provide: require('../observability/metrics/metrics.service')
-            .MetricsService,
+          provide: MetricsService,
           useValue: { setNotificationDeadLetterDepth: jest.fn() },
         },
       ],
