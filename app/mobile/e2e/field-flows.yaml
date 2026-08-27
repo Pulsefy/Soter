@@ -1,0 +1,53 @@
+appId: org.pulsefy.soter.mobile
+name: Core field flows
+onFlowStart:
+  - clearState
+  - launchApp
+  - takeScreenshot: 00-start
+
+onFlowFailure:
+  - takeScreenshot: failure
+
+---
+# Scan flow: the simulator camera is configured with a deterministic QR fixture.
+- tapOn:
+    text: "Scan QR"
+- assertVisible: "Scan QR Code"
+- assertVisible: "Align QR code within the frame"
+- tapOn:
+    id: "scan-fixture"
+    optional: true
+- takeScreenshot: 01-scan
+
+---
+# Evidence capture flow. The test device grants camera/photo permissions.
+- tapOn:
+    text: "Upload Evidence"
+- assertVisible: "Upload Evidence"
+- tapOn:
+    text: "Take Photo"
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+- assertVisible: "Step 2: Preview"
+- takeScreenshot: 02-evidence-preview
+
+# Airplane mode queues the upload locally instead of sending it.
+- tapOn: "Upload Evidence"
+- toggleAirplaneMode
+- assertVisible: "Offline mode: evidence upload will queue and resend when the device reconnects."
+- tapOn: "Upload Evidence"
+- assertVisible: "Upload queued and will send when connectivity returns."
+- takeScreenshot: 03-offline-queued
+
+# The reconnect transition flushes the durable queue.
+- toggleAirplaneMode
+- waitForAnimationToEnd
+- tapOn: "Submission Queue"
+- assertVisible: "Submission Queue"
+- assertVisible: "Online"
+- waitForAnimationToEnd
+- assertNotVisible: "1 pending"
+- takeScreenshot: 04-reconnected-synced

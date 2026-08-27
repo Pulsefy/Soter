@@ -113,6 +113,7 @@ This lets testers and field users confirm the API target without navigating to a
 - `pnpm web`: Run in web browser for testing
 - `pnpm test`: Run Jest test suite
 - `pnpm lint`: Run ESLint for code quality checks
+- `npm run e2e`: Run the Maestro simulator/emulator suite; see [E2E.md](./E2E.md)
 
 ## Troubleshooting
 
