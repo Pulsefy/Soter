@@ -26,6 +26,7 @@ import { useSync } from '../contexts/SyncContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { SaverModeBanner } from '../components/SaverModeBanner';
 import { getTxExplorerUrl } from '../explorerUtils';
+import { DataFreshnessIndicator } from '../components/DataFreshnessIndicator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidDetails'>;
 
@@ -44,6 +45,8 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [isCached, setIsCached] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const {
     getActionsForAid,
@@ -85,9 +88,13 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       try {
         const data = await fetchAidDetails(aidId);
         setDetails(data);
+        setIsCached(false);
         setError(null);
+        if (isRefresh) setRefreshMessage('Data refreshed successfully.');
       } catch {
         setError('Unable to reach the server. Showing last known data.');
+        setIsCached(true);
+        if (isRefresh) setRefreshMessage('Refresh failed. Showing the last cached data.');
         setDetails((current) => current ?? getMockAidDetails(aidId));
       } finally {
         const now = new Date().toISOString();
@@ -282,6 +289,8 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       <SaverModeBanner visible={saverModeActive} source={saverModeSource} />
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
+      <DataFreshnessIndicator isCached={isCached} isConnected={isConnected} cachedAt={lastUpdated} refreshing={refreshing} refreshMessage={refreshMessage} onRefresh={() => loadDetails(true)} />
+
       <View style={styles.header}>
         <Text style={styles.title} accessibilityRole="header">
           {details.title}

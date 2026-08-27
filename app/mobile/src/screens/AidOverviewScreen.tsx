@@ -21,6 +21,7 @@ import { AppColors } from '../theme/useAppTheme';
 import { useSync } from '../contexts/SyncContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { SaverModeBanner } from '../components/SaverModeBanner';
+import { DataFreshnessIndicator } from '../components/DataFreshnessIndicator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidOverview'>;
 
@@ -46,6 +47,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [isCached, setIsCached] = useState(false);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const { pendingCount, failedCount, isSyncing: isQueueSyncing } = useSync();
@@ -57,11 +59,13 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
 
     try {
       const fresh = await getAidPackages();
+      if (isRefresh) setRefreshMessage('Data refreshed successfully.');
       setAidList(fresh);
       setIsCached(false);
       await cacheAidList(fresh);
       setCachedAt(null);
     } catch {
+      if (isRefresh) setRefreshMessage('Refresh failed. Showing the last cached data.');
       const cached = await loadCachedAidList();
       if (cached && cached.length > 0) {
         setAidList(cached);
@@ -158,6 +162,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
     <SafeAreaView style={styles.container}>
       <SaverModeBanner visible={saverModeActive} source={saverModeSource} />
       <OfflineBanner visible={!isConnected} cachedAt={cachedAt} pendingCount={pendingCount} />
+      <DataFreshnessIndicator isCached={isCached} isConnected={isConnected} cachedAt={cachedAt} refreshing={refreshing} refreshMessage={refreshMessage} onRefresh={() => loadData(true)} />
 
       {/* Resolved sync banner: dynamic condition + accessibility */}
       {(syncing || isQueueSyncing) && (

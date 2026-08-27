@@ -19,6 +19,7 @@ from services.evidence_access_control import (
     EvidenceAccessControl,
     EvidenceAccessControlError,
 )
+from request_limits import clamp_request_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ async def verify_humanitarian_claim(
     )
 
     try:
+        timeout = clamp_request_timeout(request.timeout, http_request.url.path)
         # Fail-closed access control for evidence-bearing requests.
         #
         # Headers, role, and ownership are only enforced when the request
@@ -238,7 +240,7 @@ async def verify_humanitarian_claim(
             supporting_evidence=request.supporting_evidence,
             context_factors=request.context_factors,
             provider_preference=request.provider_preference,
-            timeout=request.timeout,
+            timeout=timeout,
             model_version=model_version,
             artifact_tag=artifact_tag,
             org_id=x_org_id,

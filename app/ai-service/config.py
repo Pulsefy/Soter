@@ -58,6 +58,8 @@ class Settings(BaseSettings):
         AI_DETERMINISTIC_MODE: Enable deterministic AI results for verification and classification during tests/CI
         TEST_PROVIDER_MODE: Enable test provider mode that returns fixture-driven results (no API keys required)
         LLM_TIMEOUT_SECONDS: Timeout for LLM API requests
+        MAX_REQUEST_BODY_BYTES: Maximum request body size for AI endpoints
+        MAX_REQUEST_TIMEOUT_SECONDS: Maximum caller-supplied provider timeout
         APP_ENV: Application environment (development, staging, production, test)
         LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         HOST: Server host (default: 0.0.0.0)
@@ -77,6 +79,10 @@ class Settings(BaseSettings):
     ai_deterministic_mode: bool = False
     test_provider_mode: bool = False
     llm_timeout_seconds: int = 30
+
+    # Request safety limits
+    max_request_body_bytes: int = 10 * 1024 * 1024
+    max_request_timeout_seconds: float = 60.0
 
     # Request throttling / Rate limiting
     request_rate_limit: str = "10/minute"
@@ -267,6 +273,8 @@ class Settings(BaseSettings):
         # --- Numeric settings must be positive ---------------------------
         positive_numeric_settings = (
             ("LLM_TIMEOUT_SECONDS", self.llm_timeout_seconds),
+            ("MAX_REQUEST_BODY_BYTES", self.max_request_body_bytes),
+            ("MAX_REQUEST_TIMEOUT_SECONDS", self.max_request_timeout_seconds),
             ("CACHE_TTL_TASK_STATUS", self.cache_ttl_task_status),
             ("CACHE_TTL_ARTIFACT_ACCESS", self.cache_ttl_artifact_access),
             ("CACHE_TTL_VERIFICATION", self.cache_ttl_verification),

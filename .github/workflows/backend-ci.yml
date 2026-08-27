@@ -52,6 +52,29 @@ jobs:
         env:
           DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_test
 
+      - name: Check for Prisma schema/migration drift
+        working-directory: app/backend
+        run: |
+          set -euo pipefail
+          # Ensure a dedicated, empty shadow database exists so `prisma migrate diff
+          # --from-migrations` has a scratch DB to materialize the migration history.
+          # This is idempotent — it only issues CREATE DATABASE when it is missing.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
+            SELECT 'CREATE DATABASE soter_shadow'
+            WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'soter_shadow')\gexec
+          SQL
+
+          # Fail the build whenever the migrations history and the Prisma schema
+          # have diverged (exit code 2). schema/prisma.schema is the source of
+          # truth; contributors must add a migration, not edit deployed databases.
+          npx prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema prisma/schema.prisma \
+            --exit-code
+        env:
+          DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_test
+          SHADOW_DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_shadow
+
       - name: Lint
         run: pnpm --filter backend run lint
 
