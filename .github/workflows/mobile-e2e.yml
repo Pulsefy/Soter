@@ -28,10 +28,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: app/mobile/package-lock.json
+          cache-dependency-path: app/mobile/package.json
 
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm install --no-audit --no-fund --ignore-scripts
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -60,17 +60,19 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics
           script: |
-            set -e
+            set -euo pipefail
             adb wait-for-device
             adb shell input keyevent 82 || true
-            CI=1 npx expo prebuild --no-install --non-interactive
+            CI=1 npx expo prebuild --no-install
             cd android
+            chmod +x gradlew
             ./gradlew assembleDebug --no-daemon --stacktrace
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             cd ..
             mkdir -p artifacts
-            maestro test app/mobile/e2e/field-flows.yaml --format junit --output app/mobile/artifacts/maestro.xml
+            maestro test e2e/field-flows.yaml --format junit --output artifacts/maestro.xml
 
       - name: Upload E2E screenshots and logs
         if: always()

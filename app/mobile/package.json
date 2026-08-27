@@ -11,7 +11,7 @@
     "lint": "expo lint",
     "e2e": "maestro test e2e/field-flows.yaml",
     "e2e:ios": "maestro test e2e/field-flows.yaml --device \"${IOS_SIMULATOR:-iPhone 15}\"",
-    "e2e:android": "maestro test e2e/field-flows.yaml --device \"${ANDROID_EMULATOR:-emulator-5554}\""
+    "e2e:android": "maestro test e2e/field-flows.yaml --device \"${ANDROID_EMULATOR:-emulator-5554}\" --format junit --output artifacts/maestro.xml"
   },
   "dependencies": {
     "@babel/runtime": "^7.29.7",
