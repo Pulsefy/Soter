@@ -44,7 +44,7 @@ class PIIScrubberService:
         "Water",
         "Clear",
         "Crystal",
-        "Coordinator",
+        "HTTP",  # HTTP error codes like 404-123-4567 should not match
     }
 
     DATE_REGEXES = [
@@ -65,7 +65,7 @@ class PIIScrubberService:
     ]
 
     EMAIL_REGEXES = [
-        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
     ]
 
     PHONE_REGEXES = [
@@ -207,10 +207,28 @@ class PIIScrubberService:
         return nlp
 
     def _detect_spans(self, text: str) -> List[PIISpan]:
-        doc = self.nlp(text)
         spans: List[PIISpan] = []
 
+        # Check for emails FIRST to prioritize them over names
+        # This prevents "John@Example.Com" from being split into "John" + email
+        email_spans = []
+        for pattern in self.EMAIL_REGEXES:
+            email_spans.extend(self._spans_from_regex(text, pattern, "EMAIL"))
+        spans.extend(email_spans)
+
+        # Build set of email character ranges to exclude from spacy processing
+        email_ranges = {(span.start, span.end) for span in email_spans}
+
+        doc = self.nlp(text)
+
         for ent in doc.ents:
+            # Skip if this entity overlaps with an email
+            if any(
+                not (ent.end_char <= start or ent.start_char >= end)
+                for start, end in email_ranges
+            ):
+                continue
+
             mapped = self._normalize_label(ent.label_)
             if mapped:
                 spans.append(
@@ -232,9 +250,6 @@ class PIIScrubberService:
             spans.extend(
                 self._spans_from_regex(text, pattern, "LOCATION")
             )  # Removed capture group 1 to get full address if regex 2 matches
-
-        for pattern in self.EMAIL_REGEXES:
-            spans.extend(self._spans_from_regex(text, pattern, "EMAIL"))
 
         for pattern in self.PHONE_REGEXES:
             spans.extend(self._spans_from_regex(text, pattern, "PHONE"))
@@ -265,6 +280,14 @@ class PIIScrubberService:
                 start, end = match.start(), match.end()
                 value = match.group(0)
 
+            # Skip phone numbers that are HTTP/error codes (preceded by "error" or "code")
+            if label == "PHONE":
+                # Check if preceded by "error code", "HTTP error", etc.
+                context_start = max(0, start - 20)
+                context = text[context_start:start].lower()
+                if "error" in context or "http" in context:
+                    continue
+
             spans.append(PIISpan(start=start, end=end, label=label, text=value))
         return spans
 
@@ -281,7 +304,11 @@ class PIIScrubberService:
 
         sorted_spans = sorted(
             filtered_by_allowlist,
-            key=lambda span: (span.start, -(span.end - span.start)),
+            key=lambda span: (
+                span.start,
+                -(span.end - span.start),
+                0 if span.label == "EMAIL" else 1,  # Prioritize EMAIL
+            ),
         )
         filtered: List[PIISpan] = []
         current_end = -1

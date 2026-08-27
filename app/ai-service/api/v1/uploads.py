@@ -46,6 +46,10 @@ EVIDENCE_MAX_UPLOAD_BYTES = int(
 EVIDENCE_UPLOAD_SESSION_TTL_SECONDS = int(
     os.getenv("EVIDENCE_UPLOAD_SESSION_TTL_SECONDS", str(60 * 60))
 )
+EVIDENCE_ARTIFACT_RETENTION_SECONDS = int(
+    os.getenv("EVIDENCE_ARTIFACT_RETENTION_SECONDS", str(30 * 24 * 60 * 60))
+)
+EVIDENCE_PURGE_BATCH_SIZE = int(os.getenv("EVIDENCE_PURGE_BATCH_SIZE", "500"))
 
 upload_session_service = UploadSessionService(
     storage_dir=EVIDENCE_UPLOAD_DIR,
@@ -210,3 +214,48 @@ async def finalize_upload_session(
         total_size=session.total_size,
         status="completed",
     )
+
+
+def run_evidence_upload_purge(dry_run: bool = False) -> dict:
+    """Purge abandoned upload sessions and expired artifacts.
+
+    Used by the scheduled Celery task (``tasks.purge_expired_evidence_uploads``)
+    and available for ad-hoc/dry-run invocation. In-progress (unexpired)
+    sessions are never touched by either pass.
+    """
+    import metrics
+
+    session_result = upload_session_service.purge_abandoned_sessions(dry_run=dry_run)
+    artifact_result = upload_session_service.purge_expired_artifacts(
+        retention_seconds=EVIDENCE_ARTIFACT_RETENTION_SECONDS,
+        batch_size=EVIDENCE_PURGE_BATCH_SIZE,
+        dry_run=dry_run,
+    )
+
+    if not dry_run:
+        metrics.UPLOAD_PURGE_ITEMS_TOTAL.labels(kind="session").inc(
+            session_result.items_purged
+        )
+        metrics.UPLOAD_PURGE_BYTES_RECLAIMED_TOTAL.labels(kind="session").inc(
+            session_result.bytes_reclaimed
+        )
+        metrics.UPLOAD_PURGE_ITEMS_TOTAL.labels(kind="artifact").inc(
+            artifact_result.items_purged
+        )
+        metrics.UPLOAD_PURGE_BYTES_RECLAIMED_TOTAL.labels(kind="artifact").inc(
+            artifact_result.bytes_reclaimed
+        )
+
+    report = {
+        "dry_run": dry_run,
+        "sessions_purged": session_result.items_purged,
+        "session_bytes_reclaimed": session_result.bytes_reclaimed,
+        "artifacts_purged": artifact_result.items_purged,
+        "artifact_bytes_reclaimed": artifact_result.bytes_reclaimed,
+        "errors": session_result.errors + artifact_result.errors,
+    }
+    logger.info(
+        "evidence_upload_purge_completed",
+        extra={"event": "evidence_upload_purge_completed", **report},
+    )
+    return report

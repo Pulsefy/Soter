@@ -4,6 +4,7 @@ import request from 'supertest';
 import { ConfigService } from '@nestjs/config';
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
+import { MetadataService } from './metadata.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
 import { ONCHAIN_ADAPTER_TOKEN } from '../onchain/onchain.adapter';
@@ -44,6 +45,7 @@ describe('HealthController', () => {
       controllers: [HealthController],
       providers: [
         HealthService,
+        MetadataService,
         { provide: ConfigService, useValue: configMock },
         { provide: PrismaService, useValue: prismaMock },
         { provide: LoggerService, useValue: loggerMock },
@@ -173,5 +175,52 @@ describe('HealthController', () => {
         },
       }),
     );
+  });
+
+  it('GET /health/metadata returns safe service metadata', async () => {
+    configValues.ONCHAIN_ADAPTER = 'mock';
+    configValues.SOROBAN_NETWORK = 'testnet';
+
+    const res = await request(app.getHttpServer())
+      .get('/health/metadata')
+      .expect(200);
+
+    expect(res.body).toEqual(
+      expect.objectContaining({
+        service: 'soter-backend',
+        environment: 'test',
+        providers: expect.objectContaining({
+          onchain: expect.objectContaining({ adapter: 'mock', network: 'testnet' }),
+          ai: expect.objectContaining({
+            active: expect.any(String),
+            models: expect.objectContaining({
+              openai: expect.any(String),
+              groq: expect.any(String),
+            }),
+          }),
+        }),
+        capabilities: expect.objectContaining({
+          caching: expect.any(Boolean),
+          rateLimiting: expect.any(Boolean),
+          verification: expect.any(Boolean),
+          onchainEscrow: expect.any(Boolean),
+          deterministicMode: expect.any(Boolean),
+          redisEnabled: expect.any(Boolean),
+        }),
+      }),
+    );
+  });
+
+  it('GET /health/metadata never exposes secrets', async () => {
+    configValues.OPENAI_API_KEY = 'sk-secret-key';
+    configValues.SOROBAN_SECRET_KEY = 'SABCSECRET';
+
+    const res = await request(app.getHttpServer())
+      .get('/health/metadata')
+      .expect(200);
+
+    const serialized = JSON.stringify(res.body);
+    expect(serialized).not.toContain('sk-secret-key');
+    expect(serialized).not.toContain('SABCSECRET');
   });
 });

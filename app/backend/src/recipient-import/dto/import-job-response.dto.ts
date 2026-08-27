@@ -24,6 +24,9 @@ export class ImportJobResponseDto implements ImportJobStatusResponse {
   @ApiProperty({ description: 'Number of rows that failed processing' })
   errorRows: number;
 
+  @ApiProperty({ description: 'Last durably checkpointed data row offset' })
+  checkpointRow: number;
+
   @ApiPropertyOptional({ description: 'Array of row-level errors' })
   errors: ImportError[] | null;
 
@@ -39,8 +42,14 @@ export class ImportJobResponseDto implements ImportJobStatusResponse {
   @ApiProperty({ description: 'Last update timestamp' })
   updatedAt: Date;
 
+  @ApiPropertyOptional({ description: 'Processing start timestamp' })
+  startedAt: Date | null;
+
   @ApiPropertyOptional({ description: 'Completion timestamp' })
   completedAt: Date | null;
+
+  @ApiPropertyOptional({ description: 'Cancellation timestamp' })
+  cancelledAt: Date | null;
 
   @ApiProperty({
     description: 'Processing progress as a percentage (0–100)',

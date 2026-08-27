@@ -31,3 +31,12 @@ def test_valid_configuration_boots_and_serves():
     with TestClient(main.app) as client:
         response = client.get("/health")
         assert response.status_code == 200
+
+    # ``main.app`` is a module-level singleton shared by every test file in
+    # the session. Exiting the context manager above runs the lifespan
+    # shutdown path, which permanently flips ``is_shutting_down`` to True.
+    # Other test modules build a plain (non-context-manager) TestClient
+    # around the same app and never re-enter the lifespan, so without this
+    # reset they would start seeing 503 "draining" responses regardless of
+    # test order.
+    main.app.state.is_shutting_down = False

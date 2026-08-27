@@ -26,6 +26,7 @@ import { useSync } from '../contexts/SyncContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { SaverModeBanner } from '../components/SaverModeBanner';
 import { getTxExplorerUrl } from '../explorerUtils';
+import { DataFreshnessIndicator } from '../components/DataFreshnessIndicator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidDetails'>;
 
@@ -33,7 +34,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const { aidId } = route.params;
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { biometricEnabled, authenticate } = useBiometric();
+  const { biometricEnabled, authenticate, confirmValueAction } = useBiometric();
   const { active: saverModeActive, source: saverModeSource } = useSaverMode();
 
   // null = not yet attempted, true = granted, false = denied
@@ -44,6 +45,8 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [isCached, setIsCached] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const {
     getActionsForAid,
@@ -85,9 +88,13 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       try {
         const data = await fetchAidDetails(aidId);
         setDetails(data);
+        setIsCached(false);
         setError(null);
+        if (isRefresh) setRefreshMessage('Data refreshed successfully.');
       } catch {
         setError('Unable to reach the server. Showing last known data.');
+        setIsCached(true);
+        if (isRefresh) setRefreshMessage('Refresh failed. Showing the last cached data.');
         setDetails((current) => current ?? getMockAidDetails(aidId));
       } finally {
         const now = new Date().toISOString();
@@ -171,6 +178,11 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
 
+    const confirmed = await confirmValueAction('Confirm claim submission');
+    if (!confirmed) {
+      return;
+    }
+
     setConfirming(true);
 
     try {
@@ -194,7 +206,15 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       setConfirming(false);
     }
-  }, [aidId, details, isConnected, loadDetails, navigation, queueClaimConfirmation]);
+  }, [
+    aidId,
+    confirmValueAction,
+    details,
+    isConnected,
+    loadDetails,
+    navigation,
+    queueClaimConfirmation,
+  ]);
 
   // ── Auth states ──────────────────────────────────────────────────────────
 
@@ -269,6 +289,8 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       <SaverModeBanner visible={saverModeActive} source={saverModeSource} />
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
+      <DataFreshnessIndicator isCached={isCached} isConnected={isConnected} cachedAt={lastUpdated} refreshing={refreshing} refreshMessage={refreshMessage} onRefresh={() => loadDetails(true)} />
+
       <View style={styles.header}>
         <Text style={styles.title} accessibilityRole="header">
           {details.title}
@@ -371,7 +393,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       <ClaimStatusTimeline details={details} colors={colors} styles={styles} />
 
       {details.status === 'disbursed' ? (
-        <View style={styles.claimCompleteCard} accessibilityRole="status">
+        <View style={styles.claimCompleteCard} accessibilityLiveRegion="polite">
           <Text style={styles.claimCompleteTitle}>Claim completed</Text>
           <Text style={styles.claimCompleteText}>
             This package has been disbursed. You can view your claim receipt now.
@@ -437,7 +459,13 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         <TouchableOpacity
           accessibilityRole="button"
           style={[styles.button, { backgroundColor: colors.success }]}
-          onPress={() => navigation.navigate('ClaimReceipt', { claimId: details.claimId })}
+          onPress={async () => {
+            const confirmed = await confirmValueAction('Confirm receipt access');
+            if (!confirmed) {
+              return;
+            }
+            navigation.navigate('ClaimReceipt', { claimId: details.claimId });
+          }}
           activeOpacity={0.8}
         >
           <Text style={styles.buttonText}>View Receipt</Text>

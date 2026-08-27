@@ -46,3 +46,6 @@ logs/
 
 # Local runtime data (e.g. SQLite decision-audit store)
 data/
+
+# Benchmark results (generated, not committed)
+benchmark-results/

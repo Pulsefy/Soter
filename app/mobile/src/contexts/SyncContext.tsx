@@ -24,6 +24,7 @@ import {
 } from '../services/syncQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useSaverMode } from './SaverModeContext';
+import { useSyncDeferral } from './SyncDeferralContext';
 
 interface SyncContextValue extends SyncQueueState {
   isConnected: boolean;
@@ -31,11 +32,11 @@ interface SyncContextValue extends SyncQueueState {
   failedCount: number;
   conflictCount: number;
   lastCompletedAction: SyncActionSuccessEvent | null;
-  flushNow: () => Promise<void>;
-  queueStatusRefresh: (aidId: string) => Promise<
+  flushNow: (force?: boolean) => Promise<void>;
+  queueStatusRefresh: (aidId: string, urgent?: boolean) => Promise<
     { status: 'completed'; result: AidDetails } | { status: 'queued'; action: QueuedSyncAction }
   >;
-  queueClaimConfirmation: (aidId: string, claimId: string) => Promise<
+  queueClaimConfirmation: (aidId: string, claimId: string, urgent?: boolean) => Promise<
     { status: 'completed'; result: unknown } | { status: 'queued'; action: QueuedSyncAction }
   >;
   queueEvidenceUpload: (
@@ -45,17 +46,21 @@ interface SyncContextValue extends SyncQueueState {
       method?: 'POST' | 'PUT' | 'PATCH';
       headers?: Record<string, string>;
       body?: string;
+      estimatedSize?: number;
     },
+    urgent?: boolean,
   ) => Promise<
     { status: 'completed'; result: unknown } | { status: 'queued'; action: QueuedSyncAction }
   >;
-  queueClaimSubmission: (aidId: string, claimId: string, idempotencyKey: string) => Promise<
+  queueClaimSubmission: (aidId: string, claimId: string, idempotencyKey: string, urgent?: boolean) => Promise<
     { status: 'completed'; result: unknown } | { status: 'queued'; action: QueuedSyncAction }
   >;
   retryAction: (actionId: string) => Promise<void>;
   requeueAction: (actionId: string) => Promise<void>;
   discardAction: (actionId: string) => Promise<void>;
   getActionsForAid: (aidId: string) => QueuedSyncAction[];
+  forceSync: () => Promise<void>;
+  deferralExplanation: string;
 }
 
 const defaultValue: SyncContextValue = {
@@ -77,6 +82,8 @@ const defaultValue: SyncContextValue = {
   requeueAction: async () => {},
   discardAction: async () => {},
   getActionsForAid: () => [],
+  forceSync: async () => {},
+  deferralExplanation: '',
 };
 
 const SyncContext = createContext<SyncContextValue>(defaultValue);
@@ -94,10 +101,31 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
   }, []);
   const { isConnected } = useNetworkStatus(handleReconnect);
   const { active: saverModeActive } = useSaverMode();
+  const { 
+    batteryLevel, 
+    isCharging, 
+    isMetered, 
+    meteredOptIn, 
+    forceSync: forceSyncDeferral, 
+    clearForceSync,
+    getDeferralExplanation,
+    setEstimatedUploadSize,
+  } = useSyncDeferral();
 
-  const flushNow = useCallback(async () => {
-    await flushPendingNetworkActions({ online: isConnected, saverMode: saverModeActive });
-  }, [isConnected, saverModeActive]);
+  const flushNow = useCallback(async (force: boolean = false) => {
+    if (force) {
+      await forceSyncDeferral();
+    }
+    await flushPendingNetworkActions({ 
+      online: isConnected, 
+      saverMode: saverModeActive,
+      forceSync: force,
+      batteryLevel,
+      isCharging,
+      isMetered,
+      meteredOptIn,
+    });
+  }, [isConnected, saverModeActive, forceSyncDeferral, batteryLevel, isCharging, isMetered, meteredOptIn]);
 
   useEffect(() => {
     void getSyncQueueState().then(setSyncState);
@@ -135,6 +163,13 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
     }
   }, [flushNow, isConnected, saverModeActive]);
 
+  // Clear force sync override when component unmounts
+  useEffect(() => {
+    return () => {
+      void clearForceSync();
+    };
+  }, [clearForceSync]);
+
   const value = useMemo<SyncContextValue>(() => {
     const pendingCount = syncState.items.filter(
       (item) => item.state === 'pending' || item.state === 'retrying',
@@ -150,36 +185,56 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
       conflictCount,
       lastCompletedAction,
       flushNow,
-      queueStatusRefresh: (aidId: string) =>
-        dispatchNetworkAction({ type: 'status-refresh', payload: { aidId } }, { online: isConnected }),
-      queueClaimConfirmation: (aidId: string, claimId: string) =>
+      queueStatusRefresh: (aidId: string, urgent: boolean = false) =>
+        dispatchNetworkAction({ type: 'status-refresh', payload: { aidId, urgent } }, { online: isConnected }),
+      queueClaimConfirmation: (aidId: string, claimId: string, urgent: boolean = false) =>
         dispatchNetworkAction(
-          { type: 'claim-confirmation', payload: { aidId, claimId } },
+          { type: 'claim-confirmation', payload: { aidId, claimId, urgent } },
           { online: isConnected },
         ),
-      queueEvidenceUpload: (aidId, upload) =>
-        dispatchNetworkAction(
+      queueEvidenceUpload: (aidId, upload, urgent: boolean = false) => {
+        if (upload.estimatedSize) {
+          setEstimatedUploadSize(upload.estimatedSize);
+        }
+        return dispatchNetworkAction(
           {
             type: 'evidence-upload',
             payload: {
               aidId,
               ...upload,
+              urgent,
+              estimatedSize: upload.estimatedSize,
             },
           },
           { online: isConnected },
-        ),
-      queueClaimSubmission: (aidId: string, claimId: string, idempotencyKey: string) =>
+        );
+      },
+      queueClaimSubmission: (aidId: string, claimId: string, idempotencyKey: string, urgent: boolean = false) =>
         dispatchNetworkAction(
-          { type: 'claim-submission', payload: { aidId, claimId, idempotencyKey } },
+          { type: 'claim-submission', payload: { aidId, claimId, idempotencyKey, urgent } },
           { online: isConnected },
         ),
       retryAction: async (actionId: string) => {
         await retryFailedAction(actionId);
-        await flushPendingNetworkActions({ online: isConnected, saverMode: saverModeActive });
+        await flushPendingNetworkActions({ 
+          online: isConnected, 
+          saverMode: saverModeActive,
+          batteryLevel,
+          isCharging,
+          isMetered,
+          meteredOptIn,
+        });
       },
       requeueAction: async (actionId: string) => {
         await requeueQueueAction(actionId);
-        await flushPendingNetworkActions({ online: isConnected, saverMode: saverModeActive });
+        await flushPendingNetworkActions({ 
+          online: isConnected, 
+          saverMode: saverModeActive,
+          batteryLevel,
+          isCharging,
+          isMetered,
+          meteredOptIn,
+        });
       },
       discardAction: async (actionId: string) => {
         await discardQueueAction(actionId);
@@ -189,8 +244,26 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
           const payload = item.payload as { aidId?: string };
           return payload.aidId === aidId;
         }),
+      forceSync: async () => {
+        await flushNow(true);
+      },
+      deferralExplanation: getDeferralExplanation(),
     };
-  }, [flushNow, isConnected, lastCompletedAction, saverModeActive, syncState]);
+  }, [
+    flushNow, 
+    isConnected, 
+    lastCompletedAction, 
+    saverModeActive, 
+    syncState,
+    batteryLevel,
+    isCharging,
+    isMetered,
+    meteredOptIn,
+    forceSyncDeferral,
+    clearForceSync,
+    getDeferralExplanation,
+    setEstimatedUploadSize,
+  ]);
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;
 };

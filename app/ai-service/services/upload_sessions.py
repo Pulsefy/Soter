@@ -208,3 +208,104 @@ class UploadSessionService:
     @staticmethod
     def received_chunks_sorted(session: UploadSession) -> List[int]:
         return sorted(session.received_chunks)
+
+    # -- retention / purge ----------------------------------------------------
+
+    def purge_abandoned_sessions(self, dry_run: bool = False) -> "PurgeResult":
+        """Remove upload sessions that expired without being finalized.
+
+        A session is only ever considered here once ``expires_at`` has
+        passed, so an upload that is still in progress is never touched
+        regardless of how long it has been running.
+        """
+        result = PurgeResult(dry_run=dry_run)
+        now = time.time()
+
+        with self._lock:
+            abandoned_ids = [
+                session_id
+                for session_id, session in self._sessions.items()
+                if not session.completed and session.expires_at < now
+            ]
+
+        for session_id in abandoned_ids:
+            session_dir = self._session_dir(session_id)
+            size = self._dir_size(session_dir)
+            if not dry_run:
+                with self._lock:
+                    self._sessions.pop(session_id, None)
+                if os.path.isdir(session_dir):
+                    shutil.rmtree(session_dir, ignore_errors=True)
+            result.items_purged += 1
+            result.bytes_reclaimed += size
+
+        return result
+
+    def purge_expired_artifacts(
+        self,
+        retention_seconds: int,
+        batch_size: int = 500,
+        dry_run: bool = False,
+    ) -> "PurgeResult":
+        """Remove finalized artifacts older than ``retention_seconds``.
+
+        Only files directly under ``storage_dir`` (finalized artifacts) are
+        considered; the ``sessions/`` subdirectory holding in-progress chunk
+        data is never touched by this method. At most ``batch_size``
+        artifacts are removed per call so a large backlog cannot make a
+        single purge run unbounded.
+        """
+        result = PurgeResult(dry_run=dry_run)
+        if not os.path.isdir(self.storage_dir):
+            return result
+
+        cutoff = time.time() - retention_seconds
+        candidates: List[str] = []
+        with os.scandir(self.storage_dir) as entries:
+            for entry in entries:
+                if entry.name == "sessions" or not entry.is_file():
+                    continue
+                try:
+                    mtime = entry.stat().st_mtime
+                except OSError:
+                    continue
+                if mtime < cutoff:
+                    candidates.append(entry.path)
+
+        for path in candidates[:batch_size]:
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                continue
+            if not dry_run:
+                try:
+                    os.remove(path)
+                except OSError as exc:
+                    result.errors.append(f"{path}: {exc}")
+                    continue
+            result.items_purged += 1
+            result.bytes_reclaimed += size
+
+        return result
+
+    def _dir_size(self, path: str) -> int:
+        total = 0
+        if not os.path.isdir(path):
+            return total
+        for root, _dirs, files in os.walk(path):
+            for name in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, name))
+                except OSError:
+                    pass
+        return total
+
+
+@dataclass
+class PurgeResult:
+    """Outcome of a single purge pass (sessions or artifacts)."""
+
+    dry_run: bool
+    items_purged: int = 0
+    bytes_reclaimed: int = 0
+    errors: List[str] = field(default_factory=list)

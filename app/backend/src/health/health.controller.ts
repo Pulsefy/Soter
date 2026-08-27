@@ -13,11 +13,16 @@ import { LivenessResponse, ReadinessResponse } from './health.service';
 import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { Public } from '../common/decorators/public.decorator';
 import { SkipThrottle } from '../common/decorators/skip-throttle.decorator';
+import { MetadataService } from './metadata.service';
+import { MetadataResponse } from './metadata.service';
 
 @ApiTags('Health')
 @Controller('health')
 export class HealthController {
-  constructor(private readonly healthService: HealthService) {}
+  constructor(
+    private readonly healthService: HealthService,
+    private readonly metadataService: MetadataService,
+  ) {}
 
   @Public()
   @SkipThrottle()
@@ -179,5 +184,44 @@ export class HealthController {
   })
   async exportDiagnostics() {
     return this.healthService.getDiagnosticsExport();
+  }
+
+  @Public()
+  @SkipThrottle()
+  @Get('metadata')
+  @Version(API_VERSIONS.V1)
+  @ApiOperation({
+    summary: 'Safe service metadata for debugging and integration checks',
+    description:
+      'Returns active providers, model versions, and capability flags. No secrets or private credentials are included. Suitable for linking from health probes and diagnostics surfaces.',
+  })
+  @ApiOkResponse({
+    description: 'Service metadata with providers, models, and capability flags.',
+    schema: {
+      example: {
+        service: 'soter-backend',
+        version: '0.0.1',
+        environment: 'development',
+        timestamp: '2025-02-23T12:00:00.000Z',
+        providers: {
+          onchain: { adapter: 'mock', network: 'testnet' },
+          ai: {
+            active: 'none',
+            models: { openai: 'gpt-4o-mini', groq: 'llama-3.3-70b-versatile' },
+          },
+        },
+        capabilities: {
+          caching: true,
+          rateLimiting: true,
+          verification: true,
+          onchainEscrow: true,
+          deterministicMode: false,
+          redisEnabled: true,
+        },
+      },
+    },
+  })
+  getMetadata(): MetadataResponse {
+    return this.metadataService.getMetadata();
   }
 }

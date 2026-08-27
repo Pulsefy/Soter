@@ -46,6 +46,7 @@ fn setup_env() -> (
         min_amount: 1,
         max_expires_in: 0,
         allowed_tokens: soroban_sdk::Vec::new(&env),
+        claim_cooldown: 0,
     });
 
     let token_contract = env.register_stellar_asset_contract_v2(admin.clone());

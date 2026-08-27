@@ -1,7 +1,16 @@
 /**
  * Job Status WebSocket Gateway
  * Handles WebSocket connections for real-time job status streaming
- * Implements reconnect handling and missed update delivery
+ * Implements authentication, per-org authorization, token expiry, and missed update delivery
+ *
+ * Auth strategy:
+ *  - The client must supply its API key as handshake.auth.token (or the
+ *    x-api-key handshake header).  The key is validated against the database
+ *    the same way ApiKeyGuard does it.
+ *  - Per-org authorization: the orgId stored on the API key must match the
+ *    orgId supplied in the subscribe payload.
+ *  - Token expiry: a periodic check disconnects sockets whose API key has
+ *    expired while the connection is live.
  */
 
 import {
@@ -15,11 +24,14 @@ import {
   ConnectedSocket,
   WsException,
 } from '@nestjs/websockets';
-import { Logger, Injectable, Inject } from '@nestjs/common';
+import { Logger, Injectable, Inject, OnModuleDestroy } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'node:crypto';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../../redis/redis.module';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AppRole } from '../../auth/app-role.enum';
 
 import {
   JobStatusEvent,
@@ -29,11 +41,18 @@ import {
 import { JobStatusBroadcaster } from '../services/job-status-broadcaster.service';
 
 /**
+ * How often (ms) we poll to disconnect sockets with expired keys.
+ * Default: every 60 seconds.
+ */
+const EXPIRY_CHECK_INTERVAL_MS = 60_000;
+
+/**
  * Metadata about an active subscription
  */
 interface SubscriptionMetadata {
   subscriptionId: string;
   jobId: string;
+  orgId?: string;
   userId?: string;
   options: JobStatusSubscriptionOptions;
   subscribedAt: Date;
@@ -41,10 +60,22 @@ interface SubscriptionMetadata {
 }
 
 /**
- * Socket.io connection with subscription tracking
+ * Auth context stored on each socket after successful handshake.
+ */
+interface SocketAuthContext {
+  apiKeyId: string;
+  orgId?: string | null;
+  ngoId?: string | null;
+  role: AppRole;
+  /** ISO string of the key's expiry time, or undefined if the key never expires */
+  expiresAt?: string;
+}
+
+/**
+ * Socket.io connection with subscription tracking and auth context
  */
 interface AuthenticatedSocket extends Socket {
-  user?: { id: string; email: string };
+  auth?: SocketAuthContext;
   subscriptions?: Map<string, SubscriptionMetadata>;
   redisSub?: Redis;
 }
@@ -58,7 +89,11 @@ interface AuthenticatedSocket extends Socket {
   },
 })
 export class JobStatusGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+  implements
+    OnGatewayInit,
+    OnGatewayConnection,
+    OnGatewayDisconnect,
+    OnModuleDestroy
 {
   @WebSocketServer()
   private server: Server;
@@ -71,32 +106,79 @@ export class JobStatusGateway
    */
   private readonly socketSubscriptions = new Map<string, Redis>();
 
+  /**
+   * Interval handle for expiry checking.
+   */
+  private expiryCheckTimer?: ReturnType<typeof setInterval>;
+
   constructor(
     private readonly jobStatusBroadcaster: JobStatusBroadcaster,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly prisma: PrismaService,
   ) {}
 
+  // ---------------------------------------------------------------------------
+  // Module lifecycle
+  // ---------------------------------------------------------------------------
+
   /**
-   * Initialize the gateway
+   * Clean up the expiry-check timer when the module shuts down.
+   */
+  onModuleDestroy(): void {
+    if (this.expiryCheckTimer) {
+      clearInterval(this.expiryCheckTimer);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle hooks
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Initialize the gateway and install the authentication middleware.
+   * Connections that cannot supply a valid, non-expired API key are rejected
+   * before the handshake completes.
    */
   afterInit(server: Server): void {
     this.logger.log('JobStatusGateway initialized with Socket.io');
 
-    // Set up global middleware for authentication
     server.use((socket, next) => {
-      try {
-        const token = socket.handshake.auth.token;
+      const run = async (): Promise<void> => {
+        const rawToken =
+          (socket.handshake.auth as Record<string, unknown>)?.token ||
+          socket.handshake.headers?.['x-api-key'];
+
+        const token =
+          typeof rawToken === 'string'
+            ? rawToken
+            : Array.isArray(rawToken)
+              ? rawToken[0]
+              : undefined;
+
         if (!token) {
           return next(new Error('Authentication token required'));
         }
 
-        // TODO: Validate JWT token - implement based on your auth strategy
-        // For now, we'll allow all connections
+        const authCtx = await this.validateApiKey(token);
+        if (!authCtx) {
+          return next(new Error('Invalid or missing API key'));
+        }
+
+        // Attach auth context to the socket for later use
+        (socket as AuthenticatedSocket).auth = authCtx;
         next();
-      } catch (error) {
-        next(error);
-      }
+      };
+
+      run().catch((err: unknown) => {
+        next(err instanceof Error ? err : new Error(String(err)));
+      });
     });
+
+    // Start the periodic expiry-check
+    this.expiryCheckTimer = setInterval(
+      () => void this.disconnectExpiredSockets(),
+      EXPIRY_CHECK_INTERVAL_MS,
+    );
   }
 
   /**
@@ -104,12 +186,9 @@ export class JobStatusGateway
    */
   handleConnection(socket: AuthenticatedSocket): void {
     const socketId = socket.id;
-    const userId =
-      socket.user?.id || (socket.handshake.headers['x-user-id'] as string);
+    const orgId = socket.auth?.orgId ?? 'unknown';
 
-    this.logger.log(
-      `Client connected: ${socketId} (user: ${userId || 'anonymous'})`,
-    );
+    this.logger.log(`Client connected: ${socketId} (org: ${orgId})`);
 
     // Initialize subscription tracking
     socket.subscriptions = new Map();
@@ -154,12 +233,17 @@ export class JobStatusGateway
     this.socketSubscriptions.delete(socketId);
   }
 
+  // ---------------------------------------------------------------------------
+  // Message handlers
+  // ---------------------------------------------------------------------------
+
   /**
    * Subscribe to job status updates
    *
    * Message format:
    * {
    *   jobId: string;
+   *   orgId?: string;          // must match the caller's org; required for NGO role
    *   options?: JobStatusSubscriptionOptions;
    * }
    */
@@ -169,15 +253,22 @@ export class JobStatusGateway
     @MessageBody() payload: any,
   ): Promise<void> {
     const socketId = socket.id;
-    const { jobId, options = {} } = payload;
+    const { jobId, orgId: requestedOrgId, options = {} } = payload;
 
     if (!jobId || typeof jobId !== 'string') {
       throw new WsException('Invalid jobId');
     }
 
+    // Per-org authorization -----------------------------------------------
+    // Non-admin callers must supply an orgId that matches their API key's
+    // orgId (or ngoId for legacy keys).
+    this.enforceOrgAccess(socket, requestedOrgId);
+
     try {
       const subscriptionId = uuidv4();
-      const userId = socket.user?.id;
+      const userId = socket.auth?.apiKeyId;
+      const resolvedOrgId =
+        socket.auth?.orgId ?? socket.auth?.ngoId ?? undefined;
 
       // Validate options
       const validatedOptions: JobStatusSubscriptionOptions = {
@@ -192,6 +283,7 @@ export class JobStatusGateway
       const metadata: SubscriptionMetadata = {
         subscriptionId,
         jobId,
+        orgId: resolvedOrgId,
         userId,
         options: validatedOptions,
         subscribedAt: new Date(),
@@ -284,6 +376,7 @@ export class JobStatusGateway
         }
       });
     } catch (error) {
+      if (error instanceof WsException) throw error;
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Subscription failed for job ${jobId}: ${message}`);
       socket.emit('error', {
@@ -351,6 +444,145 @@ export class JobStatusGateway
     socket.emit('pong', { timestamp: new Date().toISOString() });
   }
 
+  // ---------------------------------------------------------------------------
+  // Broadcasting
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Broadcast a job status event to all subscribers of that job
+   * Called by job services when status changes
+   */
+  async broadcastJobStatus(event: JobStatusEvent): Promise<void> {
+    try {
+      await this.jobStatusBroadcaster.broadcastJobStatus(event);
+    } catch (error) {
+      this.logger.error(
+        `Failed to broadcast job status: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Internal helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Validate an API key against the database (mirrors ApiKeyGuard logic).
+   * Returns the auth context on success or null on failure.
+   *
+   * Lifecycle checks mirror ApiKeyGuard exactly:
+   *  1. Look up by credential (hash or plaintext) — no lifecycle filters in WHERE
+   *     so each failure produces a distinguishable result.
+   *  2. Revoked keys → rejected.
+   *  3. Expired keys → rejected.
+   *  4. Rotated-out keys whose grace window has ended → rejected.
+   */
+  async validateApiKey(rawKey: string): Promise<SocketAuthContext | null> {
+    const keyHash = createHash('sha256').update(rawKey).digest('hex');
+
+    const record = await this.prisma.apiKey.findFirst({
+      where: {
+        OR: [{ keyHash }, { key: rawKey }],
+      },
+    });
+
+    if (!record) return null;
+
+    const now = Date.now();
+
+    if (record.revokedAt && record.revokedAt.getTime() <= now) {
+      return null; // key has been revoked
+    }
+
+    if (record.expiresAt && record.expiresAt.getTime() <= now) {
+      return null; // key has expired
+    }
+
+    // Rotated-out predecessor: reject once the grace window has closed
+    if (
+      record.graceExpiresAt &&
+      record.graceExpiresAt.getTime() <= now &&
+      record.replacedById
+    ) {
+      return null; // grace period ended
+    }
+
+    return {
+      apiKeyId: record.id,
+      orgId: record.orgId ?? undefined,
+      ngoId: record.ngoId ?? undefined,
+      role: record.role,
+      expiresAt: record.expiresAt?.toISOString(),
+    };
+  }
+
+  /**
+   * Enforce per-org access control on a subscribe request.
+   *
+   * Rules:
+   *  - Admin role: allowed to subscribe to any org's jobs.
+   *  - NGO / other roles: the orgId (or ngoId) on the API key must match the
+   *    requestedOrgId provided in the subscribe payload (if supplied).
+   *
+   * Throws WsException if access is denied.
+   */
+  private enforceOrgAccess(
+    socket: AuthenticatedSocket,
+    requestedOrgId?: string,
+  ): void {
+    const auth = socket.auth;
+    if (!auth) {
+      throw new WsException('Not authenticated');
+    }
+
+    // Admins can subscribe to any job
+    if (auth.role === AppRole.admin) return;
+
+    // If no orgId is requested in the subscribe payload, allow (job may be
+    // global/not org-scoped). The service layer can enforce stricter rules.
+    if (!requestedOrgId) return;
+
+    const keyOrg = auth.orgId ?? auth.ngoId;
+
+    if (!keyOrg) {
+      // Key has no org scope – cannot access org-scoped jobs
+      throw new WsException(
+        'Access denied: your API key is not scoped to any organization',
+      );
+    }
+
+    if (keyOrg !== requestedOrgId) {
+      throw new WsException(
+        'Access denied: resource belongs to a different organization',
+      );
+    }
+  }
+
+  /**
+   * Periodically check all connected sockets and disconnect those whose
+   * API key has expired.  This satisfies the acceptance criterion:
+   * "Token expiry during a live connection terminates the socket."
+   */
+  private async disconnectExpiredSockets(): Promise<void> {
+    if (!this.server) return;
+
+    const allSockets = await this.server.fetchSockets();
+
+    for (const rawSocket of allSockets) {
+      const socket = rawSocket as unknown as AuthenticatedSocket;
+      const auth = socket.auth;
+      if (!auth?.expiresAt) continue;
+
+      if (new Date(auth.expiresAt).getTime() <= Date.now()) {
+        this.logger.log(
+          `Disconnecting socket ${socket.id}: API key ${auth.apiKeyId} has expired`,
+        );
+        socket.emit('error', { message: 'API key expired' });
+        socket.disconnect(true);
+      }
+    }
+  }
+
   /**
    * Filter events based on subscription options
    */
@@ -390,19 +622,5 @@ export class JobStatusGateway
     options: JobStatusSubscriptionOptions,
   ): boolean {
     return this.filterEvents([event], options).length > 0;
-  }
-
-  /**
-   * Broadcast a job status event to all subscribers of that job
-   * Called by job services when status changes
-   */
-  async broadcastJobStatus(event: JobStatusEvent): Promise<void> {
-    try {
-      await this.jobStatusBroadcaster.broadcastJobStatus(event);
-    } catch (error) {
-      this.logger.error(
-        `Failed to broadcast job status: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
 }

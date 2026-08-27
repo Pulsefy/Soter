@@ -59,6 +59,7 @@ impl TestSetup {
             min_amount: 1, // Minimum 1 stroop
             max_expires_in: 0,
             allowed_tokens: Vec::new(&env),
+            claim_cooldown: 0,
         });
 
         Self {
@@ -152,6 +153,7 @@ mod create_package {
             min_amount: TWO_TOKENS, // Min 2.0 tokens
             max_expires_in: 0,
             allowed_tokens: Vec::new(&t.env),
+            claim_cooldown: 0,
         });
         let result = t.client.try_create_package(
             &t.admin,
@@ -239,6 +241,7 @@ mod token_interactions {
             min_amount: 1,
             max_expires_in: 0,
             allowed_tokens,
+            claim_cooldown: 0,
         });
 
         assert_eq!(result, Err(Ok(Error::InvalidToken)));
@@ -793,5 +796,129 @@ mod token_allowlist {
             &Map::new(&t.env),
         );
         assert_eq!(result, Err(Ok(Error::InvalidState)));
+    }
+}
+
+// ===========================================================================
+// sweep_expired_packages — Sweep Expired Packages and Release Locked Funds
+// ===========================================================================
+
+mod sweep_expired_packages {
+    use super::*;
+
+    fn create_package(t: &TestSetup, id: u64, recipient: &Address, amount: i128, expires_at: u64) {
+        t.fund_contract(amount);
+        t.client.create_package(
+            &t.admin,
+            &id,
+            recipient,
+            &amount,
+            &t.token,
+            &expires_at,
+            &Map::new(&t.env),
+        );
+    }
+
+    #[test]
+    fn sweep_transitions_expired_packages_and_corrects_locked_and_aggregates() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let now = t.now();
+
+        // Package 1 and 2 expire soon; package 3 is claimed before expiry;
+        // package 4 never expires.
+        create_package(&t, 1, &recipient, ONE_TOKEN, now + 100);
+        create_package(&t, 2, &recipient, ONE_TOKEN, now + 100);
+        create_package(&t, 3, &recipient, TWO_TOKENS, now + 100);
+        create_package(&t, 4, &recipient, ONE_TOKEN, 0);
+
+        t.client.claim(&3);
+
+        // Before the sweep: the claimed package is unlocked, the rest locked.
+        assert_eq!(t.client.get_total_locked(&t.token), 3 * ONE_TOKEN);
+        let agg_before = t.client.get_aggregates(&t.token);
+        assert_eq!(agg_before.total_committed, 3 * ONE_TOKEN); // pkgs 1, 2, 4
+        assert_eq!(agg_before.total_claimed, TWO_TOKENS); // pkg 3
+        assert_eq!(agg_before.total_expired_cancelled, 0);
+
+        // Advance past expiry of packages 1 and 2.
+        t.advance_time(101);
+
+        // Sweep callable by any address (no auth required).
+        let swept = t.client.sweep_expired_packages(&10);
+        assert_eq!(swept, 2);
+
+        // Swept packages are terminal.
+        assert_eq!(t.client.get_package(&1).status, PackageStatus::Expired);
+        assert_eq!(t.client.get_package(&2).status, PackageStatus::Expired);
+
+        // Locked funds are released: only the never-expiring package remains.
+        assert_eq!(t.client.get_total_locked(&t.token), ONE_TOKEN);
+
+        // Aggregates self-correct: expired packages move out of committed.
+        let agg_after = t.client.get_aggregates(&t.token);
+        assert_eq!(agg_after.total_committed, ONE_TOKEN); // pkg 4
+        assert_eq!(agg_after.total_claimed, TWO_TOKENS); // pkg 3
+        assert_eq!(agg_after.total_expired_cancelled, TWO_TOKENS); // pkgs 1, 2
+
+        // Claimed and never-expiring packages are untouched.
+        assert_eq!(t.client.get_package(&3).status, PackageStatus::Claimed);
+        assert_eq!(t.client.get_package(&4).status, PackageStatus::Created);
+    }
+
+    #[test]
+    fn sweep_is_bounded_idempotent_and_callable_by_any_address() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let now = t.now();
+
+        for i in 0..5 {
+            create_package(&t, i + 1, &recipient, ONE_TOKEN, now + 100);
+        }
+
+        assert_eq!(t.client.get_total_locked(&t.token), 5 * ONE_TOKEN);
+        t.advance_time(101);
+
+        // Sweep in bounded batches of 1 (callable by any address, no auth).
+        assert_eq!(t.client.sweep_expired_packages(&1), 1);
+        assert_eq!(t.client.get_total_locked(&t.token), 4 * ONE_TOKEN);
+        assert_eq!(t.client.sweep_expired_packages(&1), 1);
+        assert_eq!(t.client.get_total_locked(&t.token), 3 * ONE_TOKEN);
+        assert_eq!(t.client.sweep_expired_packages(&10), 3);
+        assert_eq!(t.client.get_total_locked(&t.token), 0);
+
+        // Idempotent: a repeated sweep returns 0 and changes nothing.
+        assert_eq!(t.client.sweep_expired_packages(&10), 0);
+        assert_eq!(t.client.get_total_locked(&t.token), 0);
+        for i in 0..5 {
+            assert_eq!(
+                t.client.get_package(&(i + 1)).status,
+                PackageStatus::Expired
+            );
+        }
+    }
+
+    #[test]
+    fn sweep_skips_packages_at_exact_expiry_boundary() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let now = t.now();
+
+        create_package(&t, 1, &recipient, ONE_TOKEN, now + 100);
+        create_package(&t, 2, &recipient, ONE_TOKEN, 0);
+
+        // At the exact expiry boundary the package is still claimable, so the
+        // sweep must leave it alone.
+        t.advance_time(100);
+        assert_eq!(t.client.sweep_expired_packages(&10), 0);
+        assert_eq!(t.client.get_package(&1).status, PackageStatus::Created);
+        assert_eq!(t.client.get_total_locked(&t.token), 2 * ONE_TOKEN);
+
+        // One second later it is expired and swept.
+        t.advance_time(1);
+        assert_eq!(t.client.sweep_expired_packages(&10), 1);
+        assert_eq!(t.client.get_package(&1).status, PackageStatus::Expired);
+        assert_eq!(t.client.get_package(&2).status, PackageStatus::Created);
+        assert_eq!(t.client.get_total_locked(&t.token), ONE_TOKEN);
     }
 }

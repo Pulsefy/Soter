@@ -55,17 +55,35 @@ export class ApiKeyGuard implements CanActivate {
 
     const apiKeyHash = createHash('sha256').update(apiKey).digest('hex');
 
-    // Primary path: look up the key in the database (hashed preferred; legacy plaintext supported)
+    // Look up by credential match only; lifecycle state (revocation, expiry,
+    // rotation grace window) is evaluated below so each failure mode produces
+    // a distinguishable error response.
     const record = await this.prisma.apiKey.findFirst({
       where: {
-        revokedAt: null,
         OR: [{ keyHash: apiKeyHash }, { key: apiKey }],
       },
     });
 
     if (record) {
-      if (record.expiresAt && record.expiresAt.getTime() <= Date.now()) {
+      const now = Date.now();
+
+      if (record.revokedAt && record.revokedAt.getTime() <= now) {
+        throw new UnauthorizedException('API key has been revoked');
+      }
+
+      if (record.expiresAt && record.expiresAt.getTime() <= now) {
         throw new UnauthorizedException('API key has expired');
+      }
+
+      // A rotated-out predecessor stays valid until its grace window ends.
+      if (
+        record.graceExpiresAt &&
+        record.graceExpiresAt.getTime() <= now &&
+        record.replacedById
+      ) {
+        throw new UnauthorizedException(
+          'API key has been rotated and its grace period has ended',
+        );
       }
 
       // Record usage for lifecycle visibility (best-effort, but awaited to ensure consistency in tests)

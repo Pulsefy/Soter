@@ -33,10 +33,12 @@ section using the `#[contractevent]` derive.
 | `package_created`         | `create_package`    | A single aid package is created (funds locked).        |
 | `package_created` (xN)    | batch create        | One per package created in a batch (see below).        |
 | `batch_created_event`     | batch create        | Summary event for a batch creation.                    |
+| `package_reassigned`      | `reassign_package`  | Admin changes an unclaimed package recipient.         |
 | `package_claimed`         | claim path          | Recipient claims a package (incl. Merkle-proof claim). |
 | `package_disbursed`       | `disburse`          | Admin disburses a package to its recipient.            |
 | `package_revoked`         | `revoke`            | Admin revokes a `Created` package (funds unlocked).    |
 | `package_refunded`        | `refund`            | Admin refunds an expired/cancelled package.            |
+| `package_swept`           | `sweep_expired_packages` | Sweep transitions an expired `Created` package to terminal `Expired` (funds released from locked). |
 | `extended_event`          | `extend_expiration` | Admin extends a package expiry.                        |
 | `surplus_withdrawn_event` | `withdraw_surplus`  | Admin withdraws unallocated surplus from the pool.     |
 | `contract_paused_event`   | `pause`             | Admin pauses the whole contract.                       |
@@ -50,8 +52,9 @@ section using the `#[contractevent]` derive.
 
 ## Payloads
 
-The five package lifecycle events share one shape (`PackageCreated`,
-`PackageClaimed`, `PackageDisbursed`, `PackageRevoked`, `PackageRefunded`):
+The six package lifecycle events share one shape (`PackageCreated`,
+`PackageClaimed`, `PackageDisbursed`, `PackageRevoked`, `PackageRefunded`,
+`PackageSwept`):
 
 | Field        | Type      | Notes                                             |
 | ------------ | --------- | ------------------------------------------------- |
@@ -75,12 +78,13 @@ Pool / administrative events:
 | `ActionUnpausedEvent`   | `admin: Address`, `action: Symbol`                                        |
 | `CampaignPausedEvent`   | `admin: Address`, `campaign_ref: String`                                  |
 | `CampaignUnpausedEvent` | `admin: Address`, `campaign_ref: String`                                  |
+| `PackageReassigned`     | `package_id: u64`, `previous_recipient: Address`, `new_recipient: Address`, `actor: Address`, `timestamp: u64` |
 
 ## Identifier stability (audit)
 
 - Every package lifecycle event carries `package_id` (`u64`), which is the
   stable key indexers should use to correlate a package across its
-  `created -> claimed | disbursed | revoked | refunded` lifecycle.
+  `created -> claimed | disbursed | revoked | refunded | swept` lifecycle.
 - Batch creation emits one `package_created` per package **and** a single
   `batch_created_event` whose `ids` array lists exactly those `package_id`s.
   Indexers can rely on either signal; the individual `package_created` events

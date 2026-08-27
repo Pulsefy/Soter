@@ -471,7 +471,7 @@
                             "symbol": "reason"
                           },
                           "val": {
-                            "string": "Admin delegate assignment"
+                            "symbol": "delegate_set"
                           }
                         }
                       ]

@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { RedisService } from '../../cache/redis.service';
 import {
@@ -6,6 +7,11 @@ import {
   TaskStatus,
 } from '../webhooks/dto/ai-verification-webhook.dto';
 import { MetricsService } from '../observability/metrics/metrics.service';
+
+export interface AidOrganizationContext {
+  orgId?: string | null;
+  ngoId?: string | null;
+}
 
 @Injectable()
 export class AidService {
@@ -15,10 +21,49 @@ export class AidService {
     private auditService: AuditService,
     private redisService: RedisService,
     private metricsService: MetricsService,
+    private prisma: PrismaService,
   ) {}
 
-  async createCampaign(data: Record<string, unknown>) {
-    const campaignId = 'mock-c-id';
+  async createCampaign(
+    data: Record<string, unknown>,
+    organizationContext?: AidOrganizationContext,
+  ) {
+    const requestedCampaignId =
+      typeof data.campaignId === 'string' && data.campaignId.trim().length > 0
+        ? data.campaignId.trim()
+        : undefined;
+    const organizationId =
+      organizationContext?.orgId ?? organizationContext?.ngoId;
+
+    // Prefer an explicit campaign reference and use the authenticated org as a
+    // fallback while enforcing ownership for either resolution path.
+    const campaign = requestedCampaignId
+      ? await this.prisma.campaign.findUnique({
+          where: { id: requestedCampaignId },
+        })
+      : organizationId
+        ? await this.prisma.campaign.findFirst({
+            where: organizationContext?.orgId
+              ? { orgId: organizationId, deletedAt: null }
+              : { ngoId: organizationId, deletedAt: null },
+            orderBy: { createdAt: 'desc' },
+          })
+        : null;
+
+    const belongsToOrganization =
+      !organizationContext ||
+      !organizationId ||
+      (organizationContext.orgId
+        ? campaign?.orgId === organizationId
+        : campaign?.ngoId === organizationId);
+
+    if (!campaign || !belongsToOrganization || campaign.deletedAt) {
+      throw new BadRequestException(
+        'A valid campaign could not be resolved from campaignId or the authenticated organization',
+      );
+    }
+
+    const campaignId = campaign.id;
     await this.auditService.record({
       actorId: 'admin-id',
       entity: 'campaign',

@@ -135,6 +135,8 @@ export class ClaimsService {
           createClaimDto.recipientRef,
         ),
         evidenceRef: createClaimDto.evidenceRef,
+        importJobId: createClaimDto.importJobId,
+        importRowNumber: createClaimDto.importRowNumber,
         expiresAt:
           createClaimDto.expiresAt ??
           new Date(
@@ -642,11 +644,12 @@ export class ClaimsService {
     });
 
     return logs
-      .filter((log) => log.action.startsWith('status_changed_to_'))
-      .map((log) => {
+      .filter(log => log.action.startsWith('status_changed_to_'))
+      .map(log => {
         const metadata = log.metadata as Record<string, any> | null;
         const txHash = metadata?.transactionHash as string | undefined;
-        const network = this.configService.get<string>('STELLAR_NETWORK') ?? 'testnet';
+        const network =
+          this.configService.get<string>('STELLAR_NETWORK') ?? 'testnet';
         return {
           status: log.action.replace('status_changed_to_', ''),
           timestamp: log.timestamp.toISOString(),

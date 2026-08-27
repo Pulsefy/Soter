@@ -16,11 +16,10 @@ import { RotateApiKeyDto } from './dto/rotate-api-key.dto';
 type Actor = { apiKeyId?: string; authType?: string; role?: AppRole };
 
 export type ApiKeyRotationStatus =
-  | 'active'
-  | 'expiring_soon'
-  | 'expired'
-  | 'revoked'
-  | 'rotated';
+  'active' | 'expiring_soon' | 'expired' | 'revoked' | 'grace' | 'rotated';
+
+/** Default overlap window during which a rotated-out predecessor stays valid. */
+export const DEFAULT_API_KEY_ROTATION_GRACE_HOURS = 24;
 
 export type ApiKeyAdminView = {
   id: string;
@@ -37,6 +36,7 @@ export type ApiKeyAdminView = {
   replacedById: string | null;
   keyPreview: string | null;
   expiresAt: Date | null;
+  graceExpiresAt: Date | null;
   lastRemindedAt: Date | null;
   rotationStatus: ApiKeyRotationStatus;
   daysUntilExpiry: number | null;
@@ -88,6 +88,7 @@ const selectFields = {
   replacedById: true,
   keyPreview: true,
   expiresAt: true,
+  graceExpiresAt: true,
   lastRemindedAt: true,
 } as const;
 
@@ -154,6 +155,7 @@ export function deriveRotationStatus(
     revokedReason: string | null;
     replacedById: string | null;
     expiresAt: Date | null;
+    graceExpiresAt?: Date | null;
   },
   options: { now?: Date; reminderWindowDays?: number } = {},
 ): Pick<
@@ -169,6 +171,20 @@ export function deriveRotationStatus(
   const highRisk = isHighRiskApiKey(row.role, scopes);
 
   if (row.replacedById || row.revokedReason === 'rotated') {
+    // A predecessor that has not been hard-revoked yet remains usable during
+    // its overlap (grace) window.
+    if (
+      !row.revokedAt &&
+      row.graceExpiresAt &&
+      row.graceExpiresAt.getTime() > now.getTime()
+    ) {
+      return {
+        rotationStatus: 'grace',
+        daysUntilExpiry: daysUntil(row.graceExpiresAt, now),
+        isHighRisk: highRisk,
+        rotationGuidance: `Key ${row.id} is in its rotation overlap window. Stop using it before ${row.graceExpiresAt.toISOString()}.`,
+      };
+    }
     return {
       rotationStatus: 'rotated',
       daysUntilExpiry: null,
@@ -260,6 +276,7 @@ function toAdminView<
     replacedById: string | null;
     keyPreview: string | null;
     expiresAt: Date | null;
+    graceExpiresAt?: Date | null;
     lastRemindedAt: Date | null;
   },
 >(row: T, reminderWindowDays: number, now: Date = new Date()): ApiKeyAdminView {
@@ -284,6 +301,7 @@ function toAdminView<
     replacedById: row.replacedById,
     keyPreview: row.keyPreview,
     expiresAt: row.expiresAt,
+    graceExpiresAt: row.graceExpiresAt ?? null,
     lastRemindedAt: row.lastRemindedAt,
     ...statusFields,
   };
@@ -333,6 +351,18 @@ export class ApiKeysService {
         ? Math.floor(parsed)
         : DEFAULT_API_KEY_REMINDER_COOLDOWN_HOURS;
     return hours * 60 * 60 * 1000;
+  }
+
+  rotationGraceHours(): number {
+    const raw = this.config.get<string | number>(
+      'API_KEY_ROTATION_GRACE_HOURS',
+    );
+    const parsed =
+      typeof raw === 'number' ? raw : raw != null ? Number(raw) : NaN;
+    if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 720) {
+      return Math.floor(parsed);
+    }
+    return DEFAULT_API_KEY_ROTATION_GRACE_HOURS;
   }
 
   resolveExpiresAt(input: {
@@ -404,7 +434,7 @@ export class ApiKeysService {
   async revoke(id: string, reason: string | undefined, actor?: Actor) {
     const existing = await this.prisma.apiKey.findUnique({
       where: { id },
-      select: { id: true, revokedAt: true },
+      select: { id: true, revokedAt: true, keyPreview: true },
     });
     if (!existing) {
       throw new NotFoundException('API key not found');
@@ -424,15 +454,32 @@ export class ApiKeysService {
         revokedAt: new Date(),
         revokedBy: this.actorId(actor),
         revokedReason: reason ?? 'revoked',
+        graceExpiresAt: null,
       },
       select: selectFields,
+    });
+
+    await this.audit.record({
+      actorId: this.actorId(actor),
+      entity: 'ApiKey',
+      entityId: id,
+      action: 'api_key_revoked',
+      metadata: {
+        keyPreview: row.keyPreview,
+        reason: row.revokedReason,
+      },
     });
 
     return toAdminView(row, this.reminderWindowDays());
   }
 
   async rotate(id: string, actor?: Actor, dto: RotateApiKeyDto = {}) {
-    return this.prisma.$transaction(async tx => {
+    const gracePeriodHours =
+      dto.gracePeriodHours != null
+        ? dto.gracePeriodHours
+        : this.rotationGraceHours();
+
+    const result = await this.prisma.$transaction(async tx => {
       const existing = await tx.apiKey.findUnique({
         where: { id },
         select: {
@@ -441,6 +488,7 @@ export class ApiKeysService {
           ngoId: true,
           description: true,
           scopes: true,
+          keyPreview: true,
           revokedAt: true,
           expiresAt: true,
         },
@@ -476,21 +524,52 @@ export class ApiKeysService {
         select: selectFields,
       });
 
+      // The predecessor stays valid during the overlap window; the guard
+      // rejects it once graceExpiresAt passes (post-grace rejection).
+      const now = new Date();
+      const graceExpiresAt = new Date(
+        now.getTime() + gracePeriodHours * 60 * 60 * 1000,
+      );
+
       await tx.apiKey.update({
         where: { id: existing.id },
         data: {
-          revokedAt: new Date(),
-          revokedBy: this.actorId(actor),
           revokedReason: 'rotated',
           replacedById: replacement.id,
+          graceExpiresAt,
         },
       });
 
       return {
-        replacement: toAdminView(replacement, this.reminderWindowDays()),
+        replacement: toAdminView(replacement, this.reminderWindowDays(), now),
         apiKey: rawKey,
+        predecessorId: existing.id,
+        predecessorKeyPreview: existing.keyPreview,
+        graceExpiresAt,
       };
     });
+
+    await this.audit.record({
+      actorId: this.actorId(actor),
+      entity: 'ApiKey',
+      entityId: result.predecessorId,
+      action: 'api_key_rotated',
+      metadata: {
+        replacedById: result.replacement.id,
+        predecessorKeyPreview: result.predecessorKeyPreview,
+        graceExpiresAt: result.graceExpiresAt.toISOString(),
+        gracePeriodHours,
+      },
+    });
+
+    return {
+      replacement: result.replacement,
+      apiKey: result.apiKey,
+      predecessor: {
+        id: result.predecessorId,
+        validUntil: result.graceExpiresAt,
+      },
+    };
   }
 
   /**
@@ -508,6 +587,7 @@ export class ApiKeysService {
     const rows = await this.prisma.apiKey.findMany({
       where: {
         revokedAt: null,
+        replacedById: null,
         expiresAt: {
           not: null,
           lte: windowEnd,

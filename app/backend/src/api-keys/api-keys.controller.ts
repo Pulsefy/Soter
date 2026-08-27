@@ -61,9 +61,9 @@ export class ApiKeysController {
   @Roles(AppRole.admin)
   @Scopes(ApiKeyScope.admin)
   @ApiOperation({
-    summary: 'Rotate an API key (revoke old, create new)',
+    summary: 'Rotate an API key with a grace overlap window',
     description:
-      'Revokes the existing key and issues a replacement. Optional expiry fields set metadata on the replacement; otherwise the previous expiresAt is inherited when present.',
+      'Issues a replacement key while the predecessor remains valid for an overlap window (gracePeriodHours, default 24) so rotation is zero-downtime. After the grace window the predecessor is rejected. Optional expiry fields set metadata on the replacement; otherwise the previous expiresAt is inherited when present.',
   })
   @ApiOkResponse({ description: 'API key rotated.' })
   @ApiBadRequestResponse({ description: 'Cannot rotate revoked key.' })

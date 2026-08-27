@@ -6,6 +6,7 @@ import {
   RetentionPurgeProcessor,
   RETENTION_PURGE_QUEUE,
 } from './retention-purge.processor';
+import { RetentionPurgeScheduler } from './retention-purge.scheduler';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuditModule } from '../audit/audit.module';
 
@@ -16,7 +17,7 @@ import { AuditModule } from '../audit/audit.module';
     BullModule.registerQueue({ name: RETENTION_PURGE_QUEUE }),
   ],
   controllers: [RetentionPolicyController],
-  providers: [RetentionPolicyService, RetentionPurgeProcessor],
+  providers: [RetentionPolicyService, RetentionPurgeProcessor, RetentionPurgeScheduler],
   exports: [RetentionPolicyService],
 })
 export class RetentionPolicyModule {}

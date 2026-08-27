@@ -174,7 +174,16 @@ export class RetentionPolicyService {
    * Execute a single purge run for all enabled policies.
    * Returns a summary of affected records per entity.
    */
-  async executePurge(): Promise<PurgeResult[]> {
+  /**
+   * Execute a single purge run for all enabled policies.
+   * Supports `dryRun` and `batchSize` options.
+   */
+  async executePurge(opts?: {
+    dryRun?: boolean;
+    batchSize?: number; // limit per-entity batch size; when provided, operate in chunks
+  }): Promise<PurgeResult[]> {
+    const { dryRun = false, batchSize } = opts ?? {};
+
     const policies = await this.prisma.retentionPolicy.findMany({
       where: { enabled: true },
     });
@@ -190,7 +199,7 @@ export class RetentionPolicyService {
 
     for (const policy of policies) {
       try {
-        const result = await this.purgeEntity(policy);
+        const result = await this.purgeEntity(policy, { dryRun, batchSize });
         results.push(result);
       } catch (error) {
         this.logger.error(
@@ -211,12 +220,15 @@ export class RetentionPolicyService {
   /**
    * Execute purge for a specific entity/policy.
    */
-  async purgeEntity(policy: {
-    id: string;
-    entity: string;
-    retentionDays: number;
-    strategy: string;
-  }): Promise<PurgeResult> {
+  async purgeEntity(
+    policy: {
+      id: string;
+      entity: string;
+      retentionDays: number;
+      strategy: string;
+    },
+    opts?: { dryRun?: boolean; batchSize?: number },
+  ): Promise<PurgeResult> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - policy.retentionDays);
 
@@ -224,13 +236,13 @@ export class RetentionPolicyService {
 
     switch (policy.strategy as PurgeStrategy) {
       case 'soft_delete':
-        affected = await this.softDelete(policy.entity, cutoffDate);
+        affected = await this.softDelete(policy.entity, cutoffDate, opts);
         break;
       case 'hard_delete':
-        affected = await this.hardDelete(policy.entity, cutoffDate);
+        affected = await this.hardDelete(policy.entity, cutoffDate, opts);
         break;
       case 'anonymize':
-        affected = await this.anonymize(policy.entity, cutoffDate);
+        affected = await this.anonymize(policy.entity, cutoffDate, opts);
         break;
       default:
         this.logger.warn(
@@ -269,7 +281,12 @@ export class RetentionPolicyService {
   // Strategy implementations
   // ---------------------------------------------------------------------------
 
-  private async softDelete(entity: string, cutoffDate: Date): Promise<number> {
+  private async softDelete(
+    entity: string,
+    cutoffDate: Date,
+    opts?: { dryRun?: boolean; batchSize?: number },
+  ): Promise<number> {
+    const { dryRun = false, batchSize } = opts ?? {};
     const where = {
       createdAt: { lt: cutoffDate },
       deletedAt: null,
@@ -277,46 +294,119 @@ export class RetentionPolicyService {
 
     switch (entity) {
       case 'AuditLog': {
-        const result = await this.prisma.auditLog.updateMany({
-          where: { timestamp: { lt: cutoffDate }, deletedAt: null },
-          data: { deletedAt: new Date() },
-        });
-        return result.count;
+        if (dryRun) {
+          return await this.prisma.auditLog.count({ where: { timestamp: { lt: cutoffDate }, deletedAt: null } });
+        }
+        if (!batchSize) {
+          const result = await this.prisma.auditLog.updateMany({
+            where: { timestamp: { lt: cutoffDate }, deletedAt: null },
+            data: { deletedAt: new Date() },
+          });
+          return result.count;
+        }
+        // batched updates by id
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.auditLog.findMany({
+            where: { timestamp: { lt: cutoffDate }, deletedAt: null },
+            select: { id: true },
+            take: batchSize,
+          });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.auditLog.updateMany({
+            where: { id: { in: ids } },
+            data: { deletedAt: new Date() },
+          });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'VerificationSession': {
-        const result = await this.prisma.verificationSession.updateMany({
-          where,
-          data: { deletedAt: new Date() },
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.verificationSession.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.verificationSession.updateMany({ where, data: { deletedAt: new Date() } });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.verificationSession.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.verificationSession.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'Session': {
-        const result = await this.prisma.session.updateMany({
-          where,
-          data: { deletedAt: new Date() },
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.session.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.session.updateMany({ where, data: { deletedAt: new Date() } });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.session.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.session.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'SessionSubmission': {
-        const result = await this.prisma.sessionSubmission.updateMany({
-          where,
-          data: { deletedAt: new Date() },
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.sessionSubmission.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.sessionSubmission.updateMany({ where, data: { deletedAt: new Date() } });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.sessionSubmission.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.sessionSubmission.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'Claim': {
-        const result = await this.prisma.claim.updateMany({
-          where,
-          data: { deletedAt: new Date() },
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.claim.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.claim.updateMany({ where, data: { deletedAt: new Date() } });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.claim.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.claim.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'VerificationRequest': {
-        const result = await this.prisma.verificationRequest.updateMany({
-          where,
-          data: { deletedAt: new Date() },
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.verificationRequest.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.verificationRequest.updateMany({ where, data: { deletedAt: new Date() } });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.verificationRequest.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.verificationRequest.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       default:
         this.logger.warn(`soft_delete: Unknown entity "${entity}"`);
@@ -324,49 +414,118 @@ export class RetentionPolicyService {
     }
   }
 
-  private async hardDelete(entity: string, cutoffDate: Date): Promise<number> {
+  private async hardDelete(
+    entity: string,
+    cutoffDate: Date,
+    opts?: { dryRun?: boolean; batchSize?: number },
+  ): Promise<number> {
+    const { dryRun = false, batchSize } = opts ?? {};
     const where = {
       createdAt: { lt: cutoffDate },
     };
 
     switch (entity) {
       case 'AuditLog': {
-        // Also delete already-soft-deleted records past retention
-        const result = await this.prisma.auditLog.deleteMany({
-          where: { timestamp: { lt: cutoffDate } },
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.auditLog.count({ where: { timestamp: { lt: cutoffDate } } });
+        if (!batchSize) {
+          const result = await this.prisma.auditLog.deleteMany({ where: { timestamp: { lt: cutoffDate } } });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.auditLog.findMany({ where: { timestamp: { lt: cutoffDate } }, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.auditLog.deleteMany({ where: { id: { in: ids } } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'VerificationSession': {
-        const result = await this.prisma.verificationSession.deleteMany({
-          where,
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.verificationSession.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.verificationSession.deleteMany({ where });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.verificationSession.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.verificationSession.deleteMany({ where: { id: { in: ids } } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'Session': {
-        // Cascade will handle SessionStep and SessionSubmission
-        const result = await this.prisma.session.deleteMany({
-          where,
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.session.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.session.deleteMany({ where });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.session.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.session.deleteMany({ where: { id: { in: ids } } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'SessionSubmission': {
-        const result = await this.prisma.sessionSubmission.deleteMany({
-          where,
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.sessionSubmission.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.sessionSubmission.deleteMany({ where });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.sessionSubmission.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.sessionSubmission.deleteMany({ where: { id: { in: ids } } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'Claim': {
-        const result = await this.prisma.claim.deleteMany({
-          where,
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.claim.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.claim.deleteMany({ where });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.claim.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.claim.deleteMany({ where: { id: { in: ids } } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'VerificationRequest': {
-        const result = await this.prisma.verificationRequest.deleteMany({
-          where,
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.verificationRequest.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.verificationRequest.deleteMany({ where });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.verificationRequest.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.verificationRequest.deleteMany({ where: { id: { in: ids } } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       default:
         this.logger.warn(`hard_delete: Unknown entity "${entity}"`);
@@ -374,7 +533,12 @@ export class RetentionPolicyService {
     }
   }
 
-  private async anonymize(entity: string, cutoffDate: Date): Promise<number> {
+  private async anonymize(
+    entity: string,
+    cutoffDate: Date,
+    opts?: { dryRun?: boolean; batchSize?: number },
+  ): Promise<number> {
+    const { dryRun = false, batchSize } = opts ?? {};
     const where = {
       createdAt: { lt: cutoffDate },
       deletedAt: null,
@@ -384,79 +548,121 @@ export class RetentionPolicyService {
 
     switch (entity) {
       case 'AuditLog': {
-        const result = await this.prisma.auditLog.updateMany({
-          where: { timestamp: { lt: cutoffDate }, deletedAt: null },
-          data: {
-            actorId: ANONYMIZED,
-            entityId: ANONYMIZED,
-            metadata: {},
-            deletedAt: new Date(),
-          },
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.auditLog.count({ where: { timestamp: { lt: cutoffDate }, deletedAt: null } });
+        if (!batchSize) {
+          const result = await this.prisma.auditLog.updateMany({
+            where: { timestamp: { lt: cutoffDate }, deletedAt: null },
+            data: {
+              actorId: ANONYMIZED,
+              entityId: ANONYMIZED,
+              metadata: {},
+              deletedAt: new Date(),
+            },
+          });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.auditLog.findMany({ where: { timestamp: { lt: cutoffDate }, deletedAt: null }, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.auditLog.updateMany({ where: { id: { in: ids } }, data: { actorId: ANONYMIZED, entityId: ANONYMIZED, metadata: {}, deletedAt: new Date() } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'VerificationSession': {
-        const result = await this.prisma.verificationSession.updateMany({
-          where,
-          data: {
-            identifier: ANONYMIZED,
-            code: ANONYMIZED,
-            deletedAt: new Date(),
-          },
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.verificationSession.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.verificationSession.updateMany({ where, data: { identifier: ANONYMIZED, code: ANONYMIZED, deletedAt: new Date() } });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.verificationSession.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.verificationSession.updateMany({ where: { id: { in: ids } }, data: { identifier: ANONYMIZED, code: ANONYMIZED, deletedAt: new Date() } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'Session': {
-        const result = await this.prisma.session.updateMany({
-          where,
-          data: {
-            metadata: {},
-            deletedAt: new Date(),
-          },
-        });
-        // Also anonymize session submissions for this entity
-        await this.prisma.sessionSubmission.updateMany({
-          where: {
-            session: { createdAt: { lt: cutoffDate }, deletedAt: null },
-          },
-          data: {
-            payload: {},
-            response: {},
-            deletedAt: new Date(),
-          },
-        });
-        return result.count;
+        if (dryRun) {
+          const cnt = await this.prisma.session.count({ where });
+          return cnt;
+        }
+        if (!batchSize) {
+          const result = await this.prisma.session.updateMany({ where, data: { metadata: {}, deletedAt: new Date() } });
+          // Also anonymize session submissions for this entity
+          await this.prisma.sessionSubmission.updateMany({ where: { session: { createdAt: { lt: cutoffDate }, deletedAt: null } }, data: { payload: {}, response: {}, deletedAt: new Date() } });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.session.findMany({ where, select: { id: true, createdAt: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.session.updateMany({ where: { id: { in: ids } }, data: { metadata: {}, deletedAt: new Date() } });
+          total += res.count;
+          // anonymize submissions for these sessions
+          await this.prisma.sessionSubmission.updateMany({ where: { sessionId: { in: ids } }, data: { payload: {}, response: {}, deletedAt: new Date() } });
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'SessionSubmission': {
-        const result = await this.prisma.sessionSubmission.updateMany({
-          where,
-          data: {
-            payload: {},
-            response: {},
-            deletedAt: new Date(),
-          },
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.sessionSubmission.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.sessionSubmission.updateMany({ where, data: { payload: {}, response: {}, deletedAt: new Date() } });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.sessionSubmission.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.sessionSubmission.updateMany({ where: { id: { in: ids } }, data: { payload: {}, response: {}, deletedAt: new Date() } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'Claim': {
-        const result = await this.prisma.claim.updateMany({
-          where,
-          data: {
-            recipientRef: ANONYMIZED,
-            evidenceRef: null,
-            deletedAt: new Date(),
-          },
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.claim.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.claim.updateMany({ where, data: { recipientRef: ANONYMIZED, evidenceRef: null, deletedAt: new Date() } });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.claim.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.claim.updateMany({ where: { id: { in: ids } }, data: { recipientRef: ANONYMIZED, evidenceRef: null, deletedAt: new Date() } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       case 'VerificationRequest': {
-        const result = await this.prisma.verificationRequest.updateMany({
-          where,
-          data: {
-            deletedAt: new Date(),
-          },
-        });
-        return result.count;
+        if (dryRun) return await this.prisma.verificationRequest.count({ where });
+        if (!batchSize) {
+          const result = await this.prisma.verificationRequest.updateMany({ where, data: { deletedAt: new Date() } });
+          return result.count;
+        }
+        let total = 0;
+        while (true) {
+          const rows = await this.prisma.verificationRequest.findMany({ where, select: { id: true }, take: batchSize });
+          if (rows.length === 0) break;
+          const ids = rows.map(r => r.id);
+          const res = await this.prisma.verificationRequest.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          total += res.count;
+          if (rows.length < batchSize) break;
+        }
+        return total;
       }
       default:
         this.logger.warn(`anonymize: Unknown entity "${entity}"`);

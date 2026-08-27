@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Modal,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -15,6 +16,7 @@ import { RootStackParamList } from '../navigation/types';
 import { SubmissionStatusBadge } from '../components/SubmissionStatusBadge';
 import { QueuedSyncAction, mapConflictErrorMessage, isConflictError } from '../services/syncQueue';
 import { useSync } from '../contexts/SyncContext';
+import { useSyncDeferral } from '../contexts/SyncDeferralContext';
 import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
 
@@ -66,7 +68,18 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
     retryAction,
     requeueAction,
     discardAction,
+    deferralStatus,
+    forceSync,
   } = useSync();
+
+  const { 
+    batteryLevel, 
+    isCharging, 
+    isMetered, 
+    meteredOptIn, 
+    setMeteredOptIn,
+    forceSync: forceSyncDeferral,
+  } = useSyncDeferral();
 
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -99,6 +112,28 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
       setSelectedAction(null);
     }
     await discardAction(actionId);
+  };
+
+  const handleForceSync = async () => {
+    try {
+      await forceSync();
+    } catch (error) {
+      Alert.alert('Force Sync Failed', 'Failed to force sync. Please try again.');
+    }
+  };
+
+  const handleMeteredOptIn = async () => {
+    try {
+      await setMeteredOptIn(!meteredOptIn);
+      Alert.alert(
+        'Metered Connection Sync',
+        meteredOptIn 
+          ? 'Sync on metered connections disabled' 
+          : 'Sync on metered connections enabled. Be aware of data usage costs.',
+      );
+    } catch (error) {
+      Alert.alert('Settings Error', 'Failed to update metered sync preference.');
+    }
   };
 
   const renderItem = ({ item }: { item: QueuedSyncAction }) => {
@@ -142,6 +177,12 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
             <Text style={isConflict ? styles.conflictText : styles.errorText}>
               {displayErrorMessage}
             </Text>
+          </View>
+        ) : null}
+
+        {item.deferralReason ? (
+          <View style={styles.deferralBox}>
+            <Text style={styles.deferralLabel}>Deferred: {item.deferralReason}</Text>
           </View>
         ) : null}
 
@@ -199,17 +240,59 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
           <Text style={styles.errorSummary}>Last sync error: {lastSyncError}</Text>
         ) : null}
 
-        <TouchableOpacity
-          style={[styles.refreshButton, isSyncing && styles.refreshButtonDisabled]}
-          onPress={flushNow}
-          disabled={isSyncing}
-          accessibilityRole="button"
-          accessibilityLabel="Sync queued submissions now"
-        >
-          <Text style={styles.refreshButtonText}>
-            {isSyncing ? 'Syncing...' : 'Sync Now'}
-          </Text>
-        </TouchableOpacity>
+        {deferralStatus?.deferred ? (
+          <View style={styles.deferralBox}>
+            <Text style={styles.deferralLabel}>Sync Deferred</Text>
+            <Text style={styles.deferralText}>{deferralStatus.explanation}</Text>
+          </View>
+        ) : null}
+
+        <View style={styles.syncButtonRow}>
+          <TouchableOpacity
+            style={[styles.refreshButton, isSyncing && styles.refreshButtonDisabled]}
+            onPress={flushNow}
+            disabled={isSyncing}
+            accessibilityRole="button"
+            accessibilityLabel="Sync queued submissions now"
+          >
+            <Text style={styles.refreshButtonText}>
+              {isSyncing ? 'Syncing...' : 'Sync Now'}
+            </Text>
+          </TouchableOpacity>
+
+          {deferralStatus?.deferred ? (
+            <TouchableOpacity
+              style={[styles.forceSyncButton, isSyncing && styles.refreshButtonDisabled]}
+              onPress={handleForceSync}
+              disabled={isSyncing}
+              accessibilityRole="button"
+              accessibilityLabel="Force sync now"
+            >
+              <Text style={styles.forceSyncButtonText}>
+                Force Sync
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        {isMetered && (
+          <TouchableOpacity
+            style={[
+              styles.meteredOptInButton,
+              meteredOptIn ? styles.meteredOptInEnabled : styles.meteredOptInDisabled
+            ]}
+            onPress={handleMeteredOptIn}
+            accessibilityRole="button"
+            accessibilityLabel={`Toggle metered connection sync (currently ${meteredOptIn ? 'enabled' : 'disabled'})`}
+          >
+            <Text style={[
+              styles.meteredOptInText,
+              meteredOptIn ? styles.meteredOptInTextEnabled : styles.meteredOptInTextDisabled
+            ]}>
+              {meteredOptIn ? '✓ Sync on metered: ON' : '✗ Sync on metered: OFF'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.tabsContainer}>
@@ -353,6 +436,23 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
                     {JSON.stringify(selectedAction.payload, null, 2)}
                   </Text>
                 </View>
+
+                {selectedAction.deferralReason ? (
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>Deferral Information</Text>
+                    <View style={styles.deferralBox}>
+                      <Text style={styles.deferralLabel}>Reason: {selectedAction.deferralReason}</Text>
+                      {selectedAction.deferralLog && selectedAction.deferralLog.length > 0 ? (
+                        <View>
+                          <Text style={styles.deferralLabel}>Deferral Log:</Text>
+                          {selectedAction.deferralLog.map((log, index) => (
+                            <Text key={index} style={styles.deferralText}>{log}</Text>
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                ) : null}
               </ScrollView>
 
               <View style={styles.modalFooter}>
@@ -417,13 +517,69 @@ const makeStyles = (colors: AppColors) =>
       fontSize: 13,
       color: colors.error,
     },
-    refreshButton: {
+    deferralBox: {
       marginTop: 8,
-      alignSelf: 'flex-start',
+      borderRadius: 6,
+      padding: 10,
+      backgroundColor: '#FEF3C7',
+      borderWidth: 1,
+      borderColor: '#F59E0B',
+    },
+    deferralLabel: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: '#92400E',
+    },
+    deferralText: {
+      fontSize: 12,
+      color: '#92400E',
+    },
+    syncButtonRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 8,
+    },
+    refreshButton: {
       borderRadius: 6,
       backgroundColor: colors.primary,
       paddingHorizontal: 14,
       paddingVertical: 8,
+    },
+    forceSyncButton: {
+      borderRadius: 6,
+      backgroundColor: '#F59E0B',
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+    },
+    forceSyncButtonText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    meteredOptInButton: {
+      marginTop: 8,
+      borderRadius: 6,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderWidth: 1,
+    },
+    meteredOptInEnabled: {
+      backgroundColor: '#D1FAE5',
+      borderColor: '#10B981',
+    },
+    meteredOptInDisabled: {
+      backgroundColor: '#FEE2E2',
+      borderColor: '#EF4444',
+    },
+    meteredOptInText: {
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    meteredOptInTextEnabled: {
+      color: '#065F46',
+    },
+    meteredOptInTextDisabled: {
+      color: '#991B1B',
     },
     refreshButtonDisabled: {
       opacity: 0.6,

@@ -33,6 +33,28 @@ describe('deriveRotationStatus', () => {
     expect(result.rotationGuidance).toBeNull();
   });
 
+  it('marks predecessors inside the rotation grace window as grace', () => {
+    const result = deriveRotationStatus({
+      ...base,
+      revokedReason: 'rotated',
+      replacedById: 'k2',
+      graceExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    expect(result.rotationStatus).toBe('grace');
+    expect(result.daysUntilExpiry).toBeGreaterThan(0);
+    expect(result.rotationGuidance).toMatch(/overlap window/);
+  });
+
+  it('falls back to rotated status once the grace window has passed', () => {
+    const result = deriveRotationStatus({
+      ...base,
+      revokedReason: 'rotated',
+      replacedById: 'k2',
+      graceExpiresAt: new Date(Date.now() - 1000),
+    });
+    expect(result.rotationStatus).toBe('rotated');
+  });
+
   it('marks revoked keys', () => {
     const result = deriveRotationStatus({
       ...base,
@@ -115,6 +137,7 @@ describe('ApiKeysService', () => {
     replacedById: null,
     keyPreview: 's2s_ab...cdef',
     expiresAt: null,
+    graceExpiresAt: null,
     lastRemindedAt: null,
   };
 
@@ -275,10 +298,11 @@ describe('ApiKeysService', () => {
       );
     });
 
-    it('updates revocation metadata', async () => {
+    it('updates revocation metadata and writes an audit entry', async () => {
       mockPrisma.apiKey.findUnique.mockResolvedValue({
         id: 'k1',
         revokedAt: null,
+        keyPreview: 's2s_ab...cdef',
       });
       mockPrisma.apiKey.update.mockResolvedValue({
         ...baseRow,
@@ -298,10 +322,20 @@ describe('ApiKeysService', () => {
             revokedAt: expect.any(Date),
             revokedBy: 'actor-1',
             revokedReason: 'compromised',
+            graceExpiresAt: null,
           }),
         }),
       );
       expect(result.rotationStatus).toBe('revoked');
+      expect(mockAudit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: 'actor-1',
+          entity: 'ApiKey',
+          entityId: 'k1',
+          action: 'api_key_revoked',
+          metadata: expect.objectContaining({ reason: 'compromised' }),
+        }),
+      );
     });
   });
 
@@ -342,7 +376,7 @@ describe('ApiKeysService', () => {
       );
     });
 
-    it('creates a replacement and revokes the old key (rotation chain)', async () => {
+    it('creates a replacement and keeps the old key valid during the grace window', async () => {
       const tx = {
         apiKey: {
           findUnique: jest.fn().mockResolvedValue({
@@ -351,6 +385,7 @@ describe('ApiKeysService', () => {
             ngoId: null,
             description: 'worker',
             scopes: '["read","write"]',
+            keyPreview: 's2s_old...key1',
             revokedAt: null,
             expiresAt: null,
           }),
@@ -382,11 +417,85 @@ describe('ApiKeysService', () => {
         expect.objectContaining({
           where: { id: 'old' },
           data: expect.objectContaining({
-            revokedAt: expect.any(Date),
             revokedReason: 'rotated',
             replacedById: 'new',
+            graceExpiresAt: expect.any(Date),
           }),
         }),
+      );
+      // Predecessor is not hard-revoked during the overlap window.
+      const updateData = tx.apiKey.update.mock.calls[0][0].data;
+      expect(updateData.revokedAt).toBeUndefined();
+      expect((updateData.graceExpiresAt as Date).getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+      expect(result.predecessor).toMatchObject({
+        id: 'old',
+        validUntil: updateData.graceExpiresAt,
+      });
+    });
+
+    it('writes an audit entry for rotation', async () => {
+      const tx = {
+        apiKey: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'old',
+            role: AppRole.operator,
+            ngoId: null,
+            description: null,
+            scopes: '["read"]',
+            keyPreview: 's2s_old...key1',
+            revokedAt: null,
+            expiresAt: null,
+          }),
+          create: jest.fn().mockResolvedValue({ ...baseRow, id: 'new' }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+      };
+      mockPrisma.$transaction.mockImplementation((fn: any) => fn(tx));
+
+      await service.rotate('old', { apiKeyId: 'actor-1' });
+
+      expect(mockAudit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: 'actor-1',
+          entity: 'ApiKey',
+          entityId: 'old',
+          action: 'api_key_rotated',
+          metadata: expect.objectContaining({ replacedById: 'new' }),
+        }),
+      );
+    });
+
+    it('honours a custom gracePeriodHours for the overlap window', async () => {
+      const tx = {
+        apiKey: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'old',
+            role: AppRole.operator,
+            ngoId: null,
+            description: null,
+            scopes: '["read"]',
+            keyPreview: 's2s_old...key1',
+            revokedAt: null,
+            expiresAt: null,
+          }),
+          create: jest.fn().mockResolvedValue({ ...baseRow, id: 'new' }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+      };
+      mockPrisma.$transaction.mockImplementation((fn: any) => fn(tx));
+
+      await service.rotate(
+        'old',
+        { apiKeyId: 'actor-1' },
+        { gracePeriodHours: 48 },
+      );
+
+      const data = tx.apiKey.update.mock.calls[0][0].data;
+      const expectedMin = Date.now() + 47.9 * 60 * 60 * 1000;
+      expect((data.graceExpiresAt as Date).getTime()).toBeGreaterThan(
+        expectedMin,
       );
     });
 

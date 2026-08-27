@@ -23,6 +23,12 @@ export interface AppConfig {
   isValid: boolean;
   /** Validation errors if any */
   errors: string[];
+  /** Battery threshold (0-1) below which sync is deferred */
+  batteryThreshold?: number;
+  /** Size threshold in bytes for large uploads that defer on metered connections */
+  largeUploadThreshold?: number;
+  /** Whether to allow sync on metered connections without user opt-in */
+  allowMeteredSync?: boolean;
 }
 
 /**
@@ -69,6 +75,13 @@ const buildConfig = (): AppConfig => {
     expoProjectId: process.env.EXPO_PUBLIC_PROJECT_ID,
     walletConnectStellarChainId: process.env.EXPO_PUBLIC_WALLETCONNECT_STELLAR_CHAIN_ID,
     sorobanContractId,
+    batteryThreshold: process.env.EXPO_PUBLIC_BATTERY_THRESHOLD 
+      ? parseFloat(process.env.EXPO_PUBLIC_BATTERY_THRESHOLD) 
+      : 0.2, // Default: defer below 20% battery
+    largeUploadThreshold: process.env.EXPO_PUBLIC_LARGE_UPLOAD_THRESHOLD 
+      ? parseInt(process.env.EXPO_PUBLIC_LARGE_UPLOAD_THRESHOLD, 10) 
+      : 5 * 1024 * 1024, // Default: 5MB
+    allowMeteredSync: process.env.EXPO_PUBLIC_ALLOW_METERED_SYNC === 'true',
     isValid: errors.length === 0,
     errors,
   };

@@ -20,13 +20,17 @@ const SAVER_MAX_ACTIONS_PER_FLUSH = 2;
 export type SyncActionType = 'status-refresh' | 'claim-confirmation' | 'evidence-upload' | 'claim-submission';
 export type SyncActionState = 'pending' | 'retrying' | 'failed' | 'submitted' | 'conflict';
 
+export type DeferralReason = 'low-battery' | 'metered-connection' | 'large-upload' | 'none';
+
 export interface StatusRefreshPayload {
   aidId: string;
+  urgent?: boolean;
 }
 
 export interface ClaimConfirmationPayload {
   aidId: string;
   claimId: string;
+  urgent?: boolean;
 }
 
 export interface EvidenceUploadPayload {
@@ -39,6 +43,8 @@ export interface EvidenceUploadPayload {
   uploadedChunks?: number[];
   totalChunks?: number;
   progress?: number;
+  urgent?: boolean;
+  estimatedSize?: number;
 }
 
 const getSubtleCrypto = () => {
@@ -109,6 +115,7 @@ export interface ClaimSubmissionPayload {
   aidId: string;
   claimId: string;
   idempotencyKey: string;
+  urgent?: boolean;
 }
 
 export type SyncActionPayload =
@@ -128,6 +135,8 @@ export interface QueuedSyncAction<TPayload = SyncActionPayload> {
   createdAt: string;
   updatedAt: string;
   lastError: string | null;
+  deferralReason?: DeferralReason;
+  deferralLog?: string[];
 }
 
 export interface SyncQueueState {
@@ -135,6 +144,11 @@ export interface SyncQueueState {
   isSyncing: boolean;
   lastSyncAt: string | null;
   lastSyncError: string | null;
+  deferralStatus?: {
+    deferred: boolean;
+    reason: DeferralReason;
+    explanation: string;
+  };
 }
 
 export interface SyncActionSuccessEvent {
@@ -318,6 +332,27 @@ const replaceQueueItems = async (items: QueuedSyncAction[]) => {
   };
   await persistQueue();
   emitQueueState();
+};
+
+const logDeferral = (action: QueuedSyncAction, reason: DeferralReason, details: string) => {
+  const timestamp = new Date().toISOString();
+  const logEntry = `[${timestamp}] Deferred: ${reason} - ${details}`;
+  
+  const updatedLog = action.deferralLog ? [...action.deferralLog, logEntry] : [logEntry];
+  
+  queueState = {
+    ...queueState,
+    items: queueState.items.map(item =>
+      item.id === action.id
+        ? { ...item, deferralReason: reason, deferralLog: updatedLog }
+        : item
+    ),
+  };
+  
+  void persistQueue();
+  emitQueueState();
+  
+  return logEntry;
 };
 
 const enqueue = async (request: SyncActionRequest) => {
@@ -604,7 +639,15 @@ export const dispatchNetworkAction = async <T extends SyncActionType>(
   }
 };
 
-export const flushPendingNetworkActions = async (options?: { online?: boolean; saverMode?: boolean }) => {
+export const flushPendingNetworkActions = async (options?: { 
+  online?: boolean; 
+  saverMode?: boolean;
+  forceSync?: boolean;
+  batteryLevel?: number;
+  isCharging?: boolean;
+  isMetered?: boolean;
+  meteredOptIn?: boolean;
+}) => {
   await hydrateQueue();
 
   if (options?.online === false || syncingPromise) {
@@ -612,6 +655,11 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
   }
 
   const isSaverMode = options?.saverMode === true;
+  const forceSync = options?.forceSync === true;
+  const batteryLevel = options?.batteryLevel ?? -1;
+  const isCharging = options?.isCharging ?? false;
+  const isMetered = options?.isMetered ?? false;
+  const meteredOptIn = options?.meteredOptIn ?? false;
 
   syncingPromise = (async () => {
     setQueueState({
@@ -622,9 +670,65 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
     let items = [...queueState.items];
     const now = Date.now();
     let actionsProcessed = 0;
+    let deferredCount = 0;
+    const deferralLog: string[] = [];
 
     for (const action of items) {
       if (new Date(action.nextRetryAt).getTime() > now) {
+        continue;
+      }
+
+      // Check if action should be deferred
+      const payload = action.payload as { urgent?: boolean; estimatedSize?: number };
+      const isUrgent = payload.urgent === true;
+      const estimatedSize = payload.estimatedSize || 0;
+      
+      // Calculate battery threshold
+      const batteryThreshold = 0.2; // Default 20%
+      const isLowBattery = !isCharging && batteryLevel >= 0 && batteryLevel < batteryThreshold;
+      
+      // Calculate large upload threshold
+      const largeUploadThreshold = 5 * 1024 * 1024; // Default 5MB
+      const isLargeUpload = action.type === 'evidence-upload' && estimatedSize > largeUploadThreshold;
+      
+      let shouldDefer = false;
+      let deferralReason: DeferralReason = 'none';
+
+      // Urgent items bypass most deferrals except critical battery
+      if (!isUrgent || (isUrgent && isLowBattery)) {
+        if (!forceSync) {
+          // Low battery deferral
+          if (isLowBattery) {
+            shouldDefer = true;
+            deferralReason = 'low-battery';
+            const logMsg = logDeferral(action, deferralReason, `Battery at ${Math.round(batteryLevel * 100)}%, threshold ${Math.round(batteryThreshold * 100)}%`);
+            deferralLog.push(logMsg);
+          }
+          // Large upload on metered connection deferral
+          else if (isMetered && !meteredOptIn && isLargeUpload) {
+            shouldDefer = true;
+            deferralReason = 'large-upload';
+            const logMsg = logDeferral(action, deferralReason, `Upload size ${Math.round(estimatedSize / 1024 / 1024)}MB on metered connection`);
+            deferralLog.push(logMsg);
+          }
+          // Metered connection deferral
+          else if (isMetered && !meteredOptIn) {
+            shouldDefer = true;
+            deferralReason = 'metered-connection';
+            const logMsg = logDeferral(action, deferralReason, 'Metered connection without user opt-in');
+            deferralLog.push(logMsg);
+          }
+        }
+      }
+
+      if (shouldDefer) {
+        deferredCount++;
+        // Update action with deferral info
+        items = items.map(item =>
+          item.id === action.id
+            ? { ...item, deferralReason, updatedAt: new Date().toISOString() }
+            : item
+        );
         continue;
       }
 
@@ -704,6 +808,11 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
     setQueueState({
       isSyncing: false,
       lastSyncAt: queueState.lastSyncAt ?? new Date().toISOString(),
+      deferralStatus: deferredCount > 0 ? {
+        deferred: true,
+        reason: items.find(i => i.deferralReason)?.deferralReason || 'none',
+        explanation: `${deferredCount} actions deferred due to battery/network constraints`,
+      } : undefined,
     });
   })().finally(() => {
     syncingPromise = null;

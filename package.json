@@ -38,44 +38,6 @@
     "redis": "^5.12.1",
     "socket.io-client": "^4.8.3"
   },
-  "overrides": {
-    "jest": "29.7.0",
-    "jest-environment-jsdom": "29.7.0",
-    "jest-environment-node": "29.7.0",
-    "jest-runtime": "29.7.0",
-    "babel-jest": "29.7.0",
-    "@jest/core": "29.7.0",
-    "@jest/globals": "29.7.0",
-    "@jest/transform": "29.7.0",
-    "@jest/types": "29.6.3",
-    "@types/jest": "29.5.14",
-    "jest-util": "29.7.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "jest": "29.7.0",
-      "jest-environment-jsdom": "29.7.0",
-      "jest-environment-node": "29.7.0",
-      "jest-runtime": "29.7.0",
-      "babel-jest": "29.7.0",
-      "@jest/core": "29.7.0",
-      "@jest/globals": "29.7.0",
-      "@jest/transform": "29.7.0",
-      "@jest/types": "29.6.3",
-      "@types/jest": "29.5.14",
-      "jest-util": "29.7.0"
-    },
-    "onlyBuiltDependencies": [
-      "@parcel/watcher",
-      "@prisma/engines",
-      "@scarf/scarf",
-      "@swc/core",
-      "msgpackr-extract",
-      "prisma",
-      "sharp",
-      "unrs-resolver"
-    ]
-  },
   "version": "1.0.0",
   "description": "<img width=\"1080\" height=\"1080\" alt=\"Gemini_Generated_Image_efez0kefez0kefez (1)\" src=\"https://github.com/user-attachments/assets/72250381-5090-45e4-9941-5096c190a000\" />[...],",
   "main": ".eslintrc.js",
