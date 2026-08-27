@@ -74,20 +74,76 @@ export class AuditService {
     return createHash('sha256').update(value).digest('hex').slice(0, 16);
   }
 
+  generateHash(payload: { actorId: string, entity: string, entityId: string, action: string, metadata: any }, previousHash: string | null): string {
+    const data = JSON.stringify({
+      actorId: payload.actorId,
+      entity: payload.entity,
+      entityId: payload.entityId,
+      action: payload.action,
+      metadata: payload.metadata ?? null,
+      previousHash: previousHash
+    });
+    return createHash('sha256').update(data).digest('hex');
+  }
+
+  async verifyChain(): Promise<{ valid: boolean; errors: string[] }> {
+    const logs = await this.prisma.auditLog.findMany({
+      orderBy: { timestamp: 'asc' },
+    });
+    
+    const errors: string[] = [];
+    let expectedPreviousHash: string | null = null;
+    
+    for (const log of logs) {
+      if (log.previousHash !== expectedPreviousHash) {
+        errors.push(`Chain broken at log ${log.id}: expected previousHash ${expectedPreviousHash}, got ${log.previousHash}`);
+      }
+      
+      const computedHash = this.generateHash({
+        actorId: log.actorId,
+        entity: log.entity,
+        entityId: log.entityId,
+        action: log.action,
+        metadata: log.metadata,
+      }, log.previousHash);
+      
+      if (log.hash !== computedHash) {
+        errors.push(`Tampering detected at log ${log.id}: computed hash ${computedHash} does not match stored hash ${log.hash}`);
+      }
+      expectedPreviousHash = log.hash;
+    }
+    
+    return { valid: errors.length === 0, errors };
+  }
+
   async record(params: AuditLogParams) {
     const end = this.metrics.dbQueryDuration.startTimer({
       operation: 'create',
       entity: 'AuditLog',
     });
     try {
-      const result = await this.prisma.auditLog.create({
-        data: {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const lastLog = await tx.auditLog.findFirst({
+          orderBy: { timestamp: 'desc' },
+        });
+        const previousHash = lastLog?.hash || null;
+        
+        const payload = {
           actorId: params.actorId,
           entity: params.entity,
           entityId: params.entityId,
           action: params.action,
           metadata: (params.metadata as Prisma.InputJsonValue) ?? {},
-        },
+        };
+        const hash = this.generateHash(payload, previousHash);
+
+        return tx.auditLog.create({
+          data: {
+            ...payload,
+            hash,
+            previousHash,
+          },
+        });
       });
       end();
       return result;

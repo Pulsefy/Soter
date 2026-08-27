@@ -143,4 +143,15 @@ export class AuditController {
     const metrics = await this.metricsService.getMetrics();
     res.send(metrics);
   }
+
+  @Get('verify')
+  @Version('1')
+  @ApiOperation({
+    summary: 'Verify audit log integrity',
+    description: 'Verifies the tamper-evident hash chain of the audit log.',
+  })
+  @ApiOkResponse({ description: 'Chain verification completed.' })
+  async verifyChain() {
+    return this.auditService.verifyChain();
+  }
 }

@@ -214,4 +214,100 @@ describe('AuditService', () => {
       expect(csv).toContain('"camp""aign"');
     });
   });
+
+  describe('Hash Chain Verification', () => {
+    it('should generate deterministic hash for payload', () => {
+      const payload = {
+        actorId: 'user-1',
+        entity: 'campaign',
+        entityId: 'c-1',
+        action: 'create',
+        metadata: { name: 'test' },
+      };
+      const hash1 = service.generateHash(payload, null);
+      const hash2 = service.generateHash(payload, null);
+      expect(hash1).toEqual(hash2);
+    });
+
+    it('should detect a valid chain', async () => {
+      const payload1 = {
+        actorId: 'user-1',
+        entity: 'campaign',
+        entityId: 'c-1',
+        action: 'create',
+        metadata: { name: 'test' },
+      };
+      const hash1 = service.generateHash(payload1, null);
+      
+      const payload2 = {
+        actorId: 'user-2',
+        entity: 'campaign',
+        entityId: 'c-2',
+        action: 'update',
+        metadata: { name: 'test2' },
+      };
+      const hash2 = service.generateHash(payload2, hash1);
+      
+      prisma.auditLog.findMany = jest.fn().mockResolvedValue([
+        { id: '1', ...payload1, hash: hash1, previousHash: null },
+        { id: '2', ...payload2, hash: hash2, previousHash: hash1 }
+      ]);
+      
+      const result = await service.verifyChain();
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('should detect a broken previousHash link (deletion or insertion)', async () => {
+      const payload1 = {
+        actorId: 'user-1',
+        entity: 'campaign',
+        entityId: 'c-1',
+        action: 'create',
+        metadata: { name: 'test' },
+      };
+      const hash1 = service.generateHash(payload1, null);
+      
+      const payload2 = {
+        actorId: 'user-2',
+        entity: 'campaign',
+        entityId: 'c-2',
+        action: 'update',
+        metadata: { name: 'test2' },
+      };
+      const hash2 = service.generateHash(payload2, hash1);
+      
+      prisma.auditLog.findMany = jest.fn().mockResolvedValue([
+        { id: '1', ...payload1, hash: hash1, previousHash: null },
+        { id: '2', ...payload2, hash: hash2, previousHash: 'wrong-hash' } // Broken link
+      ]);
+      
+      const result = await service.verifyChain();
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain(`Chain broken at log 2: expected previousHash ${hash1}, got wrong-hash`);
+    });
+
+    it('should detect tampered content (mutation)', async () => {
+      const payload1 = {
+        actorId: 'user-1',
+        entity: 'campaign',
+        entityId: 'c-1',
+        action: 'create',
+        metadata: { name: 'test' },
+      };
+      const hash1 = service.generateHash(payload1, null);
+      
+      // Tampered data
+      const tamperedPayload = { ...payload1, action: 'delete' };
+      
+      prisma.auditLog.findMany = jest.fn().mockResolvedValue([
+        { id: '1', ...tamperedPayload, hash: hash1, previousHash: null },
+      ]);
+      
+      const result = await service.verifyChain();
+      expect(result.valid).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0]).toContain(`Tampering detected at log 1:`);
+    });
+  });
 });
