@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,9 @@ import { useNotification } from '../contexts/NotificationContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { useCrashReporting } from '../contexts/CrashReportingContext';
 import { config } from '../config';
+import { getAidCacheSize, clearAidCache, AID_CACHE_MAX_ENTRIES } from '../services/aidCache';
+import { getTaskCacheSize, clearTaskCache, TASK_CACHE_MAX_ENTRIES } from '../services/taskCache';
+import { CacheSize } from '../services/cacheEviction';
 
 const STELLAR_LAB_FAUCET_URL = 'https://lab.stellar.org/account/fund';
 const STELLAR_FRIENDBOT_URL = 'https://friendbot-testnet.stellar.org';
@@ -38,6 +41,72 @@ export const SettingsScreen: React.FC = () => {
     enabled: crashReportingEnabled,
     toggle: toggleCrashReporting,
   } = useCrashReporting();
+
+  // ── Cache size state ────────────────────────────────────────────────────
+  const [aidCacheSize, setAidCacheSize] = useState<CacheSize | null>(null);
+  const [taskCacheSize, setTaskCacheSize] = useState<CacheSize | null>(null);
+
+  const refreshCacheSizes = useCallback(async () => {
+    const [aid, task] = await Promise.all([getAidCacheSize(), getTaskCacheSize()]);
+    setAidCacheSize(aid);
+    setTaskCacheSize(task);
+  }, []);
+
+  useEffect(() => {
+    void refreshCacheSizes();
+  }, [refreshCacheSizes]);
+
+  const handleClearAidCache = () => {
+    Alert.alert(
+      'Clear Aid Cache',
+      'This will remove synced aid entries from local storage. Any entries not yet synced to the server will be kept.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            const { cleared, preserved } = await clearAidCache();
+            await refreshCacheSizes();
+            if (preserved > 0) {
+              Alert.alert(
+                'Cache Cleared',
+                `Removed ${cleared} synced ${cleared === 1 ? 'entry' : 'entries'}. ${preserved} unsynced ${preserved === 1 ? 'entry was' : 'entries were'} kept.`,
+              );
+            } else {
+              Alert.alert('Cache Cleared', `Removed ${cleared} ${cleared === 1 ? 'entry' : 'entries'}.`);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleClearTaskCache = () => {
+    Alert.alert(
+      'Clear Task Cache',
+      'This will remove synced task entries from local storage. Any entries not yet synced to the server will be kept.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            const { cleared, preserved } = await clearTaskCache();
+            await refreshCacheSizes();
+            if (preserved > 0) {
+              Alert.alert(
+                'Cache Cleared',
+                `Removed ${cleared} synced ${cleared === 1 ? 'entry' : 'entries'}. ${preserved} unsynced ${preserved === 1 ? 'entry was' : 'entries were'} kept.`,
+              );
+            } else {
+              Alert.alert('Cache Cleared', `Removed ${cleared} ${cleared === 1 ? 'entry' : 'entries'}.`);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const handleNotificationToggle = async (value: boolean) => {
     if (value) {
@@ -305,6 +374,100 @@ export const SettingsScreen: React.FC = () => {
             accessibilityElementsHidden
           />
         </View>
+
+        {/* ── Storage section ─────────────────────────────────────────── */}
+        <Text
+          style={styles.sectionHeader}
+          accessibilityRole="header"
+        >
+          Storage
+        </Text>
+
+        {/* Aid cache row */}
+        <View
+          style={styles.cacheRow}
+          accessible
+          accessibilityLabel={
+            aidCacheSize
+              ? `Aid cache: ${aidCacheSize.entryCount} of ${aidCacheSize.maxEntries} entries`
+              : 'Aid cache: loading'
+          }
+        >
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>Aid Cache</Text>
+            <Text style={styles.rowSubtitle}>
+              {aidCacheSize
+                ? `${aidCacheSize.entryCount} / ${aidCacheSize.maxEntries} entries`
+                : 'Calculating…'}
+            </Text>
+          </View>
+          <Pressable
+            style={({ pressed }) => [styles.clearButton, pressed && styles.linkButtonPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Clear aid cache"
+            accessibilityHint="Removes synced aid entries from local storage; unsynced entries are kept"
+            onPress={handleClearAidCache}
+          >
+            <Text style={styles.clearButtonText}>Clear</Text>
+          </Pressable>
+        </View>
+
+        {aidCacheSize?.nearLimit && (
+          <View
+            style={styles.warningBanner}
+            accessible
+            accessibilityRole="alert"
+            accessibilityLabel={`Aid cache is near its limit: ${aidCacheSize.entryCount} of ${AID_CACHE_MAX_ENTRIES} entries used`}
+          >
+            <Text style={styles.warningText}>
+              Aid cache is near its limit ({aidCacheSize.entryCount}/{AID_CACHE_MAX_ENTRIES}).
+              Old synced entries will be evicted automatically.
+            </Text>
+          </View>
+        )}
+
+        {/* Task cache row */}
+        <View
+          style={styles.cacheRow}
+          accessible
+          accessibilityLabel={
+            taskCacheSize
+              ? `Task cache: ${taskCacheSize.entryCount} of ${taskCacheSize.maxEntries} entries`
+              : 'Task cache: loading'
+          }
+        >
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>Task Cache</Text>
+            <Text style={styles.rowSubtitle}>
+              {taskCacheSize
+                ? `${taskCacheSize.entryCount} / ${taskCacheSize.maxEntries} entries`
+                : 'Calculating…'}
+            </Text>
+          </View>
+          <Pressable
+            style={({ pressed }) => [styles.clearButton, pressed && styles.linkButtonPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Clear task cache"
+            accessibilityHint="Removes synced task entries from local storage; unsynced entries are kept"
+            onPress={handleClearTaskCache}
+          >
+            <Text style={styles.clearButtonText}>Clear</Text>
+          </Pressable>
+        </View>
+
+        {taskCacheSize?.nearLimit && (
+          <View
+            style={styles.warningBanner}
+            accessible
+            accessibilityRole="alert"
+            accessibilityLabel={`Task cache is near its limit: ${taskCacheSize.entryCount} of ${TASK_CACHE_MAX_ENTRIES} entries used`}
+          >
+            <Text style={styles.warningText}>
+              Task cache is near its limit ({taskCacheSize.entryCount}/{TASK_CACHE_MAX_ENTRIES}).
+              Old synced entries will be evicted automatically.
+            </Text>
+          </View>
+        )}
 
         {config.network === 'testnet' && (
           <>
@@ -582,5 +745,45 @@ const makeStyles = (colors: AppColors) =>
       color: colors.info,
       fontSize: 15,
       fontWeight: '700',
+    },
+    cacheRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      minHeight: 44,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 12,
+      marginBottom: 8,
+    },
+    clearButton: {
+      minHeight: 36,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    clearButtonText: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    warningBanner: {
+      backgroundColor: colors.warningBg,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      marginBottom: 8,
+    },
+    warningText: {
+      fontSize: 13,
+      color: colors.warning,
+      lineHeight: 18,
     },
   });

@@ -67,6 +67,8 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
       setIsCached(false);
       await cacheTaskList(fresh);
       setCachedAt(null);
+      // EvictionResult.atLimit is intentionally unused here — the settings
+      // screen surfaces the warning based on getCacheSize() instead.
     } catch {
       if (isRefresh) setRefreshMessage('Refresh failed. Showing the last cached tasks.');
       const cached = await loadCachedTaskList();
