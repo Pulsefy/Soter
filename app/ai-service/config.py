@@ -7,9 +7,9 @@ import logging
 import os
 import re
 import secrets
-from typing import Literal, Optional
+from typing import Dict, Literal, Optional
 
-from pydantic import model_validator, HttpUrl
+from pydantic import Field, HttpUrl, model_validator
 from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -78,8 +78,25 @@ class Settings(BaseSettings):
     test_provider_mode: bool = False
     llm_timeout_seconds: int = 30
 
-    # Request throttling
+    # Request throttling / Rate limiting
     request_rate_limit: str = "10/minute"
+    rate_limit_per_key_default: str = "60/minute"
+    rate_limit_endpoint_overrides: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "/v1/ai/inference": "10/minute",
+            "/ai/inference": "10/minute",
+            "/v1/ai/ocr/jobs": "10/minute",
+            "/ai/ocr/jobs": "10/minute",
+            "/v1/ai/humanitarian/verify": "10/minute",
+            "/ai/humanitarian/verify": "10/minute",
+            "/v1/ai/proof-of-life": "15/minute",
+            "/ai/proof-of-life": "15/minute",
+            "/v1/ai/anonymize": "30/minute",
+            "/ai/anonymize": "30/minute",
+            "/v1/ai/fraud/detect": "20/minute",
+        }
+    )
+    rate_limit_enabled: bool = True
 
     # Circuit Breaker settings
     circuit_breaker_failure_threshold: int = 3

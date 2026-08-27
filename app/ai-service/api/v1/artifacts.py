@@ -38,13 +38,23 @@ class CacheInvalidationResponse(BaseModel):
     invalidated_entries: int
 
 
-def _create_error_response(code: str, status_code: int, detail: str) -> tuple:
-    """Create standardized error response with logging."""
+def _create_error_response(
+    code: str,
+    status_code: int,
+    detail: str,
+    log_code: str = "",
+) -> tuple:
+    """Create standardized error response with logging.
+
+    ``log_code`` lets callers keep a precise reason (e.g. ``forbidden_org``)
+    in audit logs while returning an externally generic response so denial
+    responses do not leak artifact existence to other tenants.
+    """
     logger.warning(
         "artifact_access_denied",
         extra={
             "event": "artifact_access_denied",
-            "code": code,
+            "code": log_code or code,
         },
     )
     return (
@@ -120,11 +130,16 @@ async def request_artifact_access(
                 "Artifact not found",
             )
         elif error_code == "forbidden_org":
-            msg = "Access denied: artifact belongs to " "a different organization"
+            # Multi-tenant isolation: cross-org denials must be
+            # indistinguishable from missing artifacts, otherwise the status
+            # difference would let attackers enumerate which artifact IDs
+            # exist in other organizations. The precise reason stays in the
+            # audit log via ``log_code``.
             response, _ = _create_error_response(
-                error_code,
-                403,
-                msg,
+                "artifact_not_found",
+                404,
+                "Artifact not found",
+                log_code="forbidden_org",
             )
         else:
             response, _ = _create_error_response(
@@ -222,11 +237,14 @@ async def download_artifact_with_token(token: str = Query(..., min_length=10)):
                 "Token format is invalid",
             )
         elif error_code == "forbidden_org":
-            msg = "Token organization does not match " "artifact organization"
+            # Same anti-enumeration rule as the /access endpoint: return the
+            # exact same response as a missing artifact (audit log keeps the
+            # real reason).
             response, _ = _create_error_response(
-                error_code,
-                403,
-                msg,
+                "artifact_not_found",
+                404,
+                "Artifact not found",
+                log_code="forbidden_org",
             )
         else:
             response, _ = _create_error_response(

@@ -153,6 +153,44 @@ fn test_package_created_event() {
 }
 
 #[test]
+fn test_package_reassigned_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let previous_recipient = Address::generate(&env);
+    let new_recipient = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+    client.create_package(
+        &admin,
+        &7,
+        &previous_recipient,
+        &UNIT,
+        &token_client.address,
+        &0,
+        &Map::new(&env),
+    );
+
+    client.reassign_package(&7, &new_recipient);
+
+    let data = last_event_data(&env, &contract_id, "package_reassigned");
+    assert_eq!(data_u64(&env, &data, "package_id"), 7);
+    assert_eq!(
+        data_address(&env, &data, "previous_recipient"),
+        previous_recipient
+    );
+    assert_eq!(data_address(&env, &data, "new_recipient"), new_recipient);
+    assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_field_exists(&env, &data, "timestamp");
+}
+
+#[test]
 fn test_package_claimed_event() {
     let env = Env::default();
     env.mock_all_auths();

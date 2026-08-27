@@ -57,6 +57,7 @@ A singleton key is a bare `Symbol`; exactly one entry exists per key.
 | `KEY_CAMPAIGN_PAUSED`   | `"camp_pzd"`   | `Map<String, bool>` | `pause_campaign` / `unpause_campaign`, keyed by `campaign_ref`. Grows with campaigns; permanent. |
 | `KEY_TOTAL_LOCKED`      | `"locked"`     | `Map<Address, i128>` (token → locked amount) | Updated on package create/claim/disburse/revoke/cancel/refund. **Derived bookkeeping** over live packages. |
 | `KEY_TOTAL_CLAIMED`     | `"claimed"`    | `Map<Address, i128>` (token → cumulative claimed) | Claim paths only. Monotonic accounting. |
+| `KEY_RECIPIENT_LAST_CLAIM` | `"lastclaim"` | `Map<Address, u64>` (recipient → successful-claim timestamp) | Successful claim paths only. Enforces the optional `Config.claim_cooldown`; absent entries have no cooldown history. |
 | `KEY_PKG_COUNTER`       | `"pkg_cnt"`    | `u64`       | Package creation. Highest assigned id + 1; upper bound for id scans (`get_campaign_package_count`, etc.). |
 | `KEY_PKG_IDX`           | `"pkg_idx"`    | `u64`       | Package creation. Count of aggregation-index entries; positional bound for `get_aggregates`. May exceed `KEY_PKG_COUNTER` when explicit ids are used. |
 

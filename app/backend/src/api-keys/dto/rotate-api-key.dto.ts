@@ -31,4 +31,17 @@ export class RotateApiKeyDto {
   @Min(1)
   @Max(3650)
   expiresInDays?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional overlap window (hours) during which the predecessor key remains valid alongside the replacement. Defaults to 24 hours when omitted.',
+    example: 24,
+    minimum: 1,
+    maximum: 720,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(720)
+  gracePeriodHours?: number;
 }

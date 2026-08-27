@@ -134,6 +134,8 @@ def test_access_denied_for_invalid_role(client: TestClient, artifact_fixture: st
 
 
 def test_access_denied_for_wrong_org(client: TestClient, artifact_fixture: str):
+    """Cross-org denials must look identical to missing artifacts so attackers
+    cannot enumerate other organizations' artifact IDs."""
     response = client.post(
         f"/v1/ai/verification-artifacts/{artifact_fixture}/access",
         headers={
@@ -143,11 +145,9 @@ def test_access_denied_for_wrong_org(client: TestClient, artifact_fixture: str):
         },
         json={"mode": "signed_url"},
     )
-    assert response.status_code == 403
-    assert (
-        response.json()["error"]["message"]
-        == "Access denied: artifact belongs to a different organization"
-    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "artifact_not_found"
+    assert response.json()["error"]["message"] == "Artifact not found"
 
 
 def test_signed_url_and_download(client: TestClient, artifact_fixture: str):
@@ -255,7 +255,10 @@ def test_invalid_token_format_rejected(client: TestClient):
 
 
 def test_token_org_mismatch_rejected(client: TestClient, artifact_fixture: str):
-    """Test that tokens with mismatched org are rejected even if signature is valid."""
+    """Test that tokens with mismatched org are rejected even if signature is valid.
+
+    The rejection must be indistinguishable from an unknown artifact (anti-
+    enumeration) while the precise reason stays in audit logs."""
     access_response = client.post(
         f"/v1/ai/verification-artifacts/{artifact_fixture}/access",
         headers={
@@ -277,8 +280,8 @@ def test_token_org_mismatch_rejected(client: TestClient, artifact_fixture: str):
 
     # Try to download with token from different org
     response = client.get(f"/v1/ai/verification-artifacts/download?token={valid_token}")
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "forbidden_org"
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "artifact_not_found"
 
 
 def test_all_authorized_roles_have_access(client: TestClient, artifact_fixture: str):

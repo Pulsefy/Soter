@@ -59,6 +59,7 @@ impl TestSetup {
             min_amount: 1, // Minimum 1 stroop
             max_expires_in: 0,
             allowed_tokens: Vec::new(&env),
+            claim_cooldown: 0,
         });
 
         Self {
@@ -152,6 +153,7 @@ mod create_package {
             min_amount: TWO_TOKENS, // Min 2.0 tokens
             max_expires_in: 0,
             allowed_tokens: Vec::new(&t.env),
+            claim_cooldown: 0,
         });
         let result = t.client.try_create_package(
             &t.admin,
@@ -239,6 +241,7 @@ mod token_interactions {
             min_amount: 1,
             max_expires_in: 0,
             allowed_tokens,
+            claim_cooldown: 0,
         });
 
         assert_eq!(result, Err(Ok(Error::InvalidToken)));

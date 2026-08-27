@@ -6,7 +6,9 @@ import {
   Patch,
   Delete,
   Put,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { AidService } from './aid.service';
 import {
   ApiTags,
@@ -32,8 +34,11 @@ export class AidController {
   })
   @ApiCreatedResponse({ description: 'Campaign created successfully.' })
   @ApiBadRequestResponse({ description: 'Invalid input parameters.' })
-  async createCampaign(@Body() data: Record<string, unknown>) {
-    return this.aidService.createCampaign(data);
+  async createCampaign(
+    @Body() data: Record<string, unknown>,
+    @Req() req: Request,
+  ) {
+    return this.aidService.createCampaign(data, req.user);
   }
 
   @Patch('campaigns/:id')

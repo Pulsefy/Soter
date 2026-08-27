@@ -4,6 +4,7 @@ import { AuditService } from '../audit/audit.service';
 import { RedisService } from '../../cache/redis.service';
 import { AiTaskWebhookDto, TaskStatus } from './dto/ai-task-webhook.dto';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 describe('AidService - Webhook Reliability Checks', () => {
   let service: AidService;
@@ -13,10 +14,22 @@ describe('AidService - Webhook Reliability Checks', () => {
   let redisSetSpy: jest.SpyInstance;
   let auditRecordSpy: jest.SpyInstance;
   let metricsService: { incrementCallbackFailure: jest.Mock };
+  let prismaService: {
+    campaign: {
+      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+    };
+  };
 
   beforeEach(async () => {
     metricsService = {
       incrementCallbackFailure: jest.fn(),
+    };
+    prismaService = {
+      campaign: {
+        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+      },
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -34,6 +47,10 @@ describe('AidService - Webhook Reliability Checks', () => {
           provide: MetricsService,
           useValue: metricsService,
         },
+        {
+          provide: PrismaService,
+          useValue: prismaService,
+        },
       ],
     }).compile();
 
@@ -48,6 +65,64 @@ describe('AidService - Webhook Reliability Checks', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('resolves and audits the campaign supplied in the request', async () => {
+    const campaign = {
+      id: 'campaign-from-request',
+      orgId: null,
+      ngoId: null,
+      deletedAt: null,
+    };
+    prismaService.campaign.findUnique.mockResolvedValue(campaign);
+
+    const result = await service.createCampaign({
+      campaignId: campaign.id,
+      aidType: 'food',
+    });
+
+    expect(result).toEqual({
+      id: campaign.id,
+      campaignId: campaign.id,
+      aidType: 'food',
+    });
+    expect(prismaService.campaign.findUnique).toHaveBeenCalledWith({
+      where: { id: campaign.id },
+    });
+    expect(auditRecordSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ entityId: campaign.id }),
+    );
+  });
+
+  it('resolves a campaign from the authenticated organization context', async () => {
+    const campaign = {
+      id: 'campaign-from-org',
+      orgId: 'org-1',
+      ngoId: null,
+      deletedAt: null,
+    };
+    prismaService.campaign.findFirst.mockResolvedValue(campaign);
+
+    await service.createCampaign({ aidType: 'water' }, { orgId: 'org-1' });
+
+    expect(prismaService.campaign.findFirst).toHaveBeenCalledWith({
+      where: { orgId: 'org-1', deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(auditRecordSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ entityId: campaign.id }),
+    );
+  });
+
+  it('returns a clear validation error when no valid campaign is resolved', async () => {
+    prismaService.campaign.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.createCampaign({ campaignId: 'missing-campaign' }),
+    ).rejects.toThrow(
+      'A valid campaign could not be resolved from campaignId or the authenticated organization',
+    );
+    expect(auditRecordSpy).not.toHaveBeenCalled();
   });
 
   it('1. should successfully process a fresh, valid webhook payload', async () => {

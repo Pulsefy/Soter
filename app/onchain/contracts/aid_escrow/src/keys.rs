@@ -59,6 +59,9 @@ pub const KEY_TOTAL_LOCKED: Symbol = symbol_short!("locked");
 /// Per-token cumulative amount ever claimed (`Map<Address, i128>`).
 /// Monotonic; never decreases.
 pub const KEY_TOTAL_CLAIMED: Symbol = symbol_short!("claimed");
+/// Timestamp of each recipient's most recent successful claim (`Map<Address, u64>`).
+/// Used to enforce the optional per-recipient claim cooldown.
+pub const KEY_RECIPIENT_LAST_CLAIM: Symbol = symbol_short!("lastclaim");
 /// Highest assigned package id plus one (`u64`). Upper bound for id scans.
 pub const KEY_PKG_COUNTER: Symbol = symbol_short!("pkg_cnt");
 /// Number of entries written to the aggregation index (`u64`). Positional
@@ -116,7 +119,7 @@ mod tests {
     use super::*;
 
     /// Every singleton key, both storage families.
-    fn singleton_keys() -> [Symbol; 18] {
+    fn singleton_keys() -> [Symbol; 19] {
         [
             KEY_ADMIN,
             KEY_PENDING_ADMIN,
@@ -131,6 +134,7 @@ mod tests {
             KEY_CAMPAIGN_PAUSED,
             KEY_TOTAL_LOCKED,
             KEY_TOTAL_CLAIMED,
+            KEY_RECIPIENT_LAST_CLAIM,
             KEY_PKG_COUNTER,
             KEY_PKG_IDX,
             KEY_DELEGATES,

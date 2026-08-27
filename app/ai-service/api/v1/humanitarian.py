@@ -28,7 +28,7 @@ router = APIRouter(tags=["humanitarian"])
 @cached_response(
     prefix="humanitarian_verification",
     ttl_seconds=settings.cache_ttl_verification,
-    key_tags=["model_version", "artifact_tag"],
+    key_tags=["model_version", "artifact_tag", "org_id"],
 )
 async def _verify_claim_cached(
     humanitarian_verification_service,
@@ -39,6 +39,7 @@ async def _verify_claim_cached(
     timeout: Optional[float],
     model_version: str,
     artifact_tag: str,
+    org_id: str,
 ) -> Dict[str, Any]:
     """
     Cacheable wrapper around HumanitarianVerificationService.verify_claim.
@@ -48,11 +49,14 @@ async def _verify_claim_cached(
     so tests can inject a Mock and the cache decorator's args do not need
     to know about module globals.
 
-    `model_version` and `artifact_tag` don't affect the underlying provider
-    call, but embedding them in the cache key ensures a stale response isn't
-    served after the configured model/provider changes, or after an evidence
-    artifact referenced by the claim is updated (see
-    CacheInvalidationHelper.invalidate_verification_by_artifact/_model_version).
+    `model_version`, `artifact_tag`, and `org_id` don't affect the underlying
+    provider call, but embedding them in the cache key ensures a stale
+    response isn't served after the configured model/provider changes, after
+    an evidence artifact referenced by the claim is updated (see
+    CacheInvalidationHelper.invalidate_verification_by_artifact/_model_version),
+    or across tenants: including ``org_id`` scopes every cache entry to the
+    requesting organization so one tenant can never be served a response that
+    was computed for another tenant's request.
     """
     try:
         return humanitarian_verification_service.verify_claim(
@@ -204,18 +208,22 @@ async def verify_humanitarian_claim(
                     correlation_id=correlation_id,
                 )
             except EvidenceAccessControlError as exc:
+                # The specific reason is kept in audit logs only; the HTTP
+                # response must stay generic so denials do not reveal whether
+                # an artifact exists or who owns it (multi-tenant isolation).
                 logger.warning(
                     "forbidden_org",
                     extra={
                         "event": "artifact_access_denied",
                         "code": "forbidden_org",
+                        "reason": str(exc),
                         "artifact_ids": request.artifact_ids,
                         "org_id": x_org_id,
                         "user_id": x_user_id,
                         "correlation_id": correlation_id,
                     },
                 )
-                raise HTTPException(status_code=403, detail=str(exc))
+                raise HTTPException(status_code=403, detail="Access denied")
 
         model_version = humanitarian_verification_service.get_model_version(
             request.provider_preference
@@ -233,6 +241,7 @@ async def verify_humanitarian_claim(
             timeout=request.timeout,
             model_version=model_version,
             artifact_tag=artifact_tag,
+            org_id=x_org_id,
         )
 
         verification: Dict[str, Any] = raw.get("verification") or {}

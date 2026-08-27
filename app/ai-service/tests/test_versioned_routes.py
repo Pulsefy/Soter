@@ -43,6 +43,21 @@ def mock_healthy_resources():
         yield
 
 
+@pytest.fixture(autouse=True)
+def reset_app_state():
+    """Ensure app.state is clean for each test.
+
+    The Starlette TestClient manages the ASGI lifespan lifecycle.  When a
+    previous module's TestClient is torn down the lifespan shutdown sets
+    ``app.state.is_shutting_down = True``.  Since ``app`` is a
+    module-level singleton, that stale value leaks into subsequent test
+    modules and causes every throttled endpoint to return 503.
+    """
+    app.state.is_shutting_down = False
+    app.state.active_requests = 0
+    yield
+
+
 # ---------------------------------------------------------------------------
 # Clients
 # ---------------------------------------------------------------------------
@@ -51,12 +66,22 @@ def mock_healthy_resources():
 @pytest.fixture(scope="module")
 def client():
     """TestClient that does NOT follow redirects – lets us inspect 308s."""
+    # Ensure app state is initialized for test client (lifespan not called automatically)
+    if not hasattr(app.state, "is_shutting_down"):
+        app.state.is_shutting_down = False
+    if not hasattr(app.state, "active_requests"):
+        app.state.active_requests = 0
     return TestClient(app, follow_redirects=False)
 
 
 @pytest.fixture(scope="module")
 def following_client():
     """TestClient that follows redirects transparently."""
+    # Ensure app state is initialized for test client (lifespan not called automatically)
+    if not hasattr(app.state, "is_shutting_down"):
+        app.state.is_shutting_down = False
+    if not hasattr(app.state, "active_requests"):
+        app.state.active_requests = 0
     return TestClient(app, follow_redirects=True)
 
 

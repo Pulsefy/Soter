@@ -299,6 +299,7 @@ export class HealthService {
         platform: process.platform,
         nodeVersion: process.version,
       },
+      metadataEndpoint: '/health/metadata',
       appState: {
         database: readiness.checks.database,
         memory: liveness.checks.process.details,

@@ -36,7 +36,7 @@ pub use crate::keys::{
     package_index_entry, package_key, KEY_ADMIN, KEY_CAMPAIGN_PAUSED, KEY_CONFIG, KEY_DELEGATES,
     KEY_DELEGATE_EXPIRY, KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM,
     KEY_PAUSE_CREATE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN, KEY_PKG_COUNTER,
-    KEY_PKG_IDX, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
+    KEY_PKG_IDX, KEY_RECIPIENT_LAST_CLAIM, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
 };
 
 /// Upper bound on the number of package ids accepted by `batch_claim` in a
@@ -76,6 +76,9 @@ pub struct Config {
     pub min_amount: i128,
     pub max_expires_in: u64,
     pub allowed_tokens: Vec<Address>,
+    /// Minimum number of seconds a recipient must wait between successful
+    /// claims. `0` disables the cooldown.
+    pub claim_cooldown: u64,
 }
 
 #[contracttype]
@@ -111,6 +114,8 @@ pub enum ClaimStatus {
     CampaignPaused = 7,
     /// Eligibility checks passed but the token transfer failed.
     TransferFailed = 8,
+    /// The recipient successfully claimed another package too recently.
+    CooldownActive = 9,
 }
 
 /// Per-package result returned by `batch_claim`.
@@ -148,6 +153,8 @@ pub enum Error {
     NoPendingTransfer = 19,
     InvalidPendingAdmin = 20,
     BatchTooLarge = 21,
+    /// The recipient has not yet completed the configured claim cooldown.
+    ClaimCooldownActive = 22,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -167,6 +174,15 @@ pub struct PackageCreated {
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub actor: Address,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+pub struct PackageReassigned {
+    pub package_id: u64,
+    pub previous_recipient: Address,
+    pub new_recipient: Address,
     pub actor: Address,
     pub timestamp: u64,
 }
@@ -389,6 +405,7 @@ impl AidEscrow {
             min_amount: 1,
             max_expires_in: 0,
             allowed_tokens: Vec::new(&env),
+            claim_cooldown: 0,
         };
         env.storage().instance().set(&KEY_CONFIG, &config);
         Ok(())
@@ -575,7 +592,9 @@ impl AidEscrow {
     /// Admin-only. Updates the global contract configuration.
     ///
     /// # Arguments
-    /// * `config` — New config values (`min_amount`, `max_expires_in`, `allowed_tokens`).
+    /// * `config` — New config values (`min_amount`, `max_expires_in`,
+    ///   `allowed_tokens`, `claim_cooldown`). Set `claim_cooldown` to zero to
+    ///   disable per-recipient throttling.
     ///
     /// # Errors
     /// Returns `Error::InvalidAmount` if `config.min_amount` is zero or negative.
@@ -746,6 +765,7 @@ impl AidEscrow {
             min_amount: 1,
             max_expires_in: 0,
             allowed_tokens: Vec::new(&env),
+            claim_cooldown: 0,
         })
     }
 
@@ -1216,6 +1236,8 @@ impl AidEscrow {
             return Err(Error::NotAuthorized);
         }
 
+        Self::ensure_recipient_cooldown(&env, &package.recipient, now)?;
+
         claimant.require_auth();
         relayer.require_auth();
 
@@ -1244,6 +1266,7 @@ impl AidEscrow {
         env.storage()
             .instance()
             .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+        Self::record_recipient_claim(&env, &package.recipient, now);
 
         PackageClaimedByRelayer {
             package_id: id,
@@ -1266,6 +1289,10 @@ impl AidEscrow {
     /// outcome is simply recorded as a non-`Success` `ClaimStatus` in the
     /// returned results. Fund transfers and accounting updates only happen
     /// for packages that resolve to `ClaimStatus::Success`.
+    ///
+    /// When a cooldown is enabled, ids are processed in order. The first
+    /// successful claim records the recipient timestamp; later ids for that
+    /// recipient in the same batch return `ClaimStatus::CooldownActive`.
     ///
     /// Returns `Err(Error::BatchTooLarge)` if more than
     /// `MAX_BATCH_CLAIM_SIZE` ids are supplied, without touching any package.
@@ -1331,6 +1358,10 @@ impl AidEscrow {
             return not_claimable(ClaimStatus::Unauthorized);
         }
 
+        if Self::ensure_recipient_cooldown(env, &package.recipient, now).is_err() {
+            return not_claimable(ClaimStatus::CooldownActive);
+        }
+
         let amount = package.amount;
         match Self::finalize_claim(env, &key, &mut package, id, claimant, claimant, now) {
             Ok(()) => BatchClaimResult {
@@ -1388,6 +1419,47 @@ impl AidEscrow {
             actor: admin.clone(),
             timestamp,
             receipt_hash,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Admin reassigns an unclaimed package to a new recipient.
+    pub fn reassign_package(
+        env: Env,
+        package_id: u64,
+        new_recipient: Address,
+    ) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let key = crate::keys::package_key(package_id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        if package.status != PackageStatus::Created {
+            return Err(Error::PackageNotActive);
+        }
+
+        let now = env.ledger().timestamp();
+        if package.expires_at > 0 && now > package.expires_at {
+            return Err(Error::PackageExpired);
+        }
+
+        let previous_recipient = package.recipient.clone();
+        package.recipient = new_recipient.clone();
+        env.storage().persistent().set(&key, &package);
+
+        PackageReassigned {
+            package_id,
+            previous_recipient,
+            new_recipient,
+            actor: admin,
+            timestamp: now,
         }
         .publish(&env);
 
@@ -1827,6 +1899,7 @@ impl AidEscrow {
         claimant: &Address,
         now: u64,
     ) -> Result<(), Error> {
+        Self::ensure_recipient_cooldown(env, &package.recipient, now)?;
         Self::transfer_token(
             env,
             &package.token,
@@ -1852,6 +1925,7 @@ impl AidEscrow {
         env.storage()
             .instance()
             .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+        Self::record_recipient_claim(env, &package.recipient, now);
 
         // Check if claimant is a delegate (not the recipient)
         let is_delegate = claimant != &package.recipient;
@@ -1897,6 +1971,40 @@ impl AidEscrow {
         }
 
         Ok(())
+    }
+
+    /// Rejects claims made before a recipient's configured cooldown window
+    /// expires. The recipient (rather than a delegate or relayer) is tracked,
+    /// so alternate claim paths cannot bypass the limit.
+    fn ensure_recipient_cooldown(env: &Env, recipient: &Address, now: u64) -> Result<(), Error> {
+        let cooldown = Self::get_config(env.clone()).claim_cooldown;
+        if cooldown == 0 {
+            return Ok(());
+        }
+
+        let claims: Map<Address, u64> = env
+            .storage()
+            .instance()
+            .get(&KEY_RECIPIENT_LAST_CLAIM)
+            .unwrap_or(Map::new(env));
+        if let Some(last_claim) = claims.get(recipient.clone()) {
+            if now.saturating_sub(last_claim) < cooldown {
+                return Err(Error::ClaimCooldownActive);
+            }
+        }
+        Ok(())
+    }
+
+    fn record_recipient_claim(env: &Env, recipient: &Address, now: u64) {
+        let mut claims: Map<Address, u64> = env
+            .storage()
+            .instance()
+            .get(&KEY_RECIPIENT_LAST_CLAIM)
+            .unwrap_or(Map::new(env));
+        claims.set(recipient.clone(), now);
+        env.storage()
+            .instance()
+            .set(&KEY_RECIPIENT_LAST_CLAIM, &claims);
     }
 
     fn receipt_hash_from_metadata(env: &Env, metadata: &Map<Symbol, String>) -> String {

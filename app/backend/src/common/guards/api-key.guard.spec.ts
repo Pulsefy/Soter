@@ -152,28 +152,83 @@ describe('ApiKeyGuard', () => {
     );
   });
 
-  it('should reject revoked keys immediately', async () => {
-    // Guard queries with `revokedAt: null`, so a revoked record should not match
-    mockPrismaService.apiKey.findFirst.mockResolvedValue(null);
+  it('should reject revoked keys with a distinguishable error', async () => {
+    mockPrismaService.apiKey.findFirst.mockResolvedValue({
+      id: 'revoked-1',
+      keyHash: 'hashed-revoked-key',
+      role: AppRole.operator,
+      scopes: '["read"]',
+      revokedAt: new Date(Date.now() - 60_000),
+      expiresAt: null,
+      graceExpiresAt: null,
+      replacedById: null,
+    });
 
     const context = createContext({ 'x-api-key': 'revoked-key' });
     await expect(guard.canActivate(context as any)).rejects.toThrow(
-      UnauthorizedException,
+      'API key has been revoked',
     );
+    expect(mockPrismaService.apiKey.update).not.toHaveBeenCalled();
   });
 
-  it('should reject expired keys', async () => {
+  it('should reject expired keys with a distinguishable error', async () => {
     mockPrismaService.apiKey.findFirst.mockResolvedValue({
       id: 'expired-1',
       key: 'expired-key',
       role: AppRole.operator,
       scopes: '["read"]',
+      revokedAt: null,
       expiresAt: new Date(Date.now() - 60_000),
+      graceExpiresAt: null,
+      replacedById: null,
     });
 
     const context = createContext({ 'x-api-key': 'expired-key' });
     await expect(guard.canActivate(context as any)).rejects.toThrow(
-      UnauthorizedException,
+      'API key has expired',
+    );
+    expect(mockPrismaService.apiKey.update).not.toHaveBeenCalled();
+  });
+
+  it('should allow a rotated predecessor during the grace overlap window', async () => {
+    mockPrismaService.apiKey.findFirst.mockResolvedValue({
+      id: 'old-1',
+      key: 'old-key',
+      role: AppRole.operator,
+      scopes: '["read"]',
+      revokedAt: null,
+      expiresAt: null,
+      graceExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      replacedById: 'new-1',
+    });
+
+    const context = createContext({ 'x-api-key': 'old-key' });
+    const result = await guard.canActivate(context as any);
+
+    expect(result).toBe(true);
+    const req = context.switchToHttp().getRequest() as any;
+    expect(req.user).toMatchObject({
+      apiKeyId: 'old-1',
+      role: AppRole.operator,
+      scopes: [ApiKeyScope.read],
+    });
+  });
+
+  it('should reject a rotated predecessor once the grace window has ended', async () => {
+    mockPrismaService.apiKey.findFirst.mockResolvedValue({
+      id: 'old-1',
+      key: 'old-key',
+      role: AppRole.operator,
+      scopes: '["read"]',
+      revokedAt: null,
+      expiresAt: null,
+      graceExpiresAt: new Date(Date.now() - 60_000),
+      replacedById: 'new-1',
+    });
+
+    const context = createContext({ 'x-api-key': 'old-key' });
+    await expect(guard.canActivate(context as any)).rejects.toThrow(
+      'API key has been rotated and its grace period has ended',
     );
     expect(mockPrismaService.apiKey.update).not.toHaveBeenCalled();
   });
