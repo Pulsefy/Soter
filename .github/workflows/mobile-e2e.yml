@@ -64,8 +64,9 @@ jobs:
             set -e
             adb wait-for-device
             adb shell input keyevent 82 || true
-            npx expo export --platform android
-            maestro test e2e/field-flows.yaml --format junit --output artifacts/maestro.xml
+            npx expo run:android --no-bundler
+            mkdir -p artifacts
+            maestro test app/mobile/e2e/field-flows.yaml --format junit --output app/mobile/artifacts/maestro.xml
 
       - name: Upload E2E screenshots and logs
         if: always()
