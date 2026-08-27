@@ -64,6 +64,8 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
       setIsCached(false);
       await cacheTaskList(fresh);
       setCachedAt(null);
+      // EvictionResult.atLimit is intentionally unused here — the settings
+      // screen surfaces the warning based on getCacheSize() instead.
     } catch {
       const cached = await loadCachedTaskList();
       if (cached && cached.length > 0) {

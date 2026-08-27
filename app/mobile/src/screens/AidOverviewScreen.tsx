@@ -61,6 +61,8 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
       setIsCached(false);
       await cacheAidList(fresh);
       setCachedAt(null);
+      // EvictionResult.atLimit is intentionally unused here — the settings
+      // screen surfaces the warning based on getCacheSize() instead.
     } catch {
       const cached = await loadCachedAidList();
       if (cached && cached.length > 0) {
