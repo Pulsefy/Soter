@@ -560,6 +560,7 @@ model EvidenceQueueItem {
   @@index([orgId])
   @@index([fingerprint])
   @@index([nearDuplicateOf])
+  @@index([storageKey])
 }
 
 enum UploadSessionStatus {
