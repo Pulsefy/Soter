@@ -6,7 +6,9 @@ allowBuilds:
   '@scarf/scarf': false
   '@sentry/cli': false
   '@swc/core': false
+  core-js: true
   msgpackr-extract: false
   prisma: false
+  protobufjs: true
   sharp: false
   unrs-resolver: false
