@@ -43,6 +43,10 @@ pub use crate::keys::{
 /// single invocation, keeping the call within Soroban resource limits.
 pub const MAX_BATCH_CLAIM_SIZE: u32 = 25;
 
+/// Current schema version for all emitted events.
+/// Increment this when making breaking changes to event structures.
+pub const EVENT_SCHEMA_VERSION: u32 = 1;
+
 // --- Data Types ---
 
 #[contracttype]
@@ -167,6 +171,7 @@ pub struct EscrowFunded {
     pub token: Address,
     pub amount: i128,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 #[contractevent]
@@ -176,6 +181,7 @@ pub struct PackageCreated {
     pub amount: i128,
     pub actor: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 #[contractevent]
@@ -185,6 +191,7 @@ pub struct PackageReassigned {
     pub new_recipient: Address,
     pub actor: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 #[contractevent]
@@ -197,6 +204,7 @@ pub struct PackageClaimed {
     /// Optional off-chain receipt hash for anchoring external records.
     /// Empty string when not provided.
     pub receipt_hash: String,
+    pub schema_version: u32,
 }
 
 #[contractevent]
@@ -206,6 +214,7 @@ pub struct PackageClaimedByRelayer {
     pub relayer: Address,
     pub amount: i128,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 #[contractevent]
@@ -218,6 +227,7 @@ pub struct PackageDisbursed {
     /// Optional off-chain receipt hash for anchoring external records.
     /// Empty string when not provided.
     pub receipt_hash: String,
+    pub schema_version: u32,
 }
 
 #[contractevent]
@@ -227,6 +237,7 @@ pub struct PackageRevoked {
     pub amount: i128,
     pub actor: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 #[contractevent]
@@ -236,6 +247,7 @@ pub struct PackageRefunded {
     pub amount: i128,
     pub actor: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 /// Emitted when the sweep transitions an expired package to the terminal
@@ -247,6 +259,7 @@ pub struct PackageSwept {
     pub amount: i128,
     pub actor: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 #[contractevent]
@@ -254,6 +267,7 @@ pub struct BatchCreatedEvent {
     pub ids: Vec<u64>,
     pub admin: Address,
     pub total_amount: i128,
+    pub schema_version: u32,
 }
 
 #[contractevent]
@@ -262,6 +276,7 @@ pub struct ExtendedEvent {
     pub admin: Address,
     pub old_expires_at: u64,
     pub new_expires_at: u64,
+    pub schema_version: u32,
 }
 
 #[contractevent]
@@ -269,28 +284,33 @@ pub struct SurplusWithdrawnEvent {
     pub to: Address,
     pub token: Address,
     pub amount: i128,
+    pub schema_version: u32,
 }
 
 #[contractevent]
 pub struct ContractPausedEvent {
     pub admin: Address,
+    pub schema_version: u32,
 }
 
 #[contractevent]
 pub struct ContractUnpausedEvent {
     pub admin: Address,
+    pub schema_version: u32,
 }
 
 #[contractevent]
 pub struct ActionPausedEvent {
     pub admin: Address,
     pub action: Symbol,
+    pub schema_version: u32,
 }
 
 #[contractevent]
 pub struct ActionUnpausedEvent {
     pub admin: Address,
     pub action: Symbol,
+    pub schema_version: u32,
 }
 
 /// Emitted when an admin pauses a single campaign, identified by the
@@ -299,6 +319,7 @@ pub struct ActionUnpausedEvent {
 pub struct CampaignPausedEvent {
     pub admin: Address,
     pub campaign_ref: String,
+    pub schema_version: u32,
 }
 
 /// Emitted when an admin unpauses a single campaign.
@@ -306,6 +327,7 @@ pub struct CampaignPausedEvent {
 pub struct CampaignUnpausedEvent {
     pub admin: Address,
     pub campaign_ref: String,
+    pub schema_version: u32,
 }
 
 /// Emitted when a delegate is added/updated for a package.
@@ -318,6 +340,7 @@ pub struct DelegateAdded {
     pub actor: Address,
     pub expires_at: u64,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 /// Emitted when a delegate is revoked/removed for a package.
@@ -329,6 +352,7 @@ pub struct DelegateRevoked {
     pub delegate: Address,
     pub actor: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 /// Emitted when a delegate claims a package on behalf of the recipient.
@@ -341,6 +365,7 @@ pub struct DelegateClaimed {
     pub amount: i128,
     pub actor: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 /// Emitted when the current admin nominates a pending admin.
@@ -349,6 +374,7 @@ pub struct AdminTransferInitiated {
     pub admin: Address,
     pub pending_admin: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 /// Emitted when the pending admin accepts the admin role.
@@ -356,6 +382,7 @@ pub struct AdminTransferInitiated {
 pub struct AdminTransferAccepted {
     pub admin: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 /// Emitted when the current admin cancels a pending admin transfer.
@@ -363,6 +390,7 @@ pub struct AdminTransferAccepted {
 pub struct AdminTransferCancelled {
     pub admin: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 /// Emitted when a token is added to the allowed tokens allowlist.
@@ -371,6 +399,7 @@ pub struct TokenAdded {
     pub admin: Address,
     pub token: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 /// Emitted when a token is removed from the allowed tokens allowlist.
@@ -379,6 +408,7 @@ pub struct TokenRemoved {
     pub admin: Address,
     pub token: Address,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 #[contract]
@@ -454,6 +484,7 @@ impl AidEscrow {
             admin,
             pending_admin: new_admin,
             timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -482,6 +513,7 @@ impl AidEscrow {
         AdminTransferAccepted {
             admin: pending_admin,
             timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -503,7 +535,11 @@ impl AidEscrow {
         env.storage().instance().remove(&KEY_PENDING_ADMIN);
 
         let timestamp = env.ledger().timestamp();
-        AdminTransferCancelled { admin, timestamp }.publish(&env);
+        AdminTransferCancelled { 
+            admin, 
+            timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
+        }.publish(&env);
 
         Ok(())
     }
@@ -626,7 +662,10 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &true);
-        ContractPausedEvent { admin }.publish(&env);
+        ContractPausedEvent { 
+            admin,
+            schema_version: EVENT_SCHEMA_VERSION,
+        }.publish(&env);
         Ok(())
     }
 
@@ -639,7 +678,10 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &false);
-        ContractUnpausedEvent { admin }.publish(&env);
+        ContractUnpausedEvent { 
+            admin,
+            schema_version: EVENT_SCHEMA_VERSION,
+        }.publish(&env);
         Ok(())
     }
 
@@ -652,7 +694,11 @@ impl AidEscrow {
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &true);
 
-        ActionPausedEvent { admin, action }.publish(&env);
+        ActionPausedEvent { 
+            admin, 
+            action,
+            schema_version: EVENT_SCHEMA_VERSION,
+        }.publish(&env);
         Ok(())
     }
 
@@ -665,7 +711,11 @@ impl AidEscrow {
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &false);
 
-        ActionUnpausedEvent { admin, action }.publish(&env);
+        ActionUnpausedEvent { 
+            admin, 
+            action,
+            schema_version: EVENT_SCHEMA_VERSION,
+        }.publish(&env);
         Ok(())
     }
 
@@ -711,6 +761,7 @@ impl AidEscrow {
         CampaignPausedEvent {
             admin,
             campaign_ref,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
         Ok(())
@@ -736,6 +787,7 @@ impl AidEscrow {
         CampaignUnpausedEvent {
             admin,
             campaign_ref,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
         Ok(())
@@ -811,6 +863,7 @@ impl AidEscrow {
             token,
             amount,
             timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -936,6 +989,7 @@ impl AidEscrow {
             amount,
             actor: operator,
             timestamp: created_at,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -1061,6 +1115,7 @@ impl AidEscrow {
                 amount,
                 actor: operator.clone(),
                 timestamp: created_at,
+                schema_version: EVENT_SCHEMA_VERSION,
             }
             .publish(&env);
 
@@ -1078,6 +1133,7 @@ impl AidEscrow {
             ids: created_ids.clone(),
             admin: operator,
             total_amount,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -1274,6 +1330,7 @@ impl AidEscrow {
             relayer,
             amount: package.amount,
             timestamp: now,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -1419,6 +1476,7 @@ impl AidEscrow {
             actor: admin.clone(),
             timestamp,
             receipt_hash,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -1460,6 +1518,7 @@ impl AidEscrow {
             new_recipient,
             actor: admin,
             timestamp: now,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -1496,6 +1555,7 @@ impl AidEscrow {
             amount: package.amount,
             actor: admin.clone(),
             timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -1562,6 +1622,7 @@ impl AidEscrow {
             amount: package.amount,
             actor: admin.clone(),
             timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -1607,6 +1668,7 @@ impl AidEscrow {
             amount: package.amount,
             actor: admin.clone(),
             timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -1684,6 +1746,7 @@ impl AidEscrow {
             admin,
             old_expires_at,
             new_expires_at,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -1735,6 +1798,7 @@ impl AidEscrow {
             to: to.clone(),
             token: token.clone(),
             amount,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -1939,6 +2003,7 @@ impl AidEscrow {
             actor: payout_recipient.clone(),
             timestamp: now,
             receipt_hash,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(env);
 
@@ -1956,6 +2021,7 @@ impl AidEscrow {
                 amount: package.amount,
                 actor: claimant.clone(),
                 timestamp: now,
+                schema_version: EVENT_SCHEMA_VERSION,
             }
             .publish(env);
 
@@ -1966,6 +2032,7 @@ impl AidEscrow {
                 delegate: claimant.clone(),
                 actor: claimant.clone(), // The delegate who claimed acts as the actor for revocation
                 timestamp: now,
+                schema_version: EVENT_SCHEMA_VERSION,
             }
             .publish(env);
         }
@@ -2382,6 +2449,7 @@ impl AidEscrow {
             actor: admin.clone(),
             expires_at,
             timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -2447,6 +2515,7 @@ impl AidEscrow {
             actor: admin.clone(),
             expires_at,
             timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -2489,6 +2558,7 @@ impl AidEscrow {
                 delegate: delegate.clone(),
                 actor: admin.clone(),
                 timestamp,
+                schema_version: EVENT_SCHEMA_VERSION,
             }
             .publish(&env);
         }
@@ -2552,6 +2622,7 @@ impl AidEscrow {
             admin,
             token,
             timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -2600,6 +2671,7 @@ impl AidEscrow {
             admin,
             token,
             timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
@@ -2680,6 +2752,7 @@ impl AidEscrow {
                 amount: package.amount,
                 actor: env.current_contract_address(),
                 timestamp: now,
+                schema_version: EVENT_SCHEMA_VERSION,
             }
             .publish(&env);
 

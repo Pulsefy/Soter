@@ -930,6 +930,7 @@ model SorobanEventCorrelation {
   txHash          String              // Transaction hash from Soroban
   ledger          Int                 // Ledger sequence number
   eventIndex      Int                 // Index of event within transaction
+  schemaVersion   Int?                // Event schema version for compatibility tracking
 
   // Internal record references
   claimId         String?             // Reference to internal Claim
@@ -951,6 +952,7 @@ model SorobanEventCorrelation {
   @@index([txHash])
   @@index([ledger])
   @@index([eventTopic])
+  @@index([schemaVersion])
   @@index([createdAt])
   @@index([correlationSource])
   @@unique([txHash, eventIndex]) // Each event in a transaction is unique

@@ -406,6 +406,7 @@ pub fn sweep_expired_delegates(env: &Env, limit: u32) -> Result<u32, Error> {
                 delegate,
                 actor: env.current_contract_address(),
                 timestamp: now,
+                schema_version: crate::EVENT_SCHEMA_VERSION,
             }
             .publish(env);
         }

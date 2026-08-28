@@ -9,6 +9,53 @@ It also records the outcome of the event-schema audit requested for Testnet
 readiness: an enumeration of every emitted event, a review of identifier
 stability, and a check that payloads do not leak sensitive metadata.
 
+## Schema Versioning
+
+**Current Version: 1**
+
+Every event emitted by this contract includes a `schema_version` field (type `u32`) 
+that explicitly identifies the event structure version. This enables backward-compatible
+event processing as the contract evolves.
+
+### Version History
+
+| Version | Introduced | Breaking Changes | Compatible Changes |
+|---------|------------|------------------|-------------------|
+| 1       | Initial    | Initial event schema | Added `schema_version` field to all events |
+
+### Compatibility Policy
+
+**Backward Compatibility Promise:**
+- Indexers can safely process events from known schema versions
+- New schema versions will only be introduced with major contract upgrades
+- Field additions are considered compatible changes (old indexers ignore new fields)
+- Field removals, renames, or type changes require a new schema version
+
+**Version Support:**
+- **Current Version (1):** Fully supported, recommended for all new integrations
+- **Future Versions:** Will be documented here with migration guides
+- **Unknown Versions:** Indexers should log warnings and apply fallback processing
+
+### Versioning Rules for Future Changes
+
+**Compatible Changes (no version bump required):**
+- Adding new optional fields to existing events
+- Adding entirely new event types
+- Adding new enum values (where backward compatibility is maintained)
+
+**Breaking Changes (require version bump):**
+- Removing fields from existing events
+- Renaming fields in existing events
+- Changing field types (e.g., `u64` to `String`)
+- Changing field semantics (e.g., switching from stroops to human units)
+- Reordering fields in the event structure
+
+**When to Bump Schema Version:**
+1. Increment `EVENT_SCHEMA_VERSION` constant in `src/lib.rs`
+2. Update this documentation with changes and migration notes
+3. Add version handling to backend correlation service
+4. Update tests to verify version presence and correctness
+
 ## Stability contract
 
 Events are defined in `src/lib.rs` under the
@@ -20,10 +67,22 @@ section using the `#[contractevent]` derive.
 - Topics and payload field names/types are a **public interface**. Do not
   rename or reorder fields without a contract version bump. See
   [`VERSIONING.md`](./VERSIONING.md) and `get_version()` / `migrate()`.
+- **Schema Version** = every event includes a `schema_version` field (u32) 
+  set to `EVENT_SCHEMA_VERSION` constant (currently 1). Indexers must check
+  this field and handle unknown versions gracefully.
 - All monetary `amount` values are integers in the token's base units
   (stroops for the 7-decimal native asset), never fractional "human" units.
 - All `timestamp` values are the ledger close time in Unix seconds
   (`env.ledger().timestamp()`).
+
+## Universal Fields
+
+Every event emitted by this contract includes these common fields:
+
+| Field           | Type   | Description                                |
+|-----------------|--------|--------------------------------------------|
+| `schema_version`| `u32`  | Event structure version (currently 1)     |
+| `timestamp`     | `u64`  | Ledger close time in Unix seconds         |
 
 ## Event catalog
 
@@ -52,6 +111,8 @@ section using the `#[contractevent]` derive.
 
 ## Payloads
 
+**Note:** All events include `schema_version` and `timestamp` fields in addition to the fields listed below.
+
 The six package lifecycle events share one shape (`PackageCreated`,
 `PackageClaimed`, `PackageDisbursed`, `PackageRevoked`, `PackageRefunded`,
 `PackageSwept`):
@@ -63,14 +124,19 @@ The six package lifecycle events share one shape (`PackageCreated`,
 | `amount`     | `i128`    | Package amount in token base units.               |
 | `actor`      | `Address` | Account that performed the action (funder/admin). |
 | `timestamp`  | `u64`     | Ledger close time (Unix seconds).                 |
+| `schema_version` | `u32` | Event structure version (currently 1).           |
+
+**Additional fields for specific events:**
+- `PackageClaimed` and `PackageDisbursed`: `receipt_hash: String` (optional off-chain receipt hash)
 
 Pool / administrative events:
 
-| Event                   | Payload                                                                   |
+| Event                   | Additional Fields                                                         |
 | ----------------------- | ------------------------------------------------------------------------- |
-| `EscrowFunded`          | `from: Address`, `token: Address`, `amount: i128`, `timestamp: u64`       |
+| `EscrowFunded`          | `from: Address`, `token: Address`, `amount: i128`                        |
 | `BatchCreatedEvent`     | `ids: Vec<u64>`, `admin: Address`, `total_amount: i128`                   |
-| `ExtendedEvent`         | `id: u64`, `admin: Address`, `old_expires_at: u64`, `new_expires_at: u64` |
+| `PackageReassigned`     | `package_id: u64`, `previous_recipient: Address`, `new_recipient: Address`, `actor: Address` |
+| `ExtendedEvent`         | `package_id: u64`, `admin: Address`, `old_expires_at: u64`, `new_expires_at: u64` |
 | `SurplusWithdrawnEvent` | `to: Address`, `token: Address`, `amount: i128`                           |
 | `ContractPausedEvent`   | `admin: Address`                                                          |
 | `ContractUnpausedEvent` | `admin: Address`                                                          |
@@ -78,7 +144,22 @@ Pool / administrative events:
 | `ActionUnpausedEvent`   | `admin: Address`, `action: Symbol`                                        |
 | `CampaignPausedEvent`   | `admin: Address`, `campaign_ref: String`                                  |
 | `CampaignUnpausedEvent` | `admin: Address`, `campaign_ref: String`                                  |
-| `PackageReassigned`     | `package_id: u64`, `previous_recipient: Address`, `new_recipient: Address`, `actor: Address`, `timestamp: u64` |
+
+**Delegate events:**
+| Event                   | Fields                                                                    |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `DelegateAdded`         | `package_id: u64`, `recipient: Address`, `delegate: Address`, `actor: Address`, `expires_at: u64` |
+| `DelegateRevoked`       | `package_id: u64`, `recipient: Address`, `delegate: Address`, `actor: Address` |
+| `DelegateClaimed`       | `package_id: u64`, `recipient: Address`, `delegate: Address`, `amount: i128`, `actor: Address` |
+
+**Admin events:**
+| Event                   | Fields                                                                    |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `AdminTransferInitiated`| `admin: Address`, `pending_admin: Address`                               |
+| `AdminTransferAccepted` | `admin: Address`                                                          |
+| `AdminTransferCancelled`| `admin: Address`                                                          |
+| `TokenAdded`            | `admin: Address`, `token: Address`                                        |
+| `TokenRemoved`          | `admin: Address`, `token: Address`                                        |
 
 ## Identifier stability (audit)
 
@@ -90,10 +171,11 @@ Pool / administrative events:
   Indexers can rely on either signal; the individual `package_created` events
   are authoritative per-package, and `batch_created_event.ids` gives the batch
   grouping.
-- `ExtendedEvent` uses the field name `id` (not `package_id`) for the package
-  key; it is the same identifier. This naming difference is intentional to
-  document here rather than change, since renaming is a breaking interface
-  change (see "Naming observations").
+- `ExtendedEvent` uses the field name `package_id` (updated from `id` in v1)
+  for consistency with other package events.
+- **Schema Version Stability:** The `schema_version` field provides explicit
+  versioning for event structure changes. Indexers should validate this field
+  and implement version-specific parsing logic as needed.
 
 ## Sensitive-metadata review (audit)
 
@@ -143,5 +225,38 @@ Recommended assertions when adding new event-emitting behavior:
    present exactly once.
 2. Assert the decoded payload fields match the inputs (e.g. `package_id`,
    `amount`, `recipient`).
-3. Regenerate and commit the affected `test_snapshots/*.json` so the snapshot
+3. **Assert the `schema_version` field is present and equals `EVENT_SCHEMA_VERSION`**.
+4. Regenerate and commit the affected `test_snapshots/*.json` so the snapshot
    diff stays authoritative.
+
+## Version Migration Guide for Indexers
+
+When processing events, indexers should:
+
+1. **Always check `schema_version`** before parsing event data
+2. **Log warnings** for unknown schema versions
+3. **Implement fallback logic** for unsupported versions
+4. **Maintain parsing logic** for all supported versions
+
+```typescript
+// Example version-aware event processing
+function parsePackageCreatedEvent(eventData: any): PackageCreated | null {
+  const version = eventData.schema_version;
+  
+  if (version === 1) {
+    // Current version parsing
+    return {
+      packageId: eventData.package_id,
+      recipient: eventData.recipient,
+      amount: eventData.amount,
+      actor: eventData.actor,
+      timestamp: eventData.timestamp,
+      schemaVersion: version
+    };
+  } else {
+    // Unknown version - log and return null or apply fallback logic
+    console.warn(`Unknown schema version ${version} for package_created event`);
+    return null;
+  }
+}
+```

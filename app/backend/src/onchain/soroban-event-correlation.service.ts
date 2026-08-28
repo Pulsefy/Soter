@@ -34,6 +34,7 @@ export interface SorobanEvent {
   txHash: string;
   ledger: number;
   eventIndex: number;
+  schemaVersion?: number;
 }
 
 interface ExtractedContractEvent {
@@ -49,6 +50,12 @@ export class SorobanEventCorrelationService {
   private readonly rpcUrl: string;
   private readonly networkPassphrase: string;
   private server: SorobanRpc.Server | null = null;
+
+  // Supported schema versions - add new versions here as they're released
+  private readonly SUPPORTED_SCHEMA_VERSIONS = new Set([1]);
+  
+  // Current expected schema version for new events
+  private readonly CURRENT_SCHEMA_VERSION = 1;
 
   // Event topics that we correlate
   private readonly CORRELATED_TOPICS = new Set([
@@ -255,7 +262,7 @@ export class SorobanEventCorrelationService {
         const topic = this.extractEventTopic(event);
         if (!topic) continue;
 
-        const payload = this.parseEventPayload(event);
+        const { payload, schemaVersion } = this.parseEventPayload(event);
 
         events.push({
           topic,
@@ -263,6 +270,7 @@ export class SorobanEventCorrelationService {
           txHash: event.txHash || '',
           ledger: event.ledger || 0,
           eventIndex: event.transactionIndex || 0,
+          schemaVersion,
         });
       }
     }
@@ -284,19 +292,89 @@ export class SorobanEventCorrelationService {
   }
 
   /**
-   * Parse event payload from Soroban event
+   * Parse event payload from Soroban event and extract schema version
    */
-  private parseEventPayload(event: { value?: xdr.ScVal }): unknown {
+  private parseEventPayload(event: { value?: xdr.ScVal }): {
+    payload: unknown;
+    schemaVersion?: number;
+  } {
     if (event.value) {
       try {
-        return scValToNative(event.value);
+        const payload = scValToNative(event.value);
+        let schemaVersion: number | undefined;
+
+        // Extract schema_version if present in the payload
+        if (payload && typeof payload === 'object' && 'schema_version' in payload) {
+          const version = (payload as any).schema_version;
+          if (typeof version === 'number') {
+            schemaVersion = version;
+          }
+        }
+
+        return { payload, schemaVersion };
       } catch {
-        return event.value.toXDR().toString('base64');
+        return { payload: event.value.toXDR().toString('base64') };
       }
     }
-    return null;
+    return { payload: null };
   }
 
+  /**
+   * Validate schema version and log warnings for unknown versions
+   */
+  private validateSchemaVersion(event: SorobanEvent): boolean {
+    const { schemaVersion, topic, txHash } = event;
+
+    // If no schema version is present, assume it's a legacy event (pre-versioning)
+    if (schemaVersion === undefined) {
+      this.logger.warn(
+        `Event ${topic} in transaction ${txHash} has no schema_version field - assuming legacy format`,
+        {
+          topic,
+          txHash,
+          eventIndex: event.eventIndex,
+        }
+      );
+      return true; // Allow processing with legacy logic
+    }
+
+    // Check if version is supported
+    if (!this.SUPPORTED_SCHEMA_VERSIONS.has(schemaVersion)) {
+      this.logger.warn(
+        `Unknown schema version ${schemaVersion} for event ${topic} in transaction ${txHash}`,
+        {
+          topic,
+          txHash,
+          eventIndex: event.eventIndex,
+          schemaVersion,
+          supportedVersions: Array.from(this.SUPPORTED_SCHEMA_VERSIONS),
+        }
+      );
+      
+      // Emit metrics for unknown version
+      this.metricsService.incrementCounter('soroban_event_unknown_schema_version', {
+        topic,
+        version: schemaVersion.toString(),
+      });
+      
+      return false; // Reject unknown versions
+    }
+
+    // Log info for version mismatches (not current but supported)
+    if (schemaVersion !== this.CURRENT_SCHEMA_VERSION) {
+      this.logger.log(
+        `Processing event ${topic} with older schema version ${schemaVersion} (current: ${this.CURRENT_SCHEMA_VERSION})`,
+        {
+          topic,
+          txHash,
+          schemaVersion,
+          currentVersion: this.CURRENT_SCHEMA_VERSION,
+        }
+      );
+    }
+
+    return true;
+  }
   /**
    * Process events and create correlation records
    */
@@ -313,6 +391,19 @@ export class SorobanEventCorrelationService {
 
     for (const event of events) {
       try {
+        // Validate schema version first
+        if (!this.validateSchemaVersion(event)) {
+          result.skipped++;
+          result.details.push({
+            txHash: event.txHash,
+            eventIndex: event.eventIndex,
+            eventTopic: event.topic,
+            success: false,
+            error: `Unsupported schema version: ${event.schemaVersion}`,
+          });
+          continue;
+        }
+
         const detail = await this.correlateSingleEvent(
           event,
           correlationSource,
@@ -384,6 +475,7 @@ export class SorobanEventCorrelationService {
         claimId,
         packageId,
         payload: event.payload as any,
+        schemaVersion: event.schemaVersion || null,
         correlationSource,
       },
     });
@@ -528,13 +620,19 @@ export class SorobanEventCorrelationService {
       );
 
       const sorobanEvents: SorobanEvent[] = contractEvents
-        .map((e, idx) => ({
-          topic: this.extractEventTopic(e) || '',
-          payload: this.parseEventPayload(e),
-          txHash,
-          ledger: result.ledger || 0,
-          eventIndex: idx,
-        }))
+        .map((e, idx) => {
+          const topic = this.extractEventTopic(e) || '';
+          const { payload, schemaVersion } = this.parseEventPayload(e);
+          
+          return {
+            topic,
+            payload,
+            txHash,
+            ledger: result.ledger || 0,
+            eventIndex: idx,
+            schemaVersion,
+          };
+        })
         .filter(e => e.topic);
 
       return this.processEvents(sorobanEvents, correlationSource);
@@ -620,6 +718,7 @@ export class SorobanEventCorrelationService {
     packageId?: string;
     startLedger?: number;
     endLedger?: number;
+    schemaVersion?: number;
   }) {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
@@ -630,6 +729,7 @@ export class SorobanEventCorrelationService {
     if (params.eventTopic) where.eventTopic = params.eventTopic;
     if (params.claimId) where.claimId = params.claimId;
     if (params.packageId) where.packageId = params.packageId;
+    if (params.schemaVersion !== undefined) where.schemaVersion = params.schemaVersion;
     if (params.startLedger || params.endLedger) {
       where.ledger = {};
       if (params.startLedger) where.ledger.gte = params.startLedger;
@@ -651,5 +751,39 @@ export class SorobanEventCorrelationService {
     ]);
 
     return { data, total, page, limit };
+  }
+
+  /**
+   * Get supported schema versions for client information
+   */
+  getSupportedSchemaVersions(): number[] {
+    return Array.from(this.SUPPORTED_SCHEMA_VERSIONS).sort();
+  }
+
+  /**
+   * Get current schema version
+   */
+  getCurrentSchemaVersion(): number {
+    return this.CURRENT_SCHEMA_VERSION;
+  }
+
+  /**
+   * Get schema version statistics for monitoring
+   */
+  async getSchemaVersionStats(): Promise<Array<{ version: number | null; count: number }>> {
+    const result = await this.prisma.sorobanEventCorrelation.groupBy({
+      by: ['schemaVersion'],
+      _count: {
+        schemaVersion: true,
+      },
+      orderBy: {
+        schemaVersion: 'asc',
+      },
+    });
+
+    return result.map(r => ({
+      version: r.schemaVersion,
+      count: r._count.schemaVersion,
+    }));
   }
 }

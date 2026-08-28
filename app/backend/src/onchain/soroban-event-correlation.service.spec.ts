@@ -62,10 +62,12 @@ describe('SorobanEventCorrelationService', () => {
           package_id: 'pkg_123456789',
           recipient: 'GABC...',
           amount: '1000',
+          schema_version: 1,
         },
         txHash: 'abc123def456',
         ledger: 12345,
         eventIndex: 0,
+        schemaVersion: 1,
       };
 
       const result = service.extractIdentifiers(event);
@@ -312,6 +314,225 @@ describe('SorobanEventCorrelationService', () => {
       const result = service.extractIdentifiers(event);
       // Should return package_id first since it's checked first
       expect(result).toEqual({ packageId: 'pkg_123' });
+    });
+  });
+
+  describe('schema version handling', () => {
+    it('should accept events with supported schema version', () => {
+      const event: SorobanEvent = {
+        topic: 'package_created',
+        payload: {
+          package_id: 'pkg_123',
+          schema_version: 1,
+        },
+        txHash: 'abc123def456',
+        ledger: 12345,
+        eventIndex: 0,
+        schemaVersion: 1,
+      };
+
+      // Call private validateSchemaVersion method via any
+      const result = (service as any).validateSchemaVersion(event);
+      expect(result).toBe(true);
+    });
+
+    it('should log warning and reject events with unsupported schema version', () => {
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+      const mockLogger = {
+        warn: jest.fn(),
+        log: jest.fn(),
+        error: jest.fn(),
+      };
+      (service as any).logger = mockLogger;
+
+      const event: SorobanEvent = {
+        topic: 'package_created',
+        payload: {
+          package_id: 'pkg_123',
+          schema_version: 999,
+        },
+        txHash: 'abc123def456',
+        ledger: 12345,
+        eventIndex: 0,
+        schemaVersion: 999,
+      };
+
+      const result = (service as any).validateSchemaVersion(event);
+      expect(result).toBe(false);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Unknown schema version 999'),
+        expect.objectContaining({
+          topic: 'package_created',
+          schemaVersion: 999,
+        })
+      );
+      expect(mockMetricsService.incrementCounter).toHaveBeenCalledWith(
+        'soroban_event_unknown_schema_version',
+        {
+          topic: 'package_created',
+          version: '999',
+        }
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should accept events without schema version (legacy events)', () => {
+      const mockLogger = {
+        warn: jest.fn(),
+        log: jest.fn(),
+        error: jest.fn(),
+      };
+      (service as any).logger = mockLogger;
+
+      const event: SorobanEvent = {
+        topic: 'package_created',
+        payload: {
+          package_id: 'pkg_123',
+        },
+        txHash: 'abc123def456',
+        ledger: 12345,
+        eventIndex: 0,
+      };
+
+      const result = (service as any).validateSchemaVersion(event);
+      expect(result).toBe(true);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('has no schema_version field'),
+        expect.objectContaining({
+          topic: 'package_created',
+        })
+      );
+    });
+
+    it('should log info for older but supported schema versions', () => {
+      // Temporarily add version 0 to supported versions for this test
+      const originalSupported = (service as any).SUPPORTED_SCHEMA_VERSIONS;
+      (service as any).SUPPORTED_SCHEMA_VERSIONS = new Set([0, 1]);
+      (service as any).CURRENT_SCHEMA_VERSION = 1;
+
+      const mockLogger = {
+        warn: jest.fn(),
+        log: jest.fn(),
+        error: jest.fn(),
+      };
+      (service as any).logger = mockLogger;
+
+      const event: SorobanEvent = {
+        topic: 'package_created',
+        payload: {
+          package_id: 'pkg_123',
+          schema_version: 0,
+        },
+        txHash: 'abc123def456',
+        ledger: 12345,
+        eventIndex: 0,
+        schemaVersion: 0,
+      };
+
+      const result = (service as any).validateSchemaVersion(event);
+      expect(result).toBe(true);
+      expect(mockLogger.log).toHaveBeenCalledWith(
+        expect.stringContaining('older schema version 0'),
+        expect.objectContaining({
+          schemaVersion: 0,
+          currentVersion: 1,
+        })
+      );
+
+      // Restore original supported versions
+      (service as any).SUPPORTED_SCHEMA_VERSIONS = originalSupported;
+    });
+
+    it('should extract schema version from payload during parsing', () => {
+      const mockEvent = {
+        value: {
+          toXDR: () => ({ toString: () => 'base64string' })
+        }
+      };
+
+      // Mock scValToNative to return test payload
+      const originalScVal = require('@stellar/stellar-sdk').scValToNative;
+      require('@stellar/stellar-sdk').scValToNative = jest.fn().mockReturnValue({
+        package_id: 'pkg_123',
+        schema_version: 1,
+        amount: 1000,
+      });
+
+      const result = (service as any).parseEventPayload(mockEvent);
+      
+      expect(result).toEqual({
+        payload: {
+          package_id: 'pkg_123',
+          schema_version: 1,
+          amount: 1000,
+        },
+        schemaVersion: 1,
+      });
+
+      // Restore original
+      require('@stellar/stellar-sdk').scValToNative = originalScVal;
+    });
+
+    it('should handle payload without schema_version during parsing', () => {
+      const mockEvent = {
+        value: {
+          toXDR: () => ({ toString: () => 'base64string' })
+        }
+      };
+
+      const originalScVal = require('@stellar/stellar-sdk').scValToNative;
+      require('@stellar/stellar-sdk').scValToNative = jest.fn().mockReturnValue({
+        package_id: 'pkg_123',
+        amount: 1000,
+      });
+
+      const result = (service as any).parseEventPayload(mockEvent);
+      
+      expect(result).toEqual({
+        payload: {
+          package_id: 'pkg_123',
+          amount: 1000,
+        },
+        schemaVersion: undefined,
+      });
+
+      require('@stellar/stellar-sdk').scValToNative = originalScVal;
+    });
+  });
+
+  describe('schema version utility methods', () => {
+    it('should return supported schema versions', () => {
+      const versions = service.getSupportedSchemaVersions();
+      expect(versions).toEqual([1]);
+      expect(Array.isArray(versions)).toBe(true);
+    });
+
+    it('should return current schema version', () => {
+      const version = service.getCurrentSchemaVersion();
+      expect(version).toBe(1);
+      expect(typeof version).toBe('number');
+    });
+
+    it('should get schema version statistics', async () => {
+      const mockStats = [
+        { schemaVersion: 1, _count: { schemaVersion: 10 } },
+        { schemaVersion: null, _count: { schemaVersion: 5 } },
+      ];
+
+      mockPrismaService.sorobanEventCorrelation.groupBy = jest.fn().mockResolvedValue(mockStats);
+
+      const result = await service.getSchemaVersionStats();
+      
+      expect(result).toEqual([
+        { version: 1, count: 10 },
+        { version: null, count: 5 },
+      ]);
+      expect(mockPrismaService.sorobanEventCorrelation.groupBy).toHaveBeenCalledWith({
+        by: ['schemaVersion'],
+        _count: { schemaVersion: true },
+        orderBy: { schemaVersion: 'asc' },
+      });
     });
   });
 });

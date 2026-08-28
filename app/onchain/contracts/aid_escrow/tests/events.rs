@@ -90,6 +90,13 @@ fn assert_field_exists(env: &Env, data: &Val, field: &str) {
     );
 }
 
+fn assert_schema_version(env: &Env, data: &Val, expected_version: u32) {
+    let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(env, data).unwrap();
+    let val = map.get(sym(env, "schema_version")).expect("schema_version field missing from event");
+    let version = u32::try_from_val(env, &val).expect("schema_version is not u32");
+    assert_eq!(version, expected_version, "schema_version mismatch");
+}
+
 fn data_string(env: &Env, data: &Val, field: &str) -> soroban_sdk::String {
     let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(env, data).unwrap();
     let val = map.get(sym(env, field)).expect("missing field");
@@ -116,6 +123,7 @@ fn test_escrow_funded_event() {
     assert_eq!(data_address(&env, &data, "token"), token_client.address);
     assert_eq!(data_i128(&env, &data, "amount"), 5 * UNIT);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -150,6 +158,7 @@ fn test_package_created_event() {
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), admin);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -188,6 +197,7 @@ fn test_package_reassigned_event() {
     assert_eq!(data_address(&env, &data, "new_recipient"), new_recipient);
     assert_eq!(data_address(&env, &data, "actor"), admin);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -222,6 +232,7 @@ fn test_package_claimed_event() {
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), recipient);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
     // receipt_hash is absent from metadata -> must be an empty string
     assert_eq!(
         data_string(&env, &data, "receipt_hash"),
@@ -261,6 +272,7 @@ fn test_package_disbursed_event() {
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), admin);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
     // receipt_hash is absent from metadata -> must be an empty string
     assert_eq!(
         data_string(&env, &data, "receipt_hash"),
@@ -305,6 +317,7 @@ fn test_package_revoked_event() {
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), admin);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -342,6 +355,7 @@ fn test_package_refunded_event() {
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), admin);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -377,6 +391,7 @@ fn test_extended_event_records_old_and_new_expiry() {
     assert_eq!(data_u64(&env, &data, "old_expires_at"), old_expires_at);
     assert_eq!(data_u64(&env, &data, "new_expires_at"), new_expires_at);
     assert_field_exists(&env, &data, "admin");
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -415,6 +430,7 @@ fn test_batch_created_event() {
     assert_eq!(ids.get(1).unwrap(), 1);
     assert_eq!(data_address(&env, &data, "admin"), admin);
     assert_eq!(data_i128(&env, &data, "total_amount"), 3 * UNIT);
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -438,6 +454,7 @@ fn test_surplus_withdrawn_event() {
     assert_eq!(data_address(&env, &data, "to"), recipient);
     assert_eq!(data_address(&env, &data, "token"), token_client.address);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -454,6 +471,7 @@ fn test_contract_paused_event() {
 
     let data = last_event_data(&env, &contract_id, "contract_paused_event");
     assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -471,6 +489,7 @@ fn test_contract_unpaused_event() {
 
     let data = last_event_data(&env, &contract_id, "contract_unpaused_event");
     assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -488,6 +507,7 @@ fn test_action_paused_event() {
     let data = last_event_data(&env, &contract_id, "action_paused_event");
     assert_eq!(data_address(&env, &data, "admin"), admin);
     assert_eq!(data_symbol(&env, &data, "action"), sym(&env, "claim"));
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -506,6 +526,7 @@ fn test_action_unpaused_event() {
     let data = last_event_data(&env, &contract_id, "action_unpaused_event");
     assert_eq!(data_address(&env, &data, "admin"), admin);
     assert_eq!(data_symbol(&env, &data, "action"), sym(&env, "claim"));
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -546,6 +567,7 @@ fn test_delegate_added_event() {
     assert_eq!(data_address(&env, &data, "actor"), admin);
     assert_eq!(data_u64(&env, &data, "expires_at"), expiry);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -588,6 +610,7 @@ fn test_delegate_revoked_event() {
     assert_eq!(data_address(&env, &data, "delegate"), delegate);
     assert_eq!(data_address(&env, &data, "actor"), admin);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -634,6 +657,7 @@ fn test_sweep_emits_delegate_revoked_event() {
     assert_eq!(data_address(&env, &data, "delegate"), delegate);
     assert_eq!(data_address(&env, &data, "actor"), contract_id);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -677,6 +701,7 @@ fn test_sweep_emits_package_swept_event() {
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), contract_id);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -721,6 +746,7 @@ fn test_delegate_claimed_event() {
     assert_eq!(data_address(&env, &data, "delegate"), delegate);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
 
     // Also check that DelegateRevoked event was emitted (delegate is cleared after claim)
     let revoked_data = last_event_data(&env, &contract_id, "delegate_revoked");
@@ -729,6 +755,7 @@ fn test_delegate_claimed_event() {
     assert_eq!(data_address(&env, &revoked_data, "delegate"), delegate);
     // Actor for revoked after claim is the delegate who claimed
     assert_eq!(data_address(&env, &revoked_data, "actor"), delegate);
+    assert_schema_version(&env, &revoked_data, 1);
 }
 
 #[test]
@@ -749,6 +776,7 @@ fn test_token_added_event() {
     assert_eq!(data_address(&env, &data, "admin"), admin);
     assert_eq!(data_address(&env, &data, "token"), token_client.address);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
 }
 
 #[test]
@@ -770,4 +798,220 @@ fn test_token_removed_event() {
     assert_eq!(data_address(&env, &data, "admin"), admin);
     assert_eq!(data_address(&env, &data, "token"), token_client.address);
     assert_field_exists(&env, &data, "timestamp");
+    assert_schema_version(&env, &data, 1);
+}
+
+/// Tests that every emitted event contains a schema_version field
+#[test]
+fn test_all_events_have_schema_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
+
+    // Test multiple different event types to ensure comprehensive coverage
+    client.create_package(
+        &admin,
+        &42u64,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &(env.ledger().timestamp() + 86400),
+        &Map::new(&env),
+    );
+    
+    client.pause();
+    client.unpause();
+    
+    // Get all events and verify each has schema_version
+    let all_events = env.events().all();
+    let contract_events: Vec<_> = all_events
+        .into_iter()
+        .filter(|(id, _, _)| id == &contract_id)
+        .collect();
+    
+    // Should have at least 4 events: fund, create_package, pause, unpause
+    assert!(contract_events.len() >= 4, "Expected at least 4 contract events");
+    
+    // Check every contract event has schema_version field
+    for (_, _, event_data) in contract_events {
+        let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(&env, &event_data).unwrap();
+        assert!(
+            map.get(sym(&env, "schema_version")).is_some(),
+            "Event missing schema_version field: {:?}",
+            map
+        );
+        
+        // Verify it's the correct version
+        let version_val = map.get(sym(&env, "schema_version")).unwrap();
+        let version = u32::try_from_val(&env, &version_val).expect("schema_version not u32");
+        assert_eq!(version, 1, "Expected schema version 1");
+    }
+}
+
+/// Tests that schema version value matches the EVENT_SCHEMA_VERSION constant
+#[test]
+fn test_schema_version_matches_constant() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
+    // Get the fund event which should be the last event
+    let data = last_event_data(&env, &contract_id, "escrow_funded");
+    
+    // Verify schema version is exactly 1 (matching EVENT_SCHEMA_VERSION)
+    assert_schema_version(&env, &data, 1);
+}
+
+/// Tests behavior with batch operations to ensure all events in a batch have schema version
+#[test]
+fn test_batch_events_all_have_schema_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient1 = Address::generate(&env);
+    let recipient2 = Address::generate(&env);
+    let recipient3 = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(6 * UNIT));
+
+    let recipients = Vec::from_array(&env, [recipient1, recipient2, recipient3]);
+    let amounts = Vec::from_array(&env, [UNIT, UNIT, UNIT]);
+    let metadatas = Vec::from_array(&env, [Map::new(&env), Map::new(&env), Map::new(&env)]);
+
+    // Clear existing events
+    let events_before = env.events().all().len();
+    
+    client.batch_create_packages(
+        &admin,
+        &recipients,
+        &amounts,
+        &token_client.address,
+        &86400u64,
+        &metadatas,
+    );
+
+    // Get all events after batch operation
+    let all_events = env.events().all();
+    let new_events: Vec<_> = all_events
+        .into_iter()
+        .skip(events_before)
+        .filter(|(id, _, _)| id == &contract_id)
+        .collect();
+
+    // Should have 3 individual PackageCreated events + 1 BatchCreatedEvent
+    assert_eq!(new_events.len(), 4, "Expected 4 events from batch operation");
+
+    // Verify every event has schema_version = 1
+    for (_, _, event_data) in new_events {
+        let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(&env, &event_data).unwrap();
+        let version_val = map.get(sym(&env, "schema_version"))
+            .expect("Event missing schema_version field");
+        let version = u32::try_from_val(&env, &version_val).expect("schema_version not u32");
+        assert_eq!(version, 1, "Expected schema version 1 in batch event");
+    }
+}
+
+/// Tests that delegate-related events all include schema version
+#[test]
+fn test_delegate_events_have_schema_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let delegate = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
+
+    let expires_at = env.ledger().timestamp() + 86400;
+    client.create_package(
+        &admin,
+        &42u64,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &expires_at,
+        &Map::new(&env),
+    );
+
+    // Test delegate lifecycle: add -> claim -> auto-revoke
+    let expiry = env.ledger().timestamp() + 3600;
+    client.set_delegate_with_expiry(&admin, &42u64, &delegate, &expiry);
+
+    // Check DelegateAdded has schema_version
+    let added_data = last_event_data(&env, &contract_id, "delegate_added");
+    assert_schema_version(&env, &added_data, 1);
+
+    // Delegate claims (which also triggers DelegateRevoked and DelegateClaimed)
+    let proof: Vec<soroban_sdk::String> = Vec::new(&env);
+    client.claim_with_proof(&42u64, &delegate, &proof);
+
+    // Check DelegateClaimed has schema_version
+    let claimed_data = last_event_data(&env, &contract_id, "delegate_claimed");
+    assert_schema_version(&env, &claimed_data, 1);
+
+    // Check auto-generated DelegateRevoked has schema_version
+    let revoked_data = last_event_data(&env, &contract_id, "delegate_revoked");
+    assert_schema_version(&env, &revoked_data, 1);
+}
+
+/// Tests that administrative events have schema version
+#[test]
+fn test_admin_events_have_schema_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let (token_client, _) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    // Test admin transfer events
+    client.transfer_admin(&new_admin);
+    let initiated_data = last_event_data(&env, &contract_id, "admin_transfer_initiated");
+    assert_schema_version(&env, &initiated_data, 1);
+
+    client.cancel_admin_transfer();
+    let cancelled_data = last_event_data(&env, &contract_id, "admin_transfer_cancelled");
+    assert_schema_version(&env, &cancelled_data, 1);
+
+    // Test token management events
+    client.add_allowed_token(&token_client.address);
+    let token_added_data = last_event_data(&env, &contract_id, "token_added");
+    assert_schema_version(&env, &token_added_data, 1);
+
+    client.remove_allowed_token(&token_client.address);
+    let token_removed_data = last_event_data(&env, &contract_id, "token_removed");
+    assert_schema_version(&env, &token_removed_data, 1);
 }
