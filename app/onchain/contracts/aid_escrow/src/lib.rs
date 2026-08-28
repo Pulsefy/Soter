@@ -47,6 +47,11 @@ pub const MAX_BATCH_CLAIM_SIZE: u32 = 25;
 /// Increment this when making breaking changes to event structures.
 pub const EVENT_SCHEMA_VERSION: u32 = 1;
 
+/// Maximum number of package IDs that `list_recipient_packages` may return in
+/// a single call. Enforcing this keeps the response within Soroban's read-entry
+/// resource budget even for recipients with large package histories.
+pub const MAX_PAGE_SIZE: u32 = 50;
+
 // --- Data Types ---
 
 #[contracttype]
