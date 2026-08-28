@@ -835,7 +835,7 @@ fn test_all_events_have_schema_version() {
 
     // Get all events and verify each has schema_version
     let all_events = env.events().all();
-    let contract_events: Vec<_> = all_events
+    let contract_events: std::vec::Vec<_> = all_events
         .into_iter()
         .filter(|(id, _, _)| id == &contract_id)
         .collect();
@@ -907,7 +907,7 @@ fn test_batch_events_all_have_schema_version() {
     let metadatas = Vec::from_array(&env, [Map::new(&env), Map::new(&env), Map::new(&env)]);
 
     // Clear existing events
-    let events_before = env.events().all().len();
+    let events_before = env.events().all().len() as usize;
 
     client.batch_create_packages(
         &admin,
@@ -920,7 +920,7 @@ fn test_batch_events_all_have_schema_version() {
 
     // Get all events after batch operation
     let all_events = env.events().all();
-    let new_events: Vec<_> = all_events
+    let new_events: std::vec::Vec<_> = all_events
         .into_iter()
         .skip(events_before)
         .filter(|(id, _, _)| id == &contract_id)
