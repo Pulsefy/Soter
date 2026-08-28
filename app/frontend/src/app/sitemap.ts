@@ -1,4 +1,5 @@
-import { MetadataRoute } from 'next';
+import type { MetadataRoute } from 'next';
+import { locales } from '@/i18n';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl =
@@ -15,10 +16,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   const routes = isProduction ? baseRoutes : [...baseRoutes, ...demoRoutes];
 
-  return routes.map(route => ({
-    url: `${baseUrl}${route}`,
-    lastModified: new Date(),
-    changeFrequency: 'daily',
-    priority: route === '' ? 1.0 : 0.8,
-  }));
+  return locales.flatMap(locale =>
+    routes.map(route => ({
+      url: `${baseUrl}/${locale}${route}`,
+      lastModified: new Date(),
+      changeFrequency: 'daily' as const,
+      priority: route === '' ? 1.0 : 0.8,
+    })),
+  );
 }
