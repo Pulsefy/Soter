@@ -107,6 +107,121 @@ export class DeploymentMetadataController {
   }
 
   /**
+   * Get network metadata across all deployments.
+   * GET /deployment-metadata/networks
+   * @public used by admin and receipt surfaces
+   */
+  @Get('networks')
+  @ApiOperation({
+    summary: 'Get network metadata',
+    description:
+      'Returns a list of networks represented in deployment metadata, including display labels and explorer base URLs.',
+  })
+  @ApiOkResponse({
+    description: 'Network metadata.',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          network: { type: 'string' },
+          label: { type: 'string' },
+          explorerBaseUrl: { type: 'string' },
+          contractCount: { type: 'integer' },
+        },
+      },
+    },
+  })
+  async getNetworks(): Promise<
+    Array<{
+      network: string;
+      label: string;
+      explorerBaseUrl: string;
+      contractCount: number;
+    }>
+  > {
+    this.logger.log('Fetching network metadata from deployment metadata');
+    const records = await this.deploymentMetadataService.findAll();
+    const networks = new Map<
+      string,
+      { label: string; explorerBaseUrl: string; contractCount: number }
+    >();
+
+    for (const record of records) {
+      const network = record.network;
+      const existing = networks.get(network) ?? {
+        label: this.getNetworkLabel(network),
+        explorerBaseUrl: this.getExplorerBaseUrl(network),
+        contractCount: 0,
+      };
+      existing.contractCount += 1;
+      networks.set(network, existing);
+    }
+
+    return Array.from(networks.entries()).map(([network, metadata]) => ({
+      network,
+      ...metadata,
+    }));
+  }
+
+  /**
+   * Get active contract registry values.
+   * GET /deployment-metadata/registry
+   * @public used by admin and receipt surfaces
+   */
+  @Get('registry')
+  @ApiOperation({
+    summary: 'Get active contract registry',
+    description:
+      'Returns deployment metadata with registry values and explorer links for active contracts.',
+  })
+  @ApiOkResponse({
+    description: 'Contract registry entries.',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          registryValue: { type: 'string' },
+          explorerUrl: { type: 'string' },
+        },
+      },
+    },
+  })
+  async getRegistry(): Promise<
+    Array<DeploymentMetadataResponseDto & { registryValue: string; explorerUrl: string }>
+  > {
+    this.logger.log('Fetching active contract registry');
+    const records = await this.deploymentMetadataService.findAll();
+    return records.map((record) => ({
+      ...record,
+      registryValue: `${record.network}.${record.contractName}=${record.contractId}`,
+      explorerUrl: `${this.getExplorerBaseUrl(record.network)}${record.contractId}`,
+    }));
+  }
+
+  private getNetworkLabel(network: string): string {
+    const labels: Record<string, string> = {
+      mainnet: 'Mainnet',
+      testnet: 'Testnet',
+      sepolia: 'Sepolia',
+      goerli: 'Goerli',
+      localhost: 'Local',
+    };
+    return labels[network] ?? network;
+  }
+
+  private getExplorerBaseUrl(network: string): string {
+    const explorers: Record<string, string> = {
+      mainnet: 'https://etherscan.io/address/',
+      sepolia: 'https://sepolia.etherscan.io/address/',
+      goerli: 'https://goerli.etherscan.io/address/',
+      testnet: 'https://testnet.bscscan.com/address/',
+    };
+    return explorers[network] ?? 'https://etherscan.io/address/';
+  }
+
+  /**
    * Get deployment metadata by network
    * GET /deployment-metadata/by-network/:network
    * @protected admin only
