@@ -111,6 +111,14 @@ class Settings(BaseSettings):
     # Load shedding settings
     load_shed_memory_threshold_percent: float = 90.0
     load_shed_max_celery_queue_depth: int = 100
+    # Tiered queue-depth thresholds keyed by job priority level.
+    # Lower-priority work is shed first as queue pressure builds.
+    load_shed_queue_depth_low_priority: int = 50
+    load_shed_queue_depth_normal_priority: int = 100
+    load_shed_queue_depth_high_priority: int = 200
+    # Provider health: when fewer than this fraction of configured LLM
+    # providers are available, we consider the provider pool "degraded".
+    load_shed_provider_degraded_ratio: float = 0.5
 
     # Dead-letter replay settings
     dead_letter_max_replay_attempts: int = 5
@@ -284,6 +292,16 @@ class Settings(BaseSettings):
                 self.verification_artifact_url_ttl_seconds,
             ),
             ("PROOF_OF_LIFE_MIN_FACE_SIZE", self.proof_of_life_min_face_size),
+            ("LOAD_SHED_MAX_CELERY_QUEUE_DEPTH", self.load_shed_max_celery_queue_depth),
+            ("LOAD_SHED_QUEUE_DEPTH_LOW_PRIORITY", self.load_shed_queue_depth_low_priority),
+            (
+                "LOAD_SHED_QUEUE_DEPTH_NORMAL_PRIORITY",
+                self.load_shed_queue_depth_normal_priority,
+            ),
+            (
+                "LOAD_SHED_QUEUE_DEPTH_HIGH_PRIORITY",
+                self.load_shed_queue_depth_high_priority,
+            ),
         )
         for key, value in positive_numeric_settings:
             if value <= 0:
@@ -294,6 +312,11 @@ class Settings(BaseSettings):
             _add(
                 "PROOF_OF_LIFE_CONFIDENCE_THRESHOLD",
                 f"must be between 0.0 and 1.0 (got {self.proof_of_life_confidence_threshold})",
+            )
+        if not 0.0 < self.load_shed_provider_degraded_ratio <= 1.0:
+            _add(
+                "LOAD_SHED_PROVIDER_DEGRADED_RATIO",
+                f"must be between 0.0 (exclusive) and 1.0 (inclusive) (got {self.load_shed_provider_degraded_ratio})",
             )
         if not 1 <= int(self.port) <= 65535:
             _add("PORT", f"must be between 1 and 65535 (got {self.port})")

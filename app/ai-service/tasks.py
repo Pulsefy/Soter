@@ -613,7 +613,10 @@ def create_task(task_type: str, payload: Dict[str, Any]) -> str:
     # Initialize task status
     update_task_status(task_id, "pending")
 
-    ensure_queue_capacity()
+    priority = None
+    if isinstance(payload, dict):
+        priority = payload.get("priority")
+    ensure_queue_capacity(priority=priority)
 
     try:
         # Queue the task using the lazy-registered task

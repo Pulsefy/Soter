@@ -24,18 +24,36 @@ REQUESTS_SHED_TOTAL = Counter(
     "Requests rejected due to overload (load shedding)",
     ["reason", "method", "endpoint"],
 )
-REQUEST_REJECTIONS_TOTAL = Counter(
-    "api_request_rejections_total",
-    "Requests rejected or constrained by request safety limits",
-    ["endpoint", "reason"],
+REQUESTS_SHED_DETAIL = Counter(
+    "requests_shed_detail_total",
+    "Detailed load-shedding decisions with priority, queue tier, and provider state",
+    ["reason", "method", "endpoint", "priority", "queue_tier", "provider_state"],
 )
-RATE_LIMIT_EXCEEDED_TOTAL = Counter(
-    "rate_limit_exceeded_total",
-    "Requests rejected due to rate limiting",
-    ["endpoint", "method"],
+LOAD_SHED_LATENCY = Histogram(
+    "load_shed_decision_seconds",
+    "Time spent evaluating load-shedding conditions",
+    ["endpoint"],
 )
 CELERY_QUEUE_DEPTH = Gauge(
     "celery_queue_depth", "Pending tasks in the Celery default queue"
+)
+CELERY_QUEUE_TIER = Gauge(
+    "celery_queue_tier",
+    "Current queue pressure tier (0=ok, 1=low_exceeded, 2=normal_exceeded, 3=high_exceeded)",
+)
+PROVIDER_HEALTH_STATE = Gauge(
+    "provider_health_state",
+    "LLM provider pool health: 0=healthy, 1=degraded, 2=unavailable",
+)
+PROVIDER_AVAILABLE_COUNT = Gauge(
+    "provider_available_count",
+    "Number of LLM providers currently available (circuit closed)",
+    ["capability"],
+)
+PROVIDER_CONFIGURED_COUNT = Gauge(
+    "provider_configured_count",
+    "Number of LLM providers currently configured/enabled",
+    ["capability"],
 )
 
 # Dead-letter queue metrics
