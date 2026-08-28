@@ -7,6 +7,50 @@ import {
 } from './dto/verification-result.dto';
 import { DeploymentMetadataService } from '../deployment-metadata/deployment-metadata.service';
 import { DeploymentMetadataResponseDto } from '../deployment-metadata/dto/deployment-metadata.dto';
+import type { Prisma } from '@prisma/client';
+
+/**
+ * Anchor metadata written by the AI service onto a claim.
+ *
+ * Stored in the Claim.anchorMetadata Json column, so it arrives untyped and
+ * must be narrowed before use. Both camelCase and snake_case spellings are
+ * accepted because the AI service has emitted both historically.
+ */
+interface ClaimAnchorMetadata {
+  packageId?: string;
+  package_id?: string;
+  campaignRef?: string;
+  campaign_ref?: string;
+}
+
+/**
+ * Narrow an untyped value to a plain object so its properties can be read.
+ *
+ * Returns null for null, arrays and scalars. Used at the webhook boundary,
+ * where payloads are attacker-controlled and must not be trusted to have any
+ * particular shape.
+ */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Narrow a Prisma Json column to the anchor metadata shape.
+ *
+ * Returns an empty object for null, arrays and scalars, so callers can read
+ * properties without further guarding.
+ */
+function readAnchorMetadata(
+  value: Prisma.JsonValue | null | undefined,
+): ClaimAnchorMetadata {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+  return value as ClaimAnchorMetadata;
+}
 
 @Injectable()
 export class VerificationMetadataService {
@@ -71,22 +115,14 @@ export class VerificationMetadataService {
         throw new BadRequestException(`Claim ${claimId} not found`);
       }
 
-      // Build metadata with stable identifiers
-      // Use type assertion for fields that may exist on the claim but not in the Prisma type
-      const claimAny = claim as any;
-
-      // Get package ID from various sources (but NOT from contract ID)
-      let packageId: string;
-      const claimAnchor = claim.anchorMetadata as any;
-      if (claimAny.packageId) {
-        packageId = claimAny.packageId;
-      } else if (claimAnchor?.packageId) {
-        packageId = claimAnchor.packageId;
-      } else if (claimAnchor?.package_id) {
-        packageId = claimAnchor.package_id;
-      } else {
-        packageId = this.generatePackageId(claimId);
-      }
+      // Build metadata with stable identifiers.
+      // The package id lives in the anchorMetadata Json column; Claim itself has
+      // no packageId column, so anchor metadata is the only real source.
+      const claimAnchor = readAnchorMetadata(claim.anchorMetadata);
+      const packageId =
+        claimAnchor.packageId ??
+        claimAnchor.package_id ??
+        this.generatePackageId(claimId);
 
       // Explicitly get contract ID from deployment metadata
       const contractId = deploymentMetadata?.contractId ?? undefined;
@@ -111,10 +147,9 @@ export class VerificationMetadataService {
         metadata.contractAddress = deploymentMetadata.contractId;
       }
 
-      // Add transaction hash if available from claim or deployment
-      if (claimAny.transactionHash) {
-        metadata.transactionHash = claimAny.transactionHash;
-      } else if (deploymentMetadata?.transactionHash) {
+      // Add transaction hash if available. Claim has no transactionHash column,
+      // so deployment metadata is the only source.
+      if (deploymentMetadata?.transactionHash) {
         metadata.transactionHash = deploymentMetadata.transactionHash;
       }
 
@@ -250,53 +285,64 @@ export class VerificationMetadataService {
   /**
    * Validate incoming webhook payload for metadata
    */
-  validateWebhookPayload(payload: any): { isValid: boolean; errors: string[] } {
+  validateWebhookPayload(payload: unknown): {
+    isValid: boolean;
+    errors: string[];
+  } {
     const errors: string[] = [];
 
-    if (!payload || typeof payload !== 'object') {
+    const body = asRecord(payload);
+    if (!body) {
       return { isValid: false, errors: ['Invalid payload: must be an object'] };
     }
 
     // Check required fields
     const requiredFields = ['claimId', 'campaignId', 'packageId'];
     for (const field of requiredFields) {
-      if (!payload[field]) {
+      if (!body[field]) {
         errors.push(`Missing required field: ${field}`);
       }
     }
 
     // Validate UUIDs
-    if (payload.claimId && !this.isValidUUID(payload.claimId)) {
+    // A present-but-non-string value is invalid rather than coerced, so an
+    // object or number cannot slip through as an id.
+    if (
+      body.claimId &&
+      (typeof body.claimId !== 'string' || !this.isValidUUID(body.claimId))
+    ) {
       errors.push('claimId must be a valid UUID');
     }
 
-    if (payload.campaignId && !this.isValidUUID(payload.campaignId)) {
+    if (
+      body.campaignId &&
+      (typeof body.campaignId !== 'string' ||
+        !this.isValidUUID(body.campaignId))
+    ) {
       errors.push('campaignId must be a valid UUID');
     }
 
     // Validate result
-    if (payload.result) {
-      if (typeof payload.result !== 'object') {
+    if (body.result) {
+      const result = asRecord(body.result);
+      if (!result) {
         errors.push('result must be an object');
       } else {
         if (
-          typeof payload.result.score !== 'number' ||
-          payload.result.score < 0 ||
-          payload.result.score > 1
+          typeof result.score !== 'number' ||
+          result.score < 0 ||
+          result.score > 1
         ) {
           errors.push('result.score must be a number between 0 and 1');
         }
         if (
-          typeof payload.result.confidence !== 'number' ||
-          payload.result.confidence < 0 ||
-          payload.result.confidence > 1
+          typeof result.confidence !== 'number' ||
+          result.confidence < 0 ||
+          result.confidence > 1
         ) {
           errors.push('result.confidence must be a number between 0 and 1');
         }
-        if (
-          payload.result.details &&
-          typeof payload.result.details !== 'object'
-        ) {
+        if (result.details && !asRecord(result.details)) {
           errors.push('result.details must be an object');
         }
       }
@@ -306,8 +352,8 @@ export class VerificationMetadataService {
 
     // Validate network if present
     if (
-      payload.network &&
-      !['testnet', 'mainnet', 'public'].includes(payload.network)
+      typeof body.network === 'string' &&
+      !['testnet', 'mainnet', 'public'].includes(body.network)
     ) {
       errors.push('network must be one of: testnet, mainnet, public');
     }
@@ -339,41 +385,34 @@ export class VerificationMetadataService {
    * Extract metadata from a webhook payload
    */
   extractMetadataFromPayload(
-    payload: any,
+    payload: unknown,
   ): Partial<ContractAwareMetadata> | null {
-    if (!payload || typeof payload !== 'object') {
+    const body = asRecord(payload);
+    if (!body) {
       return null;
     }
 
     const metadata: Partial<ContractAwareMetadata> = {};
 
-    // Extract standard fields
-    if (payload.claimId) {
-      metadata.claimId = payload.claimId;
-    }
-    if (payload.campaignId) {
-      metadata.campaignId = payload.campaignId;
-    }
-    if (payload.packageId) {
-      metadata.packageId = payload.packageId;
-    }
-    if (payload.transactionHash) {
-      metadata.transactionHash = payload.transactionHash;
-    }
-    if (payload.contractAddress) {
-      metadata.contractAddress = payload.contractAddress;
-    }
-    if (payload.contractId) {
-      metadata.contractId = payload.contractId;
-    }
-    if (payload.network) {
-      metadata.network = payload.network;
-    }
-    if (payload.chainId) {
-      metadata.chainId = payload.chainId;
-    }
-    if (payload.version) {
-      metadata.version = payload.version;
+    // Extract standard fields. Every value arrives untyped, so only strings are
+    // carried across; anything else is treated as absent rather than coerced.
+    const stringFields = [
+      'claimId',
+      'campaignId',
+      'packageId',
+      'transactionHash',
+      'contractAddress',
+      'contractId',
+      'network',
+      'chainId',
+      'version',
+    ] as const;
+
+    for (const field of stringFields) {
+      const value = body[field];
+      if (typeof value === 'string' && value.length > 0) {
+        metadata[field] = value;
+      }
     }
 
     return Object.keys(metadata).length > 0 ? metadata : null;
