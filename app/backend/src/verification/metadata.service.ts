@@ -305,11 +305,20 @@ export class VerificationMetadataService {
     }
 
     // Validate UUIDs
-    if (body.claimId && !this.isValidUUID(String(body.claimId))) {
+    // A present-but-non-string value is invalid rather than coerced, so an
+    // object or number cannot slip through as an id.
+    if (
+      body.claimId &&
+      (typeof body.claimId !== 'string' || !this.isValidUUID(body.claimId))
+    ) {
       errors.push('claimId must be a valid UUID');
     }
 
-    if (body.campaignId && !this.isValidUUID(String(body.campaignId))) {
+    if (
+      body.campaignId &&
+      (typeof body.campaignId !== 'string' ||
+        !this.isValidUUID(body.campaignId))
+    ) {
       errors.push('campaignId must be a valid UUID');
     }
 
