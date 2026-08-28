@@ -1,6 +1,6 @@
-import type { MetadataRoute } from 'next';
+import { MetadataRoute } from 'next';
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl =
     process.env.NEXT_PUBLIC_APP_URL || 'https://soter.pulsefy.app';
   const isProduction = process.env.NODE_ENV === 'production';

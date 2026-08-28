@@ -19,6 +19,7 @@ describe('NotificationProcessor', () => {
     incrementNotificationDeliveryAttempt: jest.Mock;
     incrementNotificationDeliveryFailureByCategory: jest.Mock;
   };
+
   let emailAdapterMock: {
     send: jest.Mock;
   };

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AidPackage } from './api';
+import type { AidDetails } from './aidApi';
 import { config } from '../config';
 import {
   AID_CACHE_KEY,
@@ -10,6 +11,9 @@ import {
   persistBoundedCache,
 } from './localCache';
 import type { CacheWriteResult } from './localCache';
+
+const CACHE_DETAILS_PREFIX = '@soter/aid_details_';
+const CACHE_DETAILS_TIMESTAMP_PREFIX = '@soter/aid_details_timestamp_';
 
 const aidCacheOptions = {
   cacheKey: AID_CACHE_KEY,
@@ -45,3 +49,33 @@ export const getCacheTimestamp = async (): Promise<string | null> => {
 export const clearAidCache = async () => clearBoundedCache<AidPackage>(aidCacheOptions);
 
 export const getAidCacheSummary = async () => getCacheSummary<AidPackage>(aidCacheOptions);
+
+/** Persist aid package details to AsyncStorage */
+export const cacheAidDetails = async (aidId: string, data: AidDetails): Promise<void> => {
+  await AsyncStorage.setItem(`${CACHE_DETAILS_PREFIX}${aidId}`, JSON.stringify(data));
+  await AsyncStorage.setItem(`${CACHE_DETAILS_TIMESTAMP_PREFIX}${aidId}`, Date.now().toString());
+};
+
+/** Load cached aid package details from AsyncStorage */
+export const loadCachedAidDetails = async (aidId: string): Promise<AidDetails | null> => {
+  const raw = await AsyncStorage.getItem(`${CACHE_DETAILS_PREFIX}${aidId}`);
+  if (!raw) return null;
+  return JSON.parse(raw) as AidDetails;
+};
+
+/** Returns the ISO timestamp of the last successful cache write for an aid detail, or null */
+export const getAidDetailsCacheTimestamp = async (aidId: string): Promise<string | null> => {
+  const ts = await AsyncStorage.getItem(`${CACHE_DETAILS_TIMESTAMP_PREFIX}${aidId}`);
+  if (!ts) return null;
+  return new Date(parseInt(ts, 10)).toISOString();
+};
+
+/** Clear the cached aid details for a specific aidId or all */
+export const clearAidDetailsCache = async (aidId?: string): Promise<void> => {
+  if (aidId) {
+    await AsyncStorage.multiRemove([
+      `${CACHE_DETAILS_PREFIX}${aidId}`,
+      `${CACHE_DETAILS_TIMESTAMP_PREFIX}${aidId}`,
+    ]);
+  }
+};

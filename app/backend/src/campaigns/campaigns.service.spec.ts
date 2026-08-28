@@ -195,7 +195,7 @@ describe('CampaignsService', () => {
 
     it('countExport(): rejects an invalid date filter', async () => {
       await expect(
-        service.countExport({ from: 'not-a-date' } as any),
+        service.countExport({ from: 'not-a-date' }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
