@@ -29,6 +29,10 @@ export interface AppConfig {
   largeUploadThreshold?: number;
   /** Whether to allow sync on metered connections without user opt-in */
   allowMeteredSync?: boolean;
+  /** Base64-encoded SHA-256 SPKI pins for the API host (primary + backups) used for certificate pinning */
+  certPinHashes: string[];
+  /** Whether to pin all subdomains of the API host, not just the exact hostname */
+  certPinIncludeSubdomains: boolean;
 }
 
 /**
@@ -67,6 +71,11 @@ const buildConfig = (): AppConfig => {
     errors.push(`Invalid API URL: ${apiUrl}`);
   }
 
+  const certPinHashes = (process.env.EXPO_PUBLIC_CERT_PIN_HASHES || '')
+    .split(',')
+    .map((hash: string) => hash.trim())
+    .filter(Boolean);
+
   return {
     apiUrl,
     envName,
@@ -82,6 +91,8 @@ const buildConfig = (): AppConfig => {
       ? parseInt(process.env.EXPO_PUBLIC_LARGE_UPLOAD_THRESHOLD, 10) 
       : 5 * 1024 * 1024, // Default: 5MB
     allowMeteredSync: process.env.EXPO_PUBLIC_ALLOW_METERED_SYNC === 'true',
+    certPinHashes,
+    certPinIncludeSubdomains: process.env.EXPO_PUBLIC_CERT_PIN_INCLUDE_SUBDOMAINS === 'true',
     isValid: errors.length === 0,
     errors,
   };
