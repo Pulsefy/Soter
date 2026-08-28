@@ -49,7 +49,7 @@ function readAnchorMetadata(
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return {};
   }
-  return value as ClaimAnchorMetadata;
+  return value;
 }
 
 @Injectable()
