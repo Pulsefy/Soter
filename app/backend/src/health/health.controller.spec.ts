@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
 import { ONCHAIN_ADAPTER_TOKEN } from '../onchain/onchain.adapter';
 import { REDIS_CLIENT } from '../redis/redis.module';
+import { ProviderHealthRegistryService } from './provider-health-registry.service';
 
 describe('HealthController', () => {
   let app: INestApplication;
@@ -59,6 +60,12 @@ describe('HealthController', () => {
         { provide: LoggerService, useValue: loggerMock },
         { provide: ONCHAIN_ADAPTER_TOKEN, useValue: onchainAdapterMock },
         { provide: REDIS_CLIENT, useValue: redisClientMock },
+        {
+          provide: ProviderHealthRegistryService,
+          useValue: {
+            getAllStatuses: jest.fn().mockReturnValue({}),
+          },
+        },
       ],
     }).compile();
 

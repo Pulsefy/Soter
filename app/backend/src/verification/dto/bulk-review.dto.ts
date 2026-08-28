@@ -1,5 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsEnum, IsOptional, IsString, ArrayNotEmpty } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsOptional,
+  IsString,
+  ArrayNotEmpty,
+} from 'class-validator';
 
 export enum BulkReviewAction {
   APPROVE = 'approve',

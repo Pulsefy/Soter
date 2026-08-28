@@ -8,6 +8,10 @@ import {
   ONCHAIN_ADAPTER_TOKEN,
 } from '../onchain/onchain.adapter';
 import { REDIS_CLIENT } from '../redis/redis.module';
+import {
+  ProviderHealthRegistryService,
+  ProviderHealthSnapshot,
+} from './provider-health-registry.service';
 
 export type CheckStatus = 'up' | 'down' | 'skipped';
 export type ReadinessStatus = 'ready' | 'degraded' | 'not_ready';
@@ -47,6 +51,12 @@ export interface ReadinessResponse {
     aiService: HealthCheckResult;
     stellarRpc: HealthCheckResult;
   };
+  providers?: Record<string, ProviderHealthSnapshot>;
+}
+
+export interface ProviderHealthResponse {
+  timestamp: string;
+  providers: Record<string, ProviderHealthSnapshot>;
 }
 
 @Injectable()
@@ -64,6 +74,7 @@ export class HealthService {
     private readonly onchainAdapter: OnchainAdapter,
     @Inject(REDIS_CLIENT)
     private readonly redisClient: Redis,
+    private readonly providerHealthRegistry: ProviderHealthRegistryService,
   ) {}
 
   check() {
@@ -144,6 +155,8 @@ export class HealthService {
         ? 'degraded'
         : 'ready';
 
+    const providers = this.providerHealthRegistry.getAllStatuses();
+
     const response: ReadinessResponse = {
       status,
       ready: !hardFailure,
@@ -155,6 +168,7 @@ export class HealthService {
         aiService,
         stellarRpc,
       },
+      providers,
     };
 
     this.setCachedReadiness(response);
@@ -477,6 +491,17 @@ export class HealthService {
         error: errorMsg,
       };
     }
+  }
+
+  /**
+   * Returns a snapshot of all known provider health statuses.
+   * No sensitive details are included (issue #770).
+   */
+  getProviderHealth(): ProviderHealthResponse {
+    return {
+      timestamp: new Date().toISOString(),
+      providers: this.providerHealthRegistry.getAllStatuses(),
+    };
   }
 
   async getDiagnosticsExport() {

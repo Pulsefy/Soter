@@ -7,10 +7,29 @@ import {
   TaskStatus,
 } from '../webhooks/dto/ai-verification-webhook.dto';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import type { Prisma } from '@prisma/client';
 
 export interface AidOrganizationContext {
   orgId?: string | null;
   ngoId?: string | null;
+}
+
+export interface PaginatedResult<T> {
+  data: T[];
+  total: number;
+  page: number;
+  size: number;
+  totalPages: number;
+}
+
+export interface ListAidPackagesParams {
+  page?: number;
+  size?: number;
+  sortBy?: string;
+  sortDirection?: 'asc' | 'desc';
+  search?: string;
+  status?: string;
+  token?: string;
 }
 
 @Injectable()
@@ -23,6 +42,53 @@ export class AidService {
     private metricsService: MetricsService,
     private prisma: PrismaService,
   ) {}
+
+  async listAidPackages(
+    params: ListAidPackagesParams,
+  ): Promise<PaginatedResult<Record<string, unknown>>> {
+    const page = Math.max(1, params.page ?? 1);
+    const size = Math.min(100, Math.max(1, params.size ?? 10));
+    const sortBy = params.sortBy ?? 'id';
+    const sortDirection = params.sortDirection ?? 'asc';
+    const skip = (page - 1) * size;
+
+    const where: Prisma.AidPackageWhereInput = {};
+
+    if (params.status) {
+      where.status = params.status;
+    }
+
+    if (params.search) {
+      const searchLower = params.search.toLowerCase();
+      where.OR = [
+        { id: { contains: searchLower, mode: 'insensitive' } },
+      ];
+    }
+
+    const orderBy: Prisma.AidPackageOrderByWithRelationInput = {
+      [sortBy]: sortDirection,
+    };
+
+    const [packages, total] = await Promise.all([
+      this.prisma.aidPackage.findMany({
+        where,
+        orderBy,
+        skip,
+        take: size,
+      }),
+      this.prisma.aidPackage.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / size);
+
+    return {
+      data: packages,
+      total,
+      page,
+      size,
+      totalPages,
+    };
+  }
 
   async createCampaign(
     data: Record<string, unknown>,

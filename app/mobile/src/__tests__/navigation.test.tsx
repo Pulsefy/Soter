@@ -74,6 +74,10 @@ jest.mock('../services/aidCache', () => ({
   cacheAidList: jest.fn(),
   loadCachedAidList: jest.fn().mockResolvedValue([]),
   getCacheTimestamp: jest.fn().mockResolvedValue(null),
+  cacheAidDetails: jest.fn().mockResolvedValue(undefined),
+  loadCachedAidDetails: jest.fn().mockResolvedValue(null),
+  getAidDetailsCacheTimestamp: jest.fn().mockResolvedValue(null),
+  clearAidDetailsCache: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../hooks/useNetworkStatus', () => ({

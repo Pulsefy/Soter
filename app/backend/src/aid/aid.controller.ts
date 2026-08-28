@@ -6,10 +6,13 @@ import {
   Patch,
   Delete,
   Put,
+  Get,
+  Query,
   Req,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { AidService } from './aid.service';
+import { ListAidPackagesDto } from './dto/list-aid-packages.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -25,6 +28,18 @@ import {
 @Controller('aid')
 export class AidController {
   constructor(private readonly aidService: AidService) {}
+
+  @Get('packages')
+  @ApiOperation({
+    summary: 'List aid packages with pagination',
+    description:
+      'Returns a paginated list of aid packages. Supports filtering by status, search text, and sorting.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of aid packages.' })
+  @ApiBadRequestResponse({ description: 'Invalid query parameters.' })
+  async listPackages(@Query() query: ListAidPackagesDto) {
+    return this.aidService.listAidPackages(query);
+  }
 
   @Post('campaigns')
   @ApiOperation({

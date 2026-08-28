@@ -47,6 +47,7 @@ import { DeploymentMetadataModule } from './deployment-metadata/deployment-metad
 import { ReleaseConfigModule } from './release-config/release-config.module';
 import { RedisModule } from './redis/redis.module';
 import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guard';
+import { ApiKeyRateLimitGuard } from './common/guards/api-key-rate-limit.guard';
 import { DeprecationInterceptor } from './common/interceptors/deprecation.interceptor';
 import { SandboxModule } from './sandbox/sandbox.module';
 import { CacheModule } from './common/cache/cache.module';
@@ -208,6 +209,10 @@ import { validateNetworkConfig } from './config/network-config.validation';
     {
       provide: APP_GUARD,
       useClass: ScopesGuard, // runs third — checks request.user.scopes against @Scopes()
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ApiKeyRateLimitGuard, // runs fourth — per-API-key rate limiting (issue #952)
     },
     {
       provide: APP_GUARD,

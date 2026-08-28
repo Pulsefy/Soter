@@ -459,6 +459,7 @@ mod tests {
             expires_at: 0,
             claim_starts_at: env.ledger().timestamp(),
             metadata: soroban_sdk::Map::new(env),
+            evidence_hash: soroban_sdk::String::from_str(env, ""),
         };
         env.as_contract(contract, || {
             env.storage()

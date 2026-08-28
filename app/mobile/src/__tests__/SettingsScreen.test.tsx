@@ -4,6 +4,13 @@ import { fireEvent, render } from '@testing-library/react-native';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { config } from '../config';
 
+let mockWalletState = {
+  disconnectWallet: jest.fn(),
+  publicKey: null as string | null,
+  isOnCorrectNetwork: false,
+  status: 'idle',
+};
+
 jest.mock('../theme/ThemeContext', () => ({
   useTheme: () => {
     const { Colors, SoterLightTheme } = require('../theme/theme');
@@ -38,6 +45,41 @@ jest.mock('../contexts/SaverModeContext', () => ({
     autoDetectEnabled: true,
     toggleManual: jest.fn(),
     toggleAutoDetect: jest.fn(),
+  }),
+}));
+
+jest.mock('../contexts/CrashReportingContext', () => ({
+  useCrashReporting: () => ({
+    enabled: true,
+    toggle: jest.fn(),
+  }),
+}));
+
+jest.mock('../contexts/WalletContext', () => ({
+  useWallet: () => mockWalletState,
+}));
+
+jest.mock('../services/aidCache', () => ({
+  clearAidCache: jest.fn().mockResolvedValue({ items: [] }),
+  getAidCacheSummary: jest.fn().mockResolvedValue({
+    sizeBytes: 1024,
+    maxBytes: 4096,
+    itemCount: 2,
+    isNearLimit: false,
+    isOverLimit: false,
+    warningRatio: 0.8,
+  }),
+}));
+
+jest.mock('../services/taskCache', () => ({
+  clearTaskCache: jest.fn().mockResolvedValue({ items: [] }),
+  getTaskCacheSummary: jest.fn().mockResolvedValue({
+    sizeBytes: 512,
+    maxBytes: 2048,
+    itemCount: 1,
+    isNearLimit: false,
+    isOverLimit: false,
+    warningRatio: 0.8,
   }),
 }));
 
@@ -82,6 +124,15 @@ describe('SettingsScreen', () => {
 
     expect(queryByText('Get Testnet XLM')).toBeNull();
     expect(queryByText('Stellar Lab faucet')).toBeNull();
+  });
+
+  it('shows offline cache usage and clear action', async () => {
+    const { findByText, getByText } = render(<SettingsScreen />);
+
+    expect(await findByText('Offline Storage')).toBeTruthy();
+    expect(getByText('Aid cache')).toBeTruthy();
+    expect(getByText('Task cache')).toBeTruthy();
+    expect(getByText('Clear synced cache')).toBeTruthy();
   });
 
   describe('when wallet is connected on testnet', () => {

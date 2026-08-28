@@ -13,7 +13,7 @@ describe('MetadataService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    Object.keys(configValues).forEach((key) => delete configValues[key]);
+    Object.keys(configValues).forEach(key => delete configValues[key]);
 
     configValues.NODE_ENV = 'test';
     configValues.ONCHAIN_ADAPTER = 'mock';

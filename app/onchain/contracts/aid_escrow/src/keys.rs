@@ -113,6 +113,8 @@ pub const META_CAMPAIGN_REF: &str = "campaign_ref";
 pub const META_CLAIM_STARTS_AT: &str = "claim_starts_at";
 /// Metadata field holding an optional off-chain receipt hash.
 pub const META_RECEIPT_HASH: &str = "receipt_hash";
+/// Metadata field holding an optional off-chain evidence hash (64-char hex).
+pub const META_EVIDENCE_HASH_KEY: &str = "evidence_hash";
 
 #[cfg(test)]
 mod tests {

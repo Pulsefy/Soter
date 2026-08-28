@@ -15,10 +15,14 @@ import {
 import Constants from 'expo-constants';
 import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 import { fetchHealthStatus, HealthStatus } from '../services/api';
-import { getMockHealthData } from '../services/mockData';
+import {
+  cacheHealthStatus,
+  loadCachedHealthStatus,
+  getHealthCacheTimestamp,
+} from '../services/healthCache';
+import { formatAge } from '../components/DataFreshnessIndicator';
 import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
-
 import { config } from '../config';
 
 // Derive environment label from config
@@ -41,7 +45,8 @@ export const HealthScreen = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [isMockData, setIsMockData] = useState(false);
+  const [isCached, setIsCached] = useState(false);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [netInfo, setNetInfo] = useState<NetInfoState | null>(null);
   const [apiReachable, setApiReachable] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
@@ -68,18 +73,30 @@ export const HealthScreen = () => {
       try {
         const data = await fetchHealthStatus();
         setHealthData(data);
-        setIsMockData(false);
+        setIsCached(false);
+        setCachedAt(null);
         setApiReachable(true);
+        await cacheHealthStatus(data);
       } catch (err) {
-        console.log('Using mock data fallback');
-        setHealthData(getMockHealthData());
-        setIsMockData(true);
-        setError('Backend unreachable - showing mock data');
         setApiReachable(false);
+        const cached = await loadCachedHealthStatus();
+        if (cached) {
+          setHealthData(cached);
+          setIsCached(true);
+          const ts = await getHealthCacheTimestamp();
+          setCachedAt(ts);
+          setError('Backend unreachable - showing cached health data');
+        } else {
+          setHealthData(null);
+          setIsCached(false);
+          setCachedAt(null);
+          setError('Backend unreachable - system health data unavailable');
+        }
       }
     } catch (err) {
       setError('Failed to load health data');
       setApiReachable(false);
+      setHealthData(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -120,15 +137,17 @@ export const HealthScreen = () => {
 
   const handleCopyDiagnostics = async () => {
     const formattedNetworkType = netInfo?.type ? netInfo.type.toUpperCase() : 'UNKNOWN';
-    const formattedInternetReachable = netInfo?.isInternetReachable === true 
-      ? 'Yes' 
-      : netInfo?.isInternetReachable === false 
-        ? 'No' 
+    const formattedInternetReachable =
+      netInfo?.isInternetReachable === true
+        ? 'Yes'
+        : netInfo?.isInternetReachable === false
+        ? 'No'
         : 'Unknown';
-    const formattedApiReachable = apiReachable === true 
-      ? 'Reachable' 
-      : apiReachable === false 
-        ? 'Unreachable' 
+    const formattedApiReachable =
+      apiReachable === true
+        ? 'Reachable'
+        : apiReachable === false
+        ? 'Unreachable'
         : 'Checking...';
 
     const diagnosticsText = `Soter App Diagnostics
@@ -187,7 +206,6 @@ Timestamp: ${new Date().toISOString()}`;
         accessibilityLabel="Loading system health data"
         accessibilityLiveRegion="polite"
       >
-        {/* Third-party: ActivityIndicator uses brand.primary for consistent branding */}
         <ActivityIndicator
           size="large"
           color={colors.brand.primary}
@@ -202,7 +220,6 @@ Timestamp: ${new Date().toISOString()}`;
     <SafeAreaView style={styles.container}>
       <ScrollView
         refreshControl={
-          // Third-party: RefreshControl tintColor / colors aligned to brand
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
@@ -233,17 +250,17 @@ Timestamp: ${new Date().toISOString()}`;
                   {envLabel.toUpperCase()}
                 </Text>
               </View>
-              {isMockData && (
+              {isCached && (
                 <View
-                  style={styles.mockBadge}
+                  style={styles.cachedBadge}
                   accessible
-                  accessibilityLabel="Using mock data"
+                  accessibilityLabel="Showing cached health data"
                 >
                   <Text
-                    style={styles.mockBadgeText}
+                    style={styles.cachedBadgeText}
                     importantForAccessibility="no-hide-descendants"
                   >
-                    🔧 MOCK
+                    📦 CACHED
                   </Text>
                 </View>
               )}
@@ -272,7 +289,9 @@ Timestamp: ${new Date().toISOString()}`;
             >
               <Text style={styles.configErrorTitle}>⚠️ Configuration Issues</Text>
               {config.errors.map((err, index) => (
-                <Text key={index} style={styles.configErrorText}>• {err}</Text>
+                <Text key={index} style={styles.configErrorText}>
+                  • {err}
+                </Text>
               ))}
             </View>
           )}
@@ -283,28 +302,64 @@ Timestamp: ${new Date().toISOString()}`;
               Environment & Blockchain
             </Text>
             <View style={styles.card}>
-              <View style={styles.infoRow} accessible accessibilityLabel={`Network: ${config.network}`}>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Network: ${config.network}`}
+              >
                 <Text style={styles.infoLabel}>Network:</Text>
                 <Text style={styles.infoValue}>{config.network.toUpperCase()}</Text>
               </View>
 
-              <View style={styles.infoRow} accessible accessibilityLabel={`API URL: ${config.apiUrl}`}>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`API URL: ${config.apiUrl}`}
+              >
                 <Text style={styles.infoLabel}>Backend URL:</Text>
-                <Text style={styles.infoValue} numberOfLines={1} ellipsizeMode="middle">
+                <Text
+                  style={styles.infoValue}
+                  numberOfLines={1}
+                  ellipsizeMode="middle"
+                >
                   {config.apiUrl}
                 </Text>
               </View>
 
-              <View style={styles.infoRow} accessible accessibilityLabel={`Contract ID: ${config.sorobanContractId || 'Not Configured'}`}>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Contract ID: ${
+                  config.sorobanContractId || 'Not Configured'
+                }`}
+              >
                 <Text style={styles.infoLabel}>Contract ID:</Text>
-                <Text style={[styles.infoValue, !config.sorobanContractId && { color: colors.warning }]} numberOfLines={1} ellipsizeMode="middle">
+                <Text
+                  style={[
+                    styles.infoValue,
+                    !config.sorobanContractId && { color: colors.warning },
+                  ]}
+                  numberOfLines={1}
+                  ellipsizeMode="middle"
+                >
                   {config.sorobanContractId || 'None'}
                 </Text>
               </View>
 
-              <View style={styles.infoRow} accessible accessibilityLabel={`Config Status: ${config.isValid ? 'Valid' : 'Invalid'}`}>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Config Status: ${
+                  config.isValid ? 'Valid' : 'Invalid'
+                }`}
+              >
                 <Text style={styles.infoLabel}>Config Status:</Text>
-                <Text style={[styles.infoValue, { color: config.isValid ? colors.success : colors.error }]}>
+                <Text
+                  style={[
+                    styles.infoValue,
+                    { color: config.isValid ? colors.success : colors.error },
+                  ]}
+                >
                   {config.isValid ? 'VALID ✅' : 'INVALID ❌'}
                 </Text>
               </View>
@@ -312,14 +367,16 @@ Timestamp: ${new Date().toISOString()}`;
           </View>
 
           {/* ── Health Data Card ────────────────────────────────────────── */}
-          {healthData && (
+          {healthData ? (
             <View
               style={[
                 styles.card,
                 { borderLeftColor: getStatusColor(healthData.status) },
               ]}
               accessible
-              accessibilityLabel={`Backend status: ${healthData.status.toUpperCase()}. Service: ${healthData.service}. Version: ${healthData.version}. Environment: ${healthData.environment}.`}
+              accessibilityLabel={`Backend status: ${healthData.status.toUpperCase()}. Service: ${
+                healthData.service
+              }. Version: ${healthData.version}. Environment: ${healthData.environment}.`}
             >
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>Backend Status</Text>
@@ -328,10 +385,7 @@ Timestamp: ${new Date().toISOString()}`;
                   accessible
                   accessibilityLabel={`Status: ${healthData.status.toUpperCase()}`}
                 >
-                  <Text
-                    style={styles.statusIcon}
-                    accessibilityElementsHidden
-                  >
+                  <Text style={styles.statusIcon} accessibilityElementsHidden>
                     {getStatusIcon(healthData.status)}
                   </Text>
                   <Text
@@ -345,40 +399,100 @@ Timestamp: ${new Date().toISOString()}`;
                 </View>
               </View>
 
-              <View style={styles.infoRow} accessible accessibilityLabel={`Service: ${healthData.service}`}>
-                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">Service:</Text>
-                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">{healthData.service}</Text>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Service: ${healthData.service}`}
+              >
+                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">
+                  Service:
+                </Text>
+                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">
+                  {healthData.service}
+                </Text>
               </View>
 
-              <View style={styles.infoRow} accessible accessibilityLabel={`Version: ${healthData.version}`}>
-                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">Version:</Text>
-                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">{healthData.version}</Text>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Version: ${healthData.version}`}
+              >
+                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">
+                  Version:
+                </Text>
+                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">
+                  {healthData.version}
+                </Text>
               </View>
 
-              <View style={styles.infoRow} accessible accessibilityLabel={`Environment: ${healthData.environment}`}>
-                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">Environment:</Text>
-                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">{healthData.environment}</Text>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Environment: ${healthData.environment}`}
+              >
+                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">
+                  Environment:
+                </Text>
+                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">
+                  {healthData.environment}
+                </Text>
               </View>
 
-              <View style={styles.infoRow} accessible accessibilityLabel={`Last updated: ${formatTimestamp(healthData.timestamp)}`}>
-                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">Last updated:</Text>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Last updated: ${formatTimestamp(healthData.timestamp)}`}
+              >
+                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">
+                  Last updated:
+                </Text>
                 <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">
                   {formatTimestamp(healthData.timestamp)}
                 </Text>
               </View>
 
-              {isMockData && (
+              {isCached && (
                 <View
-                  style={styles.insideMockIndicator}
+                  style={styles.insideCachedIndicator}
                   accessible
                   accessibilityRole="alert"
-                  accessibilityLabel="Warning: This is simulated data. Backend connection failed."
+                  accessibilityLabel="Notice: Showing cached health data. Backend connection is currently unreachable."
                 >
-                  <Text style={styles.insideMockText} importantForAccessibility="no-hide-descendants">
-                    ⚠️ This is simulated data - backend connection failed
+                  <Text
+                    style={styles.insideCachedText}
+                    importantForAccessibility="no-hide-descendants"
+                  >
+                    📦 Cached data ({formatAge(cachedAt) ?? 'earlier'}) — backend unreachable
                   </Text>
                 </View>
               )}
+            </View>
+          ) : (
+            /* Explicit Unavailable State */
+            <View
+              style={[styles.card, styles.unavailableCard]}
+              accessible
+              accessibilityRole="alert"
+              accessibilityLabel="Backend status unavailable. Unable to connect to the backend server and no cached health data is available."
+            >
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>Backend Status</Text>
+                <View
+                  style={styles.statusBadge}
+                  accessible
+                  accessibilityLabel="Status: UNAVAILABLE"
+                >
+                  <Text style={styles.statusIcon} accessibilityElementsHidden>
+                    ❌
+                  </Text>
+                  <Text style={[styles.statusText, { color: colors.error }]}>
+                    UNAVAILABLE
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.unavailableMessage}>
+                Unable to connect to the backend server and no cached health data is available.
+              </Text>
             </View>
           )}
 
@@ -388,34 +502,111 @@ Timestamp: ${new Date().toISOString()}`;
               Diagnostics
             </Text>
             <View style={styles.card}>
-              <View style={styles.infoRow} accessible accessibilityLabel={`App Version: ${appVersion}`}>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`App Version: ${appVersion}`}
+              >
                 <Text style={styles.infoLabel}>App Version:</Text>
                 <Text style={styles.infoValue}>{appVersion}</Text>
               </View>
 
-              <View style={styles.infoRow} accessible accessibilityLabel={`API Reachability: ${apiReachable === true ? 'Reachable' : apiReachable === false ? 'Unreachable' : 'Checking...'}`}>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`API Reachability: ${
+                  apiReachable === true
+                    ? 'Reachable'
+                    : apiReachable === false
+                    ? 'Unreachable'
+                    : 'Checking...'
+                }`}
+              >
                 <Text style={styles.infoLabel}>API Reachability:</Text>
-                <Text style={[styles.infoValue, { color: apiReachable === true ? colors.success : apiReachable === false ? colors.error : colors.textSecondary }]}>
-                  {apiReachable === true ? 'REACHABLE ✅' : apiReachable === false ? 'UNREACHABLE ❌' : 'CHECKING...'}
+                <Text
+                  style={[
+                    styles.infoValue,
+                    {
+                      color:
+                        apiReachable === true
+                          ? colors.success
+                          : apiReachable === false
+                          ? colors.error
+                          : colors.textSecondary,
+                    },
+                  ]}
+                >
+                  {apiReachable === true
+                    ? 'REACHABLE ✅'
+                    : apiReachable === false
+                    ? 'UNREACHABLE ❌'
+                    : 'CHECKING...'}
                 </Text>
               </View>
 
-              <View style={styles.infoRow} accessible accessibilityLabel={`Network Connection: ${netInfo?.isConnected ? 'Connected' : 'Disconnected'}`}>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Network Connection: ${
+                  netInfo?.isConnected ? 'Connected' : 'Disconnected'
+                }`}
+              >
                 <Text style={styles.infoLabel}>Network Status:</Text>
-                <Text style={[styles.infoValue, { color: netInfo?.isConnected ? colors.success : colors.error }]}>
+                <Text
+                  style={[
+                    styles.infoValue,
+                    {
+                      color: netInfo?.isConnected ? colors.success : colors.error,
+                    },
+                  ]}
+                >
                   {netInfo?.isConnected ? 'CONNECTED' : 'DISCONNECTED'}
                 </Text>
               </View>
 
-              <View style={styles.infoRow} accessible accessibilityLabel={`Network Type: ${netInfo?.type ? netInfo.type.toUpperCase() : 'UNKNOWN'}`}>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Network Type: ${
+                  netInfo?.type ? netInfo.type.toUpperCase() : 'UNKNOWN'
+                }`}
+              >
                 <Text style={styles.infoLabel}>Network Type:</Text>
-                <Text style={styles.infoValue}>{netInfo?.type ? netInfo.type.toUpperCase() : 'UNKNOWN'}</Text>
+                <Text style={styles.infoValue}>
+                  {netInfo?.type ? netInfo.type.toUpperCase() : 'UNKNOWN'}
+                </Text>
               </View>
 
-              <View style={styles.infoRow} accessible accessibilityLabel={`Internet Reachable: ${netInfo?.isInternetReachable === true ? 'Yes' : netInfo?.isInternetReachable === false ? 'No' : 'Unknown'}`}>
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Internet Reachable: ${
+                  netInfo?.isInternetReachable === true
+                    ? 'Yes'
+                    : netInfo?.isInternetReachable === false
+                    ? 'No'
+                    : 'Unknown'
+                }`}
+              >
                 <Text style={styles.infoLabel}>Internet Reachable:</Text>
-                <Text style={[styles.infoValue, { color: netInfo?.isInternetReachable === true ? colors.success : netInfo?.isInternetReachable === false ? colors.error : colors.textSecondary }]}>
-                  {netInfo?.isInternetReachable === true ? 'YES' : netInfo?.isInternetReachable === false ? 'NO' : 'UNKNOWN'}
+                <Text
+                  style={[
+                    styles.infoValue,
+                    {
+                      color:
+                        netInfo?.isInternetReachable === true
+                          ? colors.success
+                          : netInfo?.isInternetReachable === false
+                          ? colors.error
+                          : colors.textSecondary,
+                    },
+                  ]}
+                >
+                  {netInfo?.isInternetReachable === true
+                    ? 'YES'
+                    : netInfo?.isInternetReachable === false
+                    ? 'NO'
+                    : 'UNKNOWN'}
                 </Text>
               </View>
             </View>
@@ -428,7 +619,9 @@ Timestamp: ${new Date().toISOString()}`;
               onPress={handleCopyDiagnostics}
               activeOpacity={0.8}
             >
-              <Text style={[styles.copyButtonText, copied && { color: colors.success }]}>
+              <Text
+                style={[styles.copyButtonText, copied && { color: colors.success }]}
+              >
                 {copied ? '✅ Diagnostics Copied!' : '📋 Copy Diagnostics'}
               </Text>
             </TouchableOpacity>
@@ -444,10 +637,20 @@ Timestamp: ${new Date().toISOString()}`;
               <View
                 style={styles.statItem}
                 accessible
-                accessibilityLabel={`Platform: ${Platform.OS === 'android' ? 'Android' : 'iOS'}`}
+                accessibilityLabel={`Platform: ${
+                  Platform.OS === 'android' ? 'Android' : 'iOS'
+                }`}
               >
-                <Text style={styles.statLabel} importantForAccessibility="no-hide-descendants">Platform</Text>
-                <Text style={styles.statValue} importantForAccessibility="no-hide-descendants">
+                <Text
+                  style={styles.statLabel}
+                  importantForAccessibility="no-hide-descendants"
+                >
+                  Platform
+                </Text>
+                <Text
+                  style={styles.statValue}
+                  importantForAccessibility="no-hide-descendants"
+                >
                   {Platform.OS === 'android' ? 'Android' : 'iOS'}
                 </Text>
               </View>
@@ -455,10 +658,22 @@ Timestamp: ${new Date().toISOString()}`;
               <View
                 style={styles.statItem}
                 accessible
-                accessibilityLabel={`Last check: ${healthData ? formatTimestamp(healthData.timestamp).split(',')[0] : 'Not available'}`}
+                accessibilityLabel={`Last check: ${
+                  healthData
+                    ? formatTimestamp(healthData.timestamp).split(',')[0]
+                    : 'Not available'
+                }`}
               >
-                <Text style={styles.statLabel} importantForAccessibility="no-hide-descendants">Last Check</Text>
-                <Text style={styles.statValue} importantForAccessibility="no-hide-descendants">
+                <Text
+                  style={styles.statLabel}
+                  importantForAccessibility="no-hide-descendants"
+                >
+                  Last Check
+                </Text>
+                <Text
+                  style={styles.statValue}
+                  importantForAccessibility="no-hide-descendants"
+                >
                   {healthData
                     ? formatTimestamp(healthData.timestamp).split(',')[0]
                     : 'N/A'}
@@ -467,9 +682,13 @@ Timestamp: ${new Date().toISOString()}`;
             </View>
           </View>
 
-          {/* ── Troubleshooting Tips ────────────────────────────────────── */}
-          {isMockData && (
-            <View style={styles.tipsContainer} accessible accessibilityRole="summary">
+          {/* ── Troubleshooting Tips (shown when API is unreachable or error exists) ── */}
+          {(apiReachable === false || error) && (
+            <View
+              style={styles.tipsContainer}
+              accessible
+              accessibilityRole="summary"
+            >
               <Text style={styles.tipsTitle} accessibilityRole="header">
                 🔍 Troubleshooting Tips
               </Text>
@@ -477,20 +696,19 @@ Timestamp: ${new Date().toISOString()}`;
                 • Ensure backend server is running on port 3000
               </Text>
               <Text style={styles.tipText}>
-                • Check if API URL is correct:{' '}
-                {config.apiUrl}
+                • Check if API URL is correct: {config.apiUrl}
               </Text>
               <Text style={styles.tipText}>
                 • For Android emulator, use 10.0.2.2 instead of localhost
               </Text>
               <Text style={styles.tipText}>
-                • Try restarting the backend server
+                • Try restarting the backend server or checking network connection
               </Text>
             </View>
           )}
 
           {/* ── Retry Button ────────────────────────────────────────────── */}
-          {error && (
+          {(error || apiReachable === false) && (
             <TouchableOpacity
               style={styles.retryButton}
               accessibilityRole="button"
@@ -505,28 +723,32 @@ Timestamp: ${new Date().toISOString()}`;
           {/* ── Footer ──────────────────────────────────────────────────── */}
           <View style={styles.footer}>
             <Text style={styles.footerText}>
-              {isMockData ? '📊 Using simulated data' : '🌐 Live backend data'}
+              {isCached
+                ? '📦 Using cached data'
+                : apiReachable
+                ? '🌐 Live backend data'
+                : '⚠️ Backend unavailable'}
             </Text>
             <Text style={styles.footerSubText}>
-              {!isMockData && 'Data fetched from /health endpoint'}
+              {apiReachable && !isCached
+                ? 'Data fetched from /health endpoint'
+                : isCached
+                ? `Last cached: ${cachedAt ? formatTimestamp(cachedAt) : 'N/A'}`
+                : 'Showing offline status'}
             </Text>
             <View
               style={styles.footerEnvRow}
               testID="footer-env-row"
               accessibilityLabel={`Environment: ${envLabel} · ${shortApiUrl}`}
             >
-              <Text style={styles.footerEnvLabel}>
-                Environment:{' '}
-              </Text>
+              <Text style={styles.footerEnvLabel}>Environment: </Text>
               <Text
                 testID="footer-env-name"
                 style={[styles.footerEnvValue, { color: envBadgeColor }]}
               >
                 {envLabel}
               </Text>
-              <Text style={styles.footerEnvSeparator}>
-                {' '}·{' '}
-              </Text>
+              <Text style={styles.footerEnvSeparator}> · </Text>
               <Text
                 testID="footer-api-url"
                 style={styles.footerEnvUrl}
@@ -573,13 +795,13 @@ const makeStyles = (colors: AppColors) =>
       fontWeight: 'bold',
       color: colors.textPrimary,
     },
-    mockBadge: {
-      backgroundColor: colors.warning,
+    cachedBadge: {
+      backgroundColor: colors.info,
       paddingHorizontal: 12,
       paddingVertical: 6,
       borderRadius: 20,
     },
-    mockBadgeText: {
+    cachedBadgeText: {
       color: '#fff',
       fontWeight: 'bold',
       fontSize: 12,
@@ -627,6 +849,15 @@ const makeStyles = (colors: AppColors) =>
       elevation: 3,
       borderLeftWidth: 4,
     },
+    unavailableCard: {
+      borderLeftColor: colors.error,
+    },
+    unavailableMessage: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      lineHeight: 20,
+      marginTop: 4,
+    },
     cardHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -664,16 +895,16 @@ const makeStyles = (colors: AppColors) =>
       color: colors.textPrimary,
       fontWeight: '500',
     },
-    insideMockIndicator: {
+    insideCachedIndicator: {
       marginTop: 12,
       padding: 8,
-      backgroundColor: colors.warningBg,
+      backgroundColor: colors.infoBg,
       borderRadius: 6,
       borderWidth: 1,
-      borderColor: colors.warningBorder,
+      borderColor: colors.info,
     },
-    insideMockText: {
-      color: colors.warning,
+    insideCachedText: {
+      color: colors.info,
       fontSize: 12,
       fontWeight: '500',
       textAlign: 'center',
@@ -736,7 +967,6 @@ const makeStyles = (colors: AppColors) =>
     retryButton: {
       backgroundColor: colors.brand.primary,
       padding: 16,
-      // Minimum 44 pt height (WCAG 2.5.5)
       minHeight: 44,
       borderRadius: 12,
       alignItems: 'center',

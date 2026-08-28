@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
 import { ONCHAIN_ADAPTER_TOKEN } from '../onchain/onchain.adapter';
 import { REDIS_CLIENT } from '../redis/redis.module';
+import { ProviderHealthRegistryService } from './provider-health-registry.service';
 
 describe('HealthService Diagnostics Export', () => {
   let service: HealthService;
@@ -43,6 +44,12 @@ describe('HealthService Diagnostics Export', () => {
         {
           provide: REDIS_CLIENT,
           useValue: { ping: jest.fn().mockResolvedValue('PONG') },
+        },
+        {
+          provide: ProviderHealthRegistryService,
+          useValue: {
+            getAllStatuses: jest.fn().mockReturnValue({}),
+          },
         },
       ],
     }).compile();

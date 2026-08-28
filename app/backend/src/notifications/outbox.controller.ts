@@ -152,4 +152,3 @@ export class OutboxController {
     return ApiResponseDto.ok(attempts, 'Delivery attempts fetched');
   }
 }
-

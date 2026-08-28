@@ -43,6 +43,11 @@ pub use crate::keys::{
 /// single invocation, keeping the call within Soroban resource limits.
 pub const MAX_BATCH_CLAIM_SIZE: u32 = 25;
 
+/// Maximum number of package IDs that `list_recipient_packages` may return in
+/// a single call.  Enforcing this keeps the response within Soroban's read-entry
+/// resource budget even for recipients with large package histories.
+pub const MAX_PAGE_SIZE: u32 = 50;
+
 // --- Data Types ---
 
 #[contracttype]
@@ -68,6 +73,7 @@ pub struct Package {
     pub expires_at: u64,
     pub claim_starts_at: u64,
     pub metadata: Map<Symbol, String>,
+    pub evidence_hash: String,
 }
 
 #[contracttype]
@@ -378,6 +384,16 @@ pub struct TokenAdded {
 pub struct TokenRemoved {
     pub admin: Address,
     pub token: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when an evidence hash is attached to a package.
+/// Only admin can attach evidence hash, and it cannot overwrite an existing hash.
+#[contractevent]
+pub struct EvidenceAttached {
+    pub package_id: u64,
+    pub admin: Address,
+    pub evidence_hash: String,
     pub timestamp: u64,
 }
 
@@ -916,6 +932,7 @@ impl AidEscrow {
             expires_at,
             claim_starts_at,
             metadata,
+            evidence_hash: String::from_str(&env, ""),
         };
 
         env.storage().persistent().set(&key, &package);
@@ -1042,6 +1059,7 @@ impl AidEscrow {
                 expires_at,
                 claim_starts_at,
                 metadata: metadata.clone(),
+                evidence_hash: String::from_str(&env, ""),
             };
 
             env.storage().persistent().set(&key, &package);
@@ -1613,7 +1631,61 @@ impl AidEscrow {
         Ok(())
     }
 
-    /// Admin-only package expiration extension.
+    /// Admin-only function to attach an evidence hash to a package.
+    /// The evidence hash is a 64-character hex string (32 bytes) that anchors
+    /// off-chain verification evidence to the on-chain package.
+    /// Cannot overwrite an existing evidence hash.
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must be authenticated)
+    /// * `package_id` - Package ID to attach evidence to
+    /// * `evidence_hash` - 64-character hex string representing the evidence hash
+    ///
+    /// # Errors
+    /// - `Error::NotAuthorized` - Caller is not the admin
+    /// - `Error::PackageNotFound` - Package doesn't exist
+    /// - `Error::InvalidState` - Package already has an evidence hash, or hash format is invalid
+    pub fn attach_evidence_hash(
+        env: Env,
+        admin: Address,
+        package_id: u64,
+        evidence_hash: String,
+    ) -> Result<(), Error> {
+        admin.require_auth();
+
+        let config_admin = Self::get_admin(env.clone())?;
+        if admin != config_admin {
+            return Err(Error::NotAuthorized);
+        }
+
+        let key = crate::keys::package_key(package_id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        if !package.evidence_hash.is_empty() {
+            return Err(Error::InvalidState);
+        }
+
+        Self::validate_evidence_hash(&env, &evidence_hash)?;
+
+        package.evidence_hash = evidence_hash.clone();
+        env.storage().persistent().set(&key, &package);
+
+        let timestamp = env.ledger().timestamp();
+        EvidenceAttached {
+            package_id,
+            admin,
+            evidence_hash,
+            timestamp,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
     /// Admin-only package expiration extension using a relative time delta.
     ///
     /// # Deprecated
@@ -2110,6 +2182,25 @@ impl AidEscrow {
         }
     }
 
+    /// Validates that the evidence hash is a 64-character hex string (32 bytes).
+    fn validate_evidence_hash(_env: &Env, hash: &String) -> Result<(), Error> {
+        let len = hash.len() as usize;
+        if len != 64 {
+            return Err(Error::InvalidState);
+        }
+
+        let mut raw = [0u8; 64];
+        hash.copy_into_slice(&mut raw);
+
+        for byte in &raw {
+            if Self::hex_nibble(*byte).is_none() {
+                return Err(Error::InvalidState);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Returns the total amount currently locked for a specific token.
     pub fn get_total_locked(env: Env, token: Address) -> i128 {
         let locked_map: Map<Address, i128> = env
@@ -2167,6 +2258,16 @@ impl AidEscrow {
     pub fn view_package_status(env: Env, id: u64) -> Result<PackageStatus, Error> {
         let pkg = Self::get_package(env, id)?;
         Ok(pkg.status)
+    }
+
+    /// Returns the evidence hash attached to a package.
+    /// Returns empty string if no evidence hash has been attached.
+    ///
+    /// # Errors
+    /// Returns `Error::PackageNotFound` if no package exists with the given `id`.
+    pub fn get_evidence_hash(env: Env, id: u64) -> Result<String, Error> {
+        let pkg = Self::get_package(env, id)?;
+        Ok(pkg.evidence_hash)
     }
 
     // --- Analytics ---
@@ -2287,12 +2388,18 @@ impl AidEscrow {
     ///
     /// # Arguments
     /// * `recipient` - The address to filter packages by
-    /// * `cursor` - Starting position for pagination (0-indexed)
-    /// * `limit` - Maximum number of results to return
+    /// * `cursor` - Starting position for pagination (0-indexed offset into the
+    ///              global package ID space; if `cursor >= package_counter` an
+    ///              empty result is returned)
+    /// * `limit` - Maximum number of results to return; capped at
+    ///             [`MAX_PAGE_SIZE`] to keep the call within Soroban resource
+    ///             limits
     ///
     /// # Returns
-    /// A Vec<u64> containing package IDs that belong to the recipient,
-    /// starting from the cursor position and limited by the limit parameter.
+    /// A `Vec<u64>` containing package IDs that belong to the recipient,
+    /// starting from `cursor` and bounded by the effective `limit`.
+    /// Use [`get_recipient_package_count`] to obtain the total count for
+    /// constructing subsequent page requests.
     pub fn list_recipient_packages(
         env: Env,
         recipient: Address,
@@ -2302,12 +2409,17 @@ impl AidEscrow {
         let package_counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
         let mut result: Vec<u64> = Vec::new(&env);
 
-        // Calculate the end position: cursor + limit or package_counter, whichever comes first
-        let end_pos = if cursor.saturating_add(limit as u64) > package_counter {
-            package_counter
-        } else {
-            cursor.saturating_add(limit as u64)
-        };
+        // Enforce the page-size cap so callers cannot request unbounded reads.
+        let effective_limit = limit.min(MAX_PAGE_SIZE);
+
+        // Out-of-range cursor: nothing to return.
+        if cursor >= package_counter {
+            return result;
+        }
+
+        // Calculate the end position: cursor + effective_limit or package_counter,
+        // whichever comes first.
+        let end_pos = (cursor.saturating_add(effective_limit as u64)).min(package_counter);
 
         // Iterate from cursor to end_pos
         for id in cursor..end_pos {
@@ -2823,6 +2935,137 @@ mod tests {
 
         let page = client.list_recipient_packages(&recipient, &0, &3);
         assert_eq!(page.len(), 3);
+    }
+
+    // ---- Pagination acceptance tests (issue #963) ----
+
+    /// Empty result when no packages exist for the recipient.
+    #[test]
+    fn test_list_recipient_packages_empty() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        // No packages created — expect empty Vec.
+        let result = client.list_recipient_packages(&recipient, &0, &10);
+        assert_eq!(result.len(), 0);
+    }
+
+    /// Single-page retrieval: all packages fit inside one call.
+    #[test]
+    fn test_list_recipient_packages_single_page() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        sac.mint(&admin, &30_000_000);
+        client.fund(&token, &admin, &30_000_000);
+
+        let meta = Map::new(&env);
+        for i in 0..3_u64 {
+            client.create_package(&admin, &i, &recipient, &10_000_000, &token, &86400, &meta);
+        }
+
+        // Request more than available — should return exactly 3.
+        let result = client.list_recipient_packages(&recipient, &0, &50);
+        assert_eq!(result.len(), 3);
+        // Count helper must agree.
+        assert_eq!(client.get_recipient_package_count(&recipient), 3);
+    }
+
+    /// Multi-page retrieval: iterate through pages and collect all package IDs.
+    #[test]
+    fn test_list_recipient_packages_multi_page() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        sac.mint(&admin, &70_000_000);
+        client.fund(&token, &admin, &70_000_000);
+
+        let meta = Map::new(&env);
+        for i in 0..7_u64 {
+            client.create_package(&admin, &i, &recipient, &10_000_000, &token, &86400, &meta);
+        }
+
+        let total = client.get_recipient_package_count(&recipient);
+        assert_eq!(total, 7);
+
+        // Page 1: IDs 0..3
+        let page1 = client.list_recipient_packages(&recipient, &0, &3);
+        assert_eq!(page1.len(), 3);
+
+        // Page 2: IDs 3..6
+        let page2 = client.list_recipient_packages(&recipient, &3, &3);
+        assert_eq!(page2.len(), 3);
+
+        // Page 3: ID 6
+        let page3 = client.list_recipient_packages(&recipient, &6, &3);
+        assert_eq!(page3.len(), 1);
+
+        // All pages together cover all 7 packages.
+        assert_eq!(page1.len() + page2.len() + page3.len(), 7);
+    }
+
+    /// Out-of-range cursor returns an empty result without panicking.
+    #[test]
+    fn test_list_recipient_packages_out_of_range_cursor() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        sac.mint(&admin, &10_000_000);
+        client.fund(&token, &admin, &10_000_000);
+
+        let meta = Map::new(&env);
+        client.create_package(&admin, &0, &recipient, &10_000_000, &token, &86400, &meta);
+
+        // cursor = 999 is way beyond the single package — must return empty.
+        let result = client.list_recipient_packages(&recipient, &999, &10);
+        assert_eq!(result.len(), 0);
+    }
+
+    /// MAX_PAGE_SIZE is enforced: passing a limit larger than MAX_PAGE_SIZE
+    /// must not return more than MAX_PAGE_SIZE items.
+    #[test]
+    fn test_list_recipient_packages_max_page_size_enforced() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        // Create MAX_PAGE_SIZE + 5 packages so a full page is possible.
+        let n = (MAX_PAGE_SIZE + 5) as u64;
+        let total_amount = n as i128 * 10_000_000;
+        sac.mint(&admin, &total_amount);
+        client.fund(&token, &admin, &total_amount);
+
+        let meta = Map::new(&env);
+        for i in 0..n {
+            client.create_package(&admin, &i, &recipient, &10_000_000, &token, &86400, &meta);
+        }
+
+        // Requesting more than MAX_PAGE_SIZE must be silently capped.
+        let result = client.list_recipient_packages(&recipient, &0, &(MAX_PAGE_SIZE + 100));
+        assert!(result.len() <= MAX_PAGE_SIZE);
     }
 
     #[test]
