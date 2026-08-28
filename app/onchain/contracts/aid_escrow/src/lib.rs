@@ -855,17 +855,16 @@ impl AidEscrow {
         }
 
         // 2. Validate token interface and fetch decimals dynamically.
-        let _decimals = Self::validate_token(&env, &token)?;
+        let decimals = Self::validate_token(&env, &token)?;
 
-        // 3. Dynamic Precision Check (Optional - allow fractional units for testing)
+        // 3. Dynamic Precision Check
         // Instead of checking 6 AND 8, we check ONLY the decimals this token uses.
-        // NOTE: Commented out for now as it may cause test failures with mock tokens
-        // let unit = 10i128.pow(decimals);
-        // if amount % unit != 0 {
-        //     // This ensures the user isn't trying to send a fractional "human" unit
-        //     // if your business logic requires whole-unit funding.
-        //     return Err(Error::InvalidAmount);
-        // }
+        let unit = 10i128.pow(decimals);
+        if amount % unit != 0 {
+            // This ensures the user isn't trying to send a fractional "human" unit
+            // if your business logic requires whole-unit funding.
+            return Err(Error::InvalidAmount);
+        }
 
         // 4. Authorization
         from.require_auth();
@@ -924,17 +923,16 @@ impl AidEscrow {
             return Err(Error::InvalidAmount);
         }
 
-        // --- DYNAMIC PRECISION CHECK (Disabled for test compatibility) ---
+        // --- DYNAMIC PRECISION CHECK ---
         // Fetch the actual decimals from a validated token contract.
-        let _decimals = Self::validate_token(&env, &token)?;
-        // let unit = 10i128.pow(decimals);
+        let decimals = Self::validate_token(&env, &token)?;
+        let unit = 10i128.pow(decimals);
 
         // Enforce that only whole units can be used (if that is your business requirement).
         // If you want to allow fractional units (e.g., 0.1 tokens), remove this check.
-        // NOTE: Temporarily disabled as it may cause test failures with mock tokens
-        // if amount % unit != 0 {
-        //     return Err(Error::InvalidAmount);
-        // }
+        if amount % unit != 0 {
+            return Err(Error::InvalidAmount);
+        }
 
         if amount < config.min_amount {
             return Err(Error::InvalidAmount);
@@ -1058,8 +1056,8 @@ impl AidEscrow {
             return Err(Error::InvalidState);
         }
 
-        let _decimals = Self::validate_token(&env, &token)?;
-        // let unit = 10i128.pow(decimals);  // Disabled for test compatibility
+        let decimals = Self::validate_token(&env, &token)?;
+        let unit = 10i128.pow(decimals);
         let contract_balance = Self::token_balance(&env, &token, &env.current_contract_address())?;
 
         let mut locked_map: Map<Address, i128> = env
@@ -1095,9 +1093,7 @@ impl AidEscrow {
                 return Err(Error::InvalidAmount);
             }
 
-            if amount < config.min_amount
-            /* || amount % unit != 0 */
-            {
+            if amount < config.min_amount || amount % unit != 0 {
                 return Err(Error::InvalidAmount);
             }
 
