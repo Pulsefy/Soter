@@ -535,11 +535,12 @@ impl AidEscrow {
         env.storage().instance().remove(&KEY_PENDING_ADMIN);
 
         let timestamp = env.ledger().timestamp();
-        AdminTransferCancelled { 
-            admin, 
+        AdminTransferCancelled {
+            admin,
             timestamp,
             schema_version: EVENT_SCHEMA_VERSION,
-        }.publish(&env);
+        }
+        .publish(&env);
 
         Ok(())
     }
@@ -662,10 +663,11 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &true);
-        ContractPausedEvent { 
+        ContractPausedEvent {
             admin,
             schema_version: EVENT_SCHEMA_VERSION,
-        }.publish(&env);
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -678,10 +680,11 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &false);
-        ContractUnpausedEvent { 
+        ContractUnpausedEvent {
             admin,
             schema_version: EVENT_SCHEMA_VERSION,
-        }.publish(&env);
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -694,11 +697,12 @@ impl AidEscrow {
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &true);
 
-        ActionPausedEvent { 
-            admin, 
+        ActionPausedEvent {
+            admin,
             action,
             schema_version: EVENT_SCHEMA_VERSION,
-        }.publish(&env);
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -711,11 +715,12 @@ impl AidEscrow {
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &false);
 
-        ActionUnpausedEvent { 
-            admin, 
+        ActionUnpausedEvent {
+            admin,
             action,
             schema_version: EVENT_SCHEMA_VERSION,
-        }.publish(&env);
+        }
+        .publish(&env);
         Ok(())
     }
 

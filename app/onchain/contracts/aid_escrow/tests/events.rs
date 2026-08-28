@@ -92,7 +92,9 @@ fn assert_field_exists(env: &Env, data: &Val, field: &str) {
 
 fn assert_schema_version(env: &Env, data: &Val, expected_version: u32) {
     let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(env, data).unwrap();
-    let val = map.get(sym(env, "schema_version")).expect("schema_version field missing from event");
+    let val = map
+        .get(sym(env, "schema_version"))
+        .expect("schema_version field missing from event");
     let version = u32::try_from_val(env, &val).expect("schema_version is not u32");
     assert_eq!(version, expected_version, "schema_version mismatch");
 }
@@ -827,20 +829,23 @@ fn test_all_events_have_schema_version() {
         &(env.ledger().timestamp() + 86400),
         &Map::new(&env),
     );
-    
+
     client.pause();
     client.unpause();
-    
+
     // Get all events and verify each has schema_version
     let all_events = env.events().all();
     let contract_events: Vec<_> = all_events
         .into_iter()
         .filter(|(id, _, _)| id == &contract_id)
         .collect();
-    
+
     // Should have at least 4 events: fund, create_package, pause, unpause
-    assert!(contract_events.len() >= 4, "Expected at least 4 contract events");
-    
+    assert!(
+        contract_events.len() >= 4,
+        "Expected at least 4 contract events"
+    );
+
     // Check every contract event has schema_version field
     for (_, _, event_data) in contract_events {
         let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(&env, &event_data).unwrap();
@@ -849,7 +854,7 @@ fn test_all_events_have_schema_version() {
             "Event missing schema_version field: {:?}",
             map
         );
-        
+
         // Verify it's the correct version
         let version_val = map.get(sym(&env, "schema_version")).unwrap();
         let version = u32::try_from_val(&env, &version_val).expect("schema_version not u32");
@@ -874,7 +879,7 @@ fn test_schema_version_matches_constant() {
 
     // Get the fund event which should be the last event
     let data = last_event_data(&env, &contract_id, "escrow_funded");
-    
+
     // Verify schema version is exactly 1 (matching EVENT_SCHEMA_VERSION)
     assert_schema_version(&env, &data, 1);
 }
@@ -903,7 +908,7 @@ fn test_batch_events_all_have_schema_version() {
 
     // Clear existing events
     let events_before = env.events().all().len();
-    
+
     client.batch_create_packages(
         &admin,
         &recipients,
@@ -922,12 +927,17 @@ fn test_batch_events_all_have_schema_version() {
         .collect();
 
     // Should have 3 individual PackageCreated events + 1 BatchCreatedEvent
-    assert_eq!(new_events.len(), 4, "Expected 4 events from batch operation");
+    assert_eq!(
+        new_events.len(),
+        4,
+        "Expected 4 events from batch operation"
+    );
 
     // Verify every event has schema_version = 1
     for (_, _, event_data) in new_events {
         let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(&env, &event_data).unwrap();
-        let version_val = map.get(sym(&env, "schema_version"))
+        let version_val = map
+            .get(sym(&env, "schema_version"))
             .expect("Event missing schema_version field");
         let version = u32::try_from_val(&env, &version_val).expect("schema_version not u32");
         assert_eq!(version, 1, "Expected schema version 1 in batch event");
