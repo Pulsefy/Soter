@@ -6,6 +6,10 @@ import {
   OnchainAdapter,
   ONCHAIN_ADAPTER_TOKEN,
 } from '../onchain/onchain.adapter';
+import {
+  ProviderHealthRegistryService,
+  ProviderHealthSnapshot,
+} from './provider-health-registry.service';
 
 export type CheckStatus = 'up' | 'down' | 'skipped';
 
@@ -41,6 +45,12 @@ export interface ReadinessResponse {
     database: HealthCheckResult;
     stellarRpc: HealthCheckResult;
   };
+  providers?: Record<string, ProviderHealthSnapshot>;
+}
+
+export interface ProviderHealthResponse {
+  timestamp: string;
+  providers: Record<string, ProviderHealthSnapshot>;
 }
 
 @Injectable()
@@ -51,6 +61,7 @@ export class HealthService {
     private readonly prisma: PrismaService,
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
+    private readonly providerHealthRegistry: ProviderHealthRegistryService,
   ) {}
 
   check() {
@@ -105,6 +116,8 @@ export class HealthService {
       database.status === 'up' &&
       (!stellarRequired || stellarRpc.status === 'up');
 
+    const providers = this.providerHealthRegistry.getAllStatuses();
+
     return {
       status: dependenciesReady ? 'ready' : 'not_ready',
       ready: dependenciesReady,
@@ -114,6 +127,7 @@ export class HealthService {
         database,
         stellarRpc,
       },
+      providers,
     };
   }
 
@@ -280,6 +294,17 @@ export class HealthService {
         error: errorMsg,
       };
     }
+  }
+
+  /**
+   * Returns a snapshot of all known provider health statuses.
+   * No sensitive details are included (issue #770).
+   */
+  getProviderHealth(): ProviderHealthResponse {
+    return {
+      timestamp: new Date().toISOString(),
+      providers: this.providerHealthRegistry.getAllStatuses(),
+    };
   }
 
   async getDiagnosticsExport() {
