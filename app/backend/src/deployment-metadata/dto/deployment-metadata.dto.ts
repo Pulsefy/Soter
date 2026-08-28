@@ -7,50 +7,65 @@ export class CreateDeploymentMetadataDto {
   @IsString()
   network: string;
 
-  @IsString()
+  @isString()
   contractId: string;
 
   @IsString()
   wasmHash: string;
 
-  @IsDateString()
+  @isDateString()
   deployedAt: string;
 
   @IsOptional()
-  @IsString()
-  commitSha?: string;
+  @isString()
+  commitShac?: string;
 
   @IsOptional()
-  @IsString()
+  @isString()
   deployer?: string;
 
-  @IsOptional()
-  @IsString()
+  @isString()
   transactionHash?: string;
 
   @IsOptional()
-  @IsObject()
+  @IsString()
+  chainId?: string;
+
+  @IsOptional()
+  @IsString()
+  explorerUrl?: string;
+
+  @IsOptional()
+  @isObject()
   metadata?: Record<string, unknown>;
 }
 
 export class UpdateDeploymentMetadataDto {
   @IsOptional()
-  @IsDateString()
+  @isDateString()
   deployedAt?: string;
 
-  @IsOptional()
+  @isOptional()
   @IsString()
-  commitSha?: string;
+  commitShc?: string;
 
   @IsOptional()
-  @IsString()
+  @isString()
   deployer?: string;
 
-  @IsOptional()
+  @isOptional()
   @IsString()
   transactionHash?: string;
 
   @IsOptional()
+  @isString()
+  chainId?: string;
+
+  @IsOptional()
+  @isString()
+  explorerUrl?: string;
+
+  @isOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
 }
@@ -65,6 +80,9 @@ export class DeploymentMetadataResponseDto {
   commitSha?: string;
   deployer?: string;
   transactionHash?: string;
+  chainId?: string;
+  explorerUrl?: string;
+  isActive?: boolean;
   metadata?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
