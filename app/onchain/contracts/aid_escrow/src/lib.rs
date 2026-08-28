@@ -855,7 +855,7 @@ impl AidEscrow {
         }
 
         // 2. Validate token interface and fetch decimals dynamically.
-        let decimals = Self::validate_token(&env, &token)?;
+        let _decimals = Self::validate_token(&env, &token)?;
 
         // 3. Dynamic Precision Check (Optional - allow fractional units for testing)
         // Instead of checking 6 AND 8, we check ONLY the decimals this token uses.
@@ -926,7 +926,7 @@ impl AidEscrow {
 
         // --- DYNAMIC PRECISION CHECK (Disabled for test compatibility) ---
         // Fetch the actual decimals from a validated token contract.
-        let decimals = Self::validate_token(&env, &token)?;
+        let _decimals = Self::validate_token(&env, &token)?;
         // let unit = 10i128.pow(decimals);
 
         // Enforce that only whole units can be used (if that is your business requirement).
@@ -1058,7 +1058,7 @@ impl AidEscrow {
             return Err(Error::InvalidState);
         }
 
-        let decimals = Self::validate_token(&env, &token)?;
+        let _decimals = Self::validate_token(&env, &token)?;
         // let unit = 10i128.pow(decimals);  // Disabled for test compatibility
         let contract_balance = Self::token_balance(&env, &token, &env.current_contract_address())?;
 
