@@ -7,6 +7,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { MetricsService } from '../observability/metrics/metrics.service';
 
+// Mock the stellar SDK at the module level
+jest.mock('@stellar/stellar-sdk', () => ({
+  scValToNative: jest.fn(),
+}));
+
+// Import the mocked function after the mock
+import { scValToNative } from '@stellar/stellar-sdk';
+const mockScValToNative = scValToNative as jest.MockedFunction<typeof scValToNative>;
+
 describe('SorobanEventCorrelationService', () => {
   let service: SorobanEventCorrelationService;
 
@@ -451,17 +460,12 @@ describe('SorobanEventCorrelationService', () => {
         },
       };
 
-      // Mock scValToNative using jest.doMock for proper ES6 import compatibility
-      const mockScValToNative = jest.fn().mockReturnValue({
+      // Set up the mock return value
+      mockScValToNative.mockReturnValue({
         package_id: 'pkg_123',
         schema_version: 1,
         amount: 1000,
       });
-
-      // Use jest.doMock to mock the entire module before importing
-      jest.doMock('@stellar/stellar-sdk', () => ({
-        scValToNative: mockScValToNative,
-      }));
 
       const result = (service as any).parseEventPayload(mockEvent);
 
@@ -473,9 +477,6 @@ describe('SorobanEventCorrelationService', () => {
         },
         schemaVersion: 1,
       });
-
-      // Restore mocks
-      jest.dontMock('@stellar/stellar-sdk');
     });
 
     it('should handle payload without schema_version during parsing', () => {
@@ -485,16 +486,11 @@ describe('SorobanEventCorrelationService', () => {
         },
       };
 
-      // Mock scValToNative using jest.doMock for proper ES6 import compatibility
-      const mockScValToNative = jest.fn().mockReturnValue({
+      // Set up the mock return value
+      mockScValToNative.mockReturnValue({
         package_id: 'pkg_123',
         amount: 1000,
       });
-
-      // Use jest.doMock to mock the entire module before importing
-      jest.doMock('@stellar/stellar-sdk', () => ({
-        scValToNative: mockScValToNative,
-      }));
 
       const result = (service as any).parseEventPayload(mockEvent);
 
@@ -505,9 +501,6 @@ describe('SorobanEventCorrelationService', () => {
         },
         schemaVersion: undefined,
       });
-
-      // Restore mocks
-      jest.dontMock('@stellar/stellar-sdk');
     });
   });
 

@@ -196,7 +196,8 @@ export class HealthController {
       'Returns active providers, model versions, and capability flags. No secrets or private credentials are included. Suitable for linking from health probes and diagnostics surfaces.',
   })
   @ApiOkResponse({
-    description: 'Service metadata with providers, models, and capability flags.',
+    description:
+      'Service metadata with providers, models, and capability flags.',
     schema: {
       example: {
         service: 'soter-backend',

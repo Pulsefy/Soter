@@ -106,7 +106,9 @@ export class ContractReadServiceImpl implements ContractReadAdapter {
     const effectiveLimit = Math.min(Math.max(1, limit), MAX_PAGE_SIZE);
     const safeCursor = Math.max(0, cursor);
 
-    if (typeof (this.onchainAdapter as any).listRecipientPackages === 'function') {
+    if (
+      typeof (this.onchainAdapter as any).listRecipientPackages === 'function'
+    ) {
       const result = await (this.onchainAdapter as any).listRecipientPackages({
         recipientAddress,
         cursor: safeCursor,
@@ -131,8 +133,13 @@ export class ContractReadServiceImpl implements ContractReadAdapter {
   }
 
   async getRecipientPackageCount(recipientAddress: string): Promise<number> {
-    if (typeof (this.onchainAdapter as any).getRecipientPackageCount === 'function') {
-      const result = await (this.onchainAdapter as any).getRecipientPackageCount({
+    if (
+      typeof (this.onchainAdapter as any).getRecipientPackageCount ===
+      'function'
+    ) {
+      const result = await (
+        this.onchainAdapter as any
+      ).getRecipientPackageCount({
         recipientAddress,
       });
       return typeof result === 'number' ? result : (result?.count ?? 0);
@@ -144,4 +151,3 @@ export class ContractReadServiceImpl implements ContractReadAdapter {
     return 0;
   }
 }
-

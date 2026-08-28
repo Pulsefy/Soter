@@ -7,10 +7,16 @@ export class ClaimTimelineEntryDto {
   @ApiProperty({ description: 'ISO timestamp of the status change' })
   timestamp: string;
 
-  @ApiProperty({ description: 'Transaction hash if this was an on-chain action', required: false })
+  @ApiProperty({
+    description: 'Transaction hash if this was an on-chain action',
+    required: false,
+  })
   transactionHash?: string;
 
-  @ApiProperty({ description: 'Explorer URL for the transaction', required: false })
+  @ApiProperty({
+    description: 'Explorer URL for the transaction',
+    required: false,
+  })
   explorerUrl?: string;
 }
 
@@ -87,7 +93,10 @@ export class ClaimReceiptDto {
   })
   explorerLink?: string;
 
-  @ApiProperty({ description: 'Status change timeline', type: [ClaimTimelineEntryDto] })
+  @ApiProperty({
+    description: 'Status change timeline',
+    type: [ClaimTimelineEntryDto],
+  })
   timeline: ClaimTimelineEntryDto[];
 }
 
