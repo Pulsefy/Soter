@@ -75,6 +75,10 @@ export class MetricsService {
     public claimsInFunnelGauge: Gauge<string>,
     @InjectMetric('claim_funnel_duration_seconds')
     public claimFunnelDuration: Histogram<string>,
+
+    // API Key Rate Limit Metrics (issue #952)
+    @InjectMetric('api_key_rate_limit_rejections_total')
+    public apiKeyRateLimitRejectionsCounter: Counter<string>,
   ) {}
 
   /**
@@ -472,5 +476,12 @@ export class MetricsService {
 
     const histogram = this.dynamicHistograms.get(key)!;
     histogram.observe(labels || {}, value);
+  }
+
+  /**
+   * Increment the counter tracking per-API-key rate limit rejections (issue #952).
+   */
+  incrementApiKeyRateLimitRejection(scope: string, apiKeyId: string): void {
+    this.apiKeyRateLimitRejectionsCounter.inc({ scope, api_key_id: apiKeyId });
   }
 }

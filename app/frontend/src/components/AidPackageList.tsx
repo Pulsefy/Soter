@@ -28,7 +28,8 @@ function PackageCard({ pkg }: { pkg: AidPackage }) {
 }
 
 export const AidPackageList: React.FC = () => {
-  const { data: packages = [], isLoading, error } = useAidPackages();
+  const { data: response, isLoading, error } = useAidPackages();
+  const packages = response?.data ?? [];
 
   if (isLoading) {
     return (

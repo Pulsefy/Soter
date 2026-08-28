@@ -60,6 +60,7 @@ expires and is refunded.
 | `create_package(env, operator, id, recipient, amount, token, expires_at)` | Admin / Distributor | Creates a single aid package with a specific ID. Locks funds from the available pool. |
 | `batch_create_packages(env, operator, recipients, amounts, token, expires_in)` | Admin / Distributor | Creates multiple packages in one transaction using auto-incrementing IDs. |
 | `claim(env, id)` | Recipient | Recipient claims the package. Transfers tokens to recipient and marks package as claimed. |
+| `reassign_package(env, package_id, new_recipient)` | Admin | Reassigns an unclaimed, unexpired package while preserving its ID and history. |
 | `disburse(env, id)` | Admin | Admin manually disburses a package to its recipient. |
 | `revoke(env, id)` | Admin | Admin revokes a package, returning funds to the surplus pool. |
 | `refund(env, id)` | Admin | Refunds an expired or cancelled package to the admin. |
@@ -157,6 +158,7 @@ All state-changing operations emit events with stable topics for indexer consump
 - `EscrowFunded` — pool funded
 - `PackageCreated` — package created
 - `PackageClaimed` — recipient claimed
+- `PackageReassigned` — package recipient changed by the admin
 - `PackageDisbursed` — admin disbursed
 - `PackageRevoked` — admin revoked
 - `PackageRefunded` — admin refunded

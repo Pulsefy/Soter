@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![allow(deprecated)]
 
 use aid_escrow::{AidEscrow, AidEscrowClient, Config, Error, PackageStatus};
 use soroban_sdk::{
@@ -91,6 +92,99 @@ fn test_multiple_packages() {
 
     assert_eq!(client.get_package(&100).amount, UNIT);
     assert_eq!(client.get_package(&101).amount, 2 * UNIT);
+}
+
+#[test]
+fn test_reassign_package_updates_recipient_and_counts() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let old_recipient = Address::generate(&env);
+    let new_recipient = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
+    client.init(&admin);
+
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+    client.create_package(
+        &admin,
+        &1,
+        &old_recipient,
+        &UNIT,
+        &token_client.address,
+        &0,
+        &Map::new(&env),
+    );
+
+    client.reassign_package(&1, &new_recipient);
+
+    assert_eq!(client.get_package(&1).recipient, new_recipient);
+    assert_eq!(client.get_recipient_package_count(&old_recipient), 0);
+    assert_eq!(client.get_recipient_package_count(&new_recipient), 1);
+}
+
+#[test]
+fn test_reassign_package_rejects_claimed_revoked_and_expired_packages() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let replacement = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &Address::generate(&env));
+    let client = AidEscrowClient::new(&env, &env.register(AidEscrow, ()));
+    client.init(&admin);
+
+    token_admin_client.mint(&admin, &(3 * UNIT));
+    client.fund(&token_client.address, &admin, &(3 * UNIT));
+
+    client.create_package(
+        &admin,
+        &1,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &0,
+        &Map::new(&env),
+    );
+    client.claim(&1);
+    assert_eq!(
+        client.try_reassign_package(&1, &replacement),
+        Err(Ok(Error::PackageNotActive))
+    );
+
+    client.create_package(
+        &admin,
+        &2,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &0,
+        &Map::new(&env),
+    );
+    client.revoke(&2);
+    assert_eq!(
+        client.try_reassign_package(&2, &replacement),
+        Err(Ok(Error::PackageNotActive))
+    );
+
+    let expires_at = env.ledger().timestamp() + 100;
+    client.create_package(
+        &admin,
+        &3,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &expires_at,
+        &Map::new(&env),
+    );
+    env.ledger().set_timestamp(expires_at + 1);
+    assert_eq!(
+        client.try_reassign_package(&3, &replacement),
+        Err(Ok(Error::PackageExpired))
+    );
 }
 
 #[test]

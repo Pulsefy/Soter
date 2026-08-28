@@ -43,3 +43,5 @@ Thumbs.db
 # Logs
 *.log
 logs/
+# Benchmark results (generated, not committed)
+benchmark-results/

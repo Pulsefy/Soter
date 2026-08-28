@@ -10,8 +10,7 @@ import { filter } from 'rxjs/operators';
  * - `inbox.item.updated` - a review decision landed on a single item.
  */
 export type VerificationInboxEventType =
-  | 'inbox.queue.changed'
-  | 'inbox.item.updated';
+  'inbox.queue.changed' | 'inbox.item.updated';
 
 export interface VerificationInboxEventPayload {
   verificationId: string;
@@ -90,7 +89,8 @@ export class VerificationInboxEventsService {
     const lastEventId = options.lastEventId ?? 0;
 
     return this.recent.filter(
-      event => event.id > lastEventId && this.isInScope(event, options.statuses),
+      event =>
+        event.id > lastEventId && this.isInScope(event, options.statuses),
     );
   }
 

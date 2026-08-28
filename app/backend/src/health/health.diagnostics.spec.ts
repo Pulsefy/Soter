@@ -4,6 +4,7 @@ import { HealthService } from './health.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
 import { ONCHAIN_ADAPTER_TOKEN } from '../onchain/onchain.adapter';
+import { ProviderHealthRegistryService } from './provider-health-registry.service';
 
 describe('HealthService Diagnostics Export', () => {
   let service: HealthService;
@@ -34,6 +35,12 @@ describe('HealthService Diagnostics Export', () => {
         {
           provide: ONCHAIN_ADAPTER_TOKEN,
           useValue: { getContractMetadata: jest.fn() },
+        },
+        {
+          provide: ProviderHealthRegistryService,
+          useValue: {
+            getAllStatuses: jest.fn().mockReturnValue({}),
+          },
         },
       ],
     }).compile();

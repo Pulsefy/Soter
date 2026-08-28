@@ -54,25 +54,37 @@ describe('RetentionPolicyService', () => {
       auditLog: {
         updateMany: jest.fn(),
         deleteMany: jest.fn(),
+        count: jest.fn(),
+        findMany: jest.fn(),
       },
       verificationSession: {
         updateMany: jest.fn(),
         deleteMany: jest.fn(),
+        count: jest.fn(),
+        findMany: jest.fn(),
       },
       session: {
         updateMany: jest.fn(),
         deleteMany: jest.fn(),
+        count: jest.fn(),
+        findMany: jest.fn(),
       },
       sessionSubmission: {
         updateMany: jest.fn(),
+        findMany: jest.fn(),
+        count: jest.fn(),
       },
       claim: {
         updateMany: jest.fn(),
         deleteMany: jest.fn(),
+        count: jest.fn(),
+        findMany: jest.fn(),
       },
       verificationRequest: {
         updateMany: jest.fn(),
         deleteMany: jest.fn(),
+        count: jest.fn(),
+        findMany: jest.fn(),
       },
     };
 
@@ -264,6 +276,67 @@ describe('RetentionPolicyService', () => {
           affected: 3,
         }),
       );
+    });
+
+    it('dry-run mode should report counts without mutating', async () => {
+      const policies = [
+        {
+          id: 'pol-1',
+          entity: 'AuditLog',
+          retentionDays: 90,
+          strategy: 'soft_delete',
+        },
+        {
+          id: 'pol-2',
+          entity: 'VerificationSession',
+          retentionDays: 30,
+          strategy: 'hard_delete',
+        },
+      ];
+
+      prisma.retentionPolicy.findMany.mockResolvedValue(policies);
+      prisma.auditLog.count.mockResolvedValue(5);
+      prisma.verificationSession.count.mockResolvedValue(3);
+
+      const results = await service.executePurge({ dryRun: true });
+
+      expect(results).toHaveLength(2);
+      expect(results[0].affected).toBe(5);
+      expect(results[1].affected).toBe(3);
+      expect(prisma.auditLog.updateMany).not.toHaveBeenCalled();
+      expect(prisma.verificationSession.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('batching should process in chunks when batchSize provided', async () => {
+      const policies = [
+        {
+          id: 'pol-1',
+          entity: 'AuditLog',
+          retentionDays: 90,
+          strategy: 'soft_delete',
+        },
+      ];
+
+      prisma.retentionPolicy.findMany.mockResolvedValue(policies);
+
+      (prisma.auditLog.findMany as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'a1' }, { id: 'a2' }])
+        .mockResolvedValueOnce([{ id: 'a3' }])
+        .mockResolvedValueOnce([]);
+
+      prisma.auditLog.updateMany
+        .mockResolvedValueOnce({ count: 2 })
+        .mockResolvedValueOnce({ count: 1 });
+
+      const results = await service.executePurge({
+        dryRun: false,
+        batchSize: 2,
+      });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].affected).toBe(3);
+      expect(prisma.auditLog.findMany).toHaveBeenCalled();
+      expect(prisma.auditLog.updateMany).toHaveBeenCalledTimes(2);
     });
   });
 

@@ -123,6 +123,19 @@ export class RecipientImportController {
     return this.recipientImportService.getJobStatus(jobId);
   }
 
+  @Post(':jobId/cancel')
+  @ApiOperation({
+    summary: 'Cancel an import job',
+    description:
+      'Requests cancellation for a pending or running import job. Active processors observe cancellation between rows.',
+  })
+  @ApiOkResponse({ type: ImportJobResponseDto })
+  async cancelJob(
+    @Param('jobId') jobId: string,
+  ): Promise<ImportJobResponseDto> {
+    return this.recipientImportService.cancelJob(jobId);
+  }
+
   @Get(':jobId/report')
   @ApiOperation({
     summary: 'Download structured validation report (CSV)',

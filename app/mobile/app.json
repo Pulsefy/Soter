@@ -48,6 +48,14 @@
           "project": "mobile",
           "authToken": "SENTRY_AUTH_TOKEN"
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "networkInspector": false
+          }
+        }
       ]
     ],
     "experiments": {

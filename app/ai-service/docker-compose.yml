@@ -57,6 +57,24 @@ services:
       - ./logs:/app/logs
     restart: unless-stopped
 
+  # Celery Beat scheduler for periodic tasks (evidence upload/artifact purge)
+  celery-beat:
+    build:
+      context: .
+      target: production
+    command: celery -A tasks beat --loglevel=info
+    environment:
+      - APP_ENV=production
+      - LOG_LEVEL=INFO
+      - REDIS_URL=redis://redis:6379/0
+      - BACKEND_WEBHOOK_URL=http://localhost:3001/api/v1/webhooks/ai-verification
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
   # GPU-enabled AI Service (requires nvidia-docker)
   ai-service-gpu:
     build:

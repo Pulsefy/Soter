@@ -33,6 +33,7 @@ section using the `#[contractevent]` derive.
 | `package_created`         | `create_package`    | A single aid package is created (funds locked).        |
 | `package_created` (xN)    | batch create        | One per package created in a batch (see below).        |
 | `batch_created_event`     | batch create        | Summary event for a batch creation.                    |
+| `package_reassigned`      | `reassign_package`  | Admin changes an unclaimed package recipient.         |
 | `package_claimed`         | claim path          | Recipient claims a package (incl. Merkle-proof claim). |
 | `package_disbursed`       | `disburse`          | Admin disburses a package to its recipient.            |
 | `package_revoked`         | `revoke`            | Admin revokes a `Created` package (funds unlocked).    |
@@ -77,6 +78,7 @@ Pool / administrative events:
 | `ActionUnpausedEvent`   | `admin: Address`, `action: Symbol`                                        |
 | `CampaignPausedEvent`   | `admin: Address`, `campaign_ref: String`                                  |
 | `CampaignUnpausedEvent` | `admin: Address`, `campaign_ref: String`                                  |
+| `PackageReassigned`     | `package_id: u64`, `previous_recipient: Address`, `new_recipient: Address`, `actor: Address`, `timestamp: u64` |
 
 ## Identifier stability (audit)
 

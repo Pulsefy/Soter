@@ -245,16 +245,21 @@ model Claim {
   /// for off-chain receipt discovery. Set at disbursement time.
   receiptPointer String?
 
+  importJobId    String?
+  importRowNumber Int?
+
   balanceLedger     BalanceLedger[]
   sorobanTransactions SorobanTransaction[]
   sorobanEventCorrelations SorobanEventCorrelation[]
 
   @@index([status])
   @@index([campaignId])
+  @@index([importJobId])
   @@index([createdAt])
   @@index([deletedAt])
   @@index([reissuedFromId])
   @@index([expiresAt])
+  @@unique([importJobId, importRowNumber])
 }
 
 enum SorobanTransactionStatus {
@@ -858,6 +863,7 @@ enum ImportJobStatus {
   processing
   completed
   failed
+  cancelled
 }
 
 model ImportJob {
@@ -870,12 +876,17 @@ model ImportJob {
   errors        String?
   reportUrl     String?
   fileName      String
+  filePath      String?
+  checkpointRow Int             @default(0)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+  startedAt     DateTime?
   completedAt   DateTime?
+  cancelledAt   DateTime?
 
   @@index([campaignId])
   @@index([status])
+  @@index([checkpointRow])
 }
 
 enum SorobanEventTopic {

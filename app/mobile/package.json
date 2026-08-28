@@ -28,6 +28,8 @@
     "expo": "~54.0.31",
     "expo-asset": "^12.0.12",
     "expo-barcode-scanner": "~12.5.3",
+    "expo-battery": "~7.0.0",
+    "expo-build-properties": "^57.0.15",
     "expo-camera": "^55.0.16",
     "expo-clipboard": "~8.0.7",
     "expo-constants": "~18.0.13",
@@ -38,7 +40,6 @@
     "expo-local-authentication": "^55.0.9",
     "expo-notifications": "^55.0.20",
     "expo-status-bar": "~3.0.9",
-    "expo-battery": "~7.0.0",
     "fast-text-encoding": "^1.0.6",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -46,6 +47,7 @@
     "react-native-get-random-values": "^2.0.0",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
+    "react-native-ssl-public-key-pinning": "^1.2.6",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {

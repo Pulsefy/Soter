@@ -331,6 +331,10 @@ const aidPackagesHandler: MockHandler = async (url) => {
   const search = urlObj.searchParams.get('search') ?? '';
   const status = urlObj.searchParams.get('status') ?? '';
   const token = urlObj.searchParams.get('token') ?? '';
+  const page = Math.max(1, parseInt(urlObj.searchParams.get('page') ?? '1', 10) || 1);
+  const size = Math.min(100, Math.max(1, parseInt(urlObj.searchParams.get('size') ?? '10', 10) || 10));
+  const sortBy = urlObj.searchParams.get('sortBy') ?? 'id';
+  const sortDirection = urlObj.searchParams.get('sortDirection') ?? 'asc';
 
   let results = [...ALL_PACKAGES];
 
@@ -352,7 +356,28 @@ const aidPackagesHandler: MockHandler = async (url) => {
     results = results.filter(p => p.token === token);
   }
 
-  return new Response(JSON.stringify(results), {
+  // Sort
+  if (sortBy && sortBy in results[0]) {
+    results.sort((a, b) => {
+      const aVal = a[sortBy as keyof AidPackage] ?? '';
+      const bVal = b[sortBy as keyof AidPackage] ?? '';
+      const cmp = String(aVal).localeCompare(String(bVal));
+      return sortDirection === 'desc' ? -cmp : cmp;
+    });
+  }
+
+  const total = results.length;
+  const totalPages = Math.ceil(total / size);
+  const startIdx = (page - 1) * size;
+  const paginatedResults = results.slice(startIdx, startIdx + size);
+
+  return new Response(JSON.stringify({
+    data: paginatedResults,
+    total,
+    page,
+    size,
+    totalPages,
+  }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
