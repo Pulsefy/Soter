@@ -53,6 +53,53 @@ pub fn create_package(
 }
 ```
 
+## 🔄 TypeScript Type Generation
+
+Contract changes require TypeScript type updates to prevent runtime type drift. Types are auto-generated from the Rust contract definitions.
+
+### When to Generate Types
+
+Generate types whenever you change:
+- Contract `#[contracttype]` structs or enums
+- Contract error codes (`#[contracterror]`)
+- Contract events (`#[contractevent]`)
+
+### How to Generate Types
+
+From the project root:
+```bash
+npm run generate:contract-types
+```
+
+Or from the backend directory:
+```bash
+cd app/backend
+npm run generate:contract-types
+```
+
+Or manually using Node:
+```bash
+cd app/onchain
+node scripts/generate-types.mjs --contract aid_escrow
+```
+
+### Generated Files
+
+- **Location**: `app/backend/src/types/aid_escrow.generated.ts`
+- **Do not edit**: This file is auto-generated. Changes will be overwritten.
+- **Exported**: Types are re-exported via `app/backend/src/types/index.ts`
+
+### CI Verification
+
+The CI pipeline automatically verifies that committed TypeScript types match the current Rust contract definition. PRs will fail if:
+- Types are out of sync with the contract
+- Generated types were not committed
+
+Run this locally before pushing:
+```bash
+node app/onchain/scripts/verify-types.mjs --contract aid_escrow
+```
+
 ## ✅ CI/CD & Testing
 
 We enforce strict quality types. Before submitting a PR, ensure you have:
@@ -60,6 +107,8 @@ We enforce strict quality types. Before submitting a PR, ensure you have:
 1. **Formatted Code**: `cargo fmt --check` must pass.
 2. **No Clippy Warnings**: `cargo clippy -- -D warnings` must pass.
 3. **Tests Pass**: `cargo test` must pass (unit and integration).
+4. **Types Current**: Run `npm run generate:contract-types` and commit any changes
+5. **Type Verification**: `node app/onchain/scripts/verify-types.mjs` exits with code 0
 
 ## 📝 PR Checklist
 
@@ -69,3 +118,6 @@ We enforce strict quality types. Before submitting a PR, ensure you have:
 - [ ] I have made corresponding changes to the documentation
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing unit tests pass locally with `cargo test`
+- [ ] I have regenerated TypeScript types if I changed contract types/errors/events
+- [ ] Type verification passes: `node app/onchain/scripts/verify-types.mjs`
+

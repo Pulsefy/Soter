@@ -105,6 +105,21 @@ export class SorobanErrorMapper {
       message: 'Token transfer failed',
       errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_TOKEN_TRANSFER_FAILED,
     },
+    19: {
+      code: 400,
+      message: 'No pending admin transfer',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_INVALID_STATE,
+    },
+    20: {
+      code: 400,
+      message: 'Invalid pending admin',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_INVALID_STATE,
+    },
+    21: {
+      code: 400,
+      message: 'Batch size exceeds maximum allowed',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_CONTRACT_ERROR,
+    },
   };
 
   /**
@@ -297,6 +312,7 @@ export class SorobanErrorMapper {
     errorCode: string;
     details?: Record<string, unknown>;
   } {
+    // Try to match against generated error enum names
     const errorMap: Record<
       string,
       { code: number; message: string; errorCode: string }

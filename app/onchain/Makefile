@@ -1,4 +1,4 @@
-.PHONY: all build test fmt clippy clean deploy registry help
+.PHONY: all build test fmt clippy clean deploy registry spec types help
 
 all: test build
 
@@ -63,6 +63,14 @@ registry:
 	@echo "📋 Generating contract registry..."
 	@python3 scripts/generate-registry.py
 
+spec:
+	@echo "📊 Exporting contract specifications..."
+	@python3 scripts/export-spec.py --contract aid_escrow
+
+types: spec
+	@echo "📝 Generating TypeScript types from contract specs..."
+	@node scripts/generate-types.mjs --contract aid_escrow
+
 docs:
 	@echo "📚 Generating documentation..."
 	@cargo doc --open
@@ -78,10 +86,14 @@ help:
 	@echo "  invoke    - Invoke contract function (set FUNCTION and ARGS)"
 	@echo "  audit     - Security audit of dependencies"
 	@echo "  registry  - Generate contract registry JSON for backend/frontend consumption"
+	@echo "  spec      - Export contract specification to machine-readable JSON"
+	@echo "  types     - Generate TypeScript types from contract specifications"
 	@echo "  docs      - Generate and open documentation"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build"
 	@echo "  make deploy"
 	@echo "  make registry"
+	@echo "  make spec"
+	@echo "  make types"
 	@echo "  make invoke FUNCTION=create_package ARGS=\"GB... 1000 USD...\""
