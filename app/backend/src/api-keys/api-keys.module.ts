@@ -25,6 +25,9 @@ export class ApiKeysModule implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    if (process.env.SKIP_BACKGROUND_JOBS === 'true') {
+      return;
+    }
     // Surface upcoming API key expirations every hour.
     await this.apiKeyExpiryQueue.add(
       'check-expiry',

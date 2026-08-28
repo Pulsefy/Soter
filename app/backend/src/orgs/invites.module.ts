@@ -23,6 +23,9 @@ export class InvitesModule implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    if (process.env.SKIP_BACKGROUND_JOBS === 'true') {
+      return;
+    }
     // Schedule invite expiry check every hour
     await this.inviteExpiryQueue.add(
       'check-expiry',

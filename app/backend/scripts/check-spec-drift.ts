@@ -7,29 +7,21 @@
  * Exit codes:
  *   0 — specs match (no drift)
  *   1 — specs differ (drift detected) OR committed artifact is missing
+ *       OR the app failed to bootstrap
  *
  * Usage (invoked by the `spec:check` npm script):
  *   pnpm --filter backend run spec:check
  */
-import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
-import { SwaggerModule } from '@nestjs/swagger';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { config as loadEnv } from 'dotenv';
 
-import { AppModule } from '../src/app.module';
-import { buildSwaggerConfig } from '../src/swagger-config';
+import {
+  loadSwaggerEnv,
+  createSwaggerDocument,
+} from '../src/swagger-document';
 
 async function checkDrift() {
-  // Load env
-  const candidates = [
-    join(process.cwd(), '.env'),
-    join(process.cwd(), 'app', 'backend', '.env'),
-    join(__dirname, '..', '.env'),
-  ];
-  const envPath = candidates.find(p => existsSync(p));
-  if (envPath) loadEnv({ path: envPath });
+  loadSwaggerEnv();
 
   const committedPath = join(process.cwd(), 'openapi', 'openapi.json');
 
@@ -41,39 +33,30 @@ async function checkDrift() {
     process.exit(1);
   }
 
-  const app = await NestFactory.create(AppModule, { logger: false });
-
-  app.setGlobalPrefix('api');
-  app.enableVersioning({
-    type: VersioningType.URI,
-    defaultVersion: '1',
-    prefix: 'v',
-  });
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: { enableImplicitConversion: true },
-      errorHttpStatusCode: 422,
-    }),
-  );
-
-  const freshDocument = SwaggerModule.createDocument(app, buildSwaggerConfig());
+  const { app, document: freshDocument } = await createSwaggerDocument();
   await app.close();
 
   // Normalize both sides by round-tripping through JSON.stringify(JSON.parse())
   // so formatting differences (whitespace, key order) don't cause false positives.
   const fresh = JSON.stringify(freshDocument);
-  const committed = JSON.stringify(JSON.parse(readFileSync(committedPath, 'utf-8')));
+  const committed = JSON.stringify(
+    JSON.parse(readFileSync(committedPath, 'utf-8')),
+  );
 
   if (fresh === committed) {
     console.log('✅  OpenAPI spec is up to date — no drift detected.');
     process.exit(0);
   }
 
+  const freshPaths = Object.keys(freshDocument.paths ?? {}).length;
+  const committedPaths = Object.keys(
+    (JSON.parse(readFileSync(committedPath, 'utf-8')) as { paths?: object })
+      .paths ?? {},
+  ).length;
+
   console.error(
     '❌  OpenAPI spec drift detected!\n\n' +
+      `    Generated paths: ${freshPaths}  |  committed paths: ${committedPaths}\n\n` +
       '    The committed artifact (openapi/openapi.json) does not match the\n' +
       '    spec generated from the current source code.\n\n' +
       '    To fix this, run:\n' +
@@ -84,4 +67,8 @@ async function checkDrift() {
   process.exit(1);
 }
 
-void checkDrift();
+void checkDrift().catch((err: unknown) => {
+  console.error('❌  Failed to generate OpenAPI spec for drift check.');
+  console.error(err);
+  process.exit(1);
+});

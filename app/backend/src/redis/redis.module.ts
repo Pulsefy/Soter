@@ -11,10 +11,14 @@ export const REDIS_CLIENT = 'REDIS_CLIENT';
     {
       provide: REDIS_CLIENT,
       useFactory: (configService: ConfigService) => {
-        return new Redis({
+        const client = new Redis({
           host: configService.get<string>('REDIS_HOST') ?? 'localhost',
           port: parseInt(configService.get<string>('REDIS_PORT') ?? '6379', 10),
         });
+        // ioredis emits 'error' on connection failure. Without a listener the
+        // process exits, which is how spec:check died in CI with no Redis.
+        client.on('error', () => undefined);
+        return client;
       },
       inject: [ConfigService],
     },

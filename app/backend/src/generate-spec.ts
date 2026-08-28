@@ -15,52 +15,19 @@
  * app normally). For CI, ensure the postgres/redis service containers are
  * up and migrations have been applied before running this script.
  */
-import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
-import { SwaggerModule } from '@nestjs/swagger';
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { config as loadEnv } from 'dotenv';
 
-import { AppModule } from './app.module';
-import { buildSwaggerConfig } from './swagger-config';
+import {
+  loadSwaggerEnv,
+  createSwaggerDocument,
+} from './swagger-document';
 
 async function generate() {
-  // Load env so ConfigService / Prisma don't fail during module init.
-  const candidates = [
-    join(process.cwd(), '.env'),
-    join(process.cwd(), 'app', 'backend', '.env'),
-    join(__dirname, '..', '.env'),
-  ];
-  const envPath = candidates.find(p => existsSync(p));
-  if (envPath) loadEnv({ path: envPath });
+  loadSwaggerEnv();
 
-  const app = await NestFactory.create(AppModule, {
-    // Silence startup logs — we only want spec output.
-    logger: false,
-  });
+  const { app, document } = await createSwaggerDocument();
 
-  // Mirror the exact same bootstrap as main.ts so the generated spec matches
-  // what is served at runtime.
-  app.setGlobalPrefix('api');
-  app.enableVersioning({
-    type: VersioningType.URI,
-    defaultVersion: '1',
-    prefix: 'v',
-  });
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: { enableImplicitConversion: true },
-      errorHttpStatusCode: 422,
-    }),
-  );
-
-  const document = SwaggerModule.createDocument(app, buildSwaggerConfig());
-
-  // Write artifact
   const outDir = join(process.cwd(), 'openapi');
   mkdirSync(outDir, { recursive: true });
   const outPath = join(outDir, 'openapi.json');
@@ -78,4 +45,8 @@ async function generate() {
   process.exit(0);
 }
 
-void generate();
+void generate().catch((err: unknown) => {
+  console.error('❌  Failed to generate OpenAPI spec.');
+  console.error(err);
+  process.exit(1);
+});
