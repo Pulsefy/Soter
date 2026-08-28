@@ -12,6 +12,8 @@ import {
   LinkEntityResult,
   EntityLinkQueryDto,
   RegistrySearchResult,
+  EntityLinkConfidenceBand,
+  EntityLinkReviewDecision,
 } from './dto/entity-link.dto';
 
 @Injectable()
@@ -31,6 +33,50 @@ export class EntityLinkingService {
       ) || 0.8;
   }
 
+  private getConfidenceBand(score: number): EntityLinkConfidenceBand {
+    if (score >= this.reviewThreshold) {
+      return 'high';
+    }
+    if (score >= 0.5) {
+      return 'medium';
+    }
+    return 'low';
+  }
+
+  private normalizeReviewDecision(reviewData: {
+    reviewedBy: string;
+    isActive?: boolean;
+    decision?: EntityLinkReviewDecision;
+    reviewNotes?: string;
+    registryId?: string;
+  }): { reviewState: string; isActive: boolean } {
+    if (reviewData.registryId) {
+      return { reviewState: 'remapped', isActive: true };
+    }
+
+    if (reviewData.decision) {
+      switch (reviewData.decision) {
+        case 'accepted':
+          return { reviewState: 'accepted', isActive: true };
+        case 'rejected':
+          return { reviewState: 'rejected', isActive: false };
+        case 'remapped':
+          return { reviewState: 'remapped', isActive: true };
+        default:
+          break;
+      }
+    }
+
+    if (reviewData.isActive === undefined) {
+      return { reviewState: 'rejected', isActive: false };
+    }
+
+    return {
+      reviewState: reviewData.isActive ? 'accepted' : 'rejected',
+      isActive: reviewData.isActive,
+    };
+  }
+
   /**
    * Link an extracted entity to a canonical registry record
    */
@@ -43,6 +89,8 @@ export class EntityLinkingService {
     if (dto.confidenceScore < 0 || dto.confidenceScore > 1) {
       throw new BadRequestException('Confidence score must be between 0 and 1');
     }
+
+    const confidenceBand = this.getConfidenceBand(dto.confidenceScore);
 
     // Find or create registry record
     let registryRecordId: string | null = null;
@@ -77,6 +125,8 @@ export class EntityLinkingService {
       extractedType: dto.extractedType,
       entityType: dto.entityType,
       confidenceScore: dto.confidenceScore,
+      confidenceBand,
+      reviewThreshold: this.reviewThreshold,
       matchMethod,
       metadata: dto.metadata ? JSON.parse(JSON.stringify(dto.metadata)) : null,
     };
@@ -169,6 +219,11 @@ export class EntityLinkingService {
 
     if (query.isActive !== undefined) {
       where.isActive = query.isActive;
+    }
+
+    // Allow filtering by review state (e.g., 'pending_review')
+    if ((query as any).reviewState !== undefined) {
+      where.reviewState = (query as any).reviewState;
     }
 
     const [links, total] = await Promise.all([
@@ -268,7 +323,8 @@ export class EntityLinkingService {
     linkId: string,
     reviewData: {
       reviewedBy: string;
-      isActive: boolean;
+      isActive?: boolean;
+      decision?: EntityLinkReviewDecision;
       reviewNotes?: string;
       registryId?: string; // Optional remap to specific registry record
     },
@@ -277,12 +333,13 @@ export class EntityLinkingService {
       `Reviewing entity link ${linkId} by ${reviewData.reviewedBy}`,
     );
 
+    const normalizedDecision = this.normalizeReviewDecision(reviewData);
     const updateData: any = {
       reviewedBy: reviewData.reviewedBy,
       reviewedAt: new Date(),
-      isActive: reviewData.isActive,
+      isActive: normalizedDecision.isActive,
       reviewNotes: reviewData.reviewNotes,
-      reviewState: reviewData.isActive ? 'accepted' : 'rejected',
+      reviewState: normalizedDecision.reviewState,
     };
 
     // If remapping to a registry ID, resolve it and attach
@@ -316,6 +373,7 @@ export class EntityLinkingService {
 
       updateData.matchMethod = 'manual';
       updateData.reviewState = 'remapped';
+      updateData.isActive = true;
     }
 
     const updated = await this.prisma.entityLink.update({
@@ -642,6 +700,8 @@ export class EntityLinkingService {
       assetId: link.assetId,
       projectId: link.projectId,
       confidenceScore: link.confidenceScore,
+      confidenceBand: this.getConfidenceBand(link.confidenceScore),
+      reviewThreshold: this.reviewThreshold,
       matchMethod: link.matchMethod,
       isActive: link.isActive,
       reviewedBy: link.reviewedBy,

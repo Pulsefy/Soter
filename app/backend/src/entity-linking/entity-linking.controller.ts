@@ -62,9 +62,33 @@ export class EntityLinkingController {
   })
   @ApiQuery({ name: 'minConfidence', required: false, type: Number })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean })
+  @ApiQuery({
+    name: 'reviewState',
+    required: false,
+    enum: [
+      'auto_applied',
+      'pending_review',
+      'accepted',
+      'rejected',
+      'remapped',
+    ],
+  })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   async queryLinks(@Query() query: EntityLinkQueryDto) {
+    return this.entityLinkingService.queryLinks(query);
+  }
+
+  @Get('queue')
+  @ApiOperation({
+    summary: 'Get review queue',
+    description: 'Retrieve entity links pending manual review (pending_review)',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getReviewQueue(@Query() query: EntityLinkQueryDto) {
+    // Force the filter to pending_review
+    query.reviewState = 'pending_review';
     return this.entityLinkingService.queryLinks(query);
   }
 
@@ -138,7 +162,8 @@ export class EntityLinkingController {
     @Body()
     reviewData: {
       reviewedBy: string;
-      isActive: boolean;
+      isActive?: boolean;
+      decision?: 'accepted' | 'rejected' | 'remapped';
       reviewNotes?: string;
       registryId?: string;
     },

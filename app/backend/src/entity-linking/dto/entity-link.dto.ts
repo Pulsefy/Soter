@@ -1,3 +1,6 @@
+export type EntityLinkConfidenceBand = 'high' | 'medium' | 'low';
+export type EntityLinkReviewDecision = 'accepted' | 'rejected' | 'remapped';
+
 export interface CreateEntityLinkDto {
   sourceType: 'campaign' | 'claim' | 'verification';
   sourceId: string;
@@ -22,6 +25,8 @@ export interface LinkEntityResult {
   assetId: string | null;
   projectId: string | null;
   confidenceScore: number;
+  confidenceBand: EntityLinkConfidenceBand;
+  reviewThreshold: number;
   matchMethod: string | null;
   isActive: boolean;
   reviewedBy: string | null;
@@ -38,6 +43,12 @@ export interface EntityLinkQueryDto {
   entityType?: 'organization' | 'location' | 'asset' | 'project';
   minConfidence?: number;
   isActive?: boolean;
+  reviewState?:
+    | 'auto_applied'
+    | 'pending_review'
+    | 'accepted'
+    | 'rejected'
+    | 'remapped';
   page?: number;
   limit?: number;
 }
