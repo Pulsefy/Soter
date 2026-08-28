@@ -207,7 +207,7 @@ describe('HealthController', () => {
         return Promise.reject(new Error('rpc timeout'));
       }
       return Promise.resolve({ ok: true, status: 200 });
-    }) as unknown as typeof fetch;
+    });
 
     const res = await request(app.getHttpServer())
       .get('/health/ready')
