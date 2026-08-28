@@ -11,7 +11,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { AidService, AidOrganizationContext } from './aid.service';
+import { AidService } from './aid.service';
 import { ListAidPackagesDto } from './dto/list-aid-packages.dto';
 import {
   ApiTags,
@@ -51,7 +51,7 @@ export class AidController {
   @ApiBadRequestResponse({ description: 'Invalid input parameters.' })
   async createCampaign(
     @Body() data: Record<string, unknown>,
-    @Req() req: Request & { user?: AidOrganizationContext },
+    @Req() req: Request,
   ) {
     return this.aidService.createCampaign(data, req.user);
   }
