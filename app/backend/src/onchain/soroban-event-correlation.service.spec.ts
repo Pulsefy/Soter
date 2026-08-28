@@ -452,8 +452,8 @@ describe('SorobanEventCorrelationService', () => {
       };
 
       // Mock scValToNative to return test payload
-      const originalScVal = require('@stellar/stellar-sdk').scValToNative;
-      require('@stellar/stellar-sdk').scValToNative = jest.fn().mockReturnValue({
+      const stellarSdk = require('@stellar/stellar-sdk');
+      const mockScValToNative = jest.spyOn(stellarSdk, 'scValToNative').mockReturnValue({
         package_id: 'pkg_123',
         schema_version: 1,
         amount: 1000,
@@ -471,7 +471,7 @@ describe('SorobanEventCorrelationService', () => {
       });
 
       // Restore original
-      require('@stellar/stellar-sdk').scValToNative = originalScVal;
+      mockScValToNative.mockRestore();
     });
 
     it('should handle payload without schema_version during parsing', () => {
@@ -481,8 +481,8 @@ describe('SorobanEventCorrelationService', () => {
         }
       };
 
-      const originalScVal = require('@stellar/stellar-sdk').scValToNative;
-      require('@stellar/stellar-sdk').scValToNative = jest.fn().mockReturnValue({
+      const stellarSdk = require('@stellar/stellar-sdk');
+      const mockScValToNative = jest.spyOn(stellarSdk, 'scValToNative').mockReturnValue({
         package_id: 'pkg_123',
         amount: 1000,
       });
@@ -497,7 +497,7 @@ describe('SorobanEventCorrelationService', () => {
         schemaVersion: undefined,
       });
 
-      require('@stellar/stellar-sdk').scValToNative = originalScVal;
+      mockScValToNative.mockRestore();
     });
   });
 
