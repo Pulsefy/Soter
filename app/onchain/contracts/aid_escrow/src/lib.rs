@@ -425,6 +425,7 @@ pub struct EvidenceAttached {
     pub admin: Address,
     pub evidence_hash: String,
     pub timestamp: u64,
+    pub schema_version: u32,
 }
 
 #[contract]
@@ -1747,6 +1748,7 @@ impl AidEscrow {
             admin,
             evidence_hash,
             timestamp,
+            schema_version: EVENT_SCHEMA_VERSION,
         }
         .publish(&env);
 
