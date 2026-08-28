@@ -1095,7 +1095,9 @@ impl AidEscrow {
                 return Err(Error::InvalidAmount);
             }
 
-            if amount < config.min_amount /* || amount % unit != 0 */ {
+            if amount < config.min_amount
+            /* || amount % unit != 0 */
+            {
                 return Err(Error::InvalidAmount);
             }
 
