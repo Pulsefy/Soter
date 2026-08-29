@@ -1,20 +1,24 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import Redis from 'ioredis';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
 import {
   OnchainAdapter,
   ONCHAIN_ADAPTER_TOKEN,
 } from '../onchain/onchain.adapter';
+import { REDIS_CLIENT } from '../redis/redis.module';
 import {
   ProviderHealthRegistryService,
   ProviderHealthSnapshot,
 } from './provider-health-registry.service';
 
 export type CheckStatus = 'up' | 'down' | 'skipped';
+export type ReadinessStatus = 'ready' | 'degraded' | 'not_ready';
 
 export interface HealthCheckResult {
   status: CheckStatus;
+  latencyMs: number;
   details?: Record<string, unknown>;
 }
 
@@ -37,12 +41,14 @@ export interface LivenessResponse {
 }
 
 export interface ReadinessResponse {
-  status: 'ready' | 'not_ready';
+  status: ReadinessStatus;
   ready: boolean;
   service: 'backend';
   timestamp: string;
   checks: {
     database: HealthCheckResult;
+    redis: HealthCheckResult;
+    aiService: HealthCheckResult;
     stellarRpc: HealthCheckResult;
   };
   providers?: Record<string, ProviderHealthSnapshot>;
@@ -55,12 +61,19 @@ export interface ProviderHealthResponse {
 
 @Injectable()
 export class HealthService {
+  private readinessCache: {
+    result: ReadinessResponse;
+    expiresAt: number;
+  } | null = null;
+
   constructor(
     private readonly configService: ConfigService,
     private readonly logger: LoggerService,
     private readonly prisma: PrismaService,
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
+    @Inject(REDIS_CLIENT)
+    private readonly redisClient: Redis,
     private readonly providerHealthRegistry: ProviderHealthRegistryService,
   ) {}
 
@@ -90,6 +103,7 @@ export class HealthService {
       checks: {
         process: {
           status: 'up',
+          latencyMs: 0,
           details: {
             pid: process.pid,
             uptimeSeconds,
@@ -103,32 +117,104 @@ export class HealthService {
   }
 
   async getReadiness(): Promise<ReadinessResponse> {
-    const [database, stellarRpc] = await Promise.all([
+    const cached = this.getCachedReadiness();
+    if (cached) {
+      return cached;
+    }
+
+    const [database, redis, aiService, stellarRpc] = await Promise.all([
       this.checkDatabase(),
+      this.checkRedis(),
+      this.checkAiService(),
       this.checkStellarRpc(),
     ]);
 
     const stellarRequired = this.isEnabled(
       this.configService.get<string>('HEALTHCHECK_STELLAR_REQUIRED'),
     );
+    const redisRequired = this.isEnabled(
+      this.configService.get<string>('HEALTHCHECK_REDIS_REQUIRED'),
+    );
+    const aiRequired = this.isEnabled(
+      this.configService.get<string>('HEALTHCHECK_AI_REQUIRED'),
+    );
 
-    const dependenciesReady =
-      database.status === 'up' &&
-      (!stellarRequired || stellarRpc.status === 'up');
+    const hardFailure =
+      database.status === 'down' ||
+      (stellarRequired && stellarRpc.status === 'down') ||
+      (redisRequired && redis.status === 'down') ||
+      (aiRequired && aiService.status === 'down');
+
+    const anyDependencyDown = [database, redis, aiService, stellarRpc].some(
+      check => check.status === 'down',
+    );
+
+    const status: ReadinessStatus = hardFailure
+      ? 'not_ready'
+      : anyDependencyDown
+        ? 'degraded'
+        : 'ready';
 
     const providers = this.providerHealthRegistry.getAllStatuses();
 
-    return {
-      status: dependenciesReady ? 'ready' : 'not_ready',
-      ready: dependenciesReady,
+    const response: ReadinessResponse = {
+      status,
+      ready: !hardFailure,
       service: 'backend',
       timestamp: new Date().toISOString(),
       checks: {
         database,
+        redis,
+        aiService,
         stellarRpc,
       },
       providers,
     };
+
+    this.setCachedReadiness(response);
+
+    return response;
+  }
+
+  private getCachedReadiness(): ReadinessResponse | null {
+    if (this.readinessCache && this.readinessCache.expiresAt > Date.now()) {
+      return this.readinessCache.result;
+    }
+
+    return null;
+  }
+
+  private setCachedReadiness(result: ReadinessResponse): void {
+    const ttlMs = this.getPositiveNumber('HEALTHCHECK_CACHE_TTL_MS', 5000);
+
+    if (ttlMs <= 0) {
+      this.readinessCache = null;
+      return;
+    }
+
+    this.readinessCache = { result, expiresAt: Date.now() + ttlMs };
+  }
+
+  private getPositiveNumber(key: string, fallback: number): number {
+    const raw = Number(this.configService.get<string>(key) ?? fallback);
+    return Number.isFinite(raw) && raw >= 0 ? raw : fallback;
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    timeoutMessage: string,
+  ): Promise<T> {
+    let timer: NodeJS.Timeout;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    });
+
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      clearTimeout(timer!);
+    }
   }
 
   logHealthCheck(requestId?: string) {
@@ -146,10 +232,19 @@ export class HealthService {
   }
 
   private async checkDatabase(): Promise<HealthCheckResult> {
+    const timeoutMs = this.getPositiveNumber('HEALTHCHECK_DB_TIMEOUT_MS', 2000);
+    const start = Date.now();
+
     try {
-      await this.prisma.$queryRaw`SELECT 1`;
+      await this.withTimeout(
+        this.prisma.$queryRaw`SELECT 1`,
+        timeoutMs,
+        `Database health check timed out after ${timeoutMs}ms`,
+      );
+
       return {
         status: 'up',
+        latencyMs: Date.now() - start,
         details: {
           connected: true,
         },
@@ -169,6 +264,103 @@ export class HealthService {
 
       return {
         status: 'down',
+        latencyMs: Date.now() - start,
+        details: {
+          connected: false,
+          error: message,
+        },
+      };
+    }
+  }
+
+  private async checkRedis(): Promise<HealthCheckResult> {
+    const timeoutMs = this.getPositiveNumber(
+      'HEALTHCHECK_REDIS_TIMEOUT_MS',
+      1000,
+    );
+    const start = Date.now();
+
+    try {
+      await this.withTimeout(
+        this.redisClient.ping(),
+        timeoutMs,
+        `Redis health check timed out after ${timeoutMs}ms`,
+      );
+
+      return {
+        status: 'up',
+        latencyMs: Date.now() - start,
+        details: {
+          connected: true,
+        },
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown Redis error';
+
+      this.logger.warn('Redis readiness check failed', 'HealthService', {
+        error: message,
+      });
+
+      return {
+        status: 'down',
+        latencyMs: Date.now() - start,
+        details: {
+          connected: false,
+          error: message,
+        },
+      };
+    }
+  }
+
+  private async checkAiService(): Promise<HealthCheckResult> {
+    const aiServiceUrl =
+      this.configService.get<string>('AI_SERVICE_URL') ??
+      'http://localhost:8000';
+    const timeoutMs = this.getPositiveNumber('HEALTHCHECK_AI_TIMEOUT_MS', 3000);
+    const start = Date.now();
+
+    try {
+      const response = await fetch(
+        `${aiServiceUrl.replace(/\/$/, '')}/health`,
+        {
+          method: 'GET',
+          signal: AbortSignal.timeout(timeoutMs),
+        },
+      );
+      const latencyMs = Date.now() - start;
+
+      if (!response.ok) {
+        return {
+          status: 'down',
+          latencyMs,
+          details: {
+            connected: false,
+            statusCode: response.status,
+          },
+        };
+      }
+
+      return {
+        status: 'up',
+        latencyMs,
+        details: {
+          connected: true,
+        },
+      };
+    } catch (error) {
+      const latencyMs = Date.now() - start;
+      const message =
+        error instanceof Error ? error.message : 'Unknown AI service error';
+
+      this.logger.warn('AI service readiness check failed', 'HealthService', {
+        error: message,
+        aiServiceUrl,
+      });
+
+      return {
+        status: 'down',
+        latencyMs,
         details: {
           connected: false,
           error: message,
@@ -183,28 +375,30 @@ export class HealthService {
     if (!rpcUrl) {
       return {
         status: 'skipped',
+        latencyMs: 0,
         details: {
           reason: 'STELLAR_RPC_URL not configured',
         },
       };
     }
 
-    const timeoutMs = Number(
-      this.configService.get<string>('HEALTHCHECK_STELLAR_TIMEOUT_MS') ??
-        '3000',
+    const timeoutMs = this.getPositiveNumber(
+      'HEALTHCHECK_STELLAR_TIMEOUT_MS',
+      3000,
     );
+    const start = Date.now();
 
     try {
       const response = await fetch(rpcUrl, {
         method: 'GET',
-        signal: AbortSignal.timeout(
-          Number.isFinite(timeoutMs) ? timeoutMs : 3000,
-        ),
+        signal: AbortSignal.timeout(timeoutMs),
       });
+      const latencyMs = Date.now() - start;
 
       if (!response.ok) {
         return {
           status: 'down',
+          latencyMs,
           details: {
             connected: false,
             statusCode: response.status,
@@ -214,11 +408,13 @@ export class HealthService {
 
       return {
         status: 'up',
+        latencyMs,
         details: {
           connected: true,
         },
       };
     } catch (error) {
+      const latencyMs = Date.now() - start;
       const message =
         error instanceof Error ? error.message : 'Unknown Stellar RPC error';
 
@@ -229,6 +425,7 @@ export class HealthService {
 
       return {
         status: 'down',
+        latencyMs,
         details: {
           connected: false,
           error: message,

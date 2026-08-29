@@ -628,6 +628,7 @@ enum NotificationOutboxStatus {
   enqueued
   sent
   failed
+  dead_letter
 }
 
 model NotificationOutbox {

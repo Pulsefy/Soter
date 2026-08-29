@@ -547,7 +547,7 @@ describe('ClaimsService', () => {
 
     it('countExport(): rejects an invalid date filter', async () => {
       await expect(
-        service.countExport({ from: 'not-a-date' } as any),
+        service.countExport({ from: 'not-a-date' }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -557,7 +557,7 @@ describe('ClaimsService', () => {
       );
       jest
         .spyOn(prismaService.claim, 'findMany')
-        .mockResolvedValueOnce(firstPage as never)
+        .mockResolvedValueOnce(firstPage)
         .mockResolvedValueOnce([makeRawClaim('claim-500')] as never);
 
       const rows: ClaimExportRow[] = [];
@@ -594,9 +594,7 @@ describe('ClaimsService', () => {
       const fullPage = Array.from({ length: 500 }, (_, i) =>
         makeRawClaim(`claim-${i}`),
       );
-      jest
-        .spyOn(prismaService.claim, 'findMany')
-        .mockResolvedValue(fullPage as never);
+      jest.spyOn(prismaService.claim, 'findMany').mockResolvedValue(fullPage);
 
       const rows: ClaimExportRow[] = [];
       for await (const row of service.streamExportRows({})) {

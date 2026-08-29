@@ -10,11 +10,24 @@ export interface ReconciliationJobData {
   thresholdPercent: number;
 }
 
+/**
+ * A ledger entry as reported by the chain, compared against the stored
+ * BalanceLedger rows during reconciliation.
+ */
+export interface OnChainLedgerEntry {
+  id: string;
+  ledger: number;
+  amount: number;
+  eventType: string;
+}
+
 export interface ReconciliationDiscrepancy {
   ledger: number;
   type: 'missing' | 'amount_mismatch' | 'count_mismatch';
-  expected: any;
-  observed: any;
+  /** Value recorded off-chain. Shape varies by discrepancy type. */
+  expected: unknown;
+  /** Value observed on-chain. Shape varies by discrepancy type. */
+  observed: unknown;
   severity: 'low' | 'medium' | 'high';
 }
 
@@ -198,7 +211,10 @@ export class LedgerReconciliationService {
     };
   }
 
-  private fetchOnChainData(_startLedger: number, _endLedger: number): any[] {
+  private fetchOnChainData(
+    _startLedger: number,
+    _endLedger: number,
+  ): OnChainLedgerEntry[] {
     // Placeholder for actual Horizon API call
     // In production, this would query the Stellar Horizon API
     return [];
@@ -231,22 +247,28 @@ export class LedgerReconciliationService {
     }
 
     const state = await job.getState();
-    const progress = job.progress as any;
+    // BullMQ types job.progress as number | object, so narrow before reading.
+    const progress: Record<string, unknown> =
+      typeof job.progress === 'object' && job.progress !== null
+        ? (job.progress as Record<string, unknown>)
+        : {};
 
     return {
       jobId: job.id || 'unknown',
-      startLedger: progress?.startLedger || 0,
-      endLedger: progress?.endLedger || 0,
+      startLedger: Number(progress.startLedger ?? 0),
+      endLedger: Number(progress.endLedger ?? 0),
       status: this.mapJobStateToStatus(state),
-      totalLedgers: progress?.totalLedgers || 0,
-      checkedLedgers: progress?.checkedLedgers || 0,
-      discrepancies: progress?.discrepancies || [],
-      summary: progress?.summary || {
+      totalLedgers: Number(progress.totalLedgers ?? 0),
+      checkedLedgers: Number(progress.checkedLedgers ?? 0),
+      discrepancies: Array.isArray(progress.discrepancies)
+        ? (progress.discrepancies as ReconciliationDiscrepancy[])
+        : [],
+      summary: (progress.summary as ReconciliationReport['summary']) ?? {
         totalDiscrepancies: 0,
         bySeverity: { low: 0, medium: 0, high: 0 },
         byType: { missing: 0, amount_mismatch: 0, count_mismatch: 0 },
       },
-      actionable: progress?.actionable || false,
+      actionable: progress.actionable === true,
     };
   }
 

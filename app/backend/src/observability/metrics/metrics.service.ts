@@ -367,6 +367,11 @@ export class MetricsService {
     this.claimsInFunnelGauge.set({ status }, count);
   }
 
+  /** Set the current number of notification outbox records awaiting replay. */
+  setNotificationDeadLetterDepth(count: number): void {
+    this.setGauge('notification_dead_letter_depth', count);
+  }
+
   /**
    * Record the duration in seconds a claim spent within a funnel stage before transitioning.
    */
