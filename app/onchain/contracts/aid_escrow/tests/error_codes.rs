@@ -69,6 +69,10 @@ fn error_discriminants_are_contiguous_and_unique() {
     codes.dedup();
     assert_eq!(codes.len(), 22, "error codes must be unique");
     for (i, code) in codes.iter().enumerate() {
-        assert_eq!(*code, (i + 1) as u32, "error codes must be contiguous from 1");
+        assert_eq!(
+            *code,
+            (i + 1) as u32,
+            "error codes must be contiguous from 1"
+        );
     }
 }
