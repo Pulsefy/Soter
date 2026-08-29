@@ -11,7 +11,6 @@ import { config as loadEnv } from 'dotenv';
 import type { OpenAPIObject } from '@nestjs/swagger';
 import type { INestApplication } from '@nestjs/common';
 
-import { AppModule } from './app.module';
 import { buildSwaggerConfig } from './swagger-config';
 
 export function loadSwaggerEnv(): void {
@@ -32,7 +31,8 @@ export async function createSwaggerDocument(): Promise<{
   // that would block (or fail) when Redis is unreachable.
   process.env.SKIP_BACKGROUND_JOBS = 'true';
 
-  const app = await NestFactory.create(AppModule, { logger: false });
+  const { SpecAppModule } = await import('./spec-app.module');
+  const app = await NestFactory.create(SpecAppModule, { logger: false });
 
   app.setGlobalPrefix('api');
   app.enableVersioning({

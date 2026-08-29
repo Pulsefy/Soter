@@ -10,7 +10,10 @@
     "build": "pnpm run build --filter=app/frontend",
     "start": "pnpm run start --filter=app/frontend",
     "lint": "pnpm run lint --filter=app/frontend",
-    "test": "pnpm run test --filter=app/frontend"
+    "test": "pnpm run test --filter=app/frontend",
+    "spec:generate": "pnpm --dir app/backend run spec:generate",
+    "spec:check": "pnpm --dir app/backend run spec:check",
+    "spec:lint": "pnpm --dir app/backend run spec:lint"
   },
   "devDependencies": {
     "@prisma/client": "^7.4.1",
