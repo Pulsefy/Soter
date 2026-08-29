@@ -249,34 +249,59 @@ export class ClaimsService {
             campaignId: claim.campaignId,
             claimAmount: claim.amount,
             originalClaimStatus: claim.status,
+      try {
+        const packageId = await this.getPackageIdForClaim(id);
+        const tokenAddress = this.getTokenAddressForClaim(claim);
+        const correlationId = `disburse-${id}-${Date.now()}`;
+
+        sorobanTransaction =
+          await this.sorobanTransactionService.createTransaction({
+            claimId: id,
+            operation: SorobanOperationType.disburse_claim,
+            packageId,
+            operatorAddress: 'admin',
+            recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
+            amount: claim.amount.toString(),
+            tokenAddress,
+            correlationId,
+            metadata: {
+              campaignId: claim.campaignId,
+              claimAmount: claim.amount,
+              originalClaimStatus: claim.status,
+              receiptPointer,
+            },
+            maxAttempts: 5,
+          });
+
+        await this.sorobanTransactionScheduler.scheduleTransaction(
+          sorobanTransaction.id,
+          {
+            correlationId,
+            priority: 1,
+          },
+        );
+
+        this.logger.log(
+          'Created Soroban transaction with lifecycle tracking for claim disbursement',
+          {
+            claimId: id,
+            transactionId: sorobanTransaction.id,
+            packageId,
+            correlationId,
             receiptPointer,
           },
-          maxAttempts: 5,
-        });
+        );
 
-      await this.sorobanTransactionScheduler.scheduleTransaction(
-        sorobanTransaction.id,
-        {
-          correlationId,
-          priority: 1,
-        },
-      );
-
-      this.logger.log(
-        'Created Soroban transaction with lifecycle tracking for claim disbursement',
-        {
+        this.metricsService.incrementCounter('soroban_disbursement_scheduled', {
           claimId: id,
           transactionId: sorobanTransaction.id,
-          packageId,
-          correlationId,
-          receiptPointer,
-        },
-      );
-
-      this.metricsService.incrementCounter('soroban_disbursement_scheduled', {
-        claimId: id,
-        transactionId: sorobanTransaction.id,
-      });
+        });
+      } catch (error) {
+        this.loggerService.error(
+          `Failed to create or schedule Soroban transaction for claim ${id}`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     }
 
     const updatedClaim = await this.transitionStatus(
