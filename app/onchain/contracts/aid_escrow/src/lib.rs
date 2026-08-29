@@ -1970,9 +1970,8 @@ impl AidEscrow {
         match env.try_invoke_contract::<u32, Error>(token, &symbol_short!("decimals"), args) {
             Ok(Ok(decimals)) if decimals <= 38 => Ok(decimals),
             _ => {
-                // Fallback for test environments: assume 7 decimals (standard Stellar)
-                // In production, this should fail with InvalidToken
-                Ok(7)
+                // Token validation failed - contract doesn't have decimals() method or returned invalid value
+                Err(Error::InvalidToken)
             }
         }
     }
