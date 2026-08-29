@@ -26,8 +26,6 @@
         "scheme": "bearer",
         "bearerFormat": "JWT",
         "type": "http",
-        "name": "Authorization",
-        "in": "header",
         "description": "Enter JWT token obtained from the authentication service"
       },
       "api-key": {

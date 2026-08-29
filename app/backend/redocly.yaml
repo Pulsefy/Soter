@@ -5,6 +5,9 @@ apis:
   main:
     root: openapi/openapi.json
 
+extends:
+  - recommended
+
 rules:
   # ── Spec completeness ──────────────────────────────────────────────────────
   operation-operationId: warn          # Each operation should have a unique operationId
@@ -18,8 +21,8 @@ rules:
   no-invalid-schema-examples: warn     # Examples should match the schema
 
   # ── Schemas ────────────────────────────────────────────────────────────────
-  no-undefined-refs: error             # $ref targets must exist
-  spec: error                          # Spec must be valid OpenAPI 3.x
+  no-unresolved-refs: error            # $ref targets must exist
+  struct: error                        # Spec must be valid OpenAPI 3.x
   no-enum-type-mismatch: error         # Enum values must match the declared type
 
   # ── Responses ──────────────────────────────────────────────────────────────
@@ -28,7 +31,3 @@ rules:
 
   # ── Parameters ─────────────────────────────────────────────────────────────
   no-invalid-parameter-examples: warn  # Parameter examples should match schema
-
-lint:
-  extends:
-    - recommended
