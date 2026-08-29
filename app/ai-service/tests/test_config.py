@@ -210,6 +210,49 @@ def test_missing_provider_in_production_names_every_option(monkeypatch):
     assert "TEST_PROVIDER_MODE" in message
 
 
+def test_fallback_order_defaults_validate(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.validate_configuration()
+    assert settings.get_llm_fallback_order() == ["openai", "groq", "test"]
+    assert settings.get_ocr_fallback_order() == ["test", "tesseract"]
+
+
+def test_invalid_llm_fallback_order_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.llm_provider_fallback_order = "openai,bogus"
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        settings.validate_configuration()
+
+    message = str(excinfo.value)
+    assert "LLM_PROVIDER_FALLBACK_ORDER" in message
+    assert "bogus" in message
+
+
+def test_duplicate_llm_fallback_order_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.llm_provider_fallback_order = "openai,openai"
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        settings.validate_configuration()
+
+    assert "LLM_PROVIDER_FALLBACK_ORDER" in str(excinfo.value)
+
+
+def test_empty_llm_fallback_order_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.llm_provider_fallback_order = ""
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        settings.validate_configuration()
+
+    assert "LLM_PROVIDER_FALLBACK_ORDER" in str(excinfo.value)
+
+
 def test_boot_report_logs_defaults_at_debug_level(monkeypatch, caplog):
     _isolate_env(monkeypatch)
     settings = Settings(_env_file=None)

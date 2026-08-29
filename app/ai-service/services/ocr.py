@@ -1,3 +1,4 @@
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -7,6 +8,10 @@ from PIL import Image
 
 import metrics
 from config import settings
+
+logger = logging.getLogger(__name__)
+from exceptions import ProviderExhaustedError
+from services.circuit_breaker import CircuitBreaker
 from services.preprocessing import ImagePreprocessor
 from services.providers import ProviderRegistry, OCRField, OCRResponse
 
@@ -22,6 +27,7 @@ class OCRResult:
     fields: dict[str, FieldMatch]
     raw_text: str
     processing_time_ms: int
+    provider: Optional[str] = None
 
 
 class FieldDetector:
@@ -81,6 +87,16 @@ class OCRService:
         self.preprocessor = ImagePreprocessor()
         self.field_detector = FieldDetector()
         self.registry = registry or ProviderRegistry()
+        self.breakers: Dict[str, CircuitBreaker] = {}
+
+    def _get_breaker(self, provider_name: str) -> CircuitBreaker:
+        if provider_name not in self.breakers:
+            self.breakers[provider_name] = CircuitBreaker(
+                name=provider_name,
+                failure_threshold=settings.circuit_breaker_failure_threshold,
+                recovery_timeout=settings.circuit_breaker_recovery_timeout_seconds,
+            )
+        return self.breakers[provider_name]
 
     def process_image(
         self, image: Image.Image, language_hint: Optional[str] = None
@@ -89,7 +105,17 @@ class OCRService:
         if not providers:
             return OCRResult(fields={}, raw_text="", processing_time_ms=0)
 
+        errors: List[str] = []
         for provider_name, provider in providers:
+            breaker = self._get_breaker(provider_name)
+            if not breaker.allow_request():
+                logger.warning(
+                    "Circuit breaker is OPEN for provider=%s. Skipping.", provider_name
+                )
+                errors.append(
+                    f"provider={provider_name}, error=Circuit breaker is OPEN"
+                )
+                continue
             try:
                 response: OCRResponse = provider.ocr_extract(
                     image, language_hint=language_hint
@@ -104,14 +130,23 @@ class OCRService:
                     response.processing_time_ms / 1000.0
                 )
 
+                breaker.record_success()
                 return OCRResult(
                     fields=fields,
                     raw_text=response.raw_text,
                     processing_time_ms=response.processing_time_ms,
+                    provider=provider_name,
                 )
             except NotImplementedError:
                 continue
-            except Exception:
+            except Exception as exc:
+                breaker.record_failure()
+                err = f"provider={provider_name}, error={exc}"
+                errors.append(err)
+                logger.warning("OCR attempt failed: %s", err)
                 continue
 
-        return OCRResult(fields={}, raw_text="", processing_time_ms=0)
+        raise ProviderExhaustedError(
+            "All OCR providers were attempted and exhausted: " + " | ".join(errors),
+            details={"attempted": errors},
+        )
