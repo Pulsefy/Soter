@@ -34,10 +34,11 @@ pub mod ttl;
 // below so existing call sites keep compiling unchanged. The canonical
 // key-space reference lives in STORAGE_KEYS.md.
 pub use crate::keys::{
-    package_index_entry, package_key, KEY_ADMIN, KEY_CAMPAIGN_PAUSED, KEY_CONFIG, KEY_DELEGATES,
-    KEY_DELEGATE_EXPIRY, KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM,
-    KEY_PAUSE_CREATE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN, KEY_PKG_COUNTER,
-    KEY_PKG_IDX, KEY_RECIPIENT_LAST_CLAIM, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
+    package_index_entry, package_key, KEY_ADMIN, KEY_CAMPAIGN_PAUSED, KEY_CAMPAIGN_TOKEN_CLAIMED,
+    KEY_CAMPAIGN_TOKEN_LOCKED, KEY_CONFIG, KEY_DELEGATES, KEY_DELEGATE_EXPIRY,
+    KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM, KEY_PAUSE_CREATE,
+    KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN, KEY_PKG_COUNTER, KEY_PKG_IDX,
+    KEY_RECIPIENT_LAST_CLAIM, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
 };
 
 /// Upper bound on the number of package ids accepted by `batch_claim` in a
@@ -552,7 +553,7 @@ impl AidEscrow {
         // Perform version-specific migrations
         match (current_version, new_version) {
             (1, 2) => {
-                // Future: Add migration logic for v1 -> v2
+                Self::backfill_campaign_token_totals(&env);
             }
             _ => {
                 // No-op for now, but structured for future use
@@ -561,6 +562,81 @@ impl AidEscrow {
 
         env.storage().instance().set(&KEY_VERSION, &new_version);
         Ok(())
+    }
+
+    /// v1 -> v2 migration step: backfills `KEY_CAMPAIGN_TOKEN_LOCKED` and
+    /// `KEY_CAMPAIGN_TOKEN_CLAIMED` from existing package records, so
+    /// campaigns created before this feature shipped immediately report
+    /// correct per-campaign, per-token totals instead of starting at zero.
+    ///
+    /// Re-scans every package id in `0..KEY_PKG_COUNTER` (the same upper
+    /// bound `get_campaign_package_count` uses) and, for each package that
+    /// carries a `campaign_ref`:
+    /// - `Created` packages add their amount to the locked backfill — this
+    ///   is exact, since status + campaign_ref + token + amount fully
+    ///   determine `get_total_locked`'s equivalent per-campaign value.
+    /// - `Claimed` packages add their amount to the claimed backfill. This
+    ///   is a **best-effort approximation**: a stored `Package` does not
+    ///   record whether it was claimed by its recipient or force-disbursed
+    ///   by the admin (`disburse` also sets `status = Claimed`), so a
+    ///   campaign with a pre-migration `disburse` may show a backfilled
+    ///   total that slightly overcounts relative to `KEY_TOTAL_CLAIMED`'s
+    ///   stricter (claim-paths-only) definition for that one historical
+    ///   slice. Every claim/disburse from the migration onward is exact,
+    ///   because `increment_claimed` and `decrement_locked` write both the
+    ///   global and per-campaign totals together from that point on.
+    ///
+    /// Idempotent: re-running it (e.g. a retried `migrate(2)` call) simply
+    /// recomputes the same totals from the same persisted records and
+    /// overwrites both maps, rather than double-counting.
+    fn backfill_campaign_token_totals(env: &Env) {
+        let counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        let campaign_key = Symbol::new(env, keys::META_CAMPAIGN_REF);
+
+        let mut locked_map: Map<String, Map<Address, i128>> = Map::new(env);
+        let mut claimed_map: Map<String, Map<Address, i128>> = Map::new(env);
+
+        for id in 0..counter {
+            let key = crate::keys::package_key(id);
+            let package: Package = match env.storage().persistent().get(&key) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            let campaign_ref = match package.metadata.get(campaign_key.clone()) {
+                Some(r) => r,
+                None => continue,
+            };
+
+            match package.status {
+                PackageStatus::Created => {
+                    Self::apply_nested_delta(
+                        env,
+                        &mut locked_map,
+                        campaign_ref,
+                        &package.token,
+                        package.amount,
+                    );
+                }
+                PackageStatus::Claimed => {
+                    Self::apply_nested_delta(
+                        env,
+                        &mut claimed_map,
+                        campaign_ref,
+                        &package.token,
+                        package.amount,
+                    );
+                }
+                PackageStatus::Expired | PackageStatus::Cancelled | PackageStatus::Refunded => {}
+            }
+        }
+
+        env.storage()
+            .instance()
+            .set(&KEY_CAMPAIGN_TOKEN_LOCKED, &locked_map);
+        env.storage()
+            .instance()
+            .set(&KEY_CAMPAIGN_TOKEN_CLAIMED, &claimed_map);
     }
 
     /// Admin-only. Grants distributor privileges to `addr`.
@@ -900,7 +976,7 @@ impl AidEscrow {
         // --- SOLVENCY CHECK ---
         let contract_balance = Self::token_balance(&env, &token, &env.current_contract_address())?;
 
-        let mut locked_map: Map<Address, i128> = env
+        let locked_map: Map<Address, i128> = env
             .storage()
             .instance()
             .get(&KEY_TOTAL_LOCKED)
@@ -913,8 +989,9 @@ impl AidEscrow {
         }
 
         // --- STATE UPDATES ---
-        locked_map.set(token.clone(), current_locked + amount);
-        env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+        // Updates both the global (token-only) and per-campaign (campaign +
+        // token) locked totals; see `increment_locked`.
+        Self::increment_locked(&env, &token, &metadata, amount);
 
         let created_at = env.ledger().timestamp();
         let claim_starts_at = Self::resolve_claim_starts_at(&env, &metadata, created_at)?;
@@ -1020,6 +1097,11 @@ impl AidEscrow {
 
         let mut created_ids: Vec<u64> = Vec::new(&env);
         let mut total_amount: i128 = 0;
+        // Per-campaign locked deltas for `token`, accumulated in memory and
+        // applied to KEY_CAMPAIGN_TOKEN_LOCKED once after the loop so a
+        // large batch costs one read-modify-write of that map, not one per
+        // package (mirrors how the global `locked_map` is committed once).
+        let mut campaign_locked_deltas: Map<String, i128> = Map::new(&env);
 
         for i in 0..recipients.len() {
             let recipient = recipients.get(i).unwrap();
@@ -1076,6 +1158,13 @@ impl AidEscrow {
             current_locked += amount;
             total_amount += amount;
 
+            if let Some(campaign_ref) = Self::campaign_ref_from_metadata(&env, &metadata) {
+                let existing = campaign_locked_deltas
+                    .get(campaign_ref.clone())
+                    .unwrap_or(0);
+                campaign_locked_deltas.set(campaign_ref, existing + amount);
+            }
+
             PackageCreated {
                 package_id: id,
                 recipient: recipient.clone(),
@@ -1091,6 +1180,7 @@ impl AidEscrow {
         // Persist updated locked map, counter, and aggregation index
         locked_map.set(token.clone(), current_locked);
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+        Self::apply_campaign_locked_batch_deltas(&env, &token, &campaign_locked_deltas);
         env.storage().instance().set(&KEY_PKG_COUNTER, &counter);
         env.storage().instance().set(&KEY_PKG_IDX, &idx);
 
@@ -1276,18 +1366,8 @@ impl AidEscrow {
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&key, &package);
 
-        Self::decrement_locked(&env, &package.token, package.amount);
-
-        let mut claimed_map: Map<Address, i128> = env
-            .storage()
-            .instance()
-            .get(&KEY_TOTAL_CLAIMED)
-            .unwrap_or(Map::new(&env));
-        let current_total = claimed_map.get(package.token.clone()).unwrap_or(0);
-        claimed_map.set(package.token.clone(), current_total + package.amount);
-        env.storage()
-            .instance()
-            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
+        Self::increment_claimed(&env, &package.token, &package.metadata, package.amount);
         Self::record_recipient_claim(&env, &package.recipient, now);
 
         PackageClaimedByRelayer {
@@ -1429,8 +1509,12 @@ impl AidEscrow {
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&key, &package);
 
-        // Update Locked
-        Self::decrement_locked(&env, &package.token, package.amount);
+        // Update Locked. Intentionally does NOT touch KEY_TOTAL_CLAIMED /
+        // KEY_CAMPAIGN_TOKEN_CLAIMED: an admin-forced disbursement has never
+        // counted as a "claim" for that accounting (see get_total_claimed's
+        // doc comment); the per-campaign counter preserves that behaviour so
+        // it stays summable to the token-level total.
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
         let timestamp = env.ledger().timestamp();
         let receipt_hash = Self::receipt_hash_from_metadata(&env, &package.metadata);
@@ -1509,7 +1593,7 @@ impl AidEscrow {
         env.storage().persistent().set(&key, &package);
 
         // Unlock funds (return to pool)
-        Self::decrement_locked(&env, &package.token, package.amount);
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
         let timestamp = env.ledger().timestamp();
         PackageRevoked {
@@ -1570,7 +1654,7 @@ impl AidEscrow {
         )?;
 
         if should_unlock_locked {
-            Self::decrement_locked(&env, &package.token, package.amount);
+            Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
         }
 
         // State Transition
@@ -1619,8 +1703,8 @@ impl AidEscrow {
         package.status = PackageStatus::Cancelled;
         env.storage().persistent().set(&key, &package);
 
-        // 5. Unlock funds (Decrement the global locked amount so funds return to the pool)
-        Self::decrement_locked(&env, &package.token, package.amount);
+        // 5. Unlock funds (Decrement the global and per-campaign locked amounts so funds return to the pool)
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
         let timestamp = env.ledger().timestamp();
         PackageRevoked {
@@ -1879,7 +1963,37 @@ impl AidEscrow {
         Ok(())
     }
 
-    fn decrement_locked(env: &Env, token: &Address, amount: i128) {
+    /// Increments the global (`KEY_TOTAL_LOCKED`) and, if `metadata` carries a
+    /// `campaign_ref`, the matching per-campaign (`KEY_CAMPAIGN_TOKEN_LOCKED`)
+    /// locked total for `token` by `amount`. The single call site for both
+    /// updates guarantees they can never drift apart. Used by `create_package`;
+    /// `batch_create_packages` uses its own batched variant,
+    /// `apply_campaign_locked_batch_deltas`, for the per-campaign half so a
+    /// large batch does not pay one read-modify-write per package.
+    fn increment_locked(env: &Env, token: &Address, metadata: &Map<Symbol, String>, amount: i128) {
+        let mut locked_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_LOCKED)
+            .unwrap_or(Map::new(env));
+
+        let current = locked_map.get(token.clone()).unwrap_or(0);
+        locked_map.set(token.clone(), current + amount);
+        env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+
+        Self::adjust_campaign_token_amount(
+            env,
+            &KEY_CAMPAIGN_TOKEN_LOCKED,
+            metadata,
+            token,
+            amount,
+        );
+    }
+
+    /// Decrements (floored at zero) the global and, if applicable, the
+    /// per-campaign locked total for `token` by `amount`. See
+    /// [`Self::increment_locked`] for why both updates are made in one place.
+    fn decrement_locked(env: &Env, token: &Address, metadata: &Map<Symbol, String>, amount: i128) {
         let mut locked_map: Map<Address, i128> = env
             .storage()
             .instance()
@@ -1895,6 +2009,122 @@ impl AidEscrow {
 
         locked_map.set(token.clone(), new_locked);
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+
+        Self::adjust_campaign_token_amount(
+            env,
+            &KEY_CAMPAIGN_TOKEN_LOCKED,
+            metadata,
+            token,
+            -amount,
+        );
+    }
+
+    /// Increments the global (`KEY_TOTAL_CLAIMED`) and, if applicable, the
+    /// per-campaign (`KEY_CAMPAIGN_TOKEN_CLAIMED`) claimed total for `token`
+    /// by `amount`. Called only from recipient-initiated claim paths
+    /// (`finalize_claim`, `claim_with_relayer`) — never from `disburse` — so
+    /// both totals keep `KEY_TOTAL_CLAIMED`'s existing, admin-disbursement-
+    /// excluded semantics.
+    fn increment_claimed(env: &Env, token: &Address, metadata: &Map<Symbol, String>, amount: i128) {
+        let mut claimed_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_CLAIMED)
+            .unwrap_or(Map::new(env));
+        let current_total = claimed_map.get(token.clone()).unwrap_or(0);
+        claimed_map.set(token.clone(), current_total + amount);
+        env.storage()
+            .instance()
+            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+
+        Self::adjust_campaign_token_amount(
+            env,
+            &KEY_CAMPAIGN_TOKEN_CLAIMED,
+            metadata,
+            token,
+            amount,
+        );
+    }
+
+    /// Applies `delta` (positive to increment, negative to decrement, floored
+    /// at zero) to the entry for `(campaign_ref, token)` inside the nested map
+    /// stored at `storage_key`. A no-op if `metadata` carries no
+    /// `campaign_ref` — packages not tagged to a campaign are never
+    /// attributed to one.
+    fn adjust_campaign_token_amount(
+        env: &Env,
+        storage_key: &Symbol,
+        metadata: &Map<Symbol, String>,
+        token: &Address,
+        delta: i128,
+    ) {
+        let campaign_ref = match Self::campaign_ref_from_metadata(env, metadata) {
+            Some(r) => r,
+            None => return,
+        };
+
+        let mut campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(storage_key)
+            .unwrap_or(Map::new(env));
+        Self::apply_nested_delta(env, &mut campaign_map, campaign_ref, token, delta);
+        env.storage().instance().set(storage_key, &campaign_map);
+    }
+
+    /// Applies a batch of per-campaign locked deltas for a single `token` to
+    /// `KEY_CAMPAIGN_TOKEN_LOCKED` in one read-modify-write, regardless of how
+    /// many distinct campaigns appear in `deltas`. Used by
+    /// `batch_create_packages` so a large batch is not O(packages) instance
+    /// storage writes.
+    fn apply_campaign_locked_batch_deltas(env: &Env, token: &Address, deltas: &Map<String, i128>) {
+        if deltas.is_empty() {
+            return;
+        }
+
+        let mut campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_TOKEN_LOCKED)
+            .unwrap_or(Map::new(env));
+
+        for campaign_ref in deltas.keys() {
+            let delta = deltas.get(campaign_ref.clone()).unwrap_or(0);
+            Self::apply_nested_delta(env, &mut campaign_map, campaign_ref, token, delta);
+        }
+
+        env.storage()
+            .instance()
+            .set(&KEY_CAMPAIGN_TOKEN_LOCKED, &campaign_map);
+    }
+
+    /// Applies `delta` to `campaign_map[campaign_ref][token]` in memory
+    /// (floored at zero on the way down), inserting empty inner maps as
+    /// needed. Shared by the single-entry and batched adjustment helpers so
+    /// the clamping logic lives in exactly one place.
+    fn apply_nested_delta(
+        env: &Env,
+        campaign_map: &mut Map<String, Map<Address, i128>>,
+        campaign_ref: String,
+        token: &Address,
+        delta: i128,
+    ) {
+        let mut token_map = campaign_map
+            .get(campaign_ref.clone())
+            .unwrap_or(Map::new(env));
+        let current = token_map.get(token.clone()).unwrap_or(0);
+        let updated = if delta >= 0 {
+            current + delta
+        } else {
+            let decrease = -delta;
+            if current > decrease {
+                current - decrease
+            } else {
+                0
+            }
+        };
+        token_map.set(token.clone(), updated);
+        campaign_map.set(campaign_ref, token_map);
     }
 
     fn validate_token(env: &Env, token: &Address) -> Result<u32, Error> {
@@ -1988,19 +2218,9 @@ impl AidEscrow {
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(key, package);
 
-        // Update Global Locked (Bookkeeping)
-        Self::decrement_locked(env, &package.token, package.amount);
-
-        let mut claimed_map: Map<Address, i128> = env
-            .storage()
-            .instance()
-            .get(&KEY_TOTAL_CLAIMED)
-            .unwrap_or(Map::new(env));
-        let current_total = claimed_map.get(package.token.clone()).unwrap_or(0);
-        claimed_map.set(package.token.clone(), current_total + package.amount);
-        env.storage()
-            .instance()
-            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+        // Update Global + Per-Campaign Locked and Claimed (Bookkeeping)
+        Self::decrement_locked(env, &package.token, &package.metadata, package.amount);
+        Self::increment_claimed(env, &package.token, &package.metadata, package.amount);
         Self::record_recipient_claim(env, &package.recipient, now);
 
         // Check if claimant is a delegate (not the recipient)
@@ -2223,6 +2443,50 @@ impl AidEscrow {
             .get(&KEY_TOTAL_CLAIMED)
             .unwrap_or(Map::new(&env));
         claimed_map.get(token).unwrap_or(0)
+    }
+
+    /// Returns the amount currently locked for `campaign_ref` in `token`.
+    ///
+    /// Scoped, per-campaign counterpart to [`Self::get_total_locked`]:
+    /// summing this value across every campaign that has ever held `token`
+    /// equals `get_total_locked(token)`, minus whatever is locked in
+    /// packages that carry no `campaign_ref` at all (those are never
+    /// attributed to a campaign). Updated at exactly the same points as
+    /// `get_total_locked`: package creation increments it; claim, disburse,
+    /// refund, revoke, cancellation, and expiry sweep decrement it. Zero for
+    /// an unknown campaign or a campaign that has never held `token`.
+    pub fn get_campaign_token_locked(env: Env, campaign_ref: String, token: Address) -> i128 {
+        let campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_TOKEN_LOCKED)
+            .unwrap_or(Map::new(&env));
+        campaign_map
+            .get(campaign_ref)
+            .and_then(|token_map| token_map.get(token))
+            .unwrap_or(0)
+    }
+
+    /// Returns the cumulative amount claimed for `campaign_ref` in `token`.
+    ///
+    /// Scoped, per-campaign counterpart to [`Self::get_total_claimed`].
+    /// Mirrors its semantics exactly, including only recipient-initiated
+    /// claim paths (`claim`, `claim_with_proof`, `claim_with_relayer`,
+    /// `batch_claim`); an admin-forced `disburse` does not increment either
+    /// total. Summing this value across every campaign that has ever held
+    /// `token` equals `get_total_claimed(token)`, minus claims from packages
+    /// with no `campaign_ref`. Zero for an unknown campaign or a campaign
+    /// that has never had a claim in `token`.
+    pub fn get_campaign_token_claimed(env: Env, campaign_ref: String, token: Address) -> i128 {
+        let campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_TOKEN_CLAIMED)
+            .unwrap_or(Map::new(&env));
+        campaign_map
+            .get(campaign_ref)
+            .and_then(|token_map| token_map.get(token))
+            .unwrap_or(0)
     }
 
     fn require_admin_or_distributor(env: &Env, operator: &Address) -> Result<(), Error> {
@@ -2791,7 +3055,7 @@ impl AidEscrow {
             package.status = PackageStatus::Expired;
             env.storage().persistent().set(&pkg_key, &package);
 
-            Self::decrement_locked(&env, &package.token, package.amount);
+            Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
             PackageSwept {
                 package_id: pkg_id,

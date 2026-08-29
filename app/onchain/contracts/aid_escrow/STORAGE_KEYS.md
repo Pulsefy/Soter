@@ -57,6 +57,8 @@ A singleton key is a bare `Symbol`; exactly one entry exists per key.
 | `KEY_CAMPAIGN_PAUSED`   | `"camp_pzd"`   | `Map<String, bool>` | `pause_campaign` / `unpause_campaign`, keyed by `campaign_ref`. Grows with campaigns; permanent. |
 | `KEY_TOTAL_LOCKED`      | `"locked"`     | `Map<Address, i128>` (token → locked amount) | Updated on package create/claim/disburse/revoke/cancel/refund. **Derived bookkeeping** over live packages. |
 | `KEY_TOTAL_CLAIMED`     | `"claimed"`    | `Map<Address, i128>` (token → cumulative claimed) | Claim paths only. Monotonic accounting. |
+| `KEY_CAMPAIGN_TOKEN_LOCKED` | `"cmp_lock"` | `Map<String, Map<Address, i128>>` (campaign_ref → token → locked) | Same call sites as `KEY_TOTAL_LOCKED` (package creation increments; claim, disburse, refund, revoke, cancellation, and expiry sweep decrement). Scoped, per-campaign bookkeeping. |
+| `KEY_CAMPAIGN_TOKEN_CLAIMED` | `"cmp_clmd"` | `Map<String, Map<Address, i128>>` (campaign_ref → token → cumulative claimed) | Same call sites as `KEY_TOTAL_CLAIMED` (claim paths only, not `disburse`). Monotonic per campaign+token. |
 | `KEY_RECIPIENT_LAST_CLAIM` | `"lastclaim"` | `Map<Address, u64>` (recipient → successful-claim timestamp) | Successful claim paths only. Enforces the optional `Config.claim_cooldown`; absent entries have no cooldown history. |
 | `KEY_PKG_COUNTER`       | `"pkg_cnt"`    | `u64`       | Package creation. Highest assigned id + 1; upper bound for id scans (`get_campaign_package_count`, etc.). |
 | `KEY_PKG_IDX`           | `"pkg_idx"`    | `u64`       | Package creation. Count of aggregation-index entries; positional bound for `get_aggregates`. May exceed `KEY_PKG_COUNTER` when explicit ids are used. |
@@ -109,6 +111,7 @@ above. Rules of thumb:
 2. **Must be preserved verbatim across any upgrade** (state loss = fund loss):
    `KEY_ADMIN`, `KEY_PENDING_ADMIN` *(if a transfer is mid-flight)*,
    all `("pkg", id)` records, `KEY_TOTAL_LOCKED`, `KEY_TOTAL_CLAIMED`,
+   `KEY_CAMPAIGN_TOKEN_LOCKED`, `KEY_CAMPAIGN_TOKEN_CLAIMED`,
    `KEY_PKG_COUNTER`, `KEY_PKG_IDX`, all `("pidx", position)` entries, and the
    three delegate keys (`KEY_DELEGATES`, `KEY_DELEGATE_HISTORY`,
    `KEY_DELEGATE_EXPIRY`).
@@ -120,6 +123,19 @@ above. Rules of thumb:
    `("pkg", id)` records with status `Created`; `KEY_PKG_COUNTER` /
    `KEY_PKG_IDX` can be rebuilt from max id / index density. Prefer repairing
    over recomputing on Mainnet (cost), but know it is possible.
+   `KEY_CAMPAIGN_TOKEN_LOCKED` is likewise fully recomputable from
+   `Created`-status package records (unambiguous: status + campaign_ref +
+   token + amount fully determine it). `KEY_CAMPAIGN_TOKEN_CLAIMED` can only
+   be **approximately** rebuilt from `Claimed`-status records, because a
+   stored `Package` does not distinguish "claimed by the recipient" from
+   "force-disbursed by the admin" — both set `status = Claimed`. The `(1, 2)`
+   step of `migrate()` performs this best-effort backfill once (see
+   `Self::backfill_campaign_token_totals` in `src/lib.rs`); any campaign with
+   a pre-migration `disburse` may show a `KEY_CAMPAIGN_TOKEN_CLAIMED` total
+   that slightly overcounts relative to `KEY_TOTAL_CLAIMED`'s stricter
+   definition for that one historical slice. All activity from the migration
+   forward is exact, because going forward both keys are written together by
+   the same helper (`Self::increment_claimed`).
 5. **Version-gate every change**: read `KEY_VERSION` first; migrations run
    strictly one step at a time ((1→2), (2→3), …). Any newly introduced key
    must default gracefully when absent (see existing `unwrap_or` patterns).
