@@ -12,6 +12,8 @@ jest.mock('ioredis', () => {
   };
 });
 
+import { createRedisClient } from './redis.module';
+
 describe('createRedisClient', () => {
   afterEach(() => {
     delete process.env.SKIP_BACKGROUND_JOBS;
@@ -21,7 +23,7 @@ describe('createRedisClient', () => {
   it('returns a no-op client when background jobs are skipped', async () => {
     process.env.SKIP_BACKGROUND_JOBS = 'true';
 
-    const { createRedisClient } = require('./redis.module');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const RedisMock = require('ioredis').default as jest.Mock;
     const client = createRedisClient({
       get: jest.fn(),

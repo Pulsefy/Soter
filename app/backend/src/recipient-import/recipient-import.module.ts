@@ -24,7 +24,9 @@ const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
             useFactory: (configService: ConfigService) => ({
               connection: {
                 host: configService.get<string>('REDIS_HOST') || 'localhost',
-                port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+                port: parseInt(
+                  configService.get<string>('REDIS_PORT') || '6379',
+                ),
               },
             }),
             inject: [ConfigService],

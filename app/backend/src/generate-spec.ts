@@ -18,10 +18,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import {
-  loadSwaggerEnv,
-  createSwaggerDocument,
-} from './swagger-document';
+import { loadSwaggerEnv, createSwaggerDocument } from './swagger-document';
 
 async function generate() {
   loadSwaggerEnv();

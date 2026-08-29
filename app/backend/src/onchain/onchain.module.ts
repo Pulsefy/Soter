@@ -64,7 +64,9 @@ const onchainAdapterProvider: Provider = {
             useFactory: (configService: ConfigService) => ({
               connection: {
                 host: configService.get<string>('REDIS_HOST') || 'localhost',
-                port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+                port: parseInt(
+                  configService.get<string>('REDIS_PORT') || '6379',
+                ),
               },
             }),
             inject: [ConfigService],
@@ -75,7 +77,9 @@ const onchainAdapterProvider: Provider = {
             useFactory: (configService: ConfigService) => ({
               connection: {
                 host: configService.get<string>('REDIS_HOST') || 'localhost',
-                port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+                port: parseInt(
+                  configService.get<string>('REDIS_PORT') || '6379',
+                ),
               },
             }),
             inject: [ConfigService],

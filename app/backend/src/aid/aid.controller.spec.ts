@@ -91,7 +91,9 @@ describe('AidController', () => {
         size: 10,
         totalPages: 5,
       };
-      (service.listAidPackages as jest.Mock).mockResolvedValueOnce(multiPageResult);
+      (service.listAidPackages as jest.Mock).mockResolvedValueOnce(
+        multiPageResult,
+      );
 
       const result = await controller.listPackages({ page: 3, size: 10 });
 

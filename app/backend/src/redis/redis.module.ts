@@ -15,15 +15,16 @@ export function createRedisClient(
     return new Proxy({} as Redis, {
       get(_target, prop) {
         if (prop === 'on') return () => undefined;
-        if (prop === 'connect') return async () => undefined;
-        if (prop === 'disconnect' || prop === 'quit') return async () => undefined;
+        if (prop === 'connect') return () => Promise.resolve();
+        if (prop === 'disconnect' || prop === 'quit')
+          return () => Promise.resolve();
         if (prop === 'status') return 'ready';
         if (prop === 'ready') return true;
-        if (prop === 'ping') return async () => 'PONG';
-        if (prop === 'incr') return async () => 1;
-        if (prop === 'expire') return async () => true;
-        if (prop === 'ttl') return async () => 1;
-        return async () => undefined;
+        if (prop === 'ping') return () => Promise.resolve('PONG');
+        if (prop === 'incr') return () => Promise.resolve(1);
+        if (prop === 'expire') return () => Promise.resolve(true);
+        if (prop === 'ttl') return () => Promise.resolve(1);
+        return () => Promise.resolve();
       },
     });
   }
