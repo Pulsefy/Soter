@@ -818,12 +818,12 @@ fn test_all_events_have_schema_version() {
     let contract_id = env.register(AidEscrow, ());
     let client = AidEscrowClient::new(&env, &contract_id);
     client.init(&admin);
-    
+
     // Add the token to allowed_tokens first to ensure it passes validation
     client.add_allowed_token(&token_client.address);
-    
+
     token_admin_client.mint(&admin, &(10 * UNIT));
-    
+
     // Try fund operation and see if it fails
     println!("Attempting fund...");
     let fund_result = client.try_fund(&token_client.address, &admin, &(5 * UNIT));
@@ -851,19 +851,26 @@ fn test_all_events_have_schema_version() {
     // Get all events and verify each has schema_version
     let all_events = env.events().all();
     println!("Total events: {}", all_events.len());
-    
+
     // Debug: Print all events to see what we have
     for (i, (contract_id_event, topic, data)) in all_events.iter().enumerate() {
-        println!("All Event {}: Contract: {:?}, Topic: {:?}", i, contract_id_event, topic);
+        println!(
+            "All Event {}: Contract: {:?}, Topic: {:?}",
+            i, contract_id_event, topic
+        );
     }
-    
+
     let contract_events: std::vec::Vec<_> = all_events
         .into_iter()
         .filter(|(id, _, _)| id == &contract_id)
         .collect();
 
     // Debug: print event count and types
-    println!("Contract events for {:?}: {}", contract_id, contract_events.len());
+    println!(
+        "Contract events for {:?}: {}",
+        contract_id,
+        contract_events.len()
+    );
     for (i, (_, topic, _)) in contract_events.iter().enumerate() {
         println!("Contract Event {}: {:?}", i, topic);
     }
@@ -871,7 +878,7 @@ fn test_all_events_have_schema_version() {
     // Should have at least 1 event (unpause always works)
     assert!(
         contract_events.len() >= 1,
-        "Expected at least 1 contract event, got {}", 
+        "Expected at least 1 contract event, got {}",
         contract_events.len()
     );
 
@@ -928,10 +935,10 @@ fn test_batch_events_all_have_schema_version() {
     let contract_id = env.register(AidEscrow, ());
     let client = AidEscrowClient::new(&env, &contract_id);
     client.init(&admin);
-    
+
     // Add the token to allowed_tokens first to ensure it passes validation
     client.add_allowed_token(&token_client.address);
-    
+
     token_admin_client.mint(&admin, &(10 * UNIT));
     client.fund(&token_client.address, &admin, &(6 * UNIT));
 
@@ -959,7 +966,7 @@ fn test_batch_events_all_have_schema_version() {
         .filter(|(id, _, _)| id == &contract_id)
         .collect();
 
-    // Should have 2 events: add_allowed_token + batch_created  
+    // Should have 2 events: add_allowed_token + batch_created
     assert_eq!(
         new_events.len(),
         2,
