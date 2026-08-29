@@ -279,10 +279,10 @@ export class ClaimsService {
           transactionId: sorobanTransaction.id,
         });
       } catch (error) {
-        this.loggerService.error('Failed to create or schedule Soroban transaction', {
-          claimId: id,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        this.loggerService.error(
+          `Failed to create or schedule Soroban transaction for claim ${id}`,
+          error instanceof Error ? error : new Error(String(error)),
+        );
       }
     }
 
