@@ -177,7 +177,7 @@ export class NotificationProcessor extends WorkerHost {
     const maxAttempts =
       typeof job.opts?.attempts === 'number' ? job.opts.attempts : 1;
     const exhausted = job.attemptsMade >= maxAttempts;
-    const status = exhausted ? 'failed' : 'enqueued';
+    const status = exhausted ? 'dead_letter' : 'enqueued';
 
     try {
       await this.prisma.notificationOutbox.update({
@@ -193,6 +193,19 @@ export class NotificationProcessor extends WorkerHost {
       this.logger.error(
         `Failed to update outbox record ${job.data.outboxId} to ${status}: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+
+    if (exhausted && this.metricsService.setNotificationDeadLetterDepth) {
+      try {
+        const depth = await this.prisma.notificationOutbox.count({
+          where: { status: 'dead_letter' },
+        });
+        this.metricsService.setNotificationDeadLetterDepth(depth);
+      } catch (err) {
+        this.logger.warn(
+          `Could not refresh notification dead-letter depth: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     const failureCategory = classifyNotificationFailure(error);

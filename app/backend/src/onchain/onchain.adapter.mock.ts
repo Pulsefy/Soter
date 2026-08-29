@@ -28,8 +28,35 @@ import {
   GetTransactionStatusParams,
   GetTransactionStatusResult,
   TxStatus,
+  AidPackage,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
+
+/**
+ * Lifecycle states a mock aid package can occupy.
+ *
+ * Derived from AidPackage so the mock cannot drift from the adapter contract.
+ */
+type MockPackageStatus = AidPackage['status'];
+
+/**
+ * Shape of the in-memory aid packages the mock adapter tracks.
+ *
+ * Amounts are stringified stroops, matching CreateAidPackageParams, and
+ * timestamps are unix seconds, matching the contract's time representation.
+ */
+interface MockAidPackage {
+  id: string;
+  recipient: string;
+  amount: string;
+  token: string;
+  status: MockPackageStatus;
+  createdAt: number;
+  expiresAt: number;
+  claimedAmount: string;
+  remainingAmount: string;
+  metadata: Record<string, string>;
+}
 
 /**
  * Mock implementation of OnchainAdapter for development and testing
@@ -37,7 +64,7 @@ import { createHash } from 'crypto';
  */
 @Injectable()
 export class MockOnchainAdapter implements OnchainAdapter {
-  private readonly mockPackages = new Map<string, any>();
+  private readonly mockPackages = new Map<string, MockAidPackage>();
   private readonly mockEscrowAddress =
     'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
@@ -87,7 +114,7 @@ export class MockOnchainAdapter implements OnchainAdapter {
       `create-package-${params.packageId}-${Date.now()}`,
     );
 
-    const pkg = {
+    const pkg: MockAidPackage = {
       id: params.packageId,
       recipient: params.recipientAddress,
       amount: params.amount,

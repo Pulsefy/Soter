@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Param,
   Query,
   NotFoundException,
@@ -17,6 +18,7 @@ import {
   ApiForbiddenResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { Body, Req } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { DeliveryAttemptOutcome } from '@prisma/client';
 import { ApiKeyGuard } from '../common/guards/api-key.guard';
@@ -53,6 +55,52 @@ export class OutboxController {
   async listStuck() {
     const records = await this.notificationsService.getStuckOutboxRecords();
     return ApiResponseDto.ok(records, 'Stuck outbox records fetched');
+  }
+
+  @Get('dead-letter')
+  @Roles(AppRole.admin, AppRole.operator)
+  @HttpCode(HttpStatus.OK)
+  async listDeadLetter(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.notificationsService.getDeadLetterNotifications(
+      page ? parseInt(page, 10) : 1,
+      limit ? parseInt(limit, 10) : 50,
+    );
+    return ApiResponseDto.ok(result, 'Dead-letter notifications fetched');
+  }
+
+  @Post('dead-letter/:id/replay')
+  @Roles(AppRole.admin, AppRole.operator)
+  @HttpCode(HttpStatus.OK)
+  async replayDeadLetter(
+    @Param('id') id: string,
+    @Req() request: { user?: { id?: string } },
+  ) {
+    return ApiResponseDto.ok(
+      await this.notificationsService.replayDeadLetterNotification(
+        id,
+        request.user?.id ?? 'system',
+      ),
+      'Notification replayed',
+    );
+  }
+
+  @Post('dead-letter/replay')
+  @Roles(AppRole.admin, AppRole.operator)
+  @HttpCode(HttpStatus.OK)
+  async replayDeadLetters(
+    @Body() body: { ids?: string[] },
+    @Req() request: { user?: { id?: string } },
+  ) {
+    return ApiResponseDto.ok(
+      await this.notificationsService.replayDeadLetterNotifications(
+        body.ids ?? [],
+        request.user?.id ?? 'system',
+      ),
+      'Notification replay completed',
+    );
   }
 
   /**
