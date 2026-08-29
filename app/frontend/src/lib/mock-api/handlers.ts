@@ -320,6 +320,38 @@ const ALL_PACKAGES: AidPackage[] = [
   },
 ];
 
+const inboxItems: VerificationInboxItem[] = [
+  {
+    id: 'INBOX-001',
+    status: 'pending_review',
+    createdAt: '2024-01-15T10:30:00Z',
+    reviewedAt: null,
+    reviewedBy: null,
+    rejectionReason: null,
+    nextStepMessage: null,
+    deepLink: '/verification/INBOX-001',
+    aiScore: 0.85,
+    riskLevel: 'high',
+    documentType: 'government_id'
+  },
+  {
+    id: 'INBOX-002', 
+    status: 'pending_review',
+    createdAt: '2024-01-14T09:15:00Z',
+    reviewedAt: null,
+    reviewedBy: null,
+    rejectionReason: null,
+    nextStepMessage: null,
+    deepLink: '/verification/INBOX-002',
+    aiScore: 0.72,
+    riskLevel: 'medium',
+    documentType: 'utility_bill'
+  }
+];
+
+let inboxNoteCounter = 0;
+const inboxNotes: InternalNote[] = [];
+
 const aidPackagesHandler: MockHandler = async (url) => {
   let urlObj: URL;
   try {
@@ -816,6 +848,182 @@ const recipientsImportConfirmHandler: MockHandler = async (_url, options) => {
 };
 
 
+
+// GET /v1/verification-inbox
+const inboxListHandler: MockHandler = async (url) => {
+  const urlObj = new URL(url, 'http://localhost');
+  const page = Math.max(1, parseInt(urlObj.searchParams.get('page') ?? '1', 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(urlObj.searchParams.get('limit') ?? '10', 10) || 10));
+  const status = urlObj.searchParams.get('status') ?? '';
+
+  let filteredItems = [...inboxItems];
+  if (status) {
+    filteredItems = filteredItems.filter(item => item.status === status);
+  }
+
+  const total = filteredItems.length;
+  const totalPages = Math.ceil(total / limit);
+  const startIdx = (page - 1) * limit;
+  const paginatedItems = filteredItems.slice(startIdx, startIdx + limit);
+
+  const response: VerificationInboxResponse = {
+    items: paginatedItems,
+    total,
+    page,
+    limit,
+    totalPages,
+  };
+
+  return new Response(JSON.stringify(response), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// GET /v1/verification-inbox/stats
+const inboxStatsHandler: MockHandler = async () => {
+  const stats: VerificationStats = {
+    pending_review: inboxItems.filter(item => item.status === 'pending_review').length,
+    approved: inboxItems.filter(item => item.status === 'approved').length,
+    rejected: inboxItems.filter(item => item.status === 'rejected').length,
+    needs_resubmission: inboxItems.filter(item => item.status === 'needs_resubmission').length,
+    total: inboxItems.length,
+  };
+
+  return new Response(JSON.stringify(stats), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// GET /v1/verification-inbox/:id
+const inboxDetailHandler: MockHandler = async (url) => {
+  const parts = url.split('?')[0].split('/');
+  const id = parts[parts.length - 1];
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  return new Response(JSON.stringify(item), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// POST /v1/verification-inbox/:id/approve
+const inboxApproveHandler: MockHandler = async (url) => {
+  const parts = url.split('?')[0].split('/');
+  const id = parts[parts.length - 2]; // Remove /approve from path
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  item.status = 'approved';
+  item.reviewedAt = new Date().toISOString();
+  item.reviewedBy = 'reviewer-demo';
+  item.rejectionReason = null;
+  item.nextStepMessage = null;
+
+  return new Response(JSON.stringify({ message: 'Verification approved successfully' }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// POST /v1/verification-inbox/:id/reject
+const inboxRejectHandler: MockHandler = async (url, options) => {
+  const parts = url.split('?')[0].split('/');
+  const id = parts[parts.length - 2]; // Remove /reject from path
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let payload: { reason?: string } = {};
+  if (options?.body) {
+    try {
+      payload = JSON.parse(options.body.toString());
+    } catch { /* ignore */ }
+  }
+
+  item.status = 'rejected';
+  item.reviewedAt = new Date().toISOString();
+  item.reviewedBy = 'reviewer-demo';
+  item.rejectionReason = payload.reason ?? 'No reason provided';
+  item.nextStepMessage = null;
+
+  return new Response(JSON.stringify({ message: 'Verification rejected successfully' }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// POST /v1/verification-inbox/:id/request-resubmission
+const inboxResubmitHandler: MockHandler = async (url, options) => {
+  const parts = url.split('?')[0].split('/');
+  const id = parts[parts.length - 2]; // Remove /request-resubmission from path
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let payload: { message?: string } = {};
+  if (options?.body) {
+    try {
+      payload = JSON.parse(options.body.toString());
+    } catch { /* ignore */ }
+  }
+
+  item.status = 'needs_resubmission';
+  item.reviewedAt = new Date().toISOString();
+  item.reviewedBy = 'reviewer-demo';
+  item.rejectionReason = null;
+  item.nextStepMessage = payload.message ?? 'Please resubmit with required documentation';
+
+  return new Response(JSON.stringify({ message: 'Resubmission requested successfully' }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// GET /v1/verification-inbox/:id/notes
+const inboxGetNotesHandler: MockHandler = async (url) => {
+  const parts = url.split('?')[0].split('/');
+  const id = parts[parts.length - 2]; // Remove /notes from path
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const itemNotes = inboxNotes.filter(note => note.entityId === id);
+
+  return new Response(JSON.stringify(itemNotes), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
 
 // POST /v1/verification-inbox/:id/notes
 const inboxAddNoteHandler: MockHandler = async (url, options) => {
