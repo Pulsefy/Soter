@@ -1,9 +1,12 @@
 import { Platform } from 'react-native';
+import { structuredLogger } from '../services/logger';
 
 /**
  * Environment variable schema for the Soter mobile app.
  * All variables must be prefixed with EXPO_PUBLIC_ to be accessible in the JS bundle.
  */
+import type { LogLevel } from '../services/logger';
+
 export interface AppConfig {
   /** Base URL for the NestJS backend API */
   apiUrl: string;
@@ -39,6 +42,8 @@ export interface AppConfig {
   certPinHashes: string[];
   /** Whether to pin all subdomains of the API host, not just the exact hostname */
   certPinIncludeSubdomains: boolean;
+  /** Lowest log level that should be persisted for support diagnostics */
+  logLevel: LogLevel;
 }
 
 /**
@@ -66,8 +71,11 @@ const buildConfig = (): AppConfig => {
 
   const sorobanContractId = process.env.EXPO_PUBLIC_SOROBAN_CONTRACT_ID;
   if (!sorobanContractId) {
-    // We only warn about this as it might not be needed for all features yet
-    console.warn('Soroban Contract ID is missing (EXPO_PUBLIC_SOROBAN_CONTRACT_ID)');
+    structuredLogger.warn(
+      'config.missing_contract_id',
+      { key: 'EXPO_PUBLIC_SOROBAN_CONTRACT_ID' },
+      'config',
+    );
   }
 
   // Basic URL validation
@@ -108,12 +116,14 @@ const buildConfig = (): AppConfig => {
       : 0.8,
     certPinHashes,
     certPinIncludeSubdomains: process.env.EXPO_PUBLIC_CERT_PIN_INCLUDE_SUBDOMAINS === 'true',
+    logLevel: (process.env.EXPO_PUBLIC_LOG_LEVEL as LogLevel) || 'warn',
     isValid: errors.length === 0,
     errors,
   };
 };
 
 export const config = buildConfig();
+structuredLogger.setLevel(config.logLevel);
 
 /**
  * Helper to get the WalletConnect chain ID (CAIP-2 format)

@@ -48,12 +48,23 @@ interface ClaimReceiptProps {
   compact?: boolean;
 }
 
-const buildExplorerUrl = (type: 'address' | 'contract' | 'tx', identifier: string) => {
+const buildExplorerUrl = (
+  type: 'address' | 'contract' | 'tx',
+  identifier: string,
+) => {
   const network = config.network;
   return `https://stellar.expert/explorer/${network}/${type}/${identifier}`;
 };
 
-function FieldCopyButton({ value, label, colors }: { value: string; label: string, colors: any }) {
+function FieldCopyButton({
+  value,
+  label,
+  colors,
+}: {
+  value: string;
+  label: string;
+  colors: any;
+}) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -65,13 +76,26 @@ function FieldCopyButton({ value, label, colors }: { value: string; label: strin
     }
   };
   return (
-    <TouchableOpacity onPress={copy} accessibilityRole="button" accessibilityLabel={`Copy ${label}`} style={{ marginLeft: 8 }}>
-      <MaterialCommunityIcons name={copied ? 'check' : 'content-copy'} size={16} color={colors.primary} />
+    <TouchableOpacity
+      onPress={copy}
+      accessibilityRole="button"
+      accessibilityLabel={`Copy ${label}`}
+      style={{ marginLeft: 8 }}
+    >
+      <MaterialCommunityIcons
+        name={copied ? 'check' : 'content-copy'}
+        size={16}
+        color={colors.primary}
+      />
     </TouchableOpacity>
   );
 }
 
-export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compact = false }) => {
+export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
+  claim,
+  colors,
+  compact = false,
+}) => {
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const { confirmValueAction } = useBiometric();
@@ -84,13 +108,40 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compa
   // Let's typecast colors as any to access full theme or just rely on what is given.
   const appColors: any = colors;
 
-  const statusColors: Record<string, { bg: string; text: string; icon: string }> = {
-    requested: { bg: appColors.warningBg || '#fef3c7', text: appColors.warning || '#92400e', icon: 'clock-outline' },
-    verified:  { bg: appColors.infoBg || '#dbeafe', text: appColors.info || '#1e40af', icon: 'check-circle-outline' },
-    approved:  { bg: appColors.successBg || '#dcfce7', text: appColors.success || '#166534', icon: 'check-circle' },
-    disbursed: { bg: appColors.successBg || '#d1fae5', text: appColors.success || '#065f46', icon: 'check-all' },
-    archived:  { bg: appColors.surface || '#f3f4f6', text: appColors.textSecondary || '#374151', icon: 'archive' },
-    cancelled: { bg: appColors.errorBg || '#fee2e2', text: appColors.error || '#991b1b', icon: 'close-circle' },
+  const statusColors: Record<
+    string,
+    { bg: string; text: string; icon: string }
+  > = {
+    requested: {
+      bg: appColors.warningBg || '#fef3c7',
+      text: appColors.warning || '#92400e',
+      icon: 'clock-outline',
+    },
+    verified: {
+      bg: appColors.infoBg || '#dbeafe',
+      text: appColors.info || '#1e40af',
+      icon: 'check-circle-outline',
+    },
+    approved: {
+      bg: appColors.successBg || '#dcfce7',
+      text: appColors.success || '#166534',
+      icon: 'check-circle',
+    },
+    disbursed: {
+      bg: appColors.successBg || '#d1fae5',
+      text: appColors.success || '#065f46',
+      icon: 'check-all',
+    },
+    archived: {
+      bg: appColors.surface || '#f3f4f6',
+      text: appColors.textSecondary || '#374151',
+      icon: 'archive',
+    },
+    cancelled: {
+      bg: appColors.errorBg || '#fee2e2',
+      text: appColors.error || '#991b1b',
+      icon: 'close-circle',
+    },
   };
 
   const statusColor = statusColors[claim.status] || statusColors.requested;
@@ -98,8 +149,12 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compa
   const formattedDate = useMemo(() => {
     try {
       return new Date(claim.timestamp).toLocaleString('en-US', {
-        year: 'numeric', month: 'short', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
       });
     } catch {
       return claim.timestamp;
@@ -169,7 +224,14 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compa
     if (!claim.explorerLink) return;
     Linking.openURL(claim.explorerLink).catch(err => {
       Alert.alert('Error', 'Unable to open explorer link');
-      console.error('Open explorer error:', err);
+      structuredLogger.error(
+        'claim_receipt.explorer_open_failed',
+        {
+          explorerLink: claim.explorerLink,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        'claimReceipt',
+      );
     });
   };
 
@@ -320,15 +382,29 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compa
 
   if (compact) {
     return (
-      <View style={[styles.container, styles.compactContainer]} accessible={true} accessibilityLabel={`Claim Receipt. Package ${claim.packageId}, date ${formattedDate}, status ${claim.status}`}>
+      <View
+        style={[styles.container, styles.compactContainer]}
+        accessible={true}
+        accessibilityLabel={`Claim Receipt. Package ${claim.packageId}, date ${formattedDate}, status ${claim.status}`}
+      >
         <View style={styles.compactRow}>
           <View style={styles.compactContent}>
-            <Text style={styles.compactPackageId} maxFontSizeMultiplier={2}>{claim.packageId}</Text>
-            <Text style={styles.compactTimestamp} maxFontSizeMultiplier={2}>{formattedDate}</Text>
+            <Text style={styles.compactPackageId} maxFontSizeMultiplier={2}>
+              {claim.packageId}
+            </Text>
+            <Text style={styles.compactTimestamp} maxFontSizeMultiplier={2}>
+              {formattedDate}
+            </Text>
           </View>
           <View style={styles.statusBadge}>
-            <MaterialCommunityIcons name={statusColor.icon as any} size={14} color={statusColor.text} />
-            <Text style={styles.statusBadgeText} maxFontSizeMultiplier={2}>{claim.status}</Text>
+            <MaterialCommunityIcons
+              name={statusColor.icon as any}
+              size={14}
+              color={statusColor.text}
+            />
+            <Text style={styles.statusBadgeText} maxFontSizeMultiplier={2}>
+              {claim.status}
+            </Text>
           </View>
         </View>
       </View>
@@ -338,79 +414,189 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compa
   return (
     <View style={styles.container}>
       <View style={styles.header} accessible={true}>
-        <Text style={styles.headerTitle} accessibilityRole="header" maxFontSizeMultiplier={2}>Claim Receipt</Text>
-        <Text style={styles.headerSubtitle} maxFontSizeMultiplier={2}>Proof of claim completion</Text>
+        <Text
+          style={styles.headerTitle}
+          accessibilityRole="header"
+          maxFontSizeMultiplier={2}
+        >
+          Claim Receipt
+        </Text>
+        <Text style={styles.headerSubtitle} maxFontSizeMultiplier={2}>
+          Proof of claim completion
+        </Text>
       </View>
 
       <View style={styles.detailsGrid}>
         <View style={styles.detailRow} accessible={true}>
-          <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>Claim ID</Text>
-          <Text style={styles.detailValue} numberOfLines={2} ellipsizeMode="middle" maxFontSizeMultiplier={2}>{claim.claimId}</Text>
+          <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>
+            Claim ID
+          </Text>
+          <Text
+            style={styles.detailValue}
+            numberOfLines={2}
+            ellipsizeMode="middle"
+            maxFontSizeMultiplier={2}
+          >
+            {claim.claimId}
+          </Text>
         </View>
 
         <View style={styles.detailRow} accessible={true}>
-          <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>Package ID</Text>
-          <Text style={styles.detailValue} maxFontSizeMultiplier={2}>{claim.packageId}</Text>
+          <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>
+            Package ID
+          </Text>
+          <Text style={styles.detailValue} maxFontSizeMultiplier={2}>
+            {claim.packageId}
+          </Text>
         </View>
 
         <View style={styles.detailRow} accessible={true}>
-          <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>Status</Text>
+          <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>
+            Status
+          </Text>
           <View style={styles.statusBadge}>
-            <MaterialCommunityIcons name={statusColor.icon as any} size={14} color={statusColor.text} />
-            <Text style={styles.statusBadgeText} maxFontSizeMultiplier={2}>{claim.status}</Text>
+            <MaterialCommunityIcons
+              name={statusColor.icon as any}
+              size={14}
+              color={statusColor.text}
+            />
+            <Text style={styles.statusBadgeText} maxFontSizeMultiplier={2}>
+              {claim.status}
+            </Text>
           </View>
         </View>
 
         <View style={styles.detailRow} accessible={true}>
-          <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>Amount</Text>
-          <Text style={styles.amount} maxFontSizeMultiplier={2}>{claim.amount} tokens</Text>
+          <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>
+            Amount
+          </Text>
+          <Text style={styles.amount} maxFontSizeMultiplier={2}>
+            {claim.amount} tokens
+          </Text>
         </View>
 
         <View style={styles.detailRow} accessible={true}>
-          <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>Timestamp</Text>
-          <Text style={styles.detailValue} maxFontSizeMultiplier={2}>{formattedDate}</Text>
+          <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>
+            Timestamp
+          </Text>
+          <Text style={styles.detailValue} maxFontSizeMultiplier={2}>
+            {formattedDate}
+          </Text>
         </View>
 
         {claim.tokenAddress && (
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>Token Address</Text>
+            <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>
+              Token Address
+            </Text>
             <View style={styles.rowWithActions}>
-              <TouchableOpacity onPress={() => Linking.openURL(buildExplorerUrl('address', claim.tokenAddress!))} style={{ flex: 1 }} accessibilityRole="link" accessibilityLabel={`View token address ${claim.tokenAddress} on explorer`}>
-                <Text style={styles.explorerLinkText} numberOfLines={2} ellipsizeMode="middle" maxFontSizeMultiplier={2}>{claim.tokenAddress}</Text>
+              <TouchableOpacity
+                onPress={() =>
+                  Linking.openURL(
+                    buildExplorerUrl('address', claim.tokenAddress!),
+                  )
+                }
+                style={{ flex: 1 }}
+                accessibilityRole="link"
+                accessibilityLabel={`View token address ${claim.tokenAddress} on explorer`}
+              >
+                <Text
+                  style={styles.explorerLinkText}
+                  numberOfLines={2}
+                  ellipsizeMode="middle"
+                  maxFontSizeMultiplier={2}
+                >
+                  {claim.tokenAddress}
+                </Text>
               </TouchableOpacity>
-              <FieldCopyButton value={claim.tokenAddress} label="token address" colors={colors} />
+              <FieldCopyButton
+                value={claim.tokenAddress}
+                label="token address"
+                colors={colors}
+              />
             </View>
           </View>
         )}
 
         {claim.transactionHash && (
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>Transaction Hash</Text>
+            <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>
+              Transaction Hash
+            </Text>
             <View style={styles.rowWithActions}>
-              <TouchableOpacity onPress={() => Linking.openURL(buildExplorerUrl('tx', claim.transactionHash!))} style={{ flex: 1 }} accessibilityRole="link" accessibilityLabel={`View transaction ${claim.transactionHash} on explorer`}>
-                <Text style={styles.explorerLinkText} numberOfLines={2} ellipsizeMode="middle" maxFontSizeMultiplier={2}>{claim.transactionHash}</Text>
+              <TouchableOpacity
+                onPress={() =>
+                  Linking.openURL(
+                    buildExplorerUrl('tx', claim.transactionHash!),
+                  )
+                }
+                style={{ flex: 1 }}
+                accessibilityRole="link"
+                accessibilityLabel={`View transaction ${claim.transactionHash} on explorer`}
+              >
+                <Text
+                  style={styles.explorerLinkText}
+                  numberOfLines={2}
+                  ellipsizeMode="middle"
+                  maxFontSizeMultiplier={2}
+                >
+                  {claim.transactionHash}
+                </Text>
               </TouchableOpacity>
-              <FieldCopyButton value={claim.transactionHash} label="transaction hash" colors={colors} />
+              <FieldCopyButton
+                value={claim.transactionHash}
+                label="transaction hash"
+                colors={colors}
+              />
             </View>
           </View>
         )}
 
         {claim.contractId && (
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>Contract ID</Text>
+            <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>
+              Contract ID
+            </Text>
             <View style={styles.rowWithActions}>
-              <TouchableOpacity onPress={() => Linking.openURL(buildExplorerUrl('contract', claim.contractId!))} style={{ flex: 1 }} accessibilityRole="link" accessibilityLabel={`View contract ${claim.contractId} on explorer`}>
-                <Text style={styles.explorerLinkText} numberOfLines={2} ellipsizeMode="middle" maxFontSizeMultiplier={2}>{claim.contractId}</Text>
+              <TouchableOpacity
+                onPress={() =>
+                  Linking.openURL(
+                    buildExplorerUrl('contract', claim.contractId!),
+                  )
+                }
+                style={{ flex: 1 }}
+                accessibilityRole="link"
+                accessibilityLabel={`View contract ${claim.contractId} on explorer`}
+              >
+                <Text
+                  style={styles.explorerLinkText}
+                  numberOfLines={2}
+                  ellipsizeMode="middle"
+                  maxFontSizeMultiplier={2}
+                >
+                  {claim.contractId}
+                </Text>
               </TouchableOpacity>
-              <FieldCopyButton value={claim.contractId} label="contract ID" colors={colors} />
+              <FieldCopyButton
+                value={claim.contractId}
+                label="contract ID"
+                colors={colors}
+              />
             </View>
           </View>
         )}
 
         {claim.explorerLink && (
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>View on Explorer</Text>
-            <TouchableOpacity onPress={handleOpenExplorer} activeOpacity={0.7} accessibilityRole="link" accessibilityLabel="Open blockchain explorer">
+            <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>
+              View on Explorer
+            </Text>
+            <TouchableOpacity
+              onPress={handleOpenExplorer}
+              activeOpacity={0.7}
+              accessibilityRole="link"
+              accessibilityLabel="Open blockchain explorer"
+            >
               <Text style={styles.explorerLinkText} maxFontSizeMultiplier={2}>
                 Open blockchain explorer →
               </Text>
@@ -428,15 +614,35 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compa
           accessibilityRole="button"
           accessibilityLabel="Share claim receipt"
         >
-          {sharing
-            ? <ActivityIndicator size="small" color={colors.background} />
-            : <MaterialCommunityIcons name="share-variant" size={16} color={colors.background} />}
-          <Text style={styles.actionButtonText} maxFontSizeMultiplier={2}>Share</Text>
+          {sharing ? (
+            <ActivityIndicator size="small" color={colors.background} />
+          ) : (
+            <MaterialCommunityIcons
+              name="share-variant"
+              size={16}
+              color={colors.background}
+            />
+          )}
+          <Text style={styles.actionButtonText} maxFontSizeMultiplier={2}>
+            Share
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={handleCopy} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Copy full receipt text">
-          <MaterialCommunityIcons name={copied ? 'check' : 'content-copy'} size={16} color={colors.background} />
-          <Text style={styles.actionButtonText} maxFontSizeMultiplier={2}>{copied ? 'Copied' : 'Copy'}</Text>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleCopy}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Copy full receipt text"
+        >
+          <MaterialCommunityIcons
+            name={copied ? 'check' : 'content-copy'}
+            size={16}
+            color={colors.background}
+          />
+          <Text style={styles.actionButtonText} maxFontSizeMultiplier={2}>
+            {copied ? 'Copied' : 'Copy'}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -453,7 +659,9 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({ claim, colors, compa
             size={16}
             color={colors.primary}
           />
-          <Text style={styles.explorerButtonText} maxFontSizeMultiplier={2}>View Transaction</Text>
+          <Text style={styles.explorerButtonText} maxFontSizeMultiplier={2}>
+            View Transaction
+          </Text>
         </TouchableOpacity>
       )}
     </View>
