@@ -211,9 +211,10 @@ class TestOCRTestProviderStability:
         mock_registry.resolve_ocr.return_value = [("failing", failing_provider)]
         monkeypatch.setattr(self.service, "registry", mock_registry)
 
-        result = self.service.process_image(img)
-        assert result.raw_text == ""
-        assert result.fields == {}
+        from exceptions import ProviderExhaustedError
+
+        with pytest.raises(ProviderExhaustedError):
+            self.service.process_image(img)
 
 
 # -----------------------------------------------------------------------

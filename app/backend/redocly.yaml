@@ -1,0 +1,33 @@
+# Redocly OpenAPI linter configuration
+# https://redocly.com/docs/cli/configuration/
+
+apis:
+  main:
+    root: openapi/openapi.json
+
+extends:
+  - recommended
+
+rules:
+  # ── Spec completeness ──────────────────────────────────────────────────────
+  operation-operationId: warn          # Each operation should have a unique operationId
+  operation-summary: error             # Every operation must have a summary
+  operation-description: warn          # Descriptions are strongly encouraged
+  tag-description: warn                # Tags should have descriptions
+  no-ambiguous-paths: error            # Paths must not be ambiguous
+
+  # ── Security ───────────────────────────────────────────────────────────────
+  security-defined: error              # Security schemes referenced must be declared
+  no-invalid-schema-examples: warn     # Examples should match the schema
+
+  # ── Schemas ────────────────────────────────────────────────────────────────
+  no-unresolved-refs: error            # $ref targets must exist
+  struct: error                        # Spec must be valid OpenAPI 3.x
+  no-enum-type-mismatch: error         # Enum values must match the declared type
+
+  # ── Responses ──────────────────────────────────────────────────────────────
+  operation-4xx-response: warn         # Operations should document a 4xx response
+  operation-2xx-response: error        # Every operation must have at least one 2xx
+
+  # ── Parameters ─────────────────────────────────────────────────────────────
+  no-invalid-parameter-examples: warn  # Parameter examples should match schema

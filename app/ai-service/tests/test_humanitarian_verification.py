@@ -1,6 +1,8 @@
 import pytest
 
 from config import settings
+from exceptions import ProviderExhaustedError
+from services.circuit_breaker import CircuitBreaker
 from services.humanitarian_verification import HumanitarianVerificationService
 from services.providers import (
     ProviderRegistry,
@@ -206,6 +208,123 @@ class TestHumanitarianVerificationService:
         )
 
         assert first_result == second_result
+
+    def test_verify_claim_records_serving_provider(self, monkeypatch):
+        """The provider that actually served the request is recorded on result."""
+        ok = MagicMock(spec=ModelProvider)
+        ok.name = "openai"
+        ok.llm_chat.return_value = LLMResponse(
+            content='{"verdict":"credible","confidence":0.9}',
+            provider="openai",
+            model="m",
+        )
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", ok)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda provider: "m"
+        )
+
+        result = self.service.verify_claim(
+            aid_claim="Aid reached households.",
+            supporting_evidence=[],
+            context_factors={},
+            provider_preference="auto",
+        )
+        assert result["provider"] == "openai"
+
+    def test_verify_claim_follows_configured_fallback_order(self, monkeypatch):
+        """First configured provider is attempted first and, if it succeeds,
+        is the one recorded as serving the request."""
+        groq = MagicMock(spec=ModelProvider)
+        groq.name = "groq"
+        groq.llm_chat.return_value = LLMResponse(
+            content='{"verdict":"credible","confidence":0.9}',
+            provider="groq",
+            model="m",
+        )
+        openai = MagicMock(spec=ModelProvider)
+        openai.name = "openai"
+
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        # groq listed before openai -> configured cheapest/latency-first order
+        mock_registry.resolve_llm.return_value = [("groq", groq), ("openai", openai)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda provider: "m"
+        )
+
+        result = self.service.verify_claim(
+            aid_claim="Aid reached households.",
+            supporting_evidence=[],
+            context_factors={},
+            provider_preference="auto",
+        )
+        assert result["provider"] == "groq"
+        openai.llm_chat.assert_not_called()
+
+    def test_verify_claim_skips_open_circuit_provider(self, monkeypatch):
+        """Providers with an OPEN circuit breaker are skipped, not retried."""
+        openai = MagicMock(spec=ModelProvider)
+        openai.name = "openai"
+        groq = MagicMock(spec=ModelProvider)
+        groq.name = "groq"
+        groq.llm_chat.return_value = LLMResponse(
+            content='{"verdict":"credible","confidence":0.9}',
+            provider="groq",
+            model="m",
+        )
+
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", openai), ("groq", groq)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda provider: "m"
+        )
+
+        # Trip openai's breaker into the OPEN state.
+        breaker = CircuitBreaker(name="openai", failure_threshold=1)
+        breaker.record_failure()
+        self.service.breakers["openai"] = breaker
+
+        result = self.service.verify_claim(
+            aid_claim="Aid reached households.",
+            supporting_evidence=[],
+            context_factors={},
+            provider_preference="auto",
+        )
+        assert result["provider"] == "groq"
+        openai.llm_chat.assert_not_called()
+
+    def test_verify_claim_exhaustion_raises_distinct_error(self, monkeypatch):
+        """Exhausting every candidate provider yields a documented error."""
+        failing = MagicMock(spec=ModelProvider)
+        failing.name = "openai"
+        failing.llm_chat.side_effect = RuntimeError("boom")
+        groq = MagicMock(spec=ModelProvider)
+        groq.name = "groq"
+        groq.llm_chat.side_effect = RuntimeError("bang")
+
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", failing), ("groq", groq)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda provider: "m"
+        )
+
+        with pytest.raises(ProviderExhaustedError) as excinfo:
+            self.service.verify_claim(
+                aid_claim="Aid reached households.",
+                supporting_evidence=[],
+                context_factors={},
+                provider_preference="auto",
+            )
+        assert excinfo.value.code == "AI_PROVIDERS_EXHAUSTED"
+        assert isinstance(excinfo.value.details, dict)
+        attempted = excinfo.value.details["attempted"]
+        assert len(attempted) >= 2
+        assert any("openai" in entry for entry in attempted)
+        assert any("groq" in entry for entry in attempted)
 
 
 class TestTestProvider:

@@ -6,6 +6,7 @@ import {
   type PinningOptions,
 } from 'react-native-ssl-public-key-pinning';
 import { config, AppConfig } from '../config';
+import { structuredLogger } from './logger';
 
 /**
  * Error codes for certificate pinning failures.
@@ -67,9 +68,13 @@ export const isLocalBackendHostname = (hostname: string | null): boolean => {
 
 const buildPinningOptions = (appConfig: AppConfig, hostname: string): PinningOptions | null => {
   if (appConfig.certPinHashes.length < 2) {
-    console.warn(
-      `[certificatePinning] Skipping certificate pinning for ${hostname}: at least 2 public key hashes ` +
-        `(primary + backup) are required via EXPO_PUBLIC_CERT_PIN_HASHES, got ${appConfig.certPinHashes.length}.`,
+    structuredLogger.warn(
+      'certificate_pinning.skipped',
+      {
+        hostname,
+        hashCount: appConfig.certPinHashes.length,
+      },
+      'certificatePinning',
     );
     return null;
   }
@@ -93,8 +98,10 @@ const buildPinningOptions = (appConfig: AppConfig, hostname: string): PinningOpt
  */
 export const initializeCertificatePinning = async (appConfig: AppConfig = config): Promise<void> => {
   if (!isSslPinningAvailable()) {
-    console.warn(
-      '[certificatePinning] Native SSL pinning module unavailable (Expo Go or a build predating this dependency); requests are unpinned.',
+    structuredLogger.warn(
+      'certificate_pinning.unavailable',
+      { apiUrl: appConfig.apiUrl },
+      'certificatePinning',
     );
     return;
   }
@@ -122,7 +129,11 @@ export const initializeCertificatePinning = async (appConfig: AppConfig = config
   try {
     await initializeSslPinning(options);
   } catch (error) {
-    console.error('[certificatePinning] Failed to initialize SSL pinning:', error);
+    structuredLogger.error(
+      'certificate_pinning.initialize_failed',
+      { hostname, error: error instanceof Error ? error.message : String(error) },
+      'certificatePinning',
+    );
   }
 };
 

@@ -24,6 +24,7 @@ import { formatAge } from '../components/DataFreshnessIndicator';
 import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
 import { config } from '../config';
+import { structuredLogger } from '../services/logger';
 
 // Derive environment label from config
 const getEnvLabel = (): string => config.envName;
@@ -66,6 +67,13 @@ export const HealthScreen = () => {
   })();
 
   const loadHealthData = async (showRefreshing = false) => {
+    const requestCorrelationId = structuredLogger.getCurrentCorrelationId();
+    structuredLogger.info(
+      'health.screen.load.start',
+      { showRefreshing, env: envLabel },
+      'HealthScreen',
+    );
+
     try {
       setError(null);
       if (!showRefreshing) setLoading(true);
@@ -77,8 +85,23 @@ export const HealthScreen = () => {
         setCachedAt(null);
         setApiReachable(true);
         await cacheHealthStatus(data);
+        structuredLogger.info(
+          'health.screen.load.success',
+          {
+            status: data.status,
+            service: data.service,
+            correlationId: requestCorrelationId,
+          },
+          'HealthScreen',
+        );
       } catch (err) {
         setApiReachable(false);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        structuredLogger.warn(
+          'health.screen.load.fallback',
+          { errorMessage, correlationId: requestCorrelationId },
+          'HealthScreen',
+        );
         const cached = await loadCachedHealthStatus();
         if (cached) {
           setHealthData(cached);
@@ -94,6 +117,12 @@ export const HealthScreen = () => {
         }
       }
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      structuredLogger.error(
+        'health.screen.load.failed',
+        { errorMessage, correlationId: requestCorrelationId },
+        'HealthScreen',
+      );
       setError('Failed to load health data');
       setApiReachable(false);
       setHealthData(null);
@@ -115,13 +144,13 @@ export const HealthScreen = () => {
         details: { isConnectionExpensive: false },
       } as any);
     } else {
-      void NetInfo.fetch().then((state) => {
+      void NetInfo.fetch().then(state => {
         setNetInfo(state);
       });
     }
 
     // Subscribe to network state changes
-    const unsubscribe = NetInfo.addEventListener((state) => {
+    const unsubscribe = NetInfo.addEventListener(state => {
       setNetInfo(state);
     });
 
@@ -136,20 +165,23 @@ export const HealthScreen = () => {
   const appVersion = Constants.expoConfig?.version || '1.0.0';
 
   const handleCopyDiagnostics = async () => {
-    const formattedNetworkType = netInfo?.type ? netInfo.type.toUpperCase() : 'UNKNOWN';
+    const formattedNetworkType = netInfo?.type
+      ? netInfo.type.toUpperCase()
+      : 'UNKNOWN';
     const formattedInternetReachable =
       netInfo?.isInternetReachable === true
         ? 'Yes'
         : netInfo?.isInternetReachable === false
-        ? 'No'
-        : 'Unknown';
+          ? 'No'
+          : 'Unknown';
     const formattedApiReachable =
       apiReachable === true
         ? 'Reachable'
         : apiReachable === false
-        ? 'Unreachable'
-        : 'Checking...';
+          ? 'Unreachable'
+          : 'Checking...';
 
+    const recentLogs = structuredLogger.getDiagnosticsText(8);
     const diagnosticsText = `Soter App Diagnostics
 ---------------------
 App Version: ${appVersion}
@@ -161,13 +193,27 @@ Network Connected: ${netInfo?.isConnected ? 'Yes' : 'No'}
 Network Type: ${formattedNetworkType}
 Internet Reachable: ${formattedInternetReachable}
 Contract ID: ${config.sorobanContractId || 'None'}
-Timestamp: ${new Date().toISOString()}`;
+Correlation ID: ${structuredLogger.getCurrentCorrelationId()}
+Timestamp: ${new Date().toISOString()}
+
+Structured logs:
+${recentLogs}`;
 
     try {
       await Clipboard.setString(diagnosticsText);
+      structuredLogger.info(
+        'health.screen.diagnostics.copied',
+        { correlationId: structuredLogger.getCurrentCorrelationId() },
+        'HealthScreen',
+      );
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
+      structuredLogger.error(
+        'health.screen.diagnostics.copy_failed',
+        { error: err instanceof Error ? err.message : String(err) },
+        'HealthScreen',
+      );
       Alert.alert('Error', 'Failed to copy diagnostics');
     }
   };
@@ -287,7 +333,9 @@ Timestamp: ${new Date().toISOString()}`;
               accessible
               accessibilityRole="alert"
             >
-              <Text style={styles.configErrorTitle}>⚠️ Configuration Issues</Text>
+              <Text style={styles.configErrorTitle}>
+                ⚠️ Configuration Issues
+              </Text>
               {config.errors.map((err, index) => (
                 <Text key={index} style={styles.configErrorText}>
                   • {err}
@@ -308,7 +356,9 @@ Timestamp: ${new Date().toISOString()}`;
                 accessibilityLabel={`Network: ${config.network}`}
               >
                 <Text style={styles.infoLabel}>Network:</Text>
-                <Text style={styles.infoValue}>{config.network.toUpperCase()}</Text>
+                <Text style={styles.infoValue}>
+                  {config.network.toUpperCase()}
+                </Text>
               </View>
 
               <View
@@ -404,10 +454,16 @@ Timestamp: ${new Date().toISOString()}`;
                 accessible
                 accessibilityLabel={`Service: ${healthData.service}`}
               >
-                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">
+                <Text
+                  style={styles.infoLabel}
+                  importantForAccessibility="no-hide-descendants"
+                >
                   Service:
                 </Text>
-                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">
+                <Text
+                  style={styles.infoValue}
+                  importantForAccessibility="no-hide-descendants"
+                >
                   {healthData.service}
                 </Text>
               </View>
@@ -417,10 +473,16 @@ Timestamp: ${new Date().toISOString()}`;
                 accessible
                 accessibilityLabel={`Version: ${healthData.version}`}
               >
-                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">
+                <Text
+                  style={styles.infoLabel}
+                  importantForAccessibility="no-hide-descendants"
+                >
                   Version:
                 </Text>
-                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">
+                <Text
+                  style={styles.infoValue}
+                  importantForAccessibility="no-hide-descendants"
+                >
                   {healthData.version}
                 </Text>
               </View>
@@ -430,10 +492,16 @@ Timestamp: ${new Date().toISOString()}`;
                 accessible
                 accessibilityLabel={`Environment: ${healthData.environment}`}
               >
-                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">
+                <Text
+                  style={styles.infoLabel}
+                  importantForAccessibility="no-hide-descendants"
+                >
                   Environment:
                 </Text>
-                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">
+                <Text
+                  style={styles.infoValue}
+                  importantForAccessibility="no-hide-descendants"
+                >
                   {healthData.environment}
                 </Text>
               </View>
@@ -443,10 +511,16 @@ Timestamp: ${new Date().toISOString()}`;
                 accessible
                 accessibilityLabel={`Last updated: ${formatTimestamp(healthData.timestamp)}`}
               >
-                <Text style={styles.infoLabel} importantForAccessibility="no-hide-descendants">
+                <Text
+                  style={styles.infoLabel}
+                  importantForAccessibility="no-hide-descendants"
+                >
                   Last updated:
                 </Text>
-                <Text style={styles.infoValue} importantForAccessibility="no-hide-descendants">
+                <Text
+                  style={styles.infoValue}
+                  importantForAccessibility="no-hide-descendants"
+                >
                   {formatTimestamp(healthData.timestamp)}
                 </Text>
               </View>
@@ -462,7 +536,8 @@ Timestamp: ${new Date().toISOString()}`;
                     style={styles.insideCachedText}
                     importantForAccessibility="no-hide-descendants"
                   >
-                    📦 Cached data ({formatAge(cachedAt) ?? 'earlier'}) — backend unreachable
+                    📦 Cached data ({formatAge(cachedAt) ?? 'earlier'}) —
+                    backend unreachable
                   </Text>
                 </View>
               )}
@@ -491,7 +566,8 @@ Timestamp: ${new Date().toISOString()}`;
                 </View>
               </View>
               <Text style={styles.unavailableMessage}>
-                Unable to connect to the backend server and no cached health data is available.
+                Unable to connect to the backend server and no cached health
+                data is available.
               </Text>
             </View>
           )}
@@ -518,8 +594,8 @@ Timestamp: ${new Date().toISOString()}`;
                   apiReachable === true
                     ? 'Reachable'
                     : apiReachable === false
-                    ? 'Unreachable'
-                    : 'Checking...'
+                      ? 'Unreachable'
+                      : 'Checking...'
                 }`}
               >
                 <Text style={styles.infoLabel}>API Reachability:</Text>
@@ -531,16 +607,16 @@ Timestamp: ${new Date().toISOString()}`;
                         apiReachable === true
                           ? colors.success
                           : apiReachable === false
-                          ? colors.error
-                          : colors.textSecondary,
+                            ? colors.error
+                            : colors.textSecondary,
                     },
                   ]}
                 >
                   {apiReachable === true
                     ? 'REACHABLE ✅'
                     : apiReachable === false
-                    ? 'UNREACHABLE ❌'
-                    : 'CHECKING...'}
+                      ? 'UNREACHABLE ❌'
+                      : 'CHECKING...'}
                 </Text>
               </View>
 
@@ -556,7 +632,9 @@ Timestamp: ${new Date().toISOString()}`;
                   style={[
                     styles.infoValue,
                     {
-                      color: netInfo?.isConnected ? colors.success : colors.error,
+                      color: netInfo?.isConnected
+                        ? colors.success
+                        : colors.error,
                     },
                   ]}
                 >
@@ -584,8 +662,8 @@ Timestamp: ${new Date().toISOString()}`;
                   netInfo?.isInternetReachable === true
                     ? 'Yes'
                     : netInfo?.isInternetReachable === false
-                    ? 'No'
-                    : 'Unknown'
+                      ? 'No'
+                      : 'Unknown'
                 }`}
               >
                 <Text style={styles.infoLabel}>Internet Reachable:</Text>
@@ -597,16 +675,16 @@ Timestamp: ${new Date().toISOString()}`;
                         netInfo?.isInternetReachable === true
                           ? colors.success
                           : netInfo?.isInternetReachable === false
-                          ? colors.error
-                          : colors.textSecondary,
+                            ? colors.error
+                            : colors.textSecondary,
                     },
                   ]}
                 >
                   {netInfo?.isInternetReachable === true
                     ? 'YES'
                     : netInfo?.isInternetReachable === false
-                    ? 'NO'
-                    : 'UNKNOWN'}
+                      ? 'NO'
+                      : 'UNKNOWN'}
                 </Text>
               </View>
             </View>
@@ -620,7 +698,10 @@ Timestamp: ${new Date().toISOString()}`;
               activeOpacity={0.8}
             >
               <Text
-                style={[styles.copyButtonText, copied && { color: colors.success }]}
+                style={[
+                  styles.copyButtonText,
+                  copied && { color: colors.success },
+                ]}
               >
                 {copied ? '✅ Diagnostics Copied!' : '📋 Copy Diagnostics'}
               </Text>
@@ -702,7 +783,8 @@ Timestamp: ${new Date().toISOString()}`;
                 • For Android emulator, use 10.0.2.2 instead of localhost
               </Text>
               <Text style={styles.tipText}>
-                • Try restarting the backend server or checking network connection
+                • Try restarting the backend server or checking network
+                connection
               </Text>
             </View>
           )}
@@ -726,15 +808,15 @@ Timestamp: ${new Date().toISOString()}`;
               {isCached
                 ? '📦 Using cached data'
                 : apiReachable
-                ? '🌐 Live backend data'
-                : '⚠️ Backend unavailable'}
+                  ? '🌐 Live backend data'
+                  : '⚠️ Backend unavailable'}
             </Text>
             <Text style={styles.footerSubText}>
               {apiReachable && !isCached
                 ? 'Data fetched from /health endpoint'
                 : isCached
-                ? `Last cached: ${cachedAt ? formatTimestamp(cachedAt) : 'N/A'}`
-                : 'Showing offline status'}
+                  ? `Last cached: ${cachedAt ? formatTimestamp(cachedAt) : 'N/A'}`
+                  : 'Showing offline status'}
             </Text>
             <View
               style={styles.footerEnvRow}
