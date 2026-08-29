@@ -231,24 +231,6 @@ export class ClaimsService {
 
     let sorobanTransaction: SorobanTransaction | undefined;
     if (this.onchainEnabled && this.onchainAdapter) {
-      const packageId = await this.getPackageIdForClaim(id);
-      const tokenAddress = this.getTokenAddressForClaim(claim);
-      const correlationId = `disburse-${id}-${Date.now()}`;
-
-      sorobanTransaction =
-        await this.sorobanTransactionService.createTransaction({
-          claimId: id,
-          operation: SorobanOperationType.disburse_claim,
-          packageId,
-          operatorAddress: 'admin',
-          recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
-          amount: claim.amount.toString(),
-          tokenAddress,
-          correlationId,
-          metadata: {
-            campaignId: claim.campaignId,
-            claimAmount: claim.amount,
-            originalClaimStatus: claim.status,
       try {
         const packageId = await this.getPackageIdForClaim(id);
         const tokenAddress = this.getTokenAddressForClaim(claim);
@@ -260,7 +242,9 @@ export class ClaimsService {
             operation: SorobanOperationType.disburse_claim,
             packageId,
             operatorAddress: 'admin',
-            recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
+            recipientAddress: this.encryptionService.decrypt(
+              claim.recipientRef,
+            ),
             amount: claim.amount.toString(),
             tokenAddress,
             correlationId,
