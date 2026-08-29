@@ -232,7 +232,7 @@ export class ClaimsService {
 
     let sorobanTransaction: SorobanTransaction | undefined;
     if (this.onchainEnabled && this.onchainAdapter) {
-      const packageId = this.generateMockPackageId(id);
+      const packageId = await this.getPackageIdForClaim(id);
       const tokenAddress = this.getTokenAddressForClaim(claim);
       const correlationId = `disburse-${id}-${Date.now()}`;
 
@@ -298,11 +298,20 @@ export class ClaimsService {
     return updatedClaim;
   }
 
-  private generateMockPackageId(claimId: string): string {
-    const hash = createHash('sha256')
-      .update(`package-${claimId}`)
-      .digest('hex');
-    return BigInt('0x' + hash.substring(0, 16)).toString();
+  private async getPackageIdForClaim(claimId: string): Promise<string> {
+    const correlation = await this.prisma.sorobanEventCorrelation.findFirst({
+      where: {
+        claimId,
+        eventTopic: 'package_created',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (correlation?.packageId) {
+      return correlation.packageId;
+    }
+
+    throw new Error(`Package ID not found for claim ${claimId}`);
   }
 
   private getTokenAddressForClaim(
@@ -454,7 +463,7 @@ export class ClaimsService {
       };
     }
 
-    const packageId = this.generateMockPackageId(claimId);
+    const packageId = await this.getPackageIdForClaim(claimId);
 
     const revokeResult = await cleanupAdapter.revokeAidPackage({
       packageId,
