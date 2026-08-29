@@ -27,6 +27,7 @@ use soroban_sdk::{
 
 mod delegate;
 pub mod keys;
+pub mod ttl;
 
 // --- Storage Keys ---
 // All storage keys are centralized in the `keys` module and re-exported
@@ -936,6 +937,7 @@ impl AidEscrow {
         };
 
         env.storage().persistent().set(&key, &package);
+        crate::ttl::bump_persistent(&env, &key);
 
         let counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
         if id >= counter {
@@ -945,6 +947,7 @@ impl AidEscrow {
         let idx: u64 = env.storage().instance().get(&KEY_PKG_IDX).unwrap_or(0);
         let idx_key = crate::keys::package_index_entry(idx);
         env.storage().persistent().set(&idx_key, &id);
+        crate::ttl::bump_persistent(&env, &idx_key);
         env.storage().instance().set(&KEY_PKG_IDX, &(idx + 1));
 
         PackageCreated {
@@ -1171,6 +1174,7 @@ impl AidEscrow {
             .persistent()
             .get(&key)
             .ok_or(Error::PackageNotFound)?;
+        crate::ttl::bump_persistent(&env, &key);
 
         Self::check_campaign_paused(&env, &package.metadata)?;
 
@@ -2247,10 +2251,13 @@ impl AidEscrow {
     /// Returns `Error::PackageNotFound` if no package exists with the given `id`.
     pub fn get_package(env: Env, id: u64) -> Result<Package, Error> {
         let key = crate::keys::package_key(id);
-        env.storage()
+        let pkg = env
+            .storage()
             .persistent()
             .get(&key)
-            .ok_or(Error::PackageNotFound)
+            .ok_or(Error::PackageNotFound)?;
+        crate::ttl::bump_persistent(&env, &key);
+        Ok(pkg)
     }
 
     /// Returns only the status of a package.
