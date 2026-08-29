@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Header, Request
 
 from config import settings
-from schemas.common import ResultEnvelope
+from schemas.common import PromptVersionInfo, ResultEnvelope
 from schemas.humanitarian import (
     HumanitarianVerificationRequest,
 )
@@ -29,7 +29,7 @@ router = APIRouter(tags=["humanitarian"])
 @cached_response(
     prefix="humanitarian_verification",
     ttl_seconds=settings.cache_ttl_verification,
-    key_tags=["model_version", "artifact_tag", "org_id"],
+    key_tags=["model_version", "artifact_tag", "org_id", "prompt_versions_tag"],
 )
 async def _verify_claim_cached(
     humanitarian_verification_service,
@@ -41,6 +41,7 @@ async def _verify_claim_cached(
     model_version: str,
     artifact_tag: str,
     org_id: str,
+    prompt_versions_tag: str,
 ) -> Dict[str, Any]:
     """
     Cacheable wrapper around HumanitarianVerificationService.verify_claim.
@@ -50,14 +51,16 @@ async def _verify_claim_cached(
     so tests can inject a Mock and the cache decorator's args do not need
     to know about module globals.
 
-    `model_version`, `artifact_tag`, and `org_id` don't affect the underlying
-    provider call, but embedding them in the cache key ensures a stale
-    response isn't served after the configured model/provider changes, after
-    an evidence artifact referenced by the claim is updated (see
+    `model_version`, `artifact_tag`, `org_id`, and `prompt_versions_tag`
+    don't affect the underlying provider call, but embedding them in the
+    cache key ensures a stale response isn't served after the configured
+    model/provider changes, after an evidence artifact referenced by the
+    claim is updated (see
     CacheInvalidationHelper.invalidate_verification_by_artifact/_model_version),
-    or across tenants: including ``org_id`` scopes every cache entry to the
-    requesting organization so one tenant can never be served a response that
-    was computed for another tenant's request.
+    after an active prompt version is bumped, or across tenants: including
+    ``org_id`` scopes every cache entry to the requesting organization so
+    one tenant can never be served a response that was computed for another
+    tenant's request.
     """
     try:
         return humanitarian_verification_service.verify_claim(
@@ -233,6 +236,7 @@ async def verify_humanitarian_claim(
         artifact_tag = (
             ",".join(sorted(request.artifact_ids)) if request.artifact_ids else ""
         )
+        prompt_versions_tag = humanitarian_verification_service.get_prompt_versions_tag()
 
         raw = await _verify_claim_cached(
             humanitarian_verification_service,
@@ -244,6 +248,7 @@ async def verify_humanitarian_claim(
             model_version=model_version,
             artifact_tag=artifact_tag,
             org_id=x_org_id,
+            prompt_versions_tag=prompt_versions_tag,
         )
 
         verification: Dict[str, Any] = raw.get("verification") or {}
@@ -264,12 +269,25 @@ async def verify_humanitarian_claim(
                 reasons = [str(r) for r in raw_reason]
                 break
 
+        # Build prompt_versions envelope map from the raw result metadata.
+        prompt_versions: Optional[Dict[str, PromptVersionInfo]] = None
+        if raw.get("prompt_name") and raw.get("prompt_version"):
+            prompt_variant_label = raw.get("prompt_variant", "primary")
+            prompt_versions = {
+                prompt_variant_label: PromptVersionInfo(
+                    name=raw["prompt_name"],
+                    version=raw["prompt_version"],
+                    content_hash=raw.get("prompt_content_hash", ""),
+                )
+            }
+
         return ResultEnvelope[Dict[str, Any]](
             result=raw,
             confidence=confidence,
             reasons=reasons,
             anchor_metadata=request.anchor_metadata,
             trace_id=correlation_id or None,
+            prompt_versions=prompt_versions,
         )
     except Exception as e:
         logger.error("Humanitarian verification failed: %s", str(e), exc_info=True)

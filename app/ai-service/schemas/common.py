@@ -1,4 +1,4 @@
-from typing import Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 from pydantic import BaseModel, Field
 
 T = TypeVar("T")
@@ -18,6 +18,46 @@ class AnchorMetadata(BaseModel):
     }
 
 
+class PromptVersionInfo(BaseModel):
+    """Identity of a specific prompt used to produce an AI result.
+
+    Populated on the ``ResultEnvelope.prompt_versions`` map so every
+    successful AI response can be traced to the exact prompt (name + version) that
+    produced it.
+
+    ``content_hash`` is the SHA256 hex digest of the rendered prompt text
+    (system + user) for a given call. Tests assert this hash against the
+    registry's known content for the declared version, preventing drift.
+    """
+
+    name: str = Field(
+        ...,
+        description="Prompt name as registered in PromptRegistry.",
+        examples=["humanitarian_primary"],
+    )
+    version: str = Field(
+        ...,
+        description="Prompt version string as registered.",
+        examples=["1.0"],
+    )
+    content_hash: str = Field(
+        ...,
+        description="SHA256 hex digest of the rendered (system+user) prompt text.",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "name": "humanitarian_primary",
+                    "version": "1.0",
+                    "content_hash": "a1b2c3d4e5f6789012345678abcdef123456789012345678abcdef12345678",
+                }
+            ]
+        }
+    }
+
+
 class ResultEnvelope(BaseModel, Generic[T]):
     """
     Standardized success-path envelope returned by all AI inference endpoints.
@@ -31,6 +71,10 @@ class ResultEnvelope(BaseModel, Generic[T]):
     trace_id        Request-scoped correlation ID echoed from the
                     X-Correlation-Id / X-Request-Id header for distributed
                     tracing.
+    prompt_versions Map of prompt-variant label -> PromptVersionInfo. Lets every
+                    result can be traced to the exact prompt version. For
+                    humanitarian endpoint populates keys "primary" / fallback"
+                    and "fallback" variants.
     """
 
     result: T
@@ -51,4 +95,21 @@ class ResultEnvelope(BaseModel, Generic[T]):
         None,
         description="Request-scoped correlation ID for distributed tracing.",
         examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
+    )
+    prompt_versions: Optional[Dict[str, PromptVersionInfo]] = Field(
+        None,
+        description=(
+            "Map of prompt-variant label to PromptVersionInfo. Records the "
+            "prompt_name and version used to produce the result. For the "
+            "humanitarian endpoint the keys are 'primary' and 'fallback'."
+        ),
+        examples=[
+            {
+                "primary": {
+                    "name": "humanitarian_primary",
+                    "version": "1.0",
+                    "content_hash": "a1b2c3",
+                },
+            }
+        ],
     )

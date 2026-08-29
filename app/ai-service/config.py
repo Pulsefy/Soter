@@ -163,6 +163,19 @@ class Settings(BaseSettings):
     # Additional custom origins (comma-separated)
     cors_custom_origins: str = ""
 
+    # Active prompt versions keyed by prompt name.
+    # When a name is absent the registry falls back to the latest registered version.
+    # Example env var format (JSON):
+    #   HUMANITARIAN_PROMPT_ACTIVE_VERSIONS='{"humanitarian_primary":"1.0","humanitarian_fallback":"1.0"}'
+    humanitarian_prompt_active_versions: Dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Map of prompt-name -> active-version for the humanitarian "
+            "verification prompt registry.  Used to pin/rollback prompt "
+            "versions at deploy time without a code change."
+        ),
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

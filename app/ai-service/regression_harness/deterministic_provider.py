@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.providers import FixtureProvider
-from services.humanitarian_prompt import HumanitarianPromptEngine
+from services.humanitarian_prompt import PromptRegistry
 
 VERDICT_TO_LABEL = {
     "credible": "approve",
@@ -22,7 +22,7 @@ class DeterministicVerificationProvider:
 
     def __init__(self) -> None:
         self._provider = FixtureProvider()
-        self._prompt_engine = HumanitarianPromptEngine()
+        self._prompt_registry = PromptRegistry()
 
     def predict(
         self,
@@ -33,16 +33,17 @@ class DeterministicVerificationProvider:
         """Predict the label for a claim and return it with the raw verdict."""
         evidence = supporting_evidence or []
         context = context_factors or {}
+        build_kw = dict(
+            aid_claim=aid_claim,
+            supporting_evidence=evidence,
+            context_factors=context,
+        )
         prompts = [
-            self._prompt_engine.build_primary_prompt(
-                aid_claim=aid_claim,
-                supporting_evidence=evidence,
-                context_factors=context,
+            self._prompt_registry.build_prompt(
+                "humanitarian_primary", **build_kw
             ),
-            self._prompt_engine.build_fallback_prompt(
-                aid_claim=aid_claim,
-                supporting_evidence=evidence,
-                context_factors=context,
+            self._prompt_registry.build_prompt(
+                "humanitarian_fallback", **build_kw
             ),
         ]
         response = None

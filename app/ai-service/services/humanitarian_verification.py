@@ -7,18 +7,32 @@ import time
 import metrics
 
 from config import settings
-from services.humanitarian_prompt import HumanitarianPromptEngine
+from services.humanitarian_prompt import PromptRegistry
 from services.circuit_breaker import CircuitBreaker
 from services.providers import ProviderRegistry, ModelProvider, LLMResponse
 
 logger = logging.getLogger(__name__)
 
 
+#: Prompt names used by the two-tier fallback chain.  Kept as module-level
+#: constants so tests and the cache layer can reference them symbolically.
+PRIMARY_PROMPT_NAME = "humanitarian_primary"
+FALLBACK_PROMPT_NAME = "humanitarian_fallback"
+
+
 class HumanitarianVerificationService:
     """Runs humanitarian verification against configured LLM providers."""
 
-    def __init__(self, registry: Optional[ProviderRegistry] = None):
-        self.prompt_engine = HumanitarianPromptEngine()
+    def __init__(
+        self,
+        registry: Optional[ProviderRegistry] = None,
+        prompt_registry: Optional[PromptRegistry] = None,
+    ):
+        if prompt_registry is None:
+            prompt_registry = PromptRegistry(
+                active_versions=settings.humanitarian_prompt_active_versions
+            )
+        self.prompt_registry = prompt_registry
         self.registry = registry or ProviderRegistry()
         self.breakers: Dict[str, CircuitBreaker] = {}
 
@@ -44,15 +58,17 @@ class HumanitarianVerificationService:
             evidence = supporting_evidence or []
             context = context_factors or {}
 
-            primary_prompt = self.prompt_engine.build_primary_prompt(
-                aid_claim=aid_claim,
-                supporting_evidence=evidence,
-                context_factors=context,
+            build_kwargs = {
+                "aid_claim": aid_claim,
+                "supporting_evidence": evidence,
+                "context_factors": context,
+            }
+
+            primary_prompt = self.prompt_registry.build_prompt(
+                PRIMARY_PROMPT_NAME, **build_kwargs
             )
-            fallback_prompt = self.prompt_engine.build_fallback_prompt(
-                aid_claim=aid_claim,
-                supporting_evidence=evidence,
-                context_factors=context,
+            fallback_prompt = self.prompt_registry.build_prompt(
+                FALLBACK_PROMPT_NAME, **build_kwargs
             )
 
             providers = self.registry.resolve_llm(provider_preference)
@@ -76,16 +92,17 @@ class HumanitarianVerificationService:
                     continue
 
                 model = self._get_model_for_provider(provider_name)
-                for prompt_variant, prompt in (
+                for prompt_variant_label, prompt in (
                     ("primary", primary_prompt),
                     ("fallback", fallback_prompt),
                 ):
                     try:
                         logger.info(
-                            "Attempting humanitarian verification with provider=%s model=%s prompt=%s",
+                            "Attempting humanitarian verification with provider=%s model=%s prompt=%s version=%s",
                             provider_name,
                             model,
-                            prompt_variant,
+                            prompt["prompt_name"],
+                            prompt["prompt_version"],
                         )
                         response = provider.llm_chat(
                             system_prompt=prompt["system"],
@@ -98,13 +115,20 @@ class HumanitarianVerificationService:
                         return {
                             "provider": provider_name,
                             "model": model,
-                            "prompt_variant": prompt_variant,
+                            "prompt_variant": prompt_variant_label,
+                            "prompt_name": prompt["prompt_name"],
+                            "prompt_version": prompt["prompt_version"],
+                            "prompt_content_hash": prompt["prompt_content_hash"],
                             "verification": parsed,
                             "raw_response": response.content,
                         }
                     except Exception as exc:
                         breaker.record_failure()
-                        err = f"provider={provider_name}, model={model}, prompt={prompt_variant}, error={exc}"
+                        err = (
+                            f"provider={provider_name}, model={model}, "
+                            f"prompt={prompt['prompt_name']}@{prompt['prompt_version']}, "
+                            f"error={exc}"
+                        )
                         errors.append(err)
                         logger.warning(
                             "Humanitarian verification attempt failed: %s", err
@@ -135,6 +159,17 @@ class HumanitarianVerificationService:
         provider_name = providers[0][0]
         model = self._get_model_for_provider(provider_name)
         return f"{provider_name}:{model}"
+
+    def get_prompt_versions_tag(self) -> str:
+        """Stable tag embedding the active versions of both primary + fallback prompts.
+
+        Used as a cache key component so a version bump automatically
+        invalidates prior cached responses.  Format:
+        ``primary=<ver>|fallback=<ver>``
+        """
+        primary_v = self.prompt_registry.get_active_version(PRIMARY_PROMPT_NAME)
+        fallback_v = self.prompt_registry.get_active_version(FALLBACK_PROMPT_NAME)
+        return f"primary={primary_v}|fallback={fallback_v}"
 
     def _get_model_for_provider(self, provider: str) -> str:
         if provider == "test":
