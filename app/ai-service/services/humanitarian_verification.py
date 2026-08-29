@@ -112,8 +112,7 @@ class HumanitarianVerificationService:
                         )
 
             raise ProviderExhaustedError(
-                "All LLM providers were attempted and exhausted: "
-                + " | ".join(errors),
+                "All LLM providers were attempted and exhausted: " + " | ".join(errors),
                 details={"attempted": errors},
             )
         finally:

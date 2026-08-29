@@ -1,5 +1,6 @@
 import pytest
 from dataclasses import dataclass
+from config import settings
 from services.ocr import FieldDetector, OCRService, FieldMatch, OCRResult
 from services.providers import ProviderRegistry, OCRField, OCRResponse, ModelProvider
 from services.circuit_breaker import CircuitBreaker
@@ -162,8 +163,13 @@ class TestOCRService:
         assert captured_hints == ["fra"]
         assert result.raw_text == "Name: Jane"
 
-    def test_process_image_empty_image(self):
+    def test_process_image_empty_image(self, monkeypatch):
         from PIL import Image
+
+        # Use the fixture provider so the test does not depend on a real OCR
+        # engine being available; it still exercises the degenerate-image path
+        # through the full service without exhausting providers.
+        monkeypatch.setattr(settings, "test_provider_mode", True)
 
         img = Image.new("RGB", (0, 0), color="white")
         result = self.ocr.process_image(img)

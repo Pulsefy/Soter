@@ -214,7 +214,9 @@ class TestHumanitarianVerificationService:
         ok = MagicMock(spec=ModelProvider)
         ok.name = "openai"
         ok.llm_chat.return_value = LLMResponse(
-            content='{"verdict":"credible","confidence":0.9}', provider="openai", model="m"
+            content='{"verdict":"credible","confidence":0.9}',
+            provider="openai",
+            model="m",
         )
         mock_registry = MagicMock(spec=ProviderRegistry)
         mock_registry.resolve_llm.return_value = [("openai", ok)]
@@ -237,7 +239,9 @@ class TestHumanitarianVerificationService:
         groq = MagicMock(spec=ModelProvider)
         groq.name = "groq"
         groq.llm_chat.return_value = LLMResponse(
-            content='{"verdict":"credible","confidence":0.9}', provider="groq", model="m"
+            content='{"verdict":"credible","confidence":0.9}',
+            provider="groq",
+            model="m",
         )
         openai = MagicMock(spec=ModelProvider)
         openai.name = "openai"
@@ -266,7 +270,9 @@ class TestHumanitarianVerificationService:
         groq = MagicMock(spec=ModelProvider)
         groq.name = "groq"
         groq.llm_chat.return_value = LLMResponse(
-            content='{"verdict":"credible","confidence":0.9}', provider="groq", model="m"
+            content='{"verdict":"credible","confidence":0.9}',
+            provider="groq",
+            model="m",
         )
 
         mock_registry = MagicMock(spec=ProviderRegistry)

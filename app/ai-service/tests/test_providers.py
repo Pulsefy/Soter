@@ -182,7 +182,11 @@ class TestProviderRegistry:
             mock_settings.test_provider_mode = False
             mock_settings.openai_api_key = "key"
             mock_settings.groq_api_key = None
-            mock_settings.get_llm_fallback_order.return_value = ["openai", "groq", "test"]
+            mock_settings.get_llm_fallback_order.return_value = [
+                "openai",
+                "groq",
+                "test",
+            ]
             result = self.registry.resolve_llm("auto")
             names = [n for n, _ in result]
             assert names == ["openai"]
@@ -212,7 +216,11 @@ class TestProviderRegistry:
             mock_settings.test_provider_mode = True
             mock_settings.openai_api_key = None
             mock_settings.groq_api_key = None
-            mock_settings.get_llm_fallback_order.return_value = ["openai", "groq", "test"]
+            mock_settings.get_llm_fallback_order.return_value = [
+                "openai",
+                "groq",
+                "test",
+            ]
             result = self.registry.resolve_llm("test")
             names = [n for n, _ in result]
             assert names == ["test"]
@@ -238,7 +246,9 @@ class TestProviderRegistry:
 
 class TestFallbackOrderValidation:
     def test_valid_order_passes(self):
-        validate_fallback_order("LLM_PROVIDER_FALLBACK_ORDER", ["openai", "groq", "test"])
+        validate_fallback_order(
+            "LLM_PROVIDER_FALLBACK_ORDER", ["openai", "groq", "test"]
+        )
 
     def test_empty_order_rejected(self):
         with pytest.raises(ValueError, match="at least one provider"):
