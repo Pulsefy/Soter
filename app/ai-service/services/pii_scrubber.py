@@ -34,8 +34,16 @@ class PIIScrubberService:
     }
 
     ALLOWLIST = {
-        "Soter", "Pulsefy", "Stellar", "Humanitarian", "Coordinator",
-        "Manager", "Project", "Water", "Clear", "Crystal",
+        "Soter",
+        "Pulsefy",
+        "Stellar",
+        "Humanitarian",
+        "Coordinator",
+        "Manager",
+        "Project",
+        "Water",
+        "Clear",
+        "Crystal",
         "HTTP",  # HTTP error codes like 404-123-4567 should not match
     }
 
@@ -67,8 +75,8 @@ class PIIScrubberService:
     ]
 
     ID_REGEXES = [
-        r"\b\d{11}\b",           # NIN (Nigeria)
-        r"\b[A-Z]{2}\d{8}\b",    # Voter ID
+        r"\b\d{11}\b",  # NIN (Nigeria)
+        r"\b[A-Z]{2}\d{8}\b",  # Voter ID
     ]
 
     def __init__(self):
@@ -104,8 +112,12 @@ class PIIScrubberService:
                 "original_length": len(text),
                 "anonymized_text": anonymized_text,
                 "pii_summary": {
-                    "names": names, "locations": locations, "dates": dates,
-                    "emails": emails, "phones": phones, "ids": ids,
+                    "names": names,
+                    "locations": locations,
+                    "dates": dates,
+                    "emails": emails,
+                    "phones": phones,
+                    "ids": ids,
                     "total": len(spans),
                 },
                 "token_counts": token_counts,
@@ -124,54 +136,112 @@ class PIIScrubberService:
             return []
         return self._detect_spans(text)
 
-    def build_preview_segments(self, text: str, spans: List[PIISpan]) -> List[Dict[str, object]]:
+    def build_preview_segments(
+        self, text: str, spans: List[PIISpan]
+    ) -> List[Dict[str, object]]:
         """Turn detected spans into kept/redacted segments covering the full text."""
         segments: List[Dict[str, object]] = []
         cursor = 0
 
         for span in spans:
             if span.start > cursor:
-                segments.append({"type": "kept", "start": cursor, "end": span.start, "category": None})
-            segments.append({
-                "type": "redacted",
-                "start": span.start,
-                "end": span.end,
-                "category": self.TOKEN_BASE_BY_LABEL[span.label],
-            })
+                segments.append(
+                    {
+                        "type": "kept",
+                        "start": cursor,
+                        "end": span.start,
+                        "category": None,
+                    }
+                )
+            segments.append(
+                {
+                    "type": "redacted",
+                    "start": span.start,
+                    "end": span.end,
+                    "category": self.TOKEN_BASE_BY_LABEL[span.label],
+                }
+            )
             cursor = span.end
 
         if cursor < len(text):
-            segments.append({"type": "kept", "start": cursor, "end": len(text), "category": None})
+            segments.append(
+                {"type": "kept", "start": cursor, "end": len(text), "category": None}
+            )
 
         return segments
 
     def _build_nlp(self) -> Language:
         nlp = spacy.blank("en")
         ruler = nlp.add_pipe("entity_ruler")
-        ruler.add_patterns([
-            {"label": "PERSON", "pattern": [
-                {"LOWER": {"IN": ["mr", "mrs", "ms", "miss", "dr", "prof"]}},
-                {"IS_TITLE": True},
-                {"IS_TITLE": True, "OP": "?"},
-            ]},
-            {"label": "PERSON", "pattern": [
-                {"IS_TITLE": True}, {"IS_TITLE": True},
-            ]},
-            {"label": "LOCATION", "pattern": [
-                {"LOWER": {"IN": ["in", "at", "from", "near"]}},
-                {"IS_TITLE": True},
-                {"IS_TITLE": True, "OP": "?"},
-                {"IS_TITLE": True, "OP": "?"},
-                {"LOWER": {"IN": ["camp", "state", "region", "district", "city", "village"]}, "OP": "?"},
-            ]},
-            {"label": "DATE", "pattern": [{"SHAPE": "dd/dd/dddd"}]},
-            {"label": "DATE", "pattern": [{"SHAPE": "dd-dd-dddd"}]},
-            {"label": "DATE", "pattern": [
-                {"IS_DIGIT": True},
-                {"LOWER": {"IN": ["jan","feb","mar","apr","may","jun","jul","aug","sep","sept","oct","nov","dec"]}},
-                {"IS_DIGIT": True},
-            ]},
-        ])
+        ruler.add_patterns(
+            [
+                {
+                    "label": "PERSON",
+                    "pattern": [
+                        {"LOWER": {"IN": ["mr", "mrs", "ms", "miss", "dr", "prof"]}},
+                        {"IS_TITLE": True},
+                        {"IS_TITLE": True, "OP": "?"},
+                    ],
+                },
+                {
+                    "label": "PERSON",
+                    "pattern": [
+                        {"IS_TITLE": True},
+                        {"IS_TITLE": True},
+                    ],
+                },
+                {
+                    "label": "LOCATION",
+                    "pattern": [
+                        {"LOWER": {"IN": ["in", "at", "from", "near"]}},
+                        {"IS_TITLE": True},
+                        {"IS_TITLE": True, "OP": "?"},
+                        {"IS_TITLE": True, "OP": "?"},
+                        {
+                            "LOWER": {
+                                "IN": [
+                                    "camp",
+                                    "state",
+                                    "region",
+                                    "district",
+                                    "city",
+                                    "village",
+                                ]
+                            },
+                            "OP": "?",
+                        },
+                    ],
+                },
+                {"label": "DATE", "pattern": [{"SHAPE": "dd/dd/dddd"}]},
+                {"label": "DATE", "pattern": [{"SHAPE": "dd-dd-dddd"}]},
+                {
+                    "label": "DATE",
+                    "pattern": [
+                        {"IS_DIGIT": True},
+                        {
+                            "LOWER": {
+                                "IN": [
+                                    "jan",
+                                    "feb",
+                                    "mar",
+                                    "apr",
+                                    "may",
+                                    "jun",
+                                    "jul",
+                                    "aug",
+                                    "sep",
+                                    "sept",
+                                    "oct",
+                                    "nov",
+                                    "dec",
+                                ]
+                            }
+                        },
+                        {"IS_DIGIT": True},
+                    ],
+                },
+            ]
+        )
         return nlp
 
     def _detect_spans(self, text: str) -> List[PIISpan]:
@@ -196,7 +266,14 @@ class PIIScrubberService:
 
             mapped = self._normalize_label(ent.label_)
             if mapped:
-                spans.append(PIISpan(start=ent.start_char, end=ent.end_char, label=mapped, text=ent.text))
+                spans.append(
+                    PIISpan(
+                        start=ent.start_char,
+                        end=ent.end_char,
+                        label=mapped,
+                        text=ent.text,
+                    )
+                )
 
         for pattern in self.DATE_REGEXES:
             spans.extend(self._spans_from_regex(text, pattern, "DATE"))
@@ -220,7 +297,9 @@ class PIIScrubberService:
             return "DATE"
         return ""
 
-    def _spans_from_regex(self, text: str, pattern: str, label: str, capture_group: int = 0) -> List[PIISpan]:
+    def _spans_from_regex(
+        self, text: str, pattern: str, label: str, capture_group: int = 0
+    ) -> List[PIISpan]:
         spans: List[PIISpan] = []
         for match in re.finditer(pattern, text):
             if capture_group:
@@ -244,7 +323,8 @@ class PIIScrubberService:
             return []
 
         filtered_by_allowlist = [
-            span for span in spans
+            span
+            for span in spans
             if not any(word in self.ALLOWLIST for word in span.text.split())
         ]
 
@@ -267,7 +347,9 @@ class PIIScrubberService:
 
         return filtered
 
-    def _mask_spans(self, text: str, spans: List[PIISpan]) -> Tuple[str, Dict[str, int]]:
+    def _mask_spans(
+        self, text: str, spans: List[PIISpan]
+    ) -> Tuple[str, Dict[str, int]]:
         if not spans:
             return text, {}
 
@@ -277,7 +359,7 @@ class PIIScrubberService:
         cursor = 0
 
         for span in spans:
-            chunks.append(text[cursor:span.start])
+            chunks.append(text[cursor : span.start])
             counters[span.label] += 1
             token_base = self.TOKEN_BASE_BY_LABEL[span.label]
             token = f"[{token_base}]"

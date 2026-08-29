@@ -23,7 +23,9 @@ class TestBuildPreviewSegments:
         for a, b in zip(segments, segments[1:]):
             assert a["end"] == b["start"]
 
-        redacted_categories = {s["category"] for s in segments if s["type"] == "redacted"}
+        redacted_categories = {
+            s["category"] for s in segments if s["type"] == "redacted"
+        }
         assert "RECIPIENT_NAME" in redacted_categories
         assert "LOCATION" in redacted_categories
         assert "EVENT_DATE" in redacted_categories
@@ -75,7 +77,9 @@ class TestRedactionPreviewRoute:
         body = response.json()
 
         result = body["result"]
-        assert result["original_length"] == len("Mary Johnson received aid in Maiduguri Camp.")
+        assert result["original_length"] == len(
+            "Mary Johnson received aid in Maiduguri Camp."
+        )
         assert len(result["segments"]) > 0
         assert any(seg["type"] == "redacted" for seg in result["segments"])
 

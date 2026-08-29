@@ -14,8 +14,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["anonymization"])
 
 
-@router.post("/ai/redaction/preview", response_model=ResultEnvelope[RedactionPreviewResult])
-async def preview_redaction(request: AnonymizeRequest) -> ResultEnvelope[RedactionPreviewResult]:
+@router.post(
+    "/ai/redaction/preview", response_model=ResultEnvelope[RedactionPreviewResult]
+)
+async def preview_redaction(
+    request: AnonymizeRequest,
+) -> ResultEnvelope[RedactionPreviewResult]:
     """Return a redaction diff (kept vs. redacted segments) without masking the text."""
     import main as _main
     from main import correlation_id_var
@@ -40,15 +44,20 @@ async def preview_redaction(request: AnonymizeRequest) -> ResultEnvelope[Redacti
             original_length=len(text),
             segments=segments,
             pii_summary={
-                "names": names, "locations": locations, "dates": dates,
-                "emails": emails, "phones": phones, "ids": ids,
+                "names": names,
+                "locations": locations,
+                "dates": dates,
+                "emails": emails,
+                "phones": phones,
+                "ids": ids,
                 "total": len(spans),
             },
         )
 
         reasons = (
             [f"Found {len(spans)} item(s) that would be redacted."]
-            if spans else ["No PII detected in input text."]
+            if spans
+            else ["No PII detected in input text."]
         )
 
         return ResultEnvelope[RedactionPreviewResult](
@@ -60,4 +69,6 @@ async def preview_redaction(request: AnonymizeRequest) -> ResultEnvelope[Redacti
         )
     except Exception as e:
         logger.error(f"Redaction preview failed: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to generate redaction preview")
+        raise HTTPException(
+            status_code=500, detail="Failed to generate redaction preview"
+        )
