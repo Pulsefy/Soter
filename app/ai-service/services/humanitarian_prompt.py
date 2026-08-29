@@ -108,6 +108,36 @@ class HumanitarianPromptEngine:
 
         return {"system": system_prompt, "user": user_prompt}
 
+    def build_repair_prompt(
+        self,
+        original_user_prompt: str,
+        malformed_content: str,
+        error_message: str,
+    ) -> Dict[str, str]:
+        """Asks the model to reformat its own previous, unusable response.
+
+        Used for a bounded retry when a response is malformed JSON or fails
+        schema validation -- distinct from `build_fallback_prompt`, which
+        re-asks the *original question* from scratch with a different
+        prompt, rather than asking the model to fix what it already wrote.
+        """
+        system_prompt = (
+            "Your previous response could not be parsed as valid JSON matching "
+            "the requested schema. Return ONLY corrected, strictly valid JSON. "
+            "Do not include prose, explanations, or markdown code fences."
+        )
+        user_prompt = (
+            "Your previous response could not be used because: "
+            f"{error_message}\n\n"
+            "Previous response:\n"
+            f"{malformed_content}\n\n"
+            "Original request:\n"
+            f"{original_user_prompt}\n\n"
+            "Reply again with corrected JSON only, matching the schema from "
+            "the original request exactly."
+        )
+        return {"system": system_prompt, "user": user_prompt}
+
     def _format_sphere_criteria(self) -> str:
         lines: List[str] = []
         for section, items in SPHERE_HANDBOOK_CRITERIA.items():
