@@ -1,6 +1,10 @@
+from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
+from main import app
 from services.pii_scrubber import PIIScrubberService
+
+client = TestClient(app)
 
 
 class TestBuildPreviewSegments:
@@ -17,15 +21,12 @@ class TestBuildPreviewSegments:
         spans = self.service.detect_spans(text)
         segments = self.service.build_preview_segments(text, spans)
 
-        # Segments should reconstruct the full text length with no gaps/overlaps
         assert segments[0]["start"] == 0
         assert segments[-1]["end"] == len(text)
         for a, b in zip(segments, segments[1:]):
             assert a["end"] == b["start"]
 
-        redacted_categories = {
-            s["category"] for s in segments if s["type"] == "redacted"
-        }
+        redacted_categories = {s["category"] for s in segments if s["type"] == "redacted"}
         assert "RECIPIENT_NAME" in redacted_categories
         assert "LOCATION" in redacted_categories
         assert "EVENT_DATE" in redacted_categories
@@ -68,26 +69,20 @@ class TestBuildPreviewSegments:
 class TestRedactionPreviewRoute:
     """Integration tests against the FastAPI app."""
 
-    def test_preview_endpoint_returns_segments(self, client):
+    def test_preview_endpoint_returns_segments(self):
         response = client.post(
             "/v1/ai/redaction/preview",
             json={"text": "Mary Johnson received aid in Maiduguri Camp."},
         )
         assert response.status_code == 200
-        body = response.json()
+        result = response.json()["result"]
 
-        result = body["result"]
-        assert result["original_length"] == len(
-            "Mary Johnson received aid in Maiduguri Camp."
-        )
+        assert result["original_length"] == len("Mary Johnson received aid in Maiduguri Camp.")
         assert len(result["segments"]) > 0
         assert any(seg["type"] == "redacted" for seg in result["segments"])
-
-        # The response must never contain the raw PII substring as a bare field —
-        # only positions and categories.
         assert "Mary Johnson" not in str(result["segments"])
 
-    def test_preview_endpoint_no_pii(self, client):
+    def test_preview_endpoint_no_pii(self):
         response = client.post(
             "/v1/ai/redaction/preview",
             json={"text": "The sky is clear today."},
@@ -97,7 +92,7 @@ class TestRedactionPreviewRoute:
         assert result["pii_summary"]["total"] == 0
         assert all(seg["type"] == "kept" for seg in result["segments"])
 
-    def test_preview_endpoint_does_not_log_raw_text(self, client, caplog):
+    def test_preview_endpoint_does_not_log_raw_text(self, caplog):
         sensitive_text = "Mary Johnson's ID is AB12345678"
         client.post("/v1/ai/redaction/preview", json={"text": sensitive_text})
 
