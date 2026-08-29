@@ -14,7 +14,9 @@ jest.mock('@stellar/stellar-sdk', () => ({
 
 // Import the mocked function after the mock
 import { scValToNative } from '@stellar/stellar-sdk';
-const mockScValToNative = scValToNative as jest.MockedFunction<typeof scValToNative>;
+const mockScValToNative = scValToNative as jest.MockedFunction<
+  typeof scValToNative
+>;
 
 describe('SorobanEventCorrelationService', () => {
   let service: SorobanEventCorrelationService;

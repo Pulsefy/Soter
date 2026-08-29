@@ -5,7 +5,10 @@ import { NotificationType } from './interfaces/notification-job.interface';
 import { Job } from 'bullmq';
 import { DlqService } from '../jobs/dlq.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
-import { EMAIL_ADAPTER, SMS_ADAPTER } from './adapters/delivery-adapter.interface';
+import {
+  EMAIL_ADAPTER,
+  SMS_ADAPTER,
+} from './adapters/delivery-adapter.interface';
 
 describe('NotificationProcessor', () => {
   let processor: NotificationProcessor;
@@ -59,10 +62,16 @@ describe('NotificationProcessor', () => {
       incrementNotificationDeliveryFailureByCategory: jest.fn(),
     };
     emailAdapterMock = {
-      send: jest.fn().mockResolvedValue({ success: true, providerMessageId: 'sg-msg-id-123' }),
+      send: jest.fn().mockResolvedValue({
+        success: true,
+        providerMessageId: 'sg-msg-id-123',
+      }),
     };
     smsAdapterMock = {
-      send: jest.fn().mockResolvedValue({ success: true, providerMessageId: 'tw-msg-id-123' }),
+      send: jest.fn().mockResolvedValue({
+        success: true,
+        providerMessageId: 'tw-msg-id-123',
+      }),
     };
 
     const module: TestingModule = await Test.createTestingModule({

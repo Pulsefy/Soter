@@ -333,7 +333,9 @@ describe('AidService - listAidPackages', () => {
       status: 'Active',
       totalAmount: (i + 1) * 100,
     }));
-    prismaService.aidPackage.findMany.mockResolvedValue(largePackageSet.slice(10, 20));
+    prismaService.aidPackage.findMany.mockResolvedValue(
+      largePackageSet.slice(10, 20),
+    );
     prismaService.aidPackage.count.mockResolvedValue(25);
 
     const result = await service.listAidPackages({ page: 2, size: 10 });
@@ -399,7 +401,10 @@ describe('AidService - listAidPackages', () => {
         where: expect.objectContaining({
           OR: expect.arrayContaining([
             expect.objectContaining({
-              id: expect.objectContaining({ contains: 'emergency', mode: 'insensitive' }),
+              id: expect.objectContaining({
+                contains: 'emergency',
+                mode: 'insensitive',
+              }),
             }),
           ]),
         }),
@@ -449,9 +454,7 @@ describe('AidService - listAidPackages', () => {
     expect(prismaService.aidPackage.findMany).toHaveBeenCalledWith({
       where: {
         status: 'Active',
-        OR: [
-          { id: { contains: 'test', mode: 'insensitive' } },
-        ],
+        OR: [{ id: { contains: 'test', mode: 'insensitive' } }],
       },
       orderBy: { status: 'desc' },
       skip: 5,

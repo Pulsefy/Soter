@@ -60,9 +60,7 @@ export class AidService {
 
     if (params.search) {
       const searchLower = params.search.toLowerCase();
-      where.OR = [
-        { id: { contains: searchLower, mode: 'insensitive' } },
-      ];
+      where.OR = [{ id: { contains: searchLower, mode: 'insensitive' } }];
     }
 
     const orderBy: Prisma.AidPackageOrderByWithRelationInput = {
