@@ -101,6 +101,55 @@ Potential future focus:
 - consider more direct aggregate accounting for heavily-used read paths
 - evaluate recipient-specific indexing if dashboard queries become expensive
 
+## CI Regression Gate (Budgets)
+
+Profiling alone does not stop a pull request from making a hot path materially
+more expensive. A committed budget file now acts as the gate:
+
+- `gas_budgets.json` — the source of truth for allowed costs per entry point.
+  Each entry lists `cpu_instructions` and `memory_bytes` ceilings, plus a
+  `tolerance` (default ±15%) that absorbs normal measurement noise.
+- `tests/gas_profiling.rs` — every profiling test now records its measured
+  cost to `target/gas_metrics/<operation>.json` (machine-readable).
+- `scripts/check_gas_budgets.py` — the CI gate. It reads the budgets and the
+  recorded metrics, compares them, and **fails the build** when any measured
+  cost exceeds its budget beyond tolerance. The failure message names the
+  entry point and the CPU/memory delta vs budget so the regression is
+  actionable.
+
+### How a regression is caught
+
+1. A PR changes contract logic, making `claim` ~30% more expensive.
+2. The gate step runs `cargo test --test gas_profiling` (producing the metrics)
+   then `python3 scripts/check_gas_budgets.py`.
+3. The script prints `[REGRESSION] claim` with the CPU/Memory delta and exits
+   non-zero, failing the `Contract CI` job.
+
+### Tolerating noise
+
+Budgets are deterministic (Soroban meters guest VM instructions, not wall
+clock), so the same code yields the same numbers across machines. The
+`tolerance` band still permits minor runtime variance without a false failure.
+
+### Updating a budget deliberately
+
+Budgets are only changed in a reviewed commit. To refresh a baseline after an
+intentional, approved cost change:
+
+```bash
+cd app/onchain
+SOTER_UPDATE_GAS_BUDGETS=1 cargo test --test gas_profiling
+# review the diff in contracts/aid_escrow/gas_budgets.json, then commit it
+```
+
+### Re-running the gate locally
+
+```bash
+cd app/onchain
+cargo test --test gas_profiling -- --nocapture
+python3 scripts/check_gas_budgets.py
+```
+
 ## Validation Summary
 
 - Baseline profiling now explicitly covers **create / claim / refund** as requested.
@@ -109,5 +158,8 @@ Potential future focus:
 
 ## Files Updated
 
-- `app/onchain/contracts/aid_escrow/tests/gas_profiling.rs`
+- `app/onchain/contracts/aid_escrow/tests/gas_profiling.rs` (records metrics)
+- `app/onchain/contracts/aid_escrow/gas_budgets.json` (committed budgets + tolerance)
+- `app/onchain/scripts/check_gas_budgets.py` (CI regression gate)
+- `.github/workflows/contract-ci.yml` (gate step + metrics artifact upload)
 - `app/onchain/contracts/aid_escrow/GAS_PROFILING_REPORT.md`
