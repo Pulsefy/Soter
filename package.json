@@ -11,7 +11,7 @@
     "start": "pnpm run start --filter=app/frontend",
     "lint": "pnpm run lint --filter=app/frontend",
     "test": "pnpm run test --filter=app/frontend",
-    "generate:api": "npx ts-node -r tsconfig-paths/register -P app/backend/tsconfig.json tools/generate-openapi.cjs && npx openapi-typescript openapi.json -o app/mobile/src/types/generated/api.d.ts"
+    "generate:api": "npx ts-node -r tsconfig-paths/register -P app/backend/tsconfig.json tools/generate-openapi.cjs && npx openapi-typescript openapi.json -o app/mobile/src/types/generated/api.d.ts",
     "spec:generate": "pnpm --dir app/backend run spec:generate",
     "spec:check": "pnpm --dir app/backend run spec:check",
     "spec:lint": "pnpm --dir app/backend run spec:lint"
