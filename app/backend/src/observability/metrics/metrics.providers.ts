@@ -141,6 +141,28 @@ export const metricsProviders = [
     labelNames: ['reason'],
   }),
 
+  // Generic Response Cache Metrics (issue #702)
+  makeCounterProvider({
+    name: 'cache_hits_total',
+    help: 'Total number of response cache hits, labelled by key group',
+    labelNames: ['key_group'],
+  }),
+  makeCounterProvider({
+    name: 'cache_misses_total',
+    help: 'Total number of response cache misses, labelled by key group',
+    labelNames: ['key_group'],
+  }),
+  makeCounterProvider({
+    name: 'cache_invalidations_total',
+    help: 'Total number of response cache invalidations, labelled by key group',
+    labelNames: ['key_group'],
+  }),
+  makeGaugeProvider({
+    name: 'cache_keys_total',
+    help: 'Current number of Redis keys per cache key group',
+    labelNames: ['key_group'],
+  }),
+
   // Verification Priority Metrics
   makeCounterProvider({
     name: 'verification_jobs_enqueued_total',
