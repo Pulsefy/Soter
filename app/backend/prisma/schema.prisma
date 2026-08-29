@@ -792,6 +792,15 @@ enum EntityLinkSourceType {
   verification
 }
 
+/// Review state for entity linking decisions
+enum EntityLinkReviewState {
+  auto_applied
+  pending_review
+  accepted
+  rejected
+  remapped
+}
+
 /// Links extracted entities to canonical registry records
 model EntityLink {
   id              String             @id @default(cuid())
@@ -820,6 +829,7 @@ model EntityLink {
   matchMethod     String?            // e.g., "exact", "fuzzy", "manual"
   reviewedBy      String?            // User ID if manually reviewed
   reviewedAt      DateTime?
+  reviewState     EntityLinkReviewState @default(auto_applied)
   reviewNotes     String?
   isActive        Boolean            @default(true)
   metadata        Json?

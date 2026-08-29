@@ -459,6 +459,40 @@ export class MetricsService {
   }
 
   /**
+   * Set current entity link review queue depth gauge.
+   */
+  setEntityLinkReviewQueueDepth(count: number): void {
+    // Create a dynamic gauge if it doesn't exist
+    const name = 'entity_link_review_queue_depth';
+    if (!this.dynamicGauges.has(name)) {
+      const g = new Gauge({
+        name,
+        help: 'Number of entity links awaiting manual review',
+        labelNames: [],
+      });
+      this.dynamicGauges.set(name, g);
+    }
+    this.dynamicGauges.get(name)!.set(count);
+  }
+
+  /**
+   * Record latency (seconds) between link creation and review decision.
+   */
+  recordEntityLinkReviewDecisionLatency(seconds: number): void {
+    const name = 'entity_link_review_decision_seconds';
+    if (!this.dynamicHistograms.has(name)) {
+      const h = new Histogram({
+        name,
+        help: 'Seconds between entity link creation and reviewer decision',
+        labelNames: [],
+        buckets: [60, 300, 900, 3600, 86400],
+      });
+      this.dynamicHistograms.set(name, h);
+    }
+    this.dynamicHistograms.get(name)!.observe(seconds);
+  }
+
+  /**
    * Record histogram metrics for duration tracking
    */
   recordHistogram(

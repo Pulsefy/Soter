@@ -44,6 +44,18 @@ describe('EntityLinkingService', () => {
           provide: PrismaService,
           useValue: mockPrisma,
         },
+        {
+          provide: require('@nestjs/config').ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('0.8') },
+        },
+        {
+          provide: require('../observability/metrics/metrics.service')
+            .MetricsService,
+          useValue: {
+            setEntityLinkReviewQueueDepth: jest.fn(),
+            recordEntityLinkReviewDecisionLatency: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -77,6 +89,10 @@ describe('EntityLinkingService', () => {
         assetId: null,
         projectId: null,
         isActive: true,
+        reviewState: 'auto_applied',
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNotes: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -87,7 +103,45 @@ describe('EntityLinkingService', () => {
       expect(result.sourceType).toBe('claim');
       expect(result.extractedName).toBe('Test Organization');
       expect(result.confidenceScore).toBe(0.95);
+      expect(result.confidenceBand).toBe('high');
+      expect(result.reviewThreshold).toBe(0.8);
       expect(prisma.entityLink.create).toHaveBeenCalled();
+    });
+
+    it('should queue low-confidence links for manual review', async () => {
+      const dto = {
+        sourceType: 'claim' as const,
+        sourceId: 'claim-123',
+        extractedName: 'Uncertain Organization',
+        entityType: 'organization' as const,
+        confidenceScore: 0.61,
+      };
+
+      mockPrisma.entityLink.create.mockResolvedValue({
+        id: 'link-queue',
+        ...dto,
+        organizationId: null,
+        locationId: null,
+        assetId: null,
+        projectId: null,
+        isActive: false,
+        reviewState: 'pending_review',
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      mockPrisma.entityLink.count.mockResolvedValue(1);
+
+      const result = await service.linkEntity(dto);
+
+      expect(result.reviewState).toBe('pending_review');
+      expect(result.isActive).toBe(false);
+      expect(result.confidenceBand).toBe('medium');
+      expect(prisma.entityLink.count).toHaveBeenCalledWith({
+        where: { reviewState: 'pending_review' },
+      });
     });
 
     it('should throw BadRequestException for invalid confidence score', async () => {
@@ -253,26 +307,30 @@ describe('EntityLinkingService', () => {
         reviewedBy: 'user-1',
         reviewedAt: new Date(),
         isActive: false,
+        reviewState: 'rejected',
         reviewNotes: 'Incorrect match',
         createdAt: new Date(),
         updatedAt: new Date(),
       };
 
       mockPrisma.entityLink.update.mockResolvedValue(mockUpdated);
+      mockPrisma.entityLink.count.mockResolvedValue(0);
 
       const result = await service.reviewLink('link-1', {
         reviewedBy: 'user-1',
-        isActive: false,
+        decision: 'rejected',
         reviewNotes: 'Incorrect match',
       });
 
       expect(result.isActive).toBe(false);
       expect(result.reviewedBy).toBe('user-1');
+      expect(result.reviewState).toBe('rejected');
       expect(prisma.entityLink.update).toHaveBeenCalledWith({
         where: { id: 'link-1' },
         data: expect.objectContaining({
           reviewedBy: 'user-1',
           isActive: false,
+          reviewState: 'rejected',
           reviewNotes: 'Incorrect match',
         }),
       });
