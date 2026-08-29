@@ -853,7 +853,7 @@ fn test_all_events_have_schema_version() {
     println!("Total events: {}", all_events.len());
 
     // Debug: Print all events to see what we have
-    for (i, (contract_id_event, topic, data)) in all_events.iter().enumerate() {
+    for (i, (contract_id_event, topic, _data)) in all_events.iter().enumerate() {
         println!(
             "All Event {}: Contract: {:?}, Topic: {:?}",
             i, contract_id_event, topic
@@ -877,7 +877,7 @@ fn test_all_events_have_schema_version() {
 
     // Should have at least 1 event (unpause always works)
     assert!(
-        contract_events.len() >= 1,
+        !contract_events.is_empty(),
         "Expected at least 1 contract event, got {}",
         contract_events.len()
     );
