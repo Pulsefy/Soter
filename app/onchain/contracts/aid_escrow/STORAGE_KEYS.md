@@ -48,7 +48,8 @@ A singleton key is a bare `Symbol`; exactly one entry exists per key.
 | `KEY_PENDING_ADMIN`     | `"pend_adm"`   | `Address`   | `transfer_admin`. **Ephemeral**: removed by `accept_admin` / `cancel_admin_transfer`. Absent when no transfer is pending. |
 | `KEY_VERSION`           | `"version"`    | `u32`       | `init` (=1); bumped by `migrate`. Permanent. |
 | `KEY_CONFIG`            | `"config"`     | `Config`    | `init`, `set_config`, `add_allowed_token`, `remove_allowed_token`. Permanent; readers fall back to defaults if absent. |
-| `KEY_DISTRIBUTORS`      | `"dstrbtrs"`   | `Map<Address, bool>` | `add_distributor` / `remove_distributor`. Permanent. |
+| `KEY_DISTRIBUTORS`      | `"dstrbtrs"`   | `Map<Address, bool>` | `add_distributor` / `remove_distributor`. Bounded by `KEY_MAX_DISTRIBUTORS`; enumerable via `list_distributors`. Permanent. |
+| `KEY_MAX_DISTRIBUTORS`  | `"max_dist"`   | `u32`       | `set_max_distributors`. Caps `KEY_DISTRIBUTORS` size; falls back to `DEFAULT_MAX_DISTRIBUTORS` when absent. Permanent. |
 | `KEY_PAUSED`            | `"paused"`     | `bool`      | `pause` / `unpause`. Permanent flag. |
 | `KEY_PAUSE_CREATE`      | `"p_create"`   | `bool`      | `pause_action("create")` / `unpause_action`. Permanent flag. |
 | `KEY_PAUSE_CLAIM`       | `"p_claim"`    | `bool`      | `pause_action("claim")` / `unpause_action`. Permanent flag. |
@@ -117,6 +118,7 @@ above. Rules of thumb:
    `KEY_DELEGATE_EXPIRY`).
 3. **Safe to drop/reset without fund impact** (policy flags only):
    `KEY_PAUSED`, `KEY_PAUSE_*`, `KEY_CAMPAIGN_PAUSED`, `KEY_DISTRIBUTORS`,
+   `KEY_MAX_DISTRIBUTORS` *(resets to `DEFAULT_MAX_DISTRIBUTORS`)*,
    `KEY_CONFIG` *(re-initialize before unpausing)*. Dropping them changes
    behaviour, not solvency.
 4. **Derived/recomputable**: `KEY_TOTAL_LOCKED` can be rebuilt by scanning all

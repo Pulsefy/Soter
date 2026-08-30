@@ -39,8 +39,13 @@ pub const KEY_VERSION: Symbol = symbol_short!("version");
 /// Global configuration struct (`Config`: min_amount, max_expires_in,
 /// allowed_tokens). Written by `init`, `set_config`, token allowlist ops.
 pub const KEY_CONFIG: Symbol = symbol_short!("config");
-/// Distributor allowlist (`Map<Address, bool>`). Admin-managed.
+/// Distributor allowlist (`Map<Address, bool>`). Admin-managed. Bounded by
+/// [`KEY_MAX_DISTRIBUTORS`]; enumerable via `list_distributors`.
 pub const KEY_DISTRIBUTORS: Symbol = symbol_short!("dstrbtrs");
+/// Maximum number of addresses `KEY_DISTRIBUTORS` may hold at once (`u32`).
+/// Enforced by `add_distributor`; configurable via `set_max_distributors`.
+/// Falls back to `DEFAULT_MAX_DISTRIBUTORS` when absent.
+pub const KEY_MAX_DISTRIBUTORS: Symbol = symbol_short!("max_dist");
 /// Global pause flag (`bool`).
 pub const KEY_PAUSED: Symbol = symbol_short!("paused");
 /// Per-action pause flag for `create_package` / `batch_create_packages` (`bool`).
@@ -141,13 +146,14 @@ mod tests {
     use super::*;
 
     /// Every singleton key, both storage families.
-    fn singleton_keys() -> [Symbol; 21] {
+    fn singleton_keys() -> [Symbol; 22] {
         [
             KEY_ADMIN,
             KEY_PENDING_ADMIN,
             KEY_VERSION,
             KEY_CONFIG,
             KEY_DISTRIBUTORS,
+            KEY_MAX_DISTRIBUTORS,
             KEY_PAUSED,
             KEY_PAUSE_CREATE,
             KEY_PAUSE_CLAIM,

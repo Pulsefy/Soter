@@ -36,9 +36,9 @@ pub mod ttl;
 pub use crate::keys::{
     package_index_entry, package_key, KEY_ADMIN, KEY_CAMPAIGN_PAUSED, KEY_CAMPAIGN_TOKEN_CLAIMED,
     KEY_CAMPAIGN_TOKEN_LOCKED, KEY_CONFIG, KEY_DELEGATES, KEY_DELEGATE_EXPIRY,
-    KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM, KEY_PAUSE_CREATE,
-    KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN, KEY_PKG_COUNTER, KEY_PKG_IDX,
-    KEY_RECIPIENT_LAST_CLAIM, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
+    KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_MAX_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM,
+    KEY_PAUSE_CREATE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN, KEY_PKG_COUNTER,
+    KEY_PKG_IDX, KEY_RECIPIENT_LAST_CLAIM, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
 };
 
 /// Upper bound on the number of package ids accepted by `batch_claim` in a
@@ -49,6 +49,17 @@ pub const MAX_BATCH_CLAIM_SIZE: u32 = 25;
 /// a single call.  Enforcing this keeps the response within Soroban's read-entry
 /// resource budget even for recipients with large package histories.
 pub const MAX_PAGE_SIZE: u32 = 50;
+
+/// Default maximum number of addresses that may hold distributor privileges
+/// at once, used until an admin calls `set_max_distributors`. Bounds
+/// `add_distributor` and keeps `require_admin_or_distributor` and
+/// `list_distributors` iteration cheap regardless of how long the contract
+/// has been running.
+pub const DEFAULT_MAX_DISTRIBUTORS: u32 = 100;
+
+/// Maximum number of distributor addresses `list_distributors` may return in
+/// a single call.
+pub const MAX_DISTRIBUTOR_PAGE_SIZE: u32 = 50;
 
 // --- Data Types ---
 
@@ -163,6 +174,15 @@ pub enum Error {
     BatchTooLarge = 21,
     /// The recipient has not yet completed the configured claim cooldown.
     ClaimCooldownActive = 22,
+    /// `add_distributor` was called for an address that already holds
+    /// distributor privileges.
+    DistributorAlreadyExists = 23,
+    /// `remove_distributor` was called for an address that does not
+    /// currently hold distributor privileges.
+    DistributorNotFound = 24,
+    /// `add_distributor` would exceed the configured maximum distributor
+    /// set size (see `get_max_distributors` / `set_max_distributors`).
+    DistributorSetFull = 25,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -386,6 +406,27 @@ pub struct TokenAdded {
 pub struct TokenRemoved {
     pub admin: Address,
     pub token: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when an address is granted distributor privileges.
+/// `total_distributors` is the resulting set size after the addition, so
+/// indexers/auditors can track set growth without a separate read.
+#[contractevent]
+pub struct DistributorAdded {
+    pub admin: Address,
+    pub distributor: Address,
+    pub total_distributors: u32,
+    pub timestamp: u64,
+}
+
+/// Emitted when an address's distributor privileges are revoked.
+/// `total_distributors` is the resulting set size after the removal.
+#[contractevent]
+pub struct DistributorRemoved {
+    pub admin: Address,
+    pub distributor: Address,
+    pub total_distributors: u32,
     pub timestamp: u64,
 }
 
@@ -641,9 +682,17 @@ impl AidEscrow {
 
     /// Admin-only. Grants distributor privileges to `addr`.
     /// Distributors can create packages but cannot pause, config, or disburse.
+    /// Enforces the configured maximum distributor set size (see
+    /// [`Self::get_max_distributors`] / [`Self::set_max_distributors`]) and
+    /// emits a `DistributorAdded` event carrying the resulting set size.
     ///
     /// # Errors
     /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::DistributorAlreadyExists` if `addr` already holds
+    /// distributor privileges — adding a duplicate is an explicit error, not
+    /// a silent no-op.
+    /// Returns `Error::DistributorSetFull` if the set is already at its
+    /// configured cap.
     pub fn add_distributor(env: Env, addr: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -653,18 +702,41 @@ impl AidEscrow {
             .instance()
             .get(&KEY_DISTRIBUTORS)
             .unwrap_or(Map::new(&env));
-        distributors.set(addr, true);
+
+        if distributors.get(addr.clone()).unwrap_or(false) {
+            return Err(Error::DistributorAlreadyExists);
+        }
+
+        let max_distributors = Self::get_max_distributors(env.clone());
+        if distributors.len() >= max_distributors {
+            return Err(Error::DistributorSetFull);
+        }
+
+        distributors.set(addr.clone(), true);
+        let total_distributors = distributors.len();
         env.storage()
             .instance()
             .set(&KEY_DISTRIBUTORS, &distributors);
 
+        let timestamp = env.ledger().timestamp();
+        DistributorAdded {
+            admin,
+            distributor: addr,
+            total_distributors,
+            timestamp,
+        }
+        .publish(&env);
+
         Ok(())
     }
 
-    /// Admin-only. Revokes distributor privileges from `addr`.
+    /// Admin-only. Revokes distributor privileges from `addr`. Emits a
+    /// `DistributorRemoved` event carrying the resulting set size.
     ///
     /// # Errors
     /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::DistributorNotFound` if `addr` does not currently hold
+    /// distributor privileges.
     pub fn remove_distributor(env: Env, addr: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -674,11 +746,111 @@ impl AidEscrow {
             .instance()
             .get(&KEY_DISTRIBUTORS)
             .unwrap_or(Map::new(&env));
-        distributors.remove(addr);
+
+        if !distributors.get(addr.clone()).unwrap_or(false) {
+            return Err(Error::DistributorNotFound);
+        }
+
+        distributors.remove(addr.clone());
+        let total_distributors = distributors.len();
         env.storage()
             .instance()
             .set(&KEY_DISTRIBUTORS, &distributors);
 
+        let timestamp = env.ledger().timestamp();
+        DistributorRemoved {
+            admin,
+            distributor: addr,
+            total_distributors,
+            timestamp,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Returns the current number of addresses holding distributor
+    /// privileges. Cheap O(1) audit helper; pair with
+    /// [`Self::list_distributors`] to enumerate the full set.
+    pub fn get_distributor_count(env: Env) -> u32 {
+        let distributors: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_DISTRIBUTORS)
+            .unwrap_or(Map::new(&env));
+        distributors.len()
+    }
+
+    /// Returns whether `addr` currently holds distributor privileges.
+    pub fn is_distributor(env: Env, addr: Address) -> bool {
+        let distributors: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_DISTRIBUTORS)
+            .unwrap_or(Map::new(&env));
+        distributors.get(addr).unwrap_or(false)
+    }
+
+    /// Returns up to `limit` distributor addresses starting at the 0-based
+    /// `cursor` index into the current set, for admin auditing. `limit` is
+    /// capped at [`MAX_DISTRIBUTOR_PAGE_SIZE`] regardless of the value
+    /// passed in. An out-of-range `cursor` (>= the current distributor
+    /// count) returns an empty result rather than an error.
+    ///
+    /// The set has no guaranteed ordering beyond "stable between writes":
+    /// like [`Self::list_recipient_packages`], a cursor obtained before an
+    /// intervening `add_distributor` / `remove_distributor` call may skip or
+    /// repeat an entry on the next page.
+    pub fn list_distributors(env: Env, cursor: u32, limit: u32) -> Vec<Address> {
+        let distributors: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_DISTRIBUTORS)
+            .unwrap_or(Map::new(&env));
+        let keys = distributors.keys();
+        let total = keys.len();
+
+        let mut result: Vec<Address> = Vec::new(&env);
+        if cursor >= total {
+            return result;
+        }
+
+        let effective_limit = limit.min(MAX_DISTRIBUTOR_PAGE_SIZE);
+        let end = cursor.saturating_add(effective_limit).min(total);
+        for i in cursor..end {
+            result.push_back(keys.get(i).unwrap());
+        }
+        result
+    }
+
+    /// Returns the configured maximum distributor set size. Defaults to
+    /// [`DEFAULT_MAX_DISTRIBUTORS`] until an admin calls
+    /// [`Self::set_max_distributors`].
+    pub fn get_max_distributors(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&KEY_MAX_DISTRIBUTORS)
+            .unwrap_or(DEFAULT_MAX_DISTRIBUTORS)
+    }
+
+    /// Admin-only. Sets the maximum number of addresses that may hold
+    /// distributor privileges at once. Lowering this below the current
+    /// distributor count does not remove any existing distributor; it only
+    /// blocks further `add_distributor` calls until the count drops back
+    /// under the new cap.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::InvalidAmount` if `max` is zero.
+    pub fn set_max_distributors(env: Env, max: u32) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        if max == 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        env.storage().instance().set(&KEY_MAX_DISTRIBUTORS, &max);
         Ok(())
     }
 
