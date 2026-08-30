@@ -20,12 +20,17 @@ import {
   ClaimTimelineStatus,
   ClaimStatus,
   fetchAidDetails,
-  getMockAidDetails,
 } from '../services/aidApi';
+import {
+  cacheAidDetails,
+  loadCachedAidDetails,
+  getAidDetailsCacheTimestamp,
+} from '../services/aidCache';
 import { useSync } from '../contexts/SyncContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { SaverModeBanner } from '../components/SaverModeBanner';
 import { getTxExplorerUrl } from '../explorerUtils';
+import { DataFreshnessIndicator } from '../components/DataFreshnessIndicator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidDetails'>;
 
@@ -44,6 +49,8 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [isCached, setIsCached] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const {
     getActionsForAid,
@@ -85,13 +92,28 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       try {
         const data = await fetchAidDetails(aidId);
         setDetails(data);
+        setIsCached(false);
         setError(null);
-      } catch {
-        setError('Unable to reach the server. Showing last known data.');
-        setDetails((current) => current ?? getMockAidDetails(aidId));
-      } finally {
+        await cacheAidDetails(aidId, data);
         const now = new Date().toISOString();
         setLastUpdated(now);
+        if (isRefresh) setRefreshMessage('Data refreshed successfully.');
+      } catch {
+        const cached = await loadCachedAidDetails(aidId);
+        if (cached) {
+          setDetails(cached);
+          setIsCached(true);
+          const ts = await getAidDetailsCacheTimestamp(aidId);
+          setLastUpdated(ts || new Date().toISOString());
+          setError('Unable to reach the server. Showing last known cached data.');
+          if (isRefresh) setRefreshMessage('Refresh failed. Showing the last cached data.');
+        } else {
+          setDetails(null);
+          setIsCached(false);
+          setError('Unable to reach the server. Aid details are unavailable offline.');
+          if (isRefresh) setRefreshMessage('Refresh failed. Server is unreachable.');
+        }
+      } finally {
         setLoading(false);
         setRefreshing(false);
       }
@@ -255,7 +277,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   }
 
   // authState === 'granted'
-  if (loading || !details) {
+  if (loading) {
     return (
       <View
         style={styles.centered}
@@ -273,6 +295,43 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   }
 
+  if (!details) {
+    return (
+      <View
+        style={styles.centered}
+        accessible
+        accessibilityLabel="Aid details unavailable. Unable to connect to the server and no cached details exist."
+        accessibilityRole="alert"
+      >
+        <Text style={styles.unavailableIcon} accessibilityElementsHidden>
+          ⚠️
+        </Text>
+        <Text style={styles.title}>Aid Details Unavailable</Text>
+        <Text style={styles.unavailableText}>
+          {error ?? 'Unable to retrieve package details from the server and no cached data is available on this device.'}
+        </Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading aid details"
+          style={[styles.button, { backgroundColor: colors.brand.primary }]}
+          onPress={() => loadDetails(false)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.buttonText}>🔄 Retry Connection</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Back to aid operations"
+          style={[styles.button, styles.secondaryButton]}
+          onPress={() => navigation.goBack()}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.secondaryButtonText}>Back to Aid Overview</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   const statusLabel = formatStatus(details.status);
   const pillStyle = statusPillStyle(details.status, colors);
 
@@ -282,6 +341,8 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       <SaverModeBanner visible={saverModeActive} source={saverModeSource} />
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
+      <DataFreshnessIndicator isCached={isCached} isConnected={isConnected} cachedAt={lastUpdated} refreshing={refreshing} refreshMessage={refreshMessage} onRefresh={() => loadDetails(true)} />
+
       <View style={styles.header}>
         <Text style={styles.title} accessibilityRole="header">
           {details.title}
@@ -943,6 +1004,18 @@ const makeStyles = (colors: AppColors) =>
       backgroundColor: colors.background,
       padding: 32,
       gap: 16,
+    },
+    unavailableIcon: {
+      fontSize: 48,
+      marginBottom: 8,
+    },
+    unavailableText: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      lineHeight: 20,
+      marginHorizontal: 16,
+      marginBottom: 8,
     },
     lockIcon: {
       fontSize: 48,

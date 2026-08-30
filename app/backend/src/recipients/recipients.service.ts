@@ -42,7 +42,12 @@ export interface ImportReport {
 }
 
 const NAME_HEADERS = ['name', 'fullname', 'recipientname'];
-const WALLET_HEADERS = ['wallet', 'walletaddress', 'stellarwallet', 'publickey'];
+const WALLET_HEADERS = [
+  'wallet',
+  'walletaddress',
+  'stellarwallet',
+  'publickey',
+];
 const PHONE_HEADERS = ['phone', 'phonenumber', 'mobile'];
 
 @Injectable()
@@ -69,21 +74,29 @@ export class RecipientsService {
       .filter(Boolean);
 
     if (headers.length === 0) {
-      throw new BadRequestException('The uploaded CSV file is missing a header row.');
+      throw new BadRequestException(
+        'The uploaded CSV file is missing a header row.',
+      );
     }
 
     const normalizedHeaders = headers.map(header =>
       header.toLowerCase().replace(/[_\s-]+/g, ''),
     );
-    const nameIndex = normalizedHeaders.findIndex(header => NAME_HEADERS.includes(header));
-    const walletIndex = normalizedHeaders.findIndex(header => WALLET_HEADERS.includes(header));
-    const phoneIndex = normalizedHeaders.findIndex(header => PHONE_HEADERS.includes(header));
+    const nameIndex = normalizedHeaders.findIndex(header =>
+      NAME_HEADERS.includes(header),
+    );
+    const walletIndex = normalizedHeaders.findIndex(header =>
+      WALLET_HEADERS.includes(header),
+    );
+    const phoneIndex = normalizedHeaders.findIndex(header =>
+      PHONE_HEADERS.includes(header),
+    );
 
     const rows = dataLines.map((line, index) => {
       const values = line.split(',').map(value => value.trim());
-      const name = nameIndex >= 0 ? values[nameIndex] ?? '' : '';
-      const wallet = walletIndex >= 0 ? values[walletIndex] ?? '' : '';
-      const phone = phoneIndex >= 0 ? values[phoneIndex] ?? '' : '';
+      const name = nameIndex >= 0 ? (values[nameIndex] ?? '') : '';
+      const wallet = walletIndex >= 0 ? (values[walletIndex] ?? '') : '';
+      const phone = phoneIndex >= 0 ? (values[phoneIndex] ?? '') : '';
       const messages: ImportValidationMessage[] = [];
 
       if (!name) {
@@ -116,7 +129,9 @@ export class RecipientsService {
         });
       }
 
-      const status: ImportRowStatus = messages.some(message => message.severity === 'error')
+      const status: ImportRowStatus = messages.some(
+        message => message.severity === 'error',
+      )
         ? 'error'
         : messages.some(message => message.severity === 'warning')
           ? 'warning'
@@ -149,7 +164,10 @@ export class RecipientsService {
    * one record per row-level message (severity, field, message) plus the row's
    * key values, so operators can locate and fix failures without the raw file.
    */
-  buildImportReport(campaignId: string, outcome: ImportValidationOutcome): ImportReport {
+  buildImportReport(
+    campaignId: string,
+    outcome: ImportValidationOutcome,
+  ): ImportReport {
     const reportId = `rpt-${Date.now().toString(36)}-${randomBytes(5).toString('hex')}`;
     const generatedAt = new Date().toISOString();
 
@@ -165,13 +183,23 @@ export class RecipientsService {
       `# errorRows: ${outcome.summary.errorRows}`,
     ].join('\n');
 
-    const headerRow = 'rowNumber,status,severity,field,message,name,wallet,phone';
+    const headerRow =
+      'rowNumber,status,severity,field,message,name,wallet,phone';
     const bodyLines: string[] = [];
 
     for (const row of outcome.rows) {
       if (row.messages.length === 0) {
         bodyLines.push(
-          [row.rowNumber, row.status, '', '', '', row.values.name, row.values.wallet, row.values.phone]
+          [
+            row.rowNumber,
+            row.status,
+            '',
+            '',
+            '',
+            row.values.name,
+            row.values.wallet,
+            row.values.phone,
+          ]
             .map(value => this.escapeCsvValue(String(value)))
             .join(','),
         );

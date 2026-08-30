@@ -922,3 +922,248 @@ mod sweep_expired_packages {
         assert_eq!(t.client.get_total_locked(&t.token), ONE_TOKEN);
     }
 }
+
+// ===========================================================================
+// Evidence Hash Tests
+// ===========================================================================
+
+mod evidence_hash {
+    use super::*;
+
+    fn valid_evidence_hash(env: &Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(
+            env,
+            "a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef",
+        )
+    }
+
+    fn another_valid_evidence_hash(env: &Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(
+            env,
+            "fedcba09876543210fedcba09876543210fedcba09876543210fedcba0987654321",
+        )
+    }
+
+    #[test]
+    fn attach_evidence_hash_succeeds() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let id = t.create_default_package(&recipient, ONE_TOKEN);
+
+        let hash = valid_evidence_hash(&t.env);
+        t.client.attach_evidence_hash(&t.admin, &id, &hash);
+
+        let pkg = t.client.get_package(&id);
+        assert_eq!(pkg.evidence_hash, hash);
+    }
+
+    #[test]
+    fn attach_evidence_hash_emits_event() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let id = t.create_default_package(&recipient, ONE_TOKEN);
+
+        let hash = valid_evidence_hash(&t.env);
+        t.client.attach_evidence_hash(&t.admin, &id, &hash);
+
+        let pkg = t.client.get_package(&id);
+        assert_eq!(pkg.evidence_hash, hash);
+    }
+
+    #[test]
+    fn attach_evidence_hash_rejects_overwrite() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let id = t.create_default_package(&recipient, ONE_TOKEN);
+
+        let hash1 = valid_evidence_hash(&t.env);
+        t.client.attach_evidence_hash(&t.admin, &id, &hash1);
+
+        let hash2 = another_valid_evidence_hash(&t.env);
+        let result = t.client.try_attach_evidence_hash(&t.admin, &id, &hash2);
+        assert_eq!(result, Err(Ok(Error::InvalidState)));
+
+        let pkg = t.client.get_package(&id);
+        assert_eq!(pkg.evidence_hash, hash1);
+    }
+
+    #[test]
+    fn attach_evidence_hash_validates_format_length() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let id = t.create_default_package(&recipient, ONE_TOKEN);
+
+        let short = soroban_sdk::String::from_str(
+            &t.env,
+            "a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcde",
+        );
+        assert_eq!(
+            t.client.try_attach_evidence_hash(&t.admin, &id, &short),
+            Err(Ok(Error::InvalidState))
+        );
+
+        let long = soroban_sdk::String::from_str(
+            &t.env,
+            "a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef1",
+        );
+        assert_eq!(
+            t.client.try_attach_evidence_hash(&t.admin, &id, &long),
+            Err(Ok(Error::InvalidState))
+        );
+
+        let empty = soroban_sdk::String::from_str(&t.env, "");
+        assert_eq!(
+            t.client.try_attach_evidence_hash(&t.admin, &id, &empty),
+            Err(Ok(Error::InvalidState))
+        );
+    }
+
+    #[test]
+    fn attach_evidence_hash_validates_hex_chars() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+
+        // Invalid char 'g'
+        t.fund_contract(ONE_TOKEN);
+        let id1 = t.client.create_package(
+            &t.admin,
+            &10u64,
+            &recipient,
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3_600),
+            &Map::new(&t.env),
+        );
+        let invalid = soroban_sdk::String::from_str(
+            &t.env,
+            "a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdeg",
+        );
+        assert_eq!(
+            t.client.try_attach_evidence_hash(&t.admin, &id1, &invalid),
+            Err(Ok(Error::InvalidState))
+        );
+
+        // Uppercase hex — valid
+        t.fund_contract(ONE_TOKEN);
+        let id2 = t.client.create_package(
+            &t.admin,
+            &11u64,
+            &recipient,
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3_600),
+            &Map::new(&t.env),
+        );
+        let uppercase = soroban_sdk::String::from_str(
+            &t.env,
+            "A1B2C3D4E5F678901234567890ABCDEF1234567890ABCDEF1234567890ABCDEF",
+        );
+        assert!(t
+            .client
+            .try_attach_evidence_hash(&t.admin, &id2, &uppercase)
+            .is_ok());
+
+        // Mixed case hex — valid
+        t.fund_contract(ONE_TOKEN);
+        let id3 = t.client.create_package(
+            &t.admin,
+            &12u64,
+            &recipient,
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3_600),
+            &Map::new(&t.env),
+        );
+        let mixed = soroban_sdk::String::from_str(
+            &t.env,
+            "A1b2C3d4E5f678901234567890aBcDeF1234567890aBcDeF1234567890aBcDeF",
+        );
+        assert!(t
+            .client
+            .try_attach_evidence_hash(&t.admin, &id3, &mixed)
+            .is_ok());
+    }
+
+    #[test]
+    fn attach_evidence_hash_requires_admin_auth() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let id = t.create_default_package(&recipient, ONE_TOKEN);
+
+        let stranger = Address::generate(&t.env);
+        let hash = valid_evidence_hash(&t.env);
+
+        let result = t.client.try_attach_evidence_hash(&stranger, &id, &hash);
+        assert_eq!(result, Err(Ok(Error::NotAuthorized)));
+    }
+
+    #[test]
+    fn attach_evidence_hash_fails_for_nonexistent_package() {
+        let t = TestSetup::new();
+        let hash = valid_evidence_hash(&t.env);
+
+        let result = t.client.try_attach_evidence_hash(&t.admin, &999u64, &hash);
+        assert_eq!(result, Err(Ok(Error::PackageNotFound)));
+    }
+
+    #[test]
+    fn evidence_hash_retrievable_via_get_package() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let id = t.create_default_package(&recipient, ONE_TOKEN);
+
+        let hash = valid_evidence_hash(&t.env);
+        t.client.attach_evidence_hash(&t.admin, &id, &hash);
+
+        let pkg = t.client.get_package(&id);
+        assert_eq!(pkg.evidence_hash, hash);
+        assert_eq!(pkg.id, id);
+        assert_eq!(pkg.recipient, recipient);
+    }
+
+    #[test]
+    fn package_created_with_empty_evidence_hash() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let id = t.create_default_package(&recipient, ONE_TOKEN);
+
+        let pkg = t.client.get_package(&id);
+        assert_eq!(pkg.evidence_hash, soroban_sdk::String::from_str(&t.env, ""));
+    }
+
+    #[test]
+    fn attach_evidence_hash_after_claim_succeeds() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let id = t.create_default_package(&recipient, ONE_TOKEN);
+
+        t.client.claim(&id);
+
+        let hash = valid_evidence_hash(&t.env);
+        let result = t.client.try_attach_evidence_hash(&t.admin, &id, &hash);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn get_evidence_hash_returns_empty_when_not_set() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let id = t.create_default_package(&recipient, ONE_TOKEN);
+
+        let result = t.client.get_evidence_hash(&id);
+        assert_eq!(result, soroban_sdk::String::from_str(&t.env, ""));
+    }
+
+    #[test]
+    fn get_evidence_hash_returns_hash_after_attach() {
+        let t = TestSetup::new();
+        let recipient = Address::generate(&t.env);
+        let id = t.create_default_package(&recipient, ONE_TOKEN);
+
+        let hash = valid_evidence_hash(&t.env);
+        t.client.attach_evidence_hash(&t.admin, &id, &hash);
+
+        let result = t.client.get_evidence_hash(&id);
+        assert_eq!(result, hash);
+    }
+}

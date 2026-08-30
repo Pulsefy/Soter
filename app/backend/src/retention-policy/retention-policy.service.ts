@@ -295,7 +295,9 @@ export class RetentionPolicyService {
     switch (entity) {
       case 'AuditLog': {
         if (dryRun) {
-          return await this.prisma.auditLog.count({ where: { timestamp: { lt: cutoffDate }, deletedAt: null } });
+          return await this.prisma.auditLog.count({
+            where: { timestamp: { lt: cutoffDate }, deletedAt: null },
+          });
         }
         if (!batchSize) {
           const result = await this.prisma.auditLog.updateMany({
@@ -324,17 +326,28 @@ export class RetentionPolicyService {
         return total;
       }
       case 'VerificationSession': {
-        if (dryRun) return await this.prisma.verificationSession.count({ where });
+        if (dryRun)
+          return await this.prisma.verificationSession.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.verificationSession.updateMany({ where, data: { deletedAt: new Date() } });
+          const result = await this.prisma.verificationSession.updateMany({
+            where,
+            data: { deletedAt: new Date() },
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.verificationSession.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.verificationSession.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.verificationSession.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          const res = await this.prisma.verificationSession.updateMany({
+            where: { id: { in: ids } },
+            data: { deletedAt: new Date() },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
@@ -343,15 +356,25 @@ export class RetentionPolicyService {
       case 'Session': {
         if (dryRun) return await this.prisma.session.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.session.updateMany({ where, data: { deletedAt: new Date() } });
+          const result = await this.prisma.session.updateMany({
+            where,
+            data: { deletedAt: new Date() },
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.session.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.session.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.session.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          const res = await this.prisma.session.updateMany({
+            where: { id: { in: ids } },
+            data: { deletedAt: new Date() },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
@@ -360,15 +383,25 @@ export class RetentionPolicyService {
       case 'SessionSubmission': {
         if (dryRun) return await this.prisma.sessionSubmission.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.sessionSubmission.updateMany({ where, data: { deletedAt: new Date() } });
+          const result = await this.prisma.sessionSubmission.updateMany({
+            where,
+            data: { deletedAt: new Date() },
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.sessionSubmission.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.sessionSubmission.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.sessionSubmission.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          const res = await this.prisma.sessionSubmission.updateMany({
+            where: { id: { in: ids } },
+            data: { deletedAt: new Date() },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
@@ -377,32 +410,53 @@ export class RetentionPolicyService {
       case 'Claim': {
         if (dryRun) return await this.prisma.claim.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.claim.updateMany({ where, data: { deletedAt: new Date() } });
+          const result = await this.prisma.claim.updateMany({
+            where,
+            data: { deletedAt: new Date() },
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.claim.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.claim.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.claim.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          const res = await this.prisma.claim.updateMany({
+            where: { id: { in: ids } },
+            data: { deletedAt: new Date() },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
         return total;
       }
       case 'VerificationRequest': {
-        if (dryRun) return await this.prisma.verificationRequest.count({ where });
+        if (dryRun)
+          return await this.prisma.verificationRequest.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.verificationRequest.updateMany({ where, data: { deletedAt: new Date() } });
+          const result = await this.prisma.verificationRequest.updateMany({
+            where,
+            data: { deletedAt: new Date() },
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.verificationRequest.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.verificationRequest.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.verificationRequest.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          const res = await this.prisma.verificationRequest.updateMany({
+            where: { id: { in: ids } },
+            data: { deletedAt: new Date() },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
@@ -426,34 +480,54 @@ export class RetentionPolicyService {
 
     switch (entity) {
       case 'AuditLog': {
-        if (dryRun) return await this.prisma.auditLog.count({ where: { timestamp: { lt: cutoffDate } } });
+        if (dryRun)
+          return await this.prisma.auditLog.count({
+            where: { timestamp: { lt: cutoffDate } },
+          });
         if (!batchSize) {
-          const result = await this.prisma.auditLog.deleteMany({ where: { timestamp: { lt: cutoffDate } } });
+          const result = await this.prisma.auditLog.deleteMany({
+            where: { timestamp: { lt: cutoffDate } },
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.auditLog.findMany({ where: { timestamp: { lt: cutoffDate } }, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.auditLog.findMany({
+            where: { timestamp: { lt: cutoffDate } },
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.auditLog.deleteMany({ where: { id: { in: ids } } });
+          const res = await this.prisma.auditLog.deleteMany({
+            where: { id: { in: ids } },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
         return total;
       }
       case 'VerificationSession': {
-        if (dryRun) return await this.prisma.verificationSession.count({ where });
+        if (dryRun)
+          return await this.prisma.verificationSession.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.verificationSession.deleteMany({ where });
+          const result = await this.prisma.verificationSession.deleteMany({
+            where,
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.verificationSession.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.verificationSession.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.verificationSession.deleteMany({ where: { id: { in: ids } } });
+          const res = await this.prisma.verificationSession.deleteMany({
+            where: { id: { in: ids } },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
@@ -467,10 +541,16 @@ export class RetentionPolicyService {
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.session.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.session.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.session.deleteMany({ where: { id: { in: ids } } });
+          const res = await this.prisma.session.deleteMany({
+            where: { id: { in: ids } },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
@@ -479,15 +559,23 @@ export class RetentionPolicyService {
       case 'SessionSubmission': {
         if (dryRun) return await this.prisma.sessionSubmission.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.sessionSubmission.deleteMany({ where });
+          const result = await this.prisma.sessionSubmission.deleteMany({
+            where,
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.sessionSubmission.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.sessionSubmission.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.sessionSubmission.deleteMany({ where: { id: { in: ids } } });
+          const res = await this.prisma.sessionSubmission.deleteMany({
+            where: { id: { in: ids } },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
@@ -501,27 +589,42 @@ export class RetentionPolicyService {
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.claim.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.claim.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.claim.deleteMany({ where: { id: { in: ids } } });
+          const res = await this.prisma.claim.deleteMany({
+            where: { id: { in: ids } },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
         return total;
       }
       case 'VerificationRequest': {
-        if (dryRun) return await this.prisma.verificationRequest.count({ where });
+        if (dryRun)
+          return await this.prisma.verificationRequest.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.verificationRequest.deleteMany({ where });
+          const result = await this.prisma.verificationRequest.deleteMany({
+            where,
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.verificationRequest.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.verificationRequest.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.verificationRequest.deleteMany({ where: { id: { in: ids } } });
+          const res = await this.prisma.verificationRequest.deleteMany({
+            where: { id: { in: ids } },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
@@ -548,7 +651,10 @@ export class RetentionPolicyService {
 
     switch (entity) {
       case 'AuditLog': {
-        if (dryRun) return await this.prisma.auditLog.count({ where: { timestamp: { lt: cutoffDate }, deletedAt: null } });
+        if (dryRun)
+          return await this.prisma.auditLog.count({
+            where: { timestamp: { lt: cutoffDate }, deletedAt: null },
+          });
         if (!batchSize) {
           const result = await this.prisma.auditLog.updateMany({
             where: { timestamp: { lt: cutoffDate }, deletedAt: null },
@@ -563,27 +669,58 @@ export class RetentionPolicyService {
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.auditLog.findMany({ where: { timestamp: { lt: cutoffDate }, deletedAt: null }, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.auditLog.findMany({
+            where: { timestamp: { lt: cutoffDate }, deletedAt: null },
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.auditLog.updateMany({ where: { id: { in: ids } }, data: { actorId: ANONYMIZED, entityId: ANONYMIZED, metadata: {}, deletedAt: new Date() } });
+          const res = await this.prisma.auditLog.updateMany({
+            where: { id: { in: ids } },
+            data: {
+              actorId: ANONYMIZED,
+              entityId: ANONYMIZED,
+              metadata: {},
+              deletedAt: new Date(),
+            },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
         return total;
       }
       case 'VerificationSession': {
-        if (dryRun) return await this.prisma.verificationSession.count({ where });
+        if (dryRun)
+          return await this.prisma.verificationSession.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.verificationSession.updateMany({ where, data: { identifier: ANONYMIZED, code: ANONYMIZED, deletedAt: new Date() } });
+          const result = await this.prisma.verificationSession.updateMany({
+            where,
+            data: {
+              identifier: ANONYMIZED,
+              code: ANONYMIZED,
+              deletedAt: new Date(),
+            },
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.verificationSession.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.verificationSession.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.verificationSession.updateMany({ where: { id: { in: ids } }, data: { identifier: ANONYMIZED, code: ANONYMIZED, deletedAt: new Date() } });
+          const res = await this.prisma.verificationSession.updateMany({
+            where: { id: { in: ids } },
+            data: {
+              identifier: ANONYMIZED,
+              code: ANONYMIZED,
+              deletedAt: new Date(),
+            },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
@@ -595,20 +732,38 @@ export class RetentionPolicyService {
           return cnt;
         }
         if (!batchSize) {
-          const result = await this.prisma.session.updateMany({ where, data: { metadata: {}, deletedAt: new Date() } });
+          const result = await this.prisma.session.updateMany({
+            where,
+            data: { metadata: {}, deletedAt: new Date() },
+          });
           // Also anonymize session submissions for this entity
-          await this.prisma.sessionSubmission.updateMany({ where: { session: { createdAt: { lt: cutoffDate }, deletedAt: null } }, data: { payload: {}, response: {}, deletedAt: new Date() } });
+          await this.prisma.sessionSubmission.updateMany({
+            where: {
+              session: { createdAt: { lt: cutoffDate }, deletedAt: null },
+            },
+            data: { payload: {}, response: {}, deletedAt: new Date() },
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.session.findMany({ where, select: { id: true, createdAt: true }, take: batchSize });
+          const rows = await this.prisma.session.findMany({
+            where,
+            select: { id: true, createdAt: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.session.updateMany({ where: { id: { in: ids } }, data: { metadata: {}, deletedAt: new Date() } });
+          const res = await this.prisma.session.updateMany({
+            where: { id: { in: ids } },
+            data: { metadata: {}, deletedAt: new Date() },
+          });
           total += res.count;
           // anonymize submissions for these sessions
-          await this.prisma.sessionSubmission.updateMany({ where: { sessionId: { in: ids } }, data: { payload: {}, response: {}, deletedAt: new Date() } });
+          await this.prisma.sessionSubmission.updateMany({
+            where: { sessionId: { in: ids } },
+            data: { payload: {}, response: {}, deletedAt: new Date() },
+          });
           if (rows.length < batchSize) break;
         }
         return total;
@@ -616,15 +771,25 @@ export class RetentionPolicyService {
       case 'SessionSubmission': {
         if (dryRun) return await this.prisma.sessionSubmission.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.sessionSubmission.updateMany({ where, data: { payload: {}, response: {}, deletedAt: new Date() } });
+          const result = await this.prisma.sessionSubmission.updateMany({
+            where,
+            data: { payload: {}, response: {}, deletedAt: new Date() },
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.sessionSubmission.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.sessionSubmission.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.sessionSubmission.updateMany({ where: { id: { in: ids } }, data: { payload: {}, response: {}, deletedAt: new Date() } });
+          const res = await this.prisma.sessionSubmission.updateMany({
+            where: { id: { in: ids } },
+            data: { payload: {}, response: {}, deletedAt: new Date() },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
@@ -633,32 +798,61 @@ export class RetentionPolicyService {
       case 'Claim': {
         if (dryRun) return await this.prisma.claim.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.claim.updateMany({ where, data: { recipientRef: ANONYMIZED, evidenceRef: null, deletedAt: new Date() } });
+          const result = await this.prisma.claim.updateMany({
+            where,
+            data: {
+              recipientRef: ANONYMIZED,
+              evidenceRef: null,
+              deletedAt: new Date(),
+            },
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.claim.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.claim.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.claim.updateMany({ where: { id: { in: ids } }, data: { recipientRef: ANONYMIZED, evidenceRef: null, deletedAt: new Date() } });
+          const res = await this.prisma.claim.updateMany({
+            where: { id: { in: ids } },
+            data: {
+              recipientRef: ANONYMIZED,
+              evidenceRef: null,
+              deletedAt: new Date(),
+            },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }
         return total;
       }
       case 'VerificationRequest': {
-        if (dryRun) return await this.prisma.verificationRequest.count({ where });
+        if (dryRun)
+          return await this.prisma.verificationRequest.count({ where });
         if (!batchSize) {
-          const result = await this.prisma.verificationRequest.updateMany({ where, data: { deletedAt: new Date() } });
+          const result = await this.prisma.verificationRequest.updateMany({
+            where,
+            data: { deletedAt: new Date() },
+          });
           return result.count;
         }
         let total = 0;
         while (true) {
-          const rows = await this.prisma.verificationRequest.findMany({ where, select: { id: true }, take: batchSize });
+          const rows = await this.prisma.verificationRequest.findMany({
+            where,
+            select: { id: true },
+            take: batchSize,
+          });
           if (rows.length === 0) break;
           const ids = rows.map(r => r.id);
-          const res = await this.prisma.verificationRequest.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+          const res = await this.prisma.verificationRequest.updateMany({
+            where: { id: { in: ids } },
+            data: { deletedAt: new Date() },
+          });
           total += res.count;
           if (rows.length < batchSize) break;
         }

@@ -76,7 +76,6 @@ class AnonymizeResult(BaseModel):
 class AnonymizeResponse(BaseModel):
     """
     Legacy response model — kept for backward compatibility.
-
     New consumers should use the ``ResultEnvelope[AnonymizeResult]`` shape
     returned by the v1 endpoint.
     """
@@ -105,6 +104,58 @@ class AnonymizeResponse(BaseModel):
                         "campaign_ref": "campaign-2024-001",
                         "claim_id": "claim-abc123",
                     },
+                }
+            ]
+        }
+    }
+
+
+class RedactionSegment(BaseModel):
+    """One contiguous span of the original text, marked kept or redacted."""
+
+    type: str = Field(examples=["kept", "redacted"])
+    start: int = Field(examples=[0])
+    end: int = Field(examples=[8])
+    category: Optional[str] = Field(
+        None,
+        description="PII category label, present only when type == 'redacted'",
+        examples=["RECIPIENT_NAME"],
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {"type": "redacted", "start": 0, "end": 8, "category": "RECIPIENT_NAME"}
+            ]
+        }
+    }
+
+
+class RedactionPreviewResult(BaseModel):
+    """Payload nested inside the ResultEnvelope for the redaction preview diff."""
+
+    original_length: int = Field(examples=[60])
+    segments: list[RedactionSegment] = Field(default_factory=list)
+    pii_summary: Dict[str, Any] = Field(
+        default_factory=dict,
+        examples=[{"names": 1, "locations": 1, "dates": 1, "total": 3}],
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "original_length": 60,
+                    "segments": [
+                        {"type": "kept", "start": 0, "end": 3, "category": None},
+                        {
+                            "type": "redacted",
+                            "start": 3,
+                            "end": 15,
+                            "category": "RECIPIENT_NAME",
+                        },
+                    ],
+                    "pii_summary": {"names": 1, "locations": 1, "dates": 1, "total": 3},
                 }
             ]
         }

@@ -1,6 +1,6 @@
-import asyncStorageMock from '@react-native-async-storage/async-storage/jest/async-storage-mock';
-
-jest.mock('@react-native-async-storage/async-storage', () => asyncStorageMock);
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
 
 jest.spyOn(console, 'warn').mockImplementation((message?: any, ...optionalParams: any[]) => {
   if (

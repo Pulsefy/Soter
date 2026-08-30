@@ -27,6 +27,7 @@ _PKG_STUBS = [
     "prometheus_client",
     "celery",
     "celery.result",
+    "celery.schedules",
     "redis",
     "spacy",
     "spacy.language",

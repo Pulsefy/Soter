@@ -30,10 +30,16 @@ export function classifyNotificationFailure(
   if (/rate.?limit|429|too many requests/.test(message)) {
     return 'rate_limited';
   }
-  if (/invalid (recipient|email|phone|address)|malformed|bad recipient/.test(message)) {
+  if (
+    /invalid (recipient|email|phone|address)|malformed|bad recipient/.test(
+      message,
+    )
+  ) {
     return 'invalid_recipient';
   }
-  if (/5\d{2}\b|provider error|upstream error|service unavailable/.test(message)) {
+  if (
+    /5\d{2}\b|provider error|upstream error|service unavailable/.test(message)
+  ) {
     return 'provider_error';
   }
   return 'unknown';

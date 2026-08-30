@@ -103,6 +103,18 @@ curl -X POST "http://localhost:8000/ai/ocr" -F "image=@document.jpg"
 
 **Rate limit:** 10 requests/minute per IP
 
+### Request Safety Limits
+
+Write requests to `/v1/*` and legacy `/ai/*` endpoints are limited by default to
+10 MiB (`MAX_REQUEST_BODY_BYTES=10485760`). Oversized requests receive HTTP 413
+and are counted in the `api_request_rejections_total` metric with the endpoint
+and `request_body_too_large` reason labels.
+
+Caller-supplied humanitarian verification timeouts are capped at 60 seconds by
+default (`MAX_REQUEST_TIMEOUT_SECONDS=60`). A larger timeout is reduced to the
+server ceiling and counted with the `timeout_clamped` reason label. Both values
+are configurable through environment variables.
+
 **Response:**
 
 ```json

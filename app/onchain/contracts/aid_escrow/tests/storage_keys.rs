@@ -129,6 +129,7 @@ fn no_two_constructors_share_a_ledger_entry_in_a_live_env() {
             expires_at: 2000,
             claim_starts_at: 1000,
             metadata: soroban_sdk::Map::new(&env),
+            evidence_hash: soroban_sdk::String::from_str(&env, ""),
         };
         env.storage()
             .persistent()

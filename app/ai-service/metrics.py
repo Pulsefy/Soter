@@ -24,6 +24,11 @@ REQUESTS_SHED_TOTAL = Counter(
     "Requests rejected due to overload (load shedding)",
     ["reason", "method", "endpoint"],
 )
+REQUEST_REJECTIONS_TOTAL = Counter(
+    "api_request_rejections_total",
+    "Requests rejected or constrained by request safety limits",
+    ["endpoint", "reason"],
+)
 RATE_LIMIT_EXCEEDED_TOTAL = Counter(
     "rate_limit_exceeded_total",
     "Requests rejected due to rate limiting",

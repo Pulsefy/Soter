@@ -15,6 +15,7 @@ import { TaskItem, fetchTaskList, getMockTaskList } from '../services/taskApi';
 import { cacheTaskList, loadCachedTaskList, getTaskCacheTimestamp } from '../services/taskCache';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { OfflineBanner } from '../components/OfflineBanner';
+import { DataFreshnessIndicator } from '../components/DataFreshnessIndicator';
 import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
 
@@ -53,6 +54,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [isCached, setIsCached] = useState(false);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
 
   const loadData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -60,11 +62,13 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
 
     try {
       const fresh = await fetchTaskList();
+      if (isRefresh) setRefreshMessage('Tasks refreshed successfully.');
       setTaskList(fresh);
       setIsCached(false);
       await cacheTaskList(fresh);
       setCachedAt(null);
     } catch {
+      if (isRefresh) setRefreshMessage('Refresh failed. Showing the last cached tasks.');
       const cached = await loadCachedTaskList();
       if (cached && cached.length > 0) {
         setTaskList(cached);
@@ -177,6 +181,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <OfflineBanner visible={!isConnected} cachedAt={cachedAt} pendingCount={0} />
+      <DataFreshnessIndicator isCached={isCached} isConnected={isConnected} cachedAt={cachedAt} refreshing={refreshing} refreshMessage={refreshMessage} onRefresh={() => loadData(true)} />
 
       <FlatList
         data={taskList}

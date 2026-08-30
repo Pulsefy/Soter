@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import secrets
-from typing import Dict, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import Field, HttpUrl, model_validator
 from pydantic_core import PydanticUndefined
@@ -58,6 +58,8 @@ class Settings(BaseSettings):
         AI_DETERMINISTIC_MODE: Enable deterministic AI results for verification and classification during tests/CI
         TEST_PROVIDER_MODE: Enable test provider mode that returns fixture-driven results (no API keys required)
         LLM_TIMEOUT_SECONDS: Timeout for LLM API requests
+        MAX_REQUEST_BODY_BYTES: Maximum request body size for AI endpoints
+        MAX_REQUEST_TIMEOUT_SECONDS: Maximum caller-supplied provider timeout
         APP_ENV: Application environment (development, staging, production, test)
         LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         HOST: Server host (default: 0.0.0.0)
@@ -77,6 +79,10 @@ class Settings(BaseSettings):
     ai_deterministic_mode: bool = False
     test_provider_mode: bool = False
     llm_timeout_seconds: int = 30
+
+    # Request safety limits
+    max_request_body_bytes: int = 10 * 1024 * 1024
+    max_request_timeout_seconds: float = 60.0
 
     # Request throttling / Rate limiting
     request_rate_limit: str = "10/minute"
@@ -101,6 +107,16 @@ class Settings(BaseSettings):
     # Circuit Breaker settings
     circuit_breaker_failure_threshold: int = 3
     circuit_breaker_recovery_timeout_seconds: float = 30.0
+
+    # Provider fallback ordering.
+    # Explicit, operator-controlled ordering used when a request must fall back
+    # across providers (e.g. under ``provider_preference="auto"``). Comma-
+    # separated provider names; each must be a known provider and the list is
+    # intersected with the providers that are actually available at runtime.
+    # Order is preserved, so operators can express e.g. cheapest-first or
+    # lowest-latency-first without editing source.
+    llm_provider_fallback_order: str = "openai,groq,test"
+    ocr_provider_fallback_order: str = "test,tesseract"
 
     # Load shedding settings
     load_shed_memory_threshold_percent: float = 90.0
@@ -267,6 +283,8 @@ class Settings(BaseSettings):
         # --- Numeric settings must be positive ---------------------------
         positive_numeric_settings = (
             ("LLM_TIMEOUT_SECONDS", self.llm_timeout_seconds),
+            ("MAX_REQUEST_BODY_BYTES", self.max_request_body_bytes),
+            ("MAX_REQUEST_TIMEOUT_SECONDS", self.max_request_timeout_seconds),
             ("CACHE_TTL_TASK_STATUS", self.cache_ttl_task_status),
             ("CACHE_TTL_ARTIFACT_ACCESS", self.cache_ttl_artifact_access),
             ("CACHE_TTL_VERIFICATION", self.cache_ttl_verification),
@@ -302,6 +320,21 @@ class Settings(BaseSettings):
                 if not entry.startswith(("http://", "https://")):
                     _add(key, "origin entries must start with http:// or https://")
                     break
+
+        # --- Provider fallback ordering ----------------------------------
+        # Imported lazily to avoid a circular import (config -> providers ->
+        # config). The known-provider sets live next to the registry so they
+        # remain the single source of truth.
+        from services.providers import validate_fallback_order
+
+        for key, order in (
+            ("LLM_PROVIDER_FALLBACK_ORDER", self.get_llm_fallback_order()),
+            ("OCR_PROVIDER_FALLBACK_ORDER", self.get_ocr_fallback_order()),
+        ):
+            try:
+                validate_fallback_order(key, order)
+            except ValueError as exc:
+                _add(key, str(exc))
 
         # --- Production requirements (defense in depth) ------------------
         # apply_environment_defaults already rejects this at construction
@@ -359,6 +392,18 @@ class Settings(BaseSettings):
         if self.groq_api_key:
             return "groq"
         return None
+
+    @staticmethod
+    def _parse_fallback_order(raw: str) -> List[str]:
+        return [entry.strip() for entry in raw.split(",") if entry.strip()]
+
+    def get_llm_fallback_order(self) -> List[str]:
+        """Parsed, ordered LLM provider fallback list from configuration."""
+        return self._parse_fallback_order(self.llm_provider_fallback_order)
+
+    def get_ocr_fallback_order(self) -> List[str]:
+        """Parsed, ordered OCR provider fallback list from configuration."""
+        return self._parse_fallback_order(self.ocr_provider_fallback_order)
 
     def get_cors_allowed_origins(self) -> list[str]:
         """

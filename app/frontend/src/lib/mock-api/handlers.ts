@@ -1,7 +1,5 @@
 import type { BackendHealthResponse } from '@/types/health';
 import type { AidPackage } from '@/types/aid-package';
-
-
 import type {
   VerificationInboxItem,
   VerificationInboxResponse,
@@ -11,7 +9,6 @@ import type {
 } from '@/types/verification-review';
 import type { ContractRegistryResponse } from '@/types/contract-registry';
 import type { RunbookResponse } from '@/types/runbook';
-
 
 export type MockHandler = (
   url: string,
@@ -47,6 +44,29 @@ interface StoredCredential {
 }
 
 const registeredCredentials: StoredCredential[] = [];
+
+// Mock in-memory state for verification inbox items and notes
+const inboxItems: VerificationInboxItem[] = [
+  {
+    id: 'mock-1',
+    status: 'pending_review' as VerificationStatus,
+    recipientName: 'Aisha Bello',
+    campaignName: 'Winter Relief 2026',
+    submittedAt: new Date(Date.now() - 1000 * 60 * 24).toISOString(),
+    riskScore: 0.15,
+  },
+  {
+    id: 'mock-2',
+    status: 'pending_review' as VerificationStatus,
+    recipientName: 'Ibrahim Musa',
+    campaignName: 'Medical Outreach',
+    submittedAt: new Date(Date.now() - 1000 * 60 * 48).toISOString(),
+    riskScore: 0.05,
+  },
+];
+
+const inboxNotes: InternalNote[] = [];
+let inboxNoteCounter = 0;
 
 const webauthnRegisterOptionsHandler: MockHandler = async (url) => {
   const urlObj = new URL(url, 'http://localhost');
@@ -331,6 +351,10 @@ const aidPackagesHandler: MockHandler = async (url) => {
   const search = urlObj.searchParams.get('search') ?? '';
   const status = urlObj.searchParams.get('status') ?? '';
   const token = urlObj.searchParams.get('token') ?? '';
+  const page = Math.max(1, parseInt(urlObj.searchParams.get('page') ?? '1', 10) || 1);
+  const size = Math.min(100, Math.max(1, parseInt(urlObj.searchParams.get('size') ?? '10', 10) || 10));
+  const sortBy = urlObj.searchParams.get('sortBy') ?? 'id';
+  const sortDirection = urlObj.searchParams.get('sortDirection') ?? 'asc';
 
   let results = [...ALL_PACKAGES];
 
@@ -352,7 +376,28 @@ const aidPackagesHandler: MockHandler = async (url) => {
     results = results.filter(p => p.token === token);
   }
 
-  return new Response(JSON.stringify(results), {
+  // Sort
+  if (sortBy && sortBy in results[0]) {
+    results.sort((a, b) => {
+      const aVal = a[sortBy as keyof AidPackage] ?? '';
+      const bVal = b[sortBy as keyof AidPackage] ?? '';
+      const cmp = String(aVal).localeCompare(String(bVal));
+      return sortDirection === 'desc' ? -cmp : cmp;
+    });
+  }
+
+  const total = results.length;
+  const totalPages = Math.ceil(total / size);
+  const startIdx = (page - 1) * size;
+  const paginatedResults = results.slice(startIdx, startIdx + size);
+
+  return new Response(JSON.stringify({
+    data: paginatedResults,
+    total,
+    page,
+    size,
+    totalPages,
+  }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
@@ -790,8 +835,6 @@ const recipientsImportConfirmHandler: MockHandler = async (_url, options) => {
   });
 };
 
-
-
 // POST /v1/verification-inbox/:id/notes
 const inboxAddNoteHandler: MockHandler = async (url, options) => {
   const parts = url.split('?')[0].split('/');
@@ -832,8 +875,6 @@ const inboxAddNoteHandler: MockHandler = async (url, options) => {
 };
 
 const dashboardSummaryHandler: MockHandler = async () => {
-  // Derive live totals from the in-memory mock data instead of returning
-  // hard-coded zeros so that the dashboard cards display meaningful metrics.
   const totalClaims = inboxItems.length;
   const totalPackages = ALL_PACKAGES.length;
   const pendingReviews = inboxItems.filter(
@@ -853,7 +894,6 @@ const dashboardSummaryHandler: MockHandler = async () => {
     { status: 200, headers: { 'Content-Type': 'application/json' } },
   );
 };
-
 
 const contractRegistryHandler: MockHandler = async () => {
   const registry: ContractRegistryResponse = {
@@ -1057,67 +1097,11 @@ const runbookHandler: MockHandler = async () => {
           actions: [
             { id: 'rl-1', description: 'Wait 2-5 minutes before retrying', command: 'Start-Sleep -Seconds 120' },
             { id: 'rl-2', description: 'Use dedicated RPC provider if public endpoint is throttled' },
-            { id: 'rl-3', description: 'Batch requests to reduce call frequency' },
+            { id: 'rl-3', description: 'Batch requests where possible' },
           ],
-          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §9.5'],
-        },
-        {
-          id: 'insufficient-xlm',
-          symptomKey: 'issueXlmSymptom',
-          causeKey: 'issueXlmCause',
-          severity: 'high',
-          actions: [
-            { id: 'xlm-1', description: 'Request testnet XLM via Friendbot', command: 'curl "https://friendbot.stellar.org/?addr=YOUR_ADDRESS"' },
-            { id: 'xlm-2', description: 'Check balance with Stellar Laboratory' },
-            { id: 'xlm-3', description: 'Allow 5-10 seconds for ledger confirmation' },
-            { id: 'xlm-4', description: 'Ensure base reserve (1 XLM) plus fees are covered' },
-          ],
-        },
-        {
-          id: 'stale-ledger',
-          symptomKey: 'issueStaleLedgerSymptom',
-          causeKey: 'issueStaleLedgerCause',
-          severity: 'medium',
-          actions: [
-            { id: 'sl-1', description: 'Wait for ledger sync (typically 5-30 seconds)' },
-            { id: 'sl-2', description: 'Verify RPC provider is fully synced' },
-            { id: 'sl-3', description: 'Retry query with fresh RPC connection' },
-            { id: 'sl-4', description: 'Run ledger reconciliation if off-chain state drifts' },
-          ],
-          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §9.3'],
-        },
-        {
-          id: 'contract-id-mismatch',
-          symptomKey: 'issueContractMismatchSymptom',
-          causeKey: 'issueContractMismatchCause',
-          severity: 'high',
-          actions: [
-            { id: 'cm-1', description: 'Check canonical contract registry for correct Contract ID' },
-            { id: 'cm-2', description: 'Update CONTRACT_ID in backend .env file' },
-            { id: 'cm-3', description: 'Restart backend service to pick up new config' },
-            { id: 'cm-4', description: 'Clear browser localStorage cached package IDs' },
-            { id: 'cm-5', description: 'Run redeployment checklist if fresh deploy needed' },
-          ],
-          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §12', 'testnet-deployment-plan.md §5'],
-        },
-        {
-          id: 'wallet-network-mismatch',
-          symptomKey: 'issueWalletMismatchSymptom',
-          causeKey: 'issueWalletMismatchCause',
-          severity: 'medium',
-          actions: [
-            { id: 'wm-1', description: 'Open Freighter wallet settings' },
-            { id: 'wm-2', description: 'Switch network to Testnet (not Mainnet or Futurenet)' },
-            { id: 'wm-3', description: 'Refresh page and re-connect wallet' },
-            { id: 'wm-4', description: 'Confirm network indicator shows Testnet' },
-          ],
+          relatedDocs: ['DEPLOY_TESTNET_RUNBOOK.md §9.2'],
         },
       ],
-    },
-    contractRegistry: {
-      canonicalSourcePath: 'app/onchain/deployments/contract-registry.json',
-      generatorScript: 'app/onchain/scripts/generate-registry.py',
-      deploymentRegistry: 'app/onchain/deployments/registry.json',
     },
   };
 
@@ -1125,73 +1109,4 @@ const runbookHandler: MockHandler = async () => {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
-};
-
-
-export const handlers: Record<string, MockHandler> = {
-  '/health': healthHandler,
-  '/aid-packages': aidPackagesHandler,
-  '/analytics/global-stats': dashboardSummaryHandler,
-  '/recipients/import/validate': recipientsImportValidateHandler,
-  '/recipients/import/report': recipientsImportReportHandler,
-  '/recipients/import/confirm': recipientsImportConfirmHandler,
-  '/notifications/activity-feed': activityFeedHandler,
-
-  '/auth/webauthn/register/options': webauthnRegisterOptionsHandler,
-  '/auth/webauthn/register/verify': webauthnRegisterVerifyHandler,
-  '/auth/webauthn/auth/options': webauthnAuthOptionsHandler,
-  '/auth/webauthn/auth/verify': webauthnAuthVerifyHandler,
-  '/v1/verification-inbox': inboxListHandler,
-  '/v1/verification-inbox/stats': inboxStatsHandler,
-  '/v1/verification-inbox/:id': async (url, options) => {
-    const method = options?.method?.toUpperCase() ?? 'GET';
-    const path = url.split('?')[0];
-
-    if (path.endsWith('/approve') && method === 'POST') {
-      return inboxApproveHandler(url, options);
-    }
-    if (path.endsWith('/reject') && method === 'POST') {
-      return inboxRejectHandler(url, options);
-    }
-    if (path.endsWith('/request-resubmission') && method === 'POST') {
-      return inboxResubmitHandler(url, options);
-    }
-    if (path.endsWith('/notes') && method === 'GET') {
-      return inboxGetNotesHandler(url, options);
-    }
-    if (path.endsWith('/notes') && method === 'POST') {
-      return inboxAddNoteHandler(url, options);
-    }
-    if (method === 'GET') {
-      return inboxDetailHandler(url, options);
-    }
-
-    return new Response(JSON.stringify({ message: 'Method not implemented in mock' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  },
-
-  '/campaigns': async (url, options) => {
-    const method = options?.method?.toUpperCase() ?? 'GET';
-    if (method === 'POST') {
-      return campaignCreateHandler(url, options);
-    }
-    return campaignsHandler(url, options);
-  },
-  '/campaigns/:id': async (url, options) => {
-    const method = options?.method?.toUpperCase() ?? 'GET';
-    if (url.split('?')[0].endsWith('/timeline')) {
-      return campaignTimelineHandler(url, options);
-    }
-    if (method === 'PATCH') {
-      return campaignUpdateHandler(url, options);
-    }
-    if (method === 'GET') {
-      return campaignGetHandler(url, options);
-    }
-    return new Response(JSON.stringify({ success: false, message: 'Method not implemented in mock' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
-  },
-  '/contract-registry': contractRegistryHandler,
-  '/runbook': runbookHandler,
 };

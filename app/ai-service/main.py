@@ -35,6 +35,7 @@ from api.routes import router as ocr_router
 from api.v1.router import v1_router
 
 from config import settings
+from request_limits import RequestSizeLimitMiddleware, clamp_request_timeout
 import tasks
 from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
 from schemas.anonymization import AnonymizeRequest, AnonymizeResponse
@@ -172,6 +173,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+app.add_middleware(RequestSizeLimitMiddleware)
 
 proof_of_life_analyzer = ProofOfLifeAnalyzer(
     config=ProofOfLifeConfig(
@@ -733,13 +736,14 @@ async def _legacy_verify_humanitarian_claim(request: HumanitarianVerificationReq
     logger.info("[legacy] Processing humanitarian verification request")
 
     try:
+        timeout = clamp_request_timeout(request.timeout, "/ai/humanitarian/verify")
         try:
             result = humanitarian_verification_service.verify_claim(
                 aid_claim=request.aid_claim,
                 supporting_evidence=request.supporting_evidence,
                 context_factors=request.context_factors,
                 provider_preference=request.provider_preference,
-                timeout=request.timeout,
+                timeout=timeout,
             )
         except TypeError as exc:
             if "timeout" in str(exc):

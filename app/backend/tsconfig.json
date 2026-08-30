@@ -24,6 +24,11 @@
     "paths": {
       "src/*": ["src/*"]
     },
-    "typeRoots": ["../../node_modules/@types", "./node_modules/@types"]
-  }
+    "typeRoots": [
+      "../../node_modules/@types",
+      "./node_modules/@types",
+      "./typings"
+    ]
+  },
+  "include": ["src/**/*", "scripts/**/*", "cache/**/*", "prisma/**/*", "test/**/*"]
 }

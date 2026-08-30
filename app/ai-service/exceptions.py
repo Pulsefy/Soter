@@ -19,6 +19,19 @@ class AIServiceError(Exception):
         return f"[{self.code}] {self.message}"
 
 
+class ProviderExhaustedError(AIServiceError):
+    """Raised when every candidate provider has been tried and none succeeded.
+
+    Distinct from a generic :class:`AIServiceError` so callers (and operators
+    reading logs/traces) can tell a total fallback-exhaustion failure apart
+    from a single transient provider error. ``details`` carries the ordered
+    list of per-provider failures so the exhaustion is fully diagnosable.
+    """
+
+    def __init__(self, message: str, details: Optional[Any] = None):
+        super().__init__(message, code="AI_PROVIDERS_EXHAUSTED", details=details)
+
+
 class LoadShedError(Exception):
     """Raised when the service must reject work due to overload."""
 

@@ -324,11 +324,14 @@ describe('RetentionPolicyService', () => {
         .mockResolvedValueOnce([{ id: 'a3' }])
         .mockResolvedValueOnce([]);
 
-      (prisma.auditLog.updateMany as jest.Mock)
+      prisma.auditLog.updateMany
         .mockResolvedValueOnce({ count: 2 })
         .mockResolvedValueOnce({ count: 1 });
 
-      const results = await service.executePurge({ dryRun: false, batchSize: 2 });
+      const results = await service.executePurge({
+        dryRun: false,
+        batchSize: 2,
+      });
 
       expect(results).toHaveLength(1);
       expect(results[0].affected).toBe(3);
