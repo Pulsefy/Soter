@@ -12,6 +12,7 @@ import { BarCodeScanner } from 'expo-barcode-scanner';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
+import { useTranslation } from '../i18n/useTranslation';
 import { useSync } from '../contexts/SyncContext';
 import { createScanDeduper } from './scanDeduper';
 import { useCameraPermission } from '../hooks/useCameraPermission';
@@ -43,6 +44,7 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
   });
 
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const { queueClaimConfirmation, isConnected } = useSync();
   const [isDuplicateScan] = useState(() => createScanDeduper());
 
@@ -144,19 +146,19 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.statsHeader}>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{stats.scanned}</Text>
-            <Text style={styles.statLabel}>Scanned</Text>
+            <Text style={styles.statLabel}>{t('scannerBulk.scanned')}</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: colors.success }]}>{stats.verified}</Text>
-            <Text style={styles.statLabel}>Verified</Text>
+            <Text style={styles.statLabel}>{t('scannerBulk.verified')}</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: colors.error }]}>{stats.failed}</Text>
-            <Text style={styles.statLabel}>Failed</Text>
+            <Text style={styles.statLabel}>{t('scannerBulk.failed')}</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: colors.warning }]}>{stats.skipped}</Text>
-            <Text style={styles.statLabel}>Skipped</Text>
+            <Text style={styles.statLabel}>{t('scannerBulk.skipped')}</Text>
           </View>
         </View>
 
@@ -169,7 +171,7 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
           {isProcessing && !lastScanResult && (
             <View style={styles.processingIndicator}>
               <ActivityIndicator color="white" size="small" />
-              <Text style={styles.processingText}>Processing...</Text>
+              <Text style={styles.processingText}>{t('scannerBulk.processing')}</Text>
             </View>
           )}
 
@@ -183,19 +185,19 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
           )}
           {lastScanResult && lastScanResult.status === 'error' && (
             <TouchableOpacity style={styles.retryButton} onPress={() => { setLastScanResult(null); setIsProcessing(false); }}>
-              <Text style={styles.retryButtonText}>Retry</Text>
+              <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
             </TouchableOpacity>
           )}
 
           {!isProcessing && !lastScanResult && (
-            <Text style={styles.instructionText}>Align QR code to scan</Text>
+            <Text style={styles.instructionText}>{t('scannerBulk.alignQr')}</Text>
           )}
 
           <TouchableOpacity
             style={styles.closeButton}
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.closeButtonText}>End Session</Text>
+            <Text style={styles.closeButtonText}>{t('scannerBulk.endSession')}</Text>
           </TouchableOpacity>
         </View>
       </View>

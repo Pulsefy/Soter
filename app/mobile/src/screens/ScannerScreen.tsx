@@ -15,6 +15,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { createScanDeduper } from './scanDeduper';
 import { useCameraPermission } from '../hooks/useCameraPermission';
 import { CameraPermissionDenied } from '../components/CameraPermissionDenied';
+import { useTranslation } from '../i18n/useTranslation';
 
 type ScannerScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Scanner'>;
 
@@ -51,6 +52,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
   const [scanned, setScanned] = useState(false);
   const [isDuplicateScan] = useState(() => createScanDeduper());
   const { colors } = useTheme();
+  const { t } = useTranslation();
 
   const {
     permissionState,
@@ -157,7 +159,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityHint="Closes the scanner and returns to the previous screen"
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Text style={styles.cancelText}>{t('common.cancel')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -184,7 +186,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityHint="Resets the scanner so you can scan another QR code"
             onPress={() => setScanned(false)}
           >
-            <Text style={styles.rescanButtonText}>Tap to Scan Again</Text>
+            <Text style={styles.rescanButtonText}>{t('scanner.tapToScanAgain')}</Text>
           </TouchableOpacity>
         </View>
       )}
