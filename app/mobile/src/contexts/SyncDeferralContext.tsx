@@ -126,8 +126,8 @@ export const SyncDeferralProvider: React.FC<React.PropsWithChildren> = ({
 
     void updateBatteryState();
 
-    const subscription = Battery.addBatteryStateListener(({ batteryLevel, batteryState }) => {
-      setBatteryLevel(batteryLevel);
+    const subscription = Battery.addBatteryStateListener(({ batteryState }) => {
+      void Battery.getBatteryLevelAsync().then(setBatteryLevel);
       setIsCharging(batteryState === Battery.BatteryState.CHARGING || batteryState === Battery.BatteryState.FULL);
     });
 

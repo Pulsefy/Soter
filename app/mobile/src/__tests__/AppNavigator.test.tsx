@@ -70,11 +70,13 @@ jest.mock('expo-notifications', () => ({
   addNotificationReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
 }));
 
-jest.mock('expo-barcode-scanner', () => ({
-  BarCodeScanner: ({ children }: { children: React.ReactNode }) => (
-    <>{children}</>
-  ),
-  requestPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),
+jest.mock('expo-camera', () => ({
+  CameraView: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Camera: {
+    requestCameraPermissionsAsync: jest
+      .fn()
+      .mockResolvedValue({ status: 'granted' }),
+  },
 }));
 
 jest.mock('../contexts/WalletContext', () => ({
