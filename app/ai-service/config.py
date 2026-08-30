@@ -127,6 +127,16 @@ class Settings(BaseSettings):
     dead_letter_replay_cooldown_seconds: float = 10.0
     dead_letter_replay_rate_limit: str = "10/minute"
 
+    # Decision audit settings (issue #990)
+    # Every verification/fraud decision is written to a durable, redacted
+    # audit record so a disbursement decision can be reconstructed later.
+    # See DECISION_AUDIT.md for the record shape and retention guidance.
+    decision_audit_enabled: bool = True
+    decision_audit_path: str = "./audit/decision_audit.jsonl"
+    # Records older than this are dropped by the retention sweep. Set to 0 to
+    # keep audit records forever (the compliance-archive configuration).
+    decision_audit_retention_days: float = 90.0
+
     # Cache TTL settings (in seconds)
     cache_ttl_task_status: int = 30  # Short TTL for responsive polling
     cache_ttl_artifact_access: int = 60  # 1 minute for artifact metadata
@@ -298,6 +308,18 @@ class Settings(BaseSettings):
         for key, value in positive_numeric_settings:
             if value <= 0:
                 _add(key, f"must be a positive number (got {value})")
+
+        # --- Decision audit retention (issue #990) -----------------------
+        # 0 is a valid, documented value meaning "retain forever", so this
+        # setting is checked for non-negativity rather than positivity.
+        if self.decision_audit_retention_days < 0:
+            _add(
+                "DECISION_AUDIT_RETENTION_DAYS",
+                "must be 0 (retain forever) or a positive number of days "
+                f"(got {self.decision_audit_retention_days})",
+            )
+        if self.decision_audit_enabled and not str(self.decision_audit_path).strip():
+            _add("DECISION_AUDIT_PATH", "must not be blank when auditing is enabled")
 
         # --- Bounded numeric settings ------------------------------------
         if not 0.0 <= self.proof_of_life_confidence_threshold <= 1.0:

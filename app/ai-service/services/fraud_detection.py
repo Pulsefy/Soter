@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 # Claims with LOF score above this threshold are flagged
 _OUTLIER_THRESHOLD = -1.5
 
+#: Version of the fraud scoring rules. Fraud detection is statistical rather
+#: than prompt-driven, so this constant plays the "prompt version" role in the
+#: decision audit record (issue #990): bump it whenever the feature set or the
+#: outlier threshold changes, so historical scores stay explainable.
+FRAUD_RULES_VERSION = "fraud-lof-v1"
+
 
 def _vectorize(claims: List[ClaimMetadata]) -> np.ndarray:
     """Convert claim metadata into a numeric feature matrix."""

@@ -46,6 +46,7 @@ from schemas.humanitarian import (
 )
 from services.humanitarian_verification import HumanitarianVerificationService
 from services.evidence_access_control import EvidenceAccessControl
+from services.decision_audit import build_store_from_settings, set_store
 
 # Context variable for correlation ID
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
@@ -148,6 +149,21 @@ async def lifespan(app: FastAPI):
     app.state.artifact_access_control = evidence_access_control
     app.state.humanitarian_verification_service = humanitarian_verification_service
     app.state.rate_limiter = rate_limiter
+    # Re-assert the decision audit store (issue #990) and apply the retention
+    # policy once at startup, so an instance that was down past the retention
+    # window compacts its log before it starts serving.
+    app.state.decision_audit_store = decision_audit_store
+    if decision_audit_store is not None and decision_audit_store.enabled:
+        dropped = decision_audit_store.prune()
+        logger.info(
+            "Decision audit store ready: path=%s retention_days=%s records=%d expired_dropped=%d",
+            decision_audit_store.path,
+            settings.decision_audit_retention_days,
+            len(decision_audit_store),
+            dropped,
+        )
+    else:
+        logger.warning("Decision audit disabled (DECISION_AUDIT_ENABLED=false)")
     app.state.is_shutting_down = False
     app.state.active_requests = 0
 
@@ -207,9 +223,24 @@ evidence_access_control = EvidenceAccessControl(artifact_access_service_instance
 # unless used as a context manager) both have these resolvable.  ``lifespan``
 # re-asserts the same references on startup so hot-reload / re-import
 # scenarios stay consistent.
+# Durable decision audit store (issue #990). Built at module-init time - like
+# the collaborators above - so ``TestClient(app)`` (which does not enter the
+# lifespan unless used as a context manager) can still audit decisions. It is
+# also published via ``set_store()`` so non-HTTP paths (Celery tasks) can reach
+# the same instance.
+try:
+    decision_audit_store = build_store_from_settings(settings)
+except Exception as _audit_exc:  # pragma: no cover - defensive
+    # A bad audit path must not stop the service from booting; the endpoints
+    # degrade to "no audit record" and log loudly instead.
+    logger.error("Failed to initialise decision audit store: %s", _audit_exc)
+    decision_audit_store = None
+set_store(decision_audit_store)
+
 app.state.humanitarian_verification_service = humanitarian_verification_service
 app.state.artifact_access_control = evidence_access_control
 app.state.rate_limiter = rate_limiter
+app.state.decision_audit_store = decision_audit_store
 
 
 class InferenceRequest(BaseModel):
