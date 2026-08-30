@@ -11,7 +11,7 @@ onFlowFailure:
 ---
 # Scan flow: the simulator camera is configured with a deterministic QR fixture.
 - tapOn:
-    text: "Scan QR"
+    text: "Scan QR Code"
 - assertVisible: "Scan QR Code"
 - assertVisible: "Align QR code within the frame"
 - tapOn:
