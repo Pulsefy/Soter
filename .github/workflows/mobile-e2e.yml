@@ -59,24 +59,21 @@ jobs:
         env:
           MAESTRO_CLI_NO_ANALYTICS: '1'
         with:
+          working-directory: app/mobile
           api-level: 35
           target: google_apis
           arch: x86_64
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics
+          # The runner splits `script` on newlines and executes each line as a
+          # separate `sh -c` from `working-directory`, so the `cd android` and all
+          # Gradle commands that depend on it must stay on one line.
           script: |
-            set -eu
             adb wait-for-device
-            adb shell input keyevent 82 || true
-            CI=1 npx expo prebuild --no-install
-            cd android
-            if [ ! -x ./gradlew ]; then gradle wrapper --gradle-version 8.13 --distribution-type bin; fi
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --no-daemon --stacktrace
-            adb install -r app/build/outputs/apk/debug/app-debug.apk
-            cd ..
-            mkdir -p artifacts
-            maestro test e2e/field-flows.yaml --format junit --output artifacts/maestro.xml
+            adb shell input keyevent 82 >/dev/null 2>&1 || true
+            CI=1 npx expo prebuild --no-install && cd android && ( test -x ./gradlew || gradle wrapper --gradle-version 8.13 --distribution-type bin ) && chmod +x ./gradlew && ./gradlew assembleDebug --no-daemon --stacktrace
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            mkdir -p artifacts && maestro test e2e/field-flows.yaml --format junit --output artifacts/maestro.xml
 
       - name: Upload E2E screenshots and logs
         if: always()
