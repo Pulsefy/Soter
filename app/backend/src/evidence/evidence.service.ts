@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { AuditService } from '../audit/audit.service';
 import { FingerprintService } from './fingerprint.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 import * as fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import * as path from 'path';
@@ -24,6 +25,7 @@ export class EvidenceService {
     private readonly encryptionService: EncryptionService,
     private readonly auditService: AuditService,
     private readonly fingerprintService: FingerprintService,
+    private readonly metricsService: MetricsService,
   ) {
     // Ensure upload directory exists
     if (!existsSync(this.uploadDir)) {
@@ -187,6 +189,13 @@ export class EvidenceService {
         data: { status: EvidenceStatus.completed },
       });
 
+      // Record intake-to-decision duration (issue #954)
+      const durationSeconds = (Date.now() - item.createdAt.getTime()) / 1000;
+      this.metricsService.recordEvidenceIntakeToDecision(
+        'completed',
+        durationSeconds,
+      );
+
       this.logger.log(`Upload completed for ${item.id}`);
     } catch (err) {
       this.logger.error(
@@ -201,6 +210,13 @@ export class EvidenceService {
           lastError: (err as Error).message,
         },
       });
+
+      // Record intake-to-decision duration (issue #954)
+      const durationSeconds = (Date.now() - item.createdAt.getTime()) / 1000;
+      this.metricsService.recordEvidenceIntakeToDecision(
+        'failed',
+        durationSeconds,
+      );
     }
   }
 

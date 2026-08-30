@@ -42,6 +42,9 @@ const ALL_METRIC_NAMES = [
   'claims_in_funnel',
   'claim_funnel_duration_seconds',
   'api_key_rate_limit_rejections_total',
+  'evidence_queue_depth',
+  'evidence_queue_oldest_pending_age_seconds',
+  'evidence_queue_intake_to_decision_seconds',
 ];
 
 const stubMetric = () => ({

@@ -243,6 +243,11 @@ curl http://localhost:3001/metrics
 - `jobs_processed_total` / `jobs_failed_total` - Background job success/failure rates
 - `onchain_operations_total` - On-chain operation counts by status
 
+**Evidence Queue SLA metrics (issue #954):**
+- `evidence_queue_depth{status}` - Current count of evidence queue items per `EvidenceStatus` (`pending`, `uploading`, `completed`, `failed`). Refreshed every 30 seconds.
+- `evidence_queue_oldest_pending_age_seconds` - Age in seconds of the oldest evidence queue item that is still in a non-terminal status (`pending` or `uploading`). Reports `0` when the active queue is empty. Refreshed every 30 seconds.
+- `evidence_queue_intake_to_decision_seconds{decision}` - Histogram recording the elapsed time from evidence intake (`createdAt`) to the moment the item reaches a terminal status. The `decision` label is either `completed` or `failed`. Observed inline when `EvidenceService.processUpload()` transitions an item to a terminal state. SLA-oriented buckets: 60 s, 5 min, 15 min, 30 min, 1 h, 2 h, 24 h.
+
 **Structured logging fields:**
 - `request_id` - Unique identifier for each request (from X-Request-ID header)
 - `user_id` - User identifier from JWT token

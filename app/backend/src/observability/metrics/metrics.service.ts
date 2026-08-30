@@ -89,6 +89,14 @@ export class MetricsService {
     // API Key Rate Limit Metrics (issue #952)
     @InjectMetric('api_key_rate_limit_rejections_total')
     public apiKeyRateLimitRejectionsCounter: Counter<string>,
+
+    // Evidence Queue SLA Metrics (issue #954)
+    @InjectMetric('evidence_queue_depth')
+    public evidenceQueueDepthGauge: Gauge<string>,
+    @InjectMetric('evidence_queue_oldest_pending_age_seconds')
+    public evidenceQueueOldestPendingAgeGauge: Gauge<string>,
+    @InjectMetric('evidence_queue_intake_to_decision_seconds')
+    public evidenceQueueIntakeToDecisionHistogram: Histogram<string>,
   ) {}
 
   /**
@@ -550,5 +558,39 @@ export class MetricsService {
    */
   incrementApiKeyRateLimitRejection(scope: string, apiKeyId: string): void {
     this.apiKeyRateLimitRejectionsCounter.inc({ scope, api_key_id: apiKeyId });
+  }
+
+  // ─── Evidence Queue SLA Metrics (issue #954) ────────────────────────────────
+
+  /**
+   * Set the current depth of the evidence queue for a given status.
+   * Call periodically for all statuses to keep the gauge accurate.
+   */
+  setEvidenceQueueDepth(status: string, count: number): void {
+    this.evidenceQueueDepthGauge.set({ status }, count);
+  }
+
+  /**
+   * Set the age (in seconds) of the oldest evidence queue item that is
+   * still in a non-terminal status (pending or uploading).
+   * Pass 0 when there are no active items.
+   */
+  setEvidenceQueueOldestPendingAge(ageSeconds: number): void {
+    this.evidenceQueueOldestPendingAgeGauge.set(ageSeconds);
+  }
+
+  /**
+   * Record the elapsed time (in seconds) from evidence intake to a terminal
+   * decision (completed or failed).  Call once per item when it transitions
+   * to a terminal status.
+   */
+  recordEvidenceIntakeToDecision(
+    decision: 'completed' | 'failed',
+    durationSeconds: number,
+  ): void {
+    this.evidenceQueueIntakeToDecisionHistogram.observe(
+      { decision },
+      durationSeconds,
+    );
   }
 }

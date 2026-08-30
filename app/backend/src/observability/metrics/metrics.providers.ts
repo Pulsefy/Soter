@@ -219,4 +219,22 @@ export const metricsProviders = [
     help: 'Total number of per-API-key rate limit rejections',
     labelNames: ['scope', 'api_key_id'],
   }),
+
+  // Evidence Queue SLA Metrics (issue #954)
+  makeGaugeProvider({
+    name: 'evidence_queue_depth',
+    help: 'Current number of evidence queue items per status',
+    labelNames: ['status'],
+  }),
+  makeGaugeProvider({
+    name: 'evidence_queue_oldest_pending_age_seconds',
+    help: 'Age in seconds of the oldest evidence queue item in a non-terminal status',
+    labelNames: [],
+  }),
+  makeHistogramProvider({
+    name: 'evidence_queue_intake_to_decision_seconds',
+    help: 'Time in seconds from evidence intake (createdAt) to terminal status (completed or failed)',
+    labelNames: ['decision'],
+    buckets: [60, 300, 900, 1800, 3600, 7200, 86400],
+  }),
 ];

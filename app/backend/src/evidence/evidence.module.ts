@@ -11,9 +11,11 @@ import { EncryptionModule } from '../common/encryption/encryption.module';
 import { AuditModule } from '../audit/audit.module';
 import { CacheModule } from '../common/cache/cache.module';
 import { FingerprintService } from './fingerprint.service';
+import { MetricsModule } from '../observability/metrics/metrics.module';
+import { EvidenceQueueMetricsScheduler } from './evidence-queue-metrics.scheduler';
 
 @Module({
-  imports: [PrismaModule, EncryptionModule, AuditModule, CacheModule],
+  imports: [PrismaModule, EncryptionModule, AuditModule, CacheModule, MetricsModule],
   controllers: [EvidenceController, UploadSessionController],
   providers: [
     EvidenceService,
@@ -22,6 +24,7 @@ import { FingerprintService } from './fingerprint.service';
     ArtifactTokenGuard,
     UploadSessionService,
     UploadSessionStore,
+    EvidenceQueueMetricsScheduler,
   ],
   exports: [FingerprintService, ArtifactOwnershipTokenService],
 })
