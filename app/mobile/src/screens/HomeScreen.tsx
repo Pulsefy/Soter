@@ -305,7 +305,6 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         accessibilityRole="button"
         accessibilityLabel="Scan QR Code"
         accessibilityHint="Opens the camera to scan a Soter QR code"
-        testID="scan-qr"
       >
         <Text style={styles.scannerFabIcon} accessibilityElementsHidden>📷</Text>
       </TouchableOpacity>

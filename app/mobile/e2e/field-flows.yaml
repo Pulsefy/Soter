@@ -9,9 +9,13 @@ onFlowFailure:
   - takeScreenshot: failure
 
 ---
-# Scan flow: the simulator camera is configured with a deterministic QR fixture.
+# Scan flow: open the scanner from the task list, where the scan control is
+# a text-backed button with a stable native label.
 - tapOn:
-    id: "scan-qr"
+    text: "Operator Task List"
+- assertVisible: "My Tasks"
+- tapOn:
+    text: "Scan QR"
     retryTapIfNoChange: true
 - assertVisible: "Scan QR Code"
 - assertVisible: "Align QR code within the frame"
