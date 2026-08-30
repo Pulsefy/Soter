@@ -34,6 +34,7 @@
     "expo-camera": "~55.0.23",
     "expo-clipboard": "~55.0.17",
     "expo-constants": "~55.0.17",
+    "expo-build-properties": "~55.0.18",
     "expo-device": "~55.0.21",
     "expo-image-manipulator": "~55.0.21",
     "expo-image-picker": "~55.0.24",
