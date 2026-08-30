@@ -9,13 +9,9 @@ onFlowFailure:
   - takeScreenshot: failure
 
 ---
-# Scan flow: open the scanner from the task list, where the scan control is
-# a text-backed button with a stable native label.
+# Scan flow: open the scanner from the home screen FAB.
 - tapOn:
-    text: "Operator Task List"
-- assertVisible: "My Tasks"
-- tapOn:
-    text: "Scan QR"
+    text: "Scan QR Code"
     retryTapIfNoChange: true
 - assertVisible: "Scan QR Code"
 - assertVisible: "Align QR code within the frame"
