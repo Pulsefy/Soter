@@ -54,7 +54,8 @@ pub const KEY_PAUSE_CREATE: Symbol = symbol_short!("p_create");
 pub const KEY_PAUSE_CLAIM: Symbol = symbol_short!("p_claim");
 /// Per-action pause flag for `refund` (`bool`).
 pub const KEY_PAUSE_REFUND: Symbol = symbol_short!("p_refund");
-/// Per-action pause flag for `withdraw_surplus` (`bool`).
+/// Per-action pause flag for `propose_surplus_withdrawal` /
+/// `execute_surplus_withdrawal` (`bool`).
 pub const KEY_PAUSE_WITHDRAW: Symbol = symbol_short!("p_wdrw");
 /// Campaign pause registry (`Map<String, bool>` keyed by `campaign_ref`).
 pub const KEY_CAMPAIGN_PAUSED: Symbol = symbol_short!("camp_pzd");
@@ -93,6 +94,16 @@ pub const KEY_PKG_COUNTER: Symbol = symbol_short!("pkg_cnt");
 /// upper bound for `get_aggregates`; may exceed the counter when explicit
 /// ids are used.
 pub const KEY_PKG_IDX: Symbol = symbol_short!("pkg_idx");
+/// Configurable delay in seconds a proposed surplus withdrawal must wait
+/// before it can be executed (`u64`). Falls back to
+/// `DEFAULT_SURPLUS_WITHDRAWAL_DELAY` when absent. Admin-managed via
+/// `set_surplus_withdrawal_delay`.
+pub const KEY_SURPLUS_WITHDRAWAL_DELAY: Symbol = symbol_short!("wd_delay");
+/// Pending surplus withdrawal proposal (`Option<PendingSurplusWithdrawal>`).
+/// Written by `propose_surplus_withdrawal`; removed by
+/// `execute_surplus_withdrawal` / `cancel_surplus_withdrawal`. Absent when no
+/// withdrawal is proposed.
+pub const KEY_PENDING_SURPLUS_WITHDRAWAL: Symbol = symbol_short!("pend_wd");
 
 // --- Singleton keys: persistent storage ---
 // Persistent-storage singletons owned by the delegate module.
@@ -146,7 +157,7 @@ mod tests {
     use super::*;
 
     /// Every singleton key, both storage families.
-    fn singleton_keys() -> [Symbol; 22] {
+    fn singleton_keys() -> [Symbol; 24] {
         [
             KEY_ADMIN,
             KEY_PENDING_ADMIN,
@@ -170,6 +181,8 @@ mod tests {
             KEY_DELEGATES,
             KEY_DELEGATE_HISTORY,
             KEY_DELEGATE_EXPIRY,
+            KEY_SURPLUS_WITHDRAWAL_DELAY,
+            KEY_PENDING_SURPLUS_WITHDRAWAL,
         ]
     }
 

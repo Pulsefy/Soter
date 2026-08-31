@@ -125,6 +125,31 @@ export class SorobanErrorMapper {
       message: 'Claim cooldown is still active',
       errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_INVALID_STATE,
     },
+    23: {
+      code: 409,
+      message: 'Address is already a distributor',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_CONTRACT_ERROR,
+    },
+    24: {
+      code: 404,
+      message: 'Address is not a distributor',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_CONTRACT_ERROR,
+    },
+    25: {
+      code: 400,
+      message: 'Maximum number of distributors reached',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_CONTRACT_ERROR,
+    },
+    26: {
+      code: 400,
+      message: 'Surplus withdrawal timelock has not elapsed yet',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_INVALID_STATE,
+    },
+    27: {
+      code: 400,
+      message: 'No pending surplus withdrawal in progress',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_CONTRACT_ERROR,
+    },
   };
 
   /**
@@ -434,6 +459,16 @@ export class SorobanErrorMapper {
         code: 400,
         message: 'Claim cooldown is still active',
         errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_INVALID_STATE,
+      },
+      TimelockNotElapsed: {
+        code: 400,
+        message: 'Surplus withdrawal timelock has not elapsed yet',
+        errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_INVALID_STATE,
+      },
+      NoPendingWithdrawal: {
+        code: 400,
+        message: 'No pending surplus withdrawal in progress',
+        errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_CONTRACT_ERROR,
       },
     };
 

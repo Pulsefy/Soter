@@ -63,6 +63,8 @@ A singleton key is a bare `Symbol`; exactly one entry exists per key.
 | `KEY_RECIPIENT_LAST_CLAIM` | `"lastclaim"` | `Map<Address, u64>` (recipient → successful-claim timestamp) | Successful claim paths only. Enforces the optional `Config.claim_cooldown`; absent entries have no cooldown history. |
 | `KEY_PKG_COUNTER`       | `"pkg_cnt"`    | `u64`       | Package creation. Highest assigned id + 1; upper bound for id scans (`get_campaign_package_count`, etc.). |
 | `KEY_PKG_IDX`           | `"pkg_idx"`    | `u64`       | Package creation. Count of aggregation-index entries; positional bound for `get_aggregates`. May exceed `KEY_PKG_COUNTER` when explicit ids are used. |
+| `KEY_SURPLUS_WITHDRAWAL_DELAY` | `"wd_delay"` | `u64` | `set_surplus_withdrawal_delay`. Falls back to `DEFAULT_SURPLUS_WITHDRAWAL_DELAY` (1 day) when absent. Permanent. |
+| `KEY_PENDING_SURPLUS_WITHDRAWAL` | `"pend_wd"` | `PendingSurplusWithdrawal` | `propose_surplus_withdrawal`. **Ephemeral**: removed by `execute_surplus_withdrawal` / `cancel_surplus_withdrawal`. Absent when no withdrawal is proposed. |
 
 ### Persistent storage
 
@@ -113,12 +115,14 @@ above. Rules of thumb:
    `KEY_ADMIN`, `KEY_PENDING_ADMIN` *(if a transfer is mid-flight)*,
    all `("pkg", id)` records, `KEY_TOTAL_LOCKED`, `KEY_TOTAL_CLAIMED`,
    `KEY_CAMPAIGN_TOKEN_LOCKED`, `KEY_CAMPAIGN_TOKEN_CLAIMED`,
-   `KEY_PKG_COUNTER`, `KEY_PKG_IDX`, all `("pidx", position)` entries, and the
+   `KEY_PKG_COUNTER`, `KEY_PKG_IDX`, all `("pidx", position)` entries, the
    three delegate keys (`KEY_DELEGATES`, `KEY_DELEGATE_HISTORY`,
-   `KEY_DELEGATE_EXPIRY`).
+   `KEY_DELEGATE_EXPIRY`), and `KEY_PENDING_SURPLUS_WITHDRAWAL` *(if a
+   withdrawal is mid-flight)*.
 3. **Safe to drop/reset without fund impact** (policy flags only):
    `KEY_PAUSED`, `KEY_PAUSE_*`, `KEY_CAMPAIGN_PAUSED`, `KEY_DISTRIBUTORS`,
    `KEY_MAX_DISTRIBUTORS` *(resets to `DEFAULT_MAX_DISTRIBUTORS`)*,
+   `KEY_SURPLUS_WITHDRAWAL_DELAY` *(resets to `DEFAULT_SURPLUS_WITHDRAWAL_DELAY`)*,
    `KEY_CONFIG` *(re-initialize before unpausing)*. Dropping them changes
    behaviour, not solvency.
 4. **Derived/recomputable**: `KEY_TOTAL_LOCKED` can be rebuilt by scanning all
