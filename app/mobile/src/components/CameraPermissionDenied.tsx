@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import type { PermissionState } from '../hooks/useCameraPermission';
+import { useTranslation } from '../i18n/useTranslation';
 
 interface CameraPermissionDeniedProps {
   /** Current permission state */
@@ -52,6 +53,7 @@ export const CameraPermissionDenied: React.FC<CameraPermissionDeniedProps> = ({
   context = 'default',
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const isBlocked = permissionState === 'blocked';
 
   const getContextTitle = () => {
@@ -120,7 +122,7 @@ export const CameraPermissionDenied: React.FC<CameraPermissionDeniedProps> = ({
             accessibilityLabel="Open device settings"
             accessibilityHint="Opens your device settings where you can enable camera access"
           >
-            <Text style={styles.primaryButtonText}>Open Settings</Text>
+            <Text style={styles.primaryButtonText}>{t('camera.openSettings')}</Text>
           </TouchableOpacity>
         ) : canRequestAgain ? (
           <TouchableOpacity
@@ -130,7 +132,7 @@ export const CameraPermissionDenied: React.FC<CameraPermissionDeniedProps> = ({
             accessibilityLabel="Grant camera permission"
             accessibilityHint="Requests camera access permission"
           >
-            <Text style={styles.primaryButtonText}>Grant Permission</Text>
+            <Text style={styles.primaryButtonText}>{t('camera.grantPermission')}</Text>
           </TouchableOpacity>
         ) : null}
 
@@ -167,19 +169,19 @@ export const CameraPermissionDenied: React.FC<CameraPermissionDeniedProps> = ({
       {isBlocked && (
         <View style={[styles.helpCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.helpTitle, { color: colors.textPrimary }]}>
-            How to enable camera access:
+            {t('camera.helpTitle')}
           </Text>
           <Text style={[styles.helpStep, { color: colors.textSecondary }]}>
-            1. Tap "Open Settings" above
+            {t('camera.helpStep1', { action: t('camera.openSettings') })}
           </Text>
           <Text style={[styles.helpStep, { color: colors.textSecondary }]}>
-            2. Find and tap "Camera" or "Permissions"
+            {t('camera.helpStep2')}
           </Text>
           <Text style={[styles.helpStep, { color: colors.textSecondary }]}>
-            3. Toggle camera access to "On" or "Allow"
+            {t('camera.helpStep3')}
           </Text>
           <Text style={[styles.helpStep, { color: colors.textSecondary }]}>
-            4. Return to this app
+            {t('camera.helpStep4')}
           </Text>
         </View>
       )}

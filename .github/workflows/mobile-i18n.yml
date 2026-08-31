@@ -1,0 +1,30 @@
+name: Mobile i18n
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'app/mobile/src/i18n/**'
+      - 'app/mobile/src/screens/**'
+      - 'app/mobile/src/components/**'
+      - 'app/mobile/scripts/check-i18n.mjs'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'app/mobile/src/i18n/**'
+      - 'app/mobile/src/screens/**'
+      - 'app/mobile/src/components/**'
+      - 'app/mobile/scripts/check-i18n.mjs'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Localization data-integrity & hardcoded-string scan
+        run: node app/mobile/scripts/check-i18n.mjs

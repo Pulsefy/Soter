@@ -69,6 +69,8 @@ class Settings(BaseSettings):
         PROOF_OF_LIFE_CONFIDENCE_THRESHOLD: Default threshold for liveness verification
         PROOF_OF_LIFE_MIN_FACE_SIZE: Minimum detected face size in pixels
         CACHE_TTL_VERIFICATION: TTL for cached AI verification responses (artifact + model-version keyed)
+        FRAUD_PASS_MAX_SCORE: Claims scoring below this are banded 'pass'
+        FRAUD_REVIEW_MAX_SCORE: Claims scoring below this (and above pass) are 'review'; at/above it is 'reject'
     """
 
     # API Keys
@@ -143,6 +145,18 @@ class Settings(BaseSettings):
     cache_ttl_verification: int = (
         120  # AI verification responses, keyed by claim/artifact/model version
     )
+
+    # Fraud detection decision thresholds.
+    # A claim's normalised fraud_risk_score (0 = lowest risk, 1 = highest
+    # risk) is banded into pass / review / reject. Defaults below were
+    # chosen from the calibration report at
+    # reports/fraud_threshold_calibration.md, which ran the current model
+    # against the fixture set in tests/fixtures/fraud_claims.json:
+    # 27/30 fixtures landed in PASS, 1/30 in REVIEW, 2/30 in REJECT.
+    # Operators can retune sensitivity via environment variables without a
+    # code change; see validate_configuration() for the accepted range.
+    fraud_pass_max_score: float = 0.40
+    fraud_review_max_score: float = 0.75
 
     # Application settings
     app_env: Literal["development", "staging", "production", "test"] = "development"
@@ -329,6 +343,25 @@ class Settings(BaseSettings):
             )
         if not 1 <= int(self.port) <= 65535:
             _add("PORT", f"must be between 1 and 65535 (got {self.port})")
+
+        # --- Fraud detection thresholds -----------------------------------
+        if not 0.0 <= self.fraud_pass_max_score <= 1.0:
+            _add(
+                "FRAUD_PASS_MAX_SCORE",
+                f"must be between 0.0 and 1.0 (got {self.fraud_pass_max_score})",
+            )
+        if not 0.0 <= self.fraud_review_max_score <= 1.0:
+            _add(
+                "FRAUD_REVIEW_MAX_SCORE",
+                f"must be between 0.0 and 1.0 (got {self.fraud_review_max_score})",
+            )
+        if self.fraud_pass_max_score >= self.fraud_review_max_score:
+            _add(
+                "FRAUD_PASS_MAX_SCORE / FRAUD_REVIEW_MAX_SCORE",
+                "FRAUD_PASS_MAX_SCORE must be strictly less than "
+                f"FRAUD_REVIEW_MAX_SCORE (got {self.fraud_pass_max_score} >= "
+                f"{self.fraud_review_max_score})",
+            )
 
         # --- CORS origins: entries must be absolute origins --------------
         for key, raw in (

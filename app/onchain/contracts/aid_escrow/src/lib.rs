@@ -61,6 +61,10 @@ pub const DEFAULT_MAX_DISTRIBUTORS: u32 = 100;
 /// a single call.
 pub const MAX_DISTRIBUTOR_PAGE_SIZE: u32 = 50;
 
+/// Current event schema version. Increment this when event payloads change
+/// in a backward-incompatible way. See EVENTS.md for compatibility policy.
+pub const EVENT_SCHEMA_VERSION: u32 = 1;
+
 // --- Data Types ---
 
 #[contracttype]
@@ -187,10 +191,12 @@ pub enum Error {
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
 // Topic = struct name in snake_case (e.g. package_created). Do not rename without versioning.
+// All events include schema_version for compatibility detection by indexers.
 
 /// Emitted when the escrow pool is funded. Actor = funder.
 #[contractevent]
 pub struct EscrowFunded {
+    pub schema_version: u32,
     pub from: Address,
     pub token: Address,
     pub amount: i128,
@@ -199,6 +205,7 @@ pub struct EscrowFunded {
 
 #[contractevent]
 pub struct PackageCreated {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -208,6 +215,7 @@ pub struct PackageCreated {
 
 #[contractevent]
 pub struct PackageReassigned {
+    pub schema_version: u32,
     pub package_id: u64,
     pub previous_recipient: Address,
     pub new_recipient: Address,
@@ -217,6 +225,7 @@ pub struct PackageReassigned {
 
 #[contractevent]
 pub struct PackageClaimed {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -229,6 +238,7 @@ pub struct PackageClaimed {
 
 #[contractevent]
 pub struct PackageClaimedByRelayer {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub relayer: Address,
@@ -238,6 +248,7 @@ pub struct PackageClaimedByRelayer {
 
 #[contractevent]
 pub struct PackageDisbursed {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -250,6 +261,7 @@ pub struct PackageDisbursed {
 
 #[contractevent]
 pub struct PackageRevoked {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -259,6 +271,7 @@ pub struct PackageRevoked {
 
 #[contractevent]
 pub struct PackageRefunded {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -270,6 +283,7 @@ pub struct PackageRefunded {
 /// `Expired` state, releasing its funds from the locked total.
 #[contractevent]
 pub struct PackageSwept {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -279,6 +293,7 @@ pub struct PackageSwept {
 
 #[contractevent]
 pub struct BatchCreatedEvent {
+    pub schema_version: u32,
     pub ids: Vec<u64>,
     pub admin: Address,
     pub total_amount: i128,
@@ -286,6 +301,7 @@ pub struct BatchCreatedEvent {
 
 #[contractevent]
 pub struct ExtendedEvent {
+    pub schema_version: u32,
     pub package_id: u64,
     pub admin: Address,
     pub old_expires_at: u64,
@@ -294,6 +310,7 @@ pub struct ExtendedEvent {
 
 #[contractevent]
 pub struct SurplusWithdrawnEvent {
+    pub schema_version: u32,
     pub to: Address,
     pub token: Address,
     pub amount: i128,
@@ -301,22 +318,26 @@ pub struct SurplusWithdrawnEvent {
 
 #[contractevent]
 pub struct ContractPausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
 }
 
 #[contractevent]
 pub struct ContractUnpausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
 }
 
 #[contractevent]
 pub struct ActionPausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
     pub action: Symbol,
 }
 
 #[contractevent]
 pub struct ActionUnpausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
     pub action: Symbol,
 }
@@ -325,6 +346,7 @@ pub struct ActionUnpausedEvent {
 /// `campaign_ref` metadata value shared by its packages.
 #[contractevent]
 pub struct CampaignPausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
     pub campaign_ref: String,
 }
@@ -332,6 +354,7 @@ pub struct CampaignPausedEvent {
 /// Emitted when an admin unpauses a single campaign.
 #[contractevent]
 pub struct CampaignUnpausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
     pub campaign_ref: String,
 }
@@ -340,6 +363,7 @@ pub struct CampaignUnpausedEvent {
 /// Includes package context for indexer-friendly reconstruction.
 #[contractevent]
 pub struct DelegateAdded {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub delegate: Address,
@@ -352,6 +376,7 @@ pub struct DelegateAdded {
 /// Includes package context for indexer-friendly reconstruction.
 #[contractevent]
 pub struct DelegateRevoked {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub delegate: Address,
@@ -363,6 +388,7 @@ pub struct DelegateRevoked {
 /// Includes package context for indexer-friendly reconstruction.
 #[contractevent]
 pub struct DelegateClaimed {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub delegate: Address,
@@ -374,6 +400,7 @@ pub struct DelegateClaimed {
 /// Emitted when the current admin nominates a pending admin.
 #[contractevent]
 pub struct AdminTransferInitiated {
+    pub schema_version: u32,
     pub admin: Address,
     pub pending_admin: Address,
     pub timestamp: u64,
@@ -382,6 +409,7 @@ pub struct AdminTransferInitiated {
 /// Emitted when the pending admin accepts the admin role.
 #[contractevent]
 pub struct AdminTransferAccepted {
+    pub schema_version: u32,
     pub admin: Address,
     pub timestamp: u64,
 }
@@ -389,6 +417,7 @@ pub struct AdminTransferAccepted {
 /// Emitted when the current admin cancels a pending admin transfer.
 #[contractevent]
 pub struct AdminTransferCancelled {
+    pub schema_version: u32,
     pub admin: Address,
     pub timestamp: u64,
 }
@@ -396,6 +425,7 @@ pub struct AdminTransferCancelled {
 /// Emitted when a token is added to the allowed tokens allowlist.
 #[contractevent]
 pub struct TokenAdded {
+    pub schema_version: u32,
     pub admin: Address,
     pub token: Address,
     pub timestamp: u64,
@@ -404,6 +434,7 @@ pub struct TokenAdded {
 /// Emitted when a token is removed from the allowed tokens allowlist.
 #[contractevent]
 pub struct TokenRemoved {
+    pub schema_version: u32,
     pub admin: Address,
     pub token: Address,
     pub timestamp: u64,
@@ -414,6 +445,7 @@ pub struct TokenRemoved {
 /// indexers/auditors can track set growth without a separate read.
 #[contractevent]
 pub struct DistributorAdded {
+    pub schema_version: u32,
     pub admin: Address,
     pub distributor: Address,
     pub total_distributors: u32,
@@ -424,6 +456,7 @@ pub struct DistributorAdded {
 /// `total_distributors` is the resulting set size after the removal.
 #[contractevent]
 pub struct DistributorRemoved {
+    pub schema_version: u32,
     pub admin: Address,
     pub distributor: Address,
     pub total_distributors: u32,
@@ -434,6 +467,7 @@ pub struct DistributorRemoved {
 /// Only admin can attach evidence hash, and it cannot overwrite an existing hash.
 #[contractevent]
 pub struct EvidenceAttached {
+    pub schema_version: u32,
     pub package_id: u64,
     pub admin: Address,
     pub evidence_hash: String,
@@ -510,6 +544,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         AdminTransferInitiated {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             pending_admin: new_admin,
             timestamp,
@@ -539,6 +574,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         AdminTransferAccepted {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin: pending_admin,
             timestamp,
         }
@@ -562,7 +598,12 @@ impl AidEscrow {
         env.storage().instance().remove(&KEY_PENDING_ADMIN);
 
         let timestamp = env.ledger().timestamp();
-        AdminTransferCancelled { admin, timestamp }.publish(&env);
+        AdminTransferCancelled {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+            timestamp,
+        }
+        .publish(&env);
 
         Ok(())
     }
@@ -720,6 +761,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         DistributorAdded {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             distributor: addr,
             total_distributors,
@@ -759,6 +801,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         DistributorRemoved {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             distributor: addr,
             total_distributors,
@@ -891,7 +934,11 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &true);
-        ContractPausedEvent { admin }.publish(&env);
+        ContractPausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -904,7 +951,11 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &false);
-        ContractUnpausedEvent { admin }.publish(&env);
+        ContractUnpausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -917,7 +968,12 @@ impl AidEscrow {
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &true);
 
-        ActionPausedEvent { admin, action }.publish(&env);
+        ActionPausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+            action,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -930,7 +986,12 @@ impl AidEscrow {
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &false);
 
-        ActionUnpausedEvent { admin, action }.publish(&env);
+        ActionUnpausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+            action,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -974,6 +1035,7 @@ impl AidEscrow {
         env.storage().instance().set(&KEY_CAMPAIGN_PAUSED, &paused);
 
         CampaignPausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             campaign_ref,
         }
@@ -999,6 +1061,7 @@ impl AidEscrow {
         env.storage().instance().set(&KEY_CAMPAIGN_PAUSED, &paused);
 
         CampaignUnpausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             campaign_ref,
         }
@@ -1072,6 +1135,7 @@ impl AidEscrow {
         // 6. Events
         let timestamp = env.ledger().timestamp();
         EscrowFunded {
+            schema_version: EVENT_SCHEMA_VERSION,
             from,
             token,
             amount,
@@ -1200,6 +1264,7 @@ impl AidEscrow {
         env.storage().instance().set(&KEY_PKG_IDX, &(idx + 1));
 
         PackageCreated {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             recipient: recipient.clone(),
             amount,
@@ -1338,6 +1403,7 @@ impl AidEscrow {
             }
 
             PackageCreated {
+                schema_version: EVENT_SCHEMA_VERSION,
                 package_id: id,
                 recipient: recipient.clone(),
                 amount,
@@ -1358,6 +1424,7 @@ impl AidEscrow {
 
         // Emit batch event
         BatchCreatedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
             ids: created_ids.clone(),
             admin: operator,
             total_amount,
@@ -1543,6 +1610,7 @@ impl AidEscrow {
         Self::record_recipient_claim(&env, &package.recipient, now);
 
         PackageClaimedByRelayer {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             recipient: claimant.clone(),
             relayer,
@@ -1691,6 +1759,7 @@ impl AidEscrow {
         let timestamp = env.ledger().timestamp();
         let receipt_hash = Self::receipt_hash_from_metadata(&env, &package.metadata);
         PackageDisbursed {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
@@ -1733,6 +1802,7 @@ impl AidEscrow {
         env.storage().persistent().set(&key, &package);
 
         PackageReassigned {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             previous_recipient,
             new_recipient,
@@ -1769,6 +1839,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         PackageRevoked {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
@@ -1835,6 +1906,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         PackageRefunded {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
@@ -1880,6 +1952,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         PackageRevoked {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             recipient: package.recipient.clone(),
             amount: package.amount,
@@ -1936,6 +2009,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         EvidenceAttached {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             admin,
             evidence_hash,
@@ -2012,6 +2086,7 @@ impl AidEscrow {
         env.storage().persistent().set(&key, &package);
 
         ExtendedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             admin,
             old_expires_at,
@@ -2064,6 +2139,7 @@ impl AidEscrow {
 
         // 7. Emit event
         SurplusWithdrawnEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
             to: to.clone(),
             token: token.clone(),
             amount,
@@ -2401,6 +2477,7 @@ impl AidEscrow {
         let receipt_hash = Self::receipt_hash_from_metadata(env, &package.metadata);
 
         PackageClaimed {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             recipient: payout_recipient.clone(),
             amount: package.amount,
@@ -2418,6 +2495,7 @@ impl AidEscrow {
         if is_delegate {
             // Emit DelegateClaimed event
             DelegateClaimed {
+                schema_version: EVENT_SCHEMA_VERSION,
                 package_id,
                 recipient: package.recipient.clone(),
                 delegate: claimant.clone(),
@@ -2429,6 +2507,7 @@ impl AidEscrow {
 
             // Emit DelegateRevoked with claimant as actor (system-initiated on claim)
             DelegateRevoked {
+                schema_version: EVENT_SCHEMA_VERSION,
                 package_id,
                 recipient: package.recipient.clone(),
                 delegate: claimant.clone(),
@@ -2931,6 +3010,7 @@ impl AidEscrow {
         let expires_at = expiry_map.get(package_id).unwrap_or(0);
 
         DelegateAdded {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             recipient: package.recipient.clone(),
             delegate: delegate.clone(),
@@ -2996,6 +3076,7 @@ impl AidEscrow {
         let timestamp = env.ledger().timestamp();
 
         DelegateAdded {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             recipient: package.recipient.clone(),
             delegate: delegate.clone(),
@@ -3039,6 +3120,7 @@ impl AidEscrow {
             let timestamp = env.ledger().timestamp();
 
             DelegateRevoked {
+                schema_version: EVENT_SCHEMA_VERSION,
                 package_id,
                 recipient: package.recipient.clone(),
                 delegate: delegate.clone(),
@@ -3104,6 +3186,7 @@ impl AidEscrow {
         // Emit event
         let timestamp = env.ledger().timestamp();
         TokenAdded {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             token,
             timestamp,
@@ -3152,6 +3235,7 @@ impl AidEscrow {
         // Emit event
         let timestamp = env.ledger().timestamp();
         TokenRemoved {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             token,
             timestamp,
@@ -3230,6 +3314,7 @@ impl AidEscrow {
             Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
             PackageSwept {
+                schema_version: EVENT_SCHEMA_VERSION,
                 package_id: pkg_id,
                 recipient: package.recipient.clone(),
                 amount: package.amount,

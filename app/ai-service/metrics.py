@@ -114,6 +114,11 @@ INFERENCE_LATENCY = Histogram(
 PIPELINE_STEP_LATENCY = Histogram(
     "pipeline_step_latency_seconds", "Pipeline step latency in seconds", ["step_name"]
 )
+IMAGE_QUALITY_REJECTION_TOTAL = Counter(
+    "image_quality_rejection_total",
+    "Total images rejected by quality gates before inference",
+    ["reason"],
+)
 
 JOB_CANCELLED_TOTAL = Counter(
     "job_cancelled_total", "Total jobs cancelled", ["task_type"]
