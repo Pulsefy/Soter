@@ -29,6 +29,7 @@ class TestFraudDetectionEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         # Response is now a ResultEnvelope; per-claim results are in data["result"]
+
         assert "result" in data
         assert len(data["result"]) == 3
         for r in data["result"]:
@@ -40,6 +41,7 @@ class TestFraudDetectionEndpoint:
         data = resp.json()
         flagged = sum(r["is_flagged"] for r in data["result"])
         # reasons list has one entry per flagged claim that has a reason
+
         if flagged and data["reasons"]:
             assert len(data["reasons"]) <= flagged
 
@@ -93,6 +95,7 @@ class TestFraudDetectionService:
         for r in results:
             assert 0.0 <= r.fraud_risk_score <= 1.0
 
+
 class TestFraudThresholdBanding:
     """Covers each band and the exact boundaries between them."""
 
@@ -115,9 +118,7 @@ class TestFraudThresholdBanding:
         from schemas.fraud import FraudBand
 
         assert _band_for_score(0.5, pass_max=0.4, review_max=0.75) == FraudBand.REVIEW
-        assert (
-            _band_for_score(0.74, pass_max=0.4, review_max=0.75) == FraudBand.REVIEW
-        )
+        assert _band_for_score(0.74, pass_max=0.4, review_max=0.75) == FraudBand.REVIEW
 
     def test_band_review_reject_boundary(self):
         """A score exactly at review_max must fall into REJECT, not REVIEW."""
@@ -132,6 +133,7 @@ class TestFraudThresholdBanding:
 
         assert _band_for_score(0.9, pass_max=0.4, review_max=0.75) == FraudBand.REJECT
         assert _band_for_score(1.0, pass_max=0.4, review_max=0.75) == FraudBand.REJECT
+
 
 class TestFraudResponseIncludesBand:
     def test_endpoint_response_includes_valid_band(self):
