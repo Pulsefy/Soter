@@ -7,6 +7,7 @@ import metrics
 
 class ImageQualityError(ValueError):
     """Exception raised when an image fails quality gate checks."""
+
     pass
 
 
@@ -72,19 +73,25 @@ class ImagePreprocessor:
         width, height = image.size
         if width < self.min_resolution or height < self.min_resolution:
             metrics.IMAGE_QUALITY_REJECTION_TOTAL.labels(reason="resolution").inc()
-            raise ImageQualityError(f"Image resolution too low. Minimum {self.min_resolution}px required in both dimensions (got {width}x{height}).")
+            raise ImageQualityError(
+                f"Image resolution too low. Minimum {self.min_resolution}px required in both dimensions (got {width}x{height})."
+            )
 
         img_array = self.image_to_numpy(self.to_grayscale(image))
-        
+
         mean_exposure = np.mean(img_array)
         if mean_exposure < self.min_exposure:
             metrics.IMAGE_QUALITY_REJECTION_TOTAL.labels(reason="exposure").inc()
-            raise ImageQualityError(f"Image is too dark. Average intensity {mean_exposure:.1f} is below minimum {self.min_exposure}.")
-            
+            raise ImageQualityError(
+                f"Image is too dark. Average intensity {mean_exposure:.1f} is below minimum {self.min_exposure}."
+            )
+
         laplacian_var = cv2.Laplacian(img_array, cv2.CV_64F).var()
         if laplacian_var < self.min_blur_variance:
             metrics.IMAGE_QUALITY_REJECTION_TOTAL.labels(reason="blur").inc()
-            raise ImageQualityError(f"Image is too blurry. Variance of Laplacian {laplacian_var:.1f} is below minimum {self.min_blur_variance}.")
+            raise ImageQualityError(
+                f"Image is too blurry. Variance of Laplacian {laplacian_var:.1f} is below minimum {self.min_blur_variance}."
+            )
 
     def preprocess(
         self,
