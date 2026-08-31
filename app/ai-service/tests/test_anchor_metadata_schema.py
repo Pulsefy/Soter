@@ -5,9 +5,7 @@ from schemas.common import AnchorMetadata
 
 def test_valid_anchor_metadata():
     metadata = AnchorMetadata(
-        campaign_ref="campaign-123",
-        claim_id="claim_456",
-        package_id="package-789"
+        campaign_ref="campaign-123", claim_id="claim_456", package_id="package-789"
     )
     assert metadata.campaign_ref == "campaign-123"
     assert metadata.claim_id == "claim_456"
