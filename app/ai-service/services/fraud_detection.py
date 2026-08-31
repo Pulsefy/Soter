@@ -55,6 +55,7 @@ def _log_decision(result: ClaimFraudResult, pass_max: float, review_max: float) 
         review_max,
     )
 
+
 #: Version of the fraud scoring rules. Fraud detection is statistical rather
 #: than prompt-driven, so this constant plays the "prompt version" role in the
 #: decision audit record (issue #990): bump it whenever the feature set or the
