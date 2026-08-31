@@ -8,6 +8,7 @@ class FraudExplanationCode(str, Enum):
     ANOMALY_DETECTED = "ANOMALY_DETECTED"
     # Additional codes can be added here as new detection rules are implemented
 
+
 class FraudBand(str, Enum):
     """Decision band derived from a claim's fraud_risk_score.
 
@@ -21,6 +22,7 @@ class FraudBand(str, Enum):
     PASS = "PASS"
     REVIEW = "REVIEW"
     REJECT = "REJECT"
+
 
 class ClaimMetadata(BaseModel):
     claim_id: str = Field(examples=["claim-abc123"])
