@@ -147,7 +147,7 @@ class Settings(BaseSettings):
     # code change; see validate_configuration() for the accepted range.
     fraud_pass_max_score: float = 0.40
     fraud_review_max_score: float = 0.75
-    
+
     # Application settings
     app_env: Literal["development", "staging", "production", "test"] = "development"
     log_level: str = "INFO"
