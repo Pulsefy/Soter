@@ -13,6 +13,7 @@ from services.providers import (
     GroqProvider,
     FixtureProvider,
     TesseractOCRProvider,
+    validate_fallback_order,
 )
 
 # ---------------------------------------------------------------------------
@@ -161,16 +162,41 @@ class TestProviderRegistry:
             mock_settings.test_provider_mode = False
             mock_settings.openai_api_key = "key"
             mock_settings.groq_api_key = "key"
+            mock_settings.get_llm_fallback_order.return_value = ["openai", "groq"]
             result = self.registry.resolve_llm("auto")
             names = [n for n, _ in result]
-            assert "openai" in names
-            assert "groq" in names
+            assert names == ["openai", "groq"]
+
+    def test_resolve_llm_follows_configured_order(self):
+        with patch("services.providers.settings") as mock_settings:
+            mock_settings.test_provider_mode = False
+            mock_settings.openai_api_key = "key"
+            mock_settings.groq_api_key = "key"
+            mock_settings.get_llm_fallback_order.return_value = ["groq", "openai"]
+            result = self.registry.resolve_llm("auto")
+            names = [n for n, _ in result]
+            assert names == ["groq", "openai"]
+
+    def test_resolve_llm_skips_unavailable_providers_in_config(self):
+        with patch("services.providers.settings") as mock_settings:
+            mock_settings.test_provider_mode = False
+            mock_settings.openai_api_key = "key"
+            mock_settings.groq_api_key = None
+            mock_settings.get_llm_fallback_order.return_value = [
+                "openai",
+                "groq",
+                "test",
+            ]
+            result = self.registry.resolve_llm("auto")
+            names = [n for n, _ in result]
+            assert names == ["openai"]
 
     def test_resolve_llm_preference_openai_first(self):
         with patch("services.providers.settings") as mock_settings:
             mock_settings.test_provider_mode = False
             mock_settings.openai_api_key = "key"
             mock_settings.groq_api_key = "key"
+            mock_settings.get_llm_fallback_order.return_value = ["openai", "groq"]
             result = self.registry.resolve_llm("openai")
             names = [n for n, _ in result]
             assert names[0] == "openai"
@@ -180,6 +206,7 @@ class TestProviderRegistry:
             mock_settings.test_provider_mode = False
             mock_settings.openai_api_key = "key"
             mock_settings.groq_api_key = "key"
+            mock_settings.get_llm_fallback_order.return_value = ["openai", "groq"]
             result = self.registry.resolve_llm("groq")
             names = [n for n, _ in result]
             assert names[0] == "groq"
@@ -189,6 +216,11 @@ class TestProviderRegistry:
             mock_settings.test_provider_mode = True
             mock_settings.openai_api_key = None
             mock_settings.groq_api_key = None
+            mock_settings.get_llm_fallback_order.return_value = [
+                "openai",
+                "groq",
+                "test",
+            ]
             result = self.registry.resolve_llm("test")
             names = [n for n, _ in result]
             assert names == ["test"]
@@ -196,6 +228,7 @@ class TestProviderRegistry:
     def test_resolve_ocr_test_mode(self):
         with patch("services.providers.settings") as mock_settings:
             mock_settings.test_provider_mode = True
+            mock_settings.get_ocr_fallback_order.return_value = ["test", "tesseract"]
             result = self.registry.resolve_ocr()
             names = [n for n, _ in result]
             assert names[0] == "test"
@@ -204,10 +237,30 @@ class TestProviderRegistry:
     def test_resolve_ocr_production(self):
         with patch("services.providers.settings") as mock_settings:
             mock_settings.test_provider_mode = False
+            mock_settings.get_ocr_fallback_order.return_value = ["test", "tesseract"]
             result = self.registry.resolve_ocr()
             names = [n for n, _ in result]
             assert "tesseract" in names
             assert "test" not in names
+
+
+class TestFallbackOrderValidation:
+    def test_valid_order_passes(self):
+        validate_fallback_order(
+            "LLM_PROVIDER_FALLBACK_ORDER", ["openai", "groq", "test"]
+        )
+
+    def test_empty_order_rejected(self):
+        with pytest.raises(ValueError, match="at least one provider"):
+            validate_fallback_order("LLM_PROVIDER_FALLBACK_ORDER", [])
+
+    def test_unknown_provider_rejected(self):
+        with pytest.raises(ValueError, match="unknown provider"):
+            validate_fallback_order("LLM_PROVIDER_FALLBACK_ORDER", ["openai", "bogus"])
+
+    def test_duplicate_provider_rejected(self):
+        with pytest.raises(ValueError, match="more than once"):
+            validate_fallback_order("LLM_PROVIDER_FALLBACK_ORDER", ["openai", "openai"])
 
 
 # ---------------------------------------------------------------------------

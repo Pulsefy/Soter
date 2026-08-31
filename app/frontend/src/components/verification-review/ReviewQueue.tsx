@@ -97,8 +97,8 @@ export function ReviewQueue({ filters, onPageChange }: ReviewQueueProps) {
         {/* ── Queue list ──────────────────────────────────────────────── */}
         <div className="flex-1 min-w-0 space-y-2">
           {data.items.map(item => {
-            const isPending = pendingIds.has(item.id);
-            const isFailed = failedIds.has(item.id);
+            const isItemPending = pendingIds.has(item.id);
+            const isItemFailed = failedIds.has(item.id);
 
             return (
               <button
@@ -106,15 +106,15 @@ export function ReviewQueue({ filters, onPageChange }: ReviewQueueProps) {
                 onClick={() =>
                   setSelectedId(item.id === selectedId ? null : item.id)
                 }
-                disabled={isPending}
-                aria-busy={isPending}
-                aria-label={`Verification ${item.id}${isPending ? ' — action in progress' : ''}${isFailed ? ' — action failed' : ''}`}
+                disabled={isItemPending}
+                aria-busy={isItemPending}
+                aria-label={`Verification ${item.id}${isItemPending ? ' — action in progress' : ''}${isItemFailed ? ' — action failed' : ''}`}
                 className={[
                   'w-full text-left px-4 py-3 rounded-lg border transition-colors relative',
-                  isPending
-                    ? 'border-blue-300 dark:border-blue-700 bg-blue-50/60 dark:bg-blue-900/10 cursor-wait opacity-80'
-                    : isFailed
-                      ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/10'
+                  isItemPending
+                    ? 'border-blue-300 dark:border-blue-700 bg-blue-50/60 dark:bg-blue-900/15 cursor-wait opacity-85'
+                    : isItemFailed
+                      ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/15'
                       : selectedId === item.id
                         ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
                         : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-gray-200 dark:hover:border-gray-700',
@@ -131,7 +131,7 @@ export function ReviewQueue({ filters, onPageChange }: ReviewQueueProps) {
                     )}
 
                     {/* Pending spinner */}
-                    {isPending && (
+                    {isItemPending && (
                       <span
                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
                         title="Action in progress…"
@@ -146,7 +146,7 @@ export function ReviewQueue({ filters, onPageChange }: ReviewQueueProps) {
                     )}
 
                     {/* Failed badge */}
-                    {isFailed && !isPending && (
+                    {isItemFailed && !isItemPending && (
                       <span
                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300"
                         title="Action failed — data has been rolled back"
@@ -170,7 +170,7 @@ export function ReviewQueue({ filters, onPageChange }: ReviewQueueProps) {
                 )}
 
                 {/* Failed retry hint */}
-                {isFailed && !isPending && (
+                {isItemFailed && !isItemPending && (
                   <p
                     className="mt-1 text-xs text-red-500 dark:text-red-400"
                     role="alert"

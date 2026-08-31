@@ -5,6 +5,7 @@ import { useMemo, useRef, useState, useEffect } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronLeft, Download, FileSpreadsheet, RefreshCcw, UploadCloud } from 'lucide-react';
 import { useToast } from '@/components/ToastProvider';
 import { normalizeError } from '@/lib/error-utils';
+import { useTranslations } from 'next-intl';
 import {
   confirmRecipientsImport,
   downloadImportReport,
@@ -117,10 +118,19 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
       }
     } catch (error) {
       const normalized = normalizeError(error);
+      let msg = normalized.message;
+      if (normalized.code) {
+        if (tErrors.has(normalized.code)) {
+          msg = tErrors(normalized.code);
+        } else {
+          console.warn(`[ImportRecipientsWizard] Unknown error code: ${normalized.code}`);
+          msg = tErrors('generic');
+        }
+      }
       const toastMsg = normalized.correlationId
-        ? `${normalized.message} (Correlation ID: ${normalized.correlationId})`
-        : normalized.message;
-      setFileError(normalized.message);
+        ? `${msg} (Correlation ID: ${normalized.correlationId})`
+        : msg;
+      setFileError(msg);
       toast('Upload problem', toastMsg, 'error');
     } finally {
       setIsParsing(false);
@@ -154,10 +164,19 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
       }
     } catch (error) {
       const normalized = normalizeError(error);
+      let msg = normalized.message;
+      if (normalized.code) {
+        if (tErrors.has(normalized.code)) {
+          msg = tErrors(normalized.code);
+        } else {
+          console.warn(`[ImportRecipientsWizard] Unknown error code: ${normalized.code}`);
+          msg = tErrors('generic');
+        }
+      }
       const toastMsg = normalized.correlationId
-        ? `${normalized.message} (Correlation ID: ${normalized.correlationId})`
-        : normalized.message;
-      setSubmitError(normalized.message);
+        ? `${msg} (Correlation ID: ${normalized.correlationId})`
+        : msg;
+      setSubmitError(msg);
       toast('Validation failed', toastMsg, 'error');
     } finally {
       setIsValidating(false);
@@ -194,7 +213,16 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
       }
     } catch (error) {
       const normalized = normalizeError(error);
-      toast('Report failed', normalized.message, 'error');
+      let msg = normalized.message;
+      if (normalized.code) {
+        if (tErrors.has(normalized.code)) {
+          msg = tErrors(normalized.code);
+        } else {
+          console.warn(`[ImportRecipientsWizard] Unknown error code: ${normalized.code}`);
+          msg = tErrors('generic');
+        }
+      }
+      toast('Report failed', msg, 'error');
     } finally {
       setIsDownloadingReport(false);
     }
@@ -215,10 +243,19 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
       toast('Import complete', message, 'success');
     } catch (error) {
       const normalized = normalizeError(error);
+      let msg = normalized.message;
+      if (normalized.code) {
+        if (tErrors.has(normalized.code)) {
+          msg = tErrors(normalized.code);
+        } else {
+          console.warn(`[ImportRecipientsWizard] Unknown error code: ${normalized.code}`);
+          msg = tErrors('generic');
+        }
+      }
       const toastMsg = normalized.correlationId
-        ? `${normalized.message} (Correlation ID: ${normalized.correlationId})`
-        : normalized.message;
-      setSubmitError(normalized.message);
+        ? `${msg} (Correlation ID: ${normalized.correlationId})`
+        : msg;
+      setSubmitError(msg);
       toast('Import failed', toastMsg, 'error');
     } finally {
       setIsSubmitting(false);

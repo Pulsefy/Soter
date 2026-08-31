@@ -149,25 +149,32 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Enumerate all keys matching a glob pattern using SCAN (non-blocking).
+   */
+  private async scanKeys(pattern: string): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, batch] = await this.client.scan(
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        100,
+      );
+      cursor = nextCursor;
+      keys.push(...batch);
+    } while (cursor !== '0');
+    return keys;
+  }
+
+  /**
    * Delete all keys matching a glob pattern using SCAN (non-blocking).
    * Returns the number of keys deleted.
    */
   async delByPattern(pattern: string): Promise<number> {
     try {
-      const keys: string[] = [];
-      let cursor = '0';
-      do {
-        const [nextCursor, batch] = await this.client.scan(
-          cursor,
-          'MATCH',
-          pattern,
-          'COUNT',
-          100,
-        );
-        cursor = nextCursor;
-        keys.push(...batch);
-      } while (cursor !== '0');
-
+      const keys = await this.scanKeys(pattern);
       if (keys.length > 0) {
         await this.client.del(...keys);
       }
@@ -175,6 +182,21 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(
         `Redis SCAN/DEL failed for pattern "${pattern}": ${String(err)}`,
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * Count keys matching a glob pattern using SCAN (non-blocking, non-destructive).
+   */
+  async countKeysByPattern(pattern: string): Promise<number> {
+    try {
+      const keys = await this.scanKeys(pattern);
+      return keys.length;
+    } catch (err) {
+      this.logger.warn(
+        `Redis SCAN failed for pattern "${pattern}": ${String(err)}`,
       );
       return 0;
     }

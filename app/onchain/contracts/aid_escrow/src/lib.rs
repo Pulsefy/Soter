@@ -27,14 +27,16 @@ use soroban_sdk::{
 
 mod delegate;
 pub mod keys;
+pub mod ttl;
 
 // --- Storage Keys ---
 // All storage keys are centralized in the `keys` module and re-exported
 // below so existing call sites keep compiling unchanged. The canonical
 // key-space reference lives in STORAGE_KEYS.md.
 pub use crate::keys::{
-    package_index_entry, package_key, KEY_ADMIN, KEY_CAMPAIGN_PAUSED, KEY_CONFIG, KEY_DELEGATES,
-    KEY_DELEGATE_EXPIRY, KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM,
+    package_index_entry, package_key, KEY_ADMIN, KEY_CAMPAIGN_PAUSED, KEY_CAMPAIGN_TOKEN_CLAIMED,
+    KEY_CAMPAIGN_TOKEN_LOCKED, KEY_CONFIG, KEY_DELEGATES, KEY_DELEGATE_EXPIRY,
+    KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_MAX_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM,
     KEY_PAUSE_CREATE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN, KEY_PKG_COUNTER,
     KEY_PKG_IDX, KEY_RECIPIENT_LAST_CLAIM, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
 };
@@ -42,6 +44,22 @@ pub use crate::keys::{
 /// Upper bound on the number of package ids accepted by `batch_claim` in a
 /// single invocation, keeping the call within Soroban resource limits.
 pub const MAX_BATCH_CLAIM_SIZE: u32 = 25;
+
+/// Maximum number of package IDs that `list_recipient_packages` may return in
+/// a single call.  Enforcing this keeps the response within Soroban's read-entry
+/// resource budget even for recipients with large package histories.
+pub const MAX_PAGE_SIZE: u32 = 50;
+
+/// Default maximum number of addresses that may hold distributor privileges
+/// at once, used until an admin calls `set_max_distributors`. Bounds
+/// `add_distributor` and keeps `require_admin_or_distributor` and
+/// `list_distributors` iteration cheap regardless of how long the contract
+/// has been running.
+pub const DEFAULT_MAX_DISTRIBUTORS: u32 = 100;
+
+/// Maximum number of distributor addresses `list_distributors` may return in
+/// a single call.
+pub const MAX_DISTRIBUTOR_PAGE_SIZE: u32 = 50;
 
 // --- Data Types ---
 
@@ -68,6 +86,7 @@ pub struct Package {
     pub expires_at: u64,
     pub claim_starts_at: u64,
     pub metadata: Map<Symbol, String>,
+    pub evidence_hash: String,
 }
 
 #[contracttype]
@@ -155,6 +174,15 @@ pub enum Error {
     BatchTooLarge = 21,
     /// The recipient has not yet completed the configured claim cooldown.
     ClaimCooldownActive = 22,
+    /// `add_distributor` was called for an address that already holds
+    /// distributor privileges.
+    DistributorAlreadyExists = 23,
+    /// `remove_distributor` was called for an address that does not
+    /// currently hold distributor privileges.
+    DistributorNotFound = 24,
+    /// `add_distributor` would exceed the configured maximum distributor
+    /// set size (see `get_max_distributors` / `set_max_distributors`).
+    DistributorSetFull = 25,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -381,6 +409,37 @@ pub struct TokenRemoved {
     pub timestamp: u64,
 }
 
+/// Emitted when an address is granted distributor privileges.
+/// `total_distributors` is the resulting set size after the addition, so
+/// indexers/auditors can track set growth without a separate read.
+#[contractevent]
+pub struct DistributorAdded {
+    pub admin: Address,
+    pub distributor: Address,
+    pub total_distributors: u32,
+    pub timestamp: u64,
+}
+
+/// Emitted when an address's distributor privileges are revoked.
+/// `total_distributors` is the resulting set size after the removal.
+#[contractevent]
+pub struct DistributorRemoved {
+    pub admin: Address,
+    pub distributor: Address,
+    pub total_distributors: u32,
+    pub timestamp: u64,
+}
+
+/// Emitted when an evidence hash is attached to a package.
+/// Only admin can attach evidence hash, and it cannot overwrite an existing hash.
+#[contractevent]
+pub struct EvidenceAttached {
+    pub package_id: u64,
+    pub admin: Address,
+    pub evidence_hash: String,
+    pub timestamp: u64,
+}
+
 #[contract]
 pub struct AidEscrow;
 
@@ -535,7 +594,7 @@ impl AidEscrow {
         // Perform version-specific migrations
         match (current_version, new_version) {
             (1, 2) => {
-                // Future: Add migration logic for v1 -> v2
+                Self::backfill_campaign_token_totals(&env);
             }
             _ => {
                 // No-op for now, but structured for future use
@@ -546,11 +605,94 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// v1 -> v2 migration step: backfills `KEY_CAMPAIGN_TOKEN_LOCKED` and
+    /// `KEY_CAMPAIGN_TOKEN_CLAIMED` from existing package records, so
+    /// campaigns created before this feature shipped immediately report
+    /// correct per-campaign, per-token totals instead of starting at zero.
+    ///
+    /// Re-scans every package id in `0..KEY_PKG_COUNTER` (the same upper
+    /// bound `get_campaign_package_count` uses) and, for each package that
+    /// carries a `campaign_ref`:
+    /// - `Created` packages add their amount to the locked backfill — this
+    ///   is exact, since status + campaign_ref + token + amount fully
+    ///   determine `get_total_locked`'s equivalent per-campaign value.
+    /// - `Claimed` packages add their amount to the claimed backfill. This
+    ///   is a **best-effort approximation**: a stored `Package` does not
+    ///   record whether it was claimed by its recipient or force-disbursed
+    ///   by the admin (`disburse` also sets `status = Claimed`), so a
+    ///   campaign with a pre-migration `disburse` may show a backfilled
+    ///   total that slightly overcounts relative to `KEY_TOTAL_CLAIMED`'s
+    ///   stricter (claim-paths-only) definition for that one historical
+    ///   slice. Every claim/disburse from the migration onward is exact,
+    ///   because `increment_claimed` and `decrement_locked` write both the
+    ///   global and per-campaign totals together from that point on.
+    ///
+    /// Idempotent: re-running it (e.g. a retried `migrate(2)` call) simply
+    /// recomputes the same totals from the same persisted records and
+    /// overwrites both maps, rather than double-counting.
+    fn backfill_campaign_token_totals(env: &Env) {
+        let counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        let campaign_key = Symbol::new(env, keys::META_CAMPAIGN_REF);
+
+        let mut locked_map: Map<String, Map<Address, i128>> = Map::new(env);
+        let mut claimed_map: Map<String, Map<Address, i128>> = Map::new(env);
+
+        for id in 0..counter {
+            let key = crate::keys::package_key(id);
+            let package: Package = match env.storage().persistent().get(&key) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            let campaign_ref = match package.metadata.get(campaign_key.clone()) {
+                Some(r) => r,
+                None => continue,
+            };
+
+            match package.status {
+                PackageStatus::Created => {
+                    Self::apply_nested_delta(
+                        env,
+                        &mut locked_map,
+                        campaign_ref,
+                        &package.token,
+                        package.amount,
+                    );
+                }
+                PackageStatus::Claimed => {
+                    Self::apply_nested_delta(
+                        env,
+                        &mut claimed_map,
+                        campaign_ref,
+                        &package.token,
+                        package.amount,
+                    );
+                }
+                PackageStatus::Expired | PackageStatus::Cancelled | PackageStatus::Refunded => {}
+            }
+        }
+
+        env.storage()
+            .instance()
+            .set(&KEY_CAMPAIGN_TOKEN_LOCKED, &locked_map);
+        env.storage()
+            .instance()
+            .set(&KEY_CAMPAIGN_TOKEN_CLAIMED, &claimed_map);
+    }
+
     /// Admin-only. Grants distributor privileges to `addr`.
     /// Distributors can create packages but cannot pause, config, or disburse.
+    /// Enforces the configured maximum distributor set size (see
+    /// [`Self::get_max_distributors`] / [`Self::set_max_distributors`]) and
+    /// emits a `DistributorAdded` event carrying the resulting set size.
     ///
     /// # Errors
     /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::DistributorAlreadyExists` if `addr` already holds
+    /// distributor privileges — adding a duplicate is an explicit error, not
+    /// a silent no-op.
+    /// Returns `Error::DistributorSetFull` if the set is already at its
+    /// configured cap.
     pub fn add_distributor(env: Env, addr: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -560,18 +702,41 @@ impl AidEscrow {
             .instance()
             .get(&KEY_DISTRIBUTORS)
             .unwrap_or(Map::new(&env));
-        distributors.set(addr, true);
+
+        if distributors.get(addr.clone()).unwrap_or(false) {
+            return Err(Error::DistributorAlreadyExists);
+        }
+
+        let max_distributors = Self::get_max_distributors(env.clone());
+        if distributors.len() >= max_distributors {
+            return Err(Error::DistributorSetFull);
+        }
+
+        distributors.set(addr.clone(), true);
+        let total_distributors = distributors.len();
         env.storage()
             .instance()
             .set(&KEY_DISTRIBUTORS, &distributors);
 
+        let timestamp = env.ledger().timestamp();
+        DistributorAdded {
+            admin,
+            distributor: addr,
+            total_distributors,
+            timestamp,
+        }
+        .publish(&env);
+
         Ok(())
     }
 
-    /// Admin-only. Revokes distributor privileges from `addr`.
+    /// Admin-only. Revokes distributor privileges from `addr`. Emits a
+    /// `DistributorRemoved` event carrying the resulting set size.
     ///
     /// # Errors
     /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::DistributorNotFound` if `addr` does not currently hold
+    /// distributor privileges.
     pub fn remove_distributor(env: Env, addr: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -581,11 +746,111 @@ impl AidEscrow {
             .instance()
             .get(&KEY_DISTRIBUTORS)
             .unwrap_or(Map::new(&env));
-        distributors.remove(addr);
+
+        if !distributors.get(addr.clone()).unwrap_or(false) {
+            return Err(Error::DistributorNotFound);
+        }
+
+        distributors.remove(addr.clone());
+        let total_distributors = distributors.len();
         env.storage()
             .instance()
             .set(&KEY_DISTRIBUTORS, &distributors);
 
+        let timestamp = env.ledger().timestamp();
+        DistributorRemoved {
+            admin,
+            distributor: addr,
+            total_distributors,
+            timestamp,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Returns the current number of addresses holding distributor
+    /// privileges. Cheap O(1) audit helper; pair with
+    /// [`Self::list_distributors`] to enumerate the full set.
+    pub fn get_distributor_count(env: Env) -> u32 {
+        let distributors: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_DISTRIBUTORS)
+            .unwrap_or(Map::new(&env));
+        distributors.len()
+    }
+
+    /// Returns whether `addr` currently holds distributor privileges.
+    pub fn is_distributor(env: Env, addr: Address) -> bool {
+        let distributors: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_DISTRIBUTORS)
+            .unwrap_or(Map::new(&env));
+        distributors.get(addr).unwrap_or(false)
+    }
+
+    /// Returns up to `limit` distributor addresses starting at the 0-based
+    /// `cursor` index into the current set, for admin auditing. `limit` is
+    /// capped at [`MAX_DISTRIBUTOR_PAGE_SIZE`] regardless of the value
+    /// passed in. An out-of-range `cursor` (>= the current distributor
+    /// count) returns an empty result rather than an error.
+    ///
+    /// The set has no guaranteed ordering beyond "stable between writes":
+    /// like [`Self::list_recipient_packages`], a cursor obtained before an
+    /// intervening `add_distributor` / `remove_distributor` call may skip or
+    /// repeat an entry on the next page.
+    pub fn list_distributors(env: Env, cursor: u32, limit: u32) -> Vec<Address> {
+        let distributors: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_DISTRIBUTORS)
+            .unwrap_or(Map::new(&env));
+        let keys = distributors.keys();
+        let total = keys.len();
+
+        let mut result: Vec<Address> = Vec::new(&env);
+        if cursor >= total {
+            return result;
+        }
+
+        let effective_limit = limit.min(MAX_DISTRIBUTOR_PAGE_SIZE);
+        let end = cursor.saturating_add(effective_limit).min(total);
+        for i in cursor..end {
+            result.push_back(keys.get(i).unwrap());
+        }
+        result
+    }
+
+    /// Returns the configured maximum distributor set size. Defaults to
+    /// [`DEFAULT_MAX_DISTRIBUTORS`] until an admin calls
+    /// [`Self::set_max_distributors`].
+    pub fn get_max_distributors(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&KEY_MAX_DISTRIBUTORS)
+            .unwrap_or(DEFAULT_MAX_DISTRIBUTORS)
+    }
+
+    /// Admin-only. Sets the maximum number of addresses that may hold
+    /// distributor privileges at once. Lowering this below the current
+    /// distributor count does not remove any existing distributor; it only
+    /// blocks further `add_distributor` calls until the count drops back
+    /// under the new cap.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::InvalidAmount` if `max` is zero.
+    pub fn set_max_distributors(env: Env, max: u32) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        if max == 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        env.storage().instance().set(&KEY_MAX_DISTRIBUTORS, &max);
         Ok(())
     }
 
@@ -883,7 +1148,7 @@ impl AidEscrow {
         // --- SOLVENCY CHECK ---
         let contract_balance = Self::token_balance(&env, &token, &env.current_contract_address())?;
 
-        let mut locked_map: Map<Address, i128> = env
+        let locked_map: Map<Address, i128> = env
             .storage()
             .instance()
             .get(&KEY_TOTAL_LOCKED)
@@ -896,8 +1161,9 @@ impl AidEscrow {
         }
 
         // --- STATE UPDATES ---
-        locked_map.set(token.clone(), current_locked + amount);
-        env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+        // Updates both the global (token-only) and per-campaign (campaign +
+        // token) locked totals; see `increment_locked`.
+        Self::increment_locked(&env, &token, &metadata, amount);
 
         let created_at = env.ledger().timestamp();
         let claim_starts_at = Self::resolve_claim_starts_at(&env, &metadata, created_at)?;
@@ -916,9 +1182,11 @@ impl AidEscrow {
             expires_at,
             claim_starts_at,
             metadata,
+            evidence_hash: String::from_str(&env, ""),
         };
 
         env.storage().persistent().set(&key, &package);
+        crate::ttl::bump_persistent(&env, &key);
 
         let counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
         if id >= counter {
@@ -928,6 +1196,7 @@ impl AidEscrow {
         let idx: u64 = env.storage().instance().get(&KEY_PKG_IDX).unwrap_or(0);
         let idx_key = crate::keys::package_index_entry(idx);
         env.storage().persistent().set(&idx_key, &id);
+        crate::ttl::bump_persistent(&env, &idx_key);
         env.storage().instance().set(&KEY_PKG_IDX, &(idx + 1));
 
         PackageCreated {
@@ -1000,6 +1269,11 @@ impl AidEscrow {
 
         let mut created_ids: Vec<u64> = Vec::new(&env);
         let mut total_amount: i128 = 0;
+        // Per-campaign locked deltas for `token`, accumulated in memory and
+        // applied to KEY_CAMPAIGN_TOKEN_LOCKED once after the loop so a
+        // large batch costs one read-modify-write of that map, not one per
+        // package (mirrors how the global `locked_map` is committed once).
+        let mut campaign_locked_deltas: Map<String, i128> = Map::new(&env);
 
         for i in 0..recipients.len() {
             let recipient = recipients.get(i).unwrap();
@@ -1042,6 +1316,7 @@ impl AidEscrow {
                 expires_at,
                 claim_starts_at,
                 metadata: metadata.clone(),
+                evidence_hash: String::from_str(&env, ""),
             };
 
             env.storage().persistent().set(&key, &package);
@@ -1054,6 +1329,13 @@ impl AidEscrow {
             // Update locked
             current_locked += amount;
             total_amount += amount;
+
+            if let Some(campaign_ref) = Self::campaign_ref_from_metadata(&env, &metadata) {
+                let existing = campaign_locked_deltas
+                    .get(campaign_ref.clone())
+                    .unwrap_or(0);
+                campaign_locked_deltas.set(campaign_ref, existing + amount);
+            }
 
             PackageCreated {
                 package_id: id,
@@ -1070,6 +1352,7 @@ impl AidEscrow {
         // Persist updated locked map, counter, and aggregation index
         locked_map.set(token.clone(), current_locked);
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+        Self::apply_campaign_locked_batch_deltas(&env, &token, &campaign_locked_deltas);
         env.storage().instance().set(&KEY_PKG_COUNTER, &counter);
         env.storage().instance().set(&KEY_PKG_IDX, &idx);
 
@@ -1153,6 +1436,7 @@ impl AidEscrow {
             .persistent()
             .get(&key)
             .ok_or(Error::PackageNotFound)?;
+        crate::ttl::bump_persistent(&env, &key);
 
         Self::check_campaign_paused(&env, &package.metadata)?;
 
@@ -1254,18 +1538,8 @@ impl AidEscrow {
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&key, &package);
 
-        Self::decrement_locked(&env, &package.token, package.amount);
-
-        let mut claimed_map: Map<Address, i128> = env
-            .storage()
-            .instance()
-            .get(&KEY_TOTAL_CLAIMED)
-            .unwrap_or(Map::new(&env));
-        let current_total = claimed_map.get(package.token.clone()).unwrap_or(0);
-        claimed_map.set(package.token.clone(), current_total + package.amount);
-        env.storage()
-            .instance()
-            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
+        Self::increment_claimed(&env, &package.token, &package.metadata, package.amount);
         Self::record_recipient_claim(&env, &package.recipient, now);
 
         PackageClaimedByRelayer {
@@ -1407,8 +1681,12 @@ impl AidEscrow {
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&key, &package);
 
-        // Update Locked
-        Self::decrement_locked(&env, &package.token, package.amount);
+        // Update Locked. Intentionally does NOT touch KEY_TOTAL_CLAIMED /
+        // KEY_CAMPAIGN_TOKEN_CLAIMED: an admin-forced disbursement has never
+        // counted as a "claim" for that accounting (see get_total_claimed's
+        // doc comment); the per-campaign counter preserves that behaviour so
+        // it stays summable to the token-level total.
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
         let timestamp = env.ledger().timestamp();
         let receipt_hash = Self::receipt_hash_from_metadata(&env, &package.metadata);
@@ -1487,7 +1765,7 @@ impl AidEscrow {
         env.storage().persistent().set(&key, &package);
 
         // Unlock funds (return to pool)
-        Self::decrement_locked(&env, &package.token, package.amount);
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
         let timestamp = env.ledger().timestamp();
         PackageRevoked {
@@ -1548,7 +1826,7 @@ impl AidEscrow {
         )?;
 
         if should_unlock_locked {
-            Self::decrement_locked(&env, &package.token, package.amount);
+            Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
         }
 
         // State Transition
@@ -1597,8 +1875,8 @@ impl AidEscrow {
         package.status = PackageStatus::Cancelled;
         env.storage().persistent().set(&key, &package);
 
-        // 5. Unlock funds (Decrement the global locked amount so funds return to the pool)
-        Self::decrement_locked(&env, &package.token, package.amount);
+        // 5. Unlock funds (Decrement the global and per-campaign locked amounts so funds return to the pool)
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
         let timestamp = env.ledger().timestamp();
         PackageRevoked {
@@ -1613,7 +1891,61 @@ impl AidEscrow {
         Ok(())
     }
 
-    /// Admin-only package expiration extension.
+    /// Admin-only function to attach an evidence hash to a package.
+    /// The evidence hash is a 64-character hex string (32 bytes) that anchors
+    /// off-chain verification evidence to the on-chain package.
+    /// Cannot overwrite an existing evidence hash.
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must be authenticated)
+    /// * `package_id` - Package ID to attach evidence to
+    /// * `evidence_hash` - 64-character hex string representing the evidence hash
+    ///
+    /// # Errors
+    /// - `Error::NotAuthorized` - Caller is not the admin
+    /// - `Error::PackageNotFound` - Package doesn't exist
+    /// - `Error::InvalidState` - Package already has an evidence hash, or hash format is invalid
+    pub fn attach_evidence_hash(
+        env: Env,
+        admin: Address,
+        package_id: u64,
+        evidence_hash: String,
+    ) -> Result<(), Error> {
+        admin.require_auth();
+
+        let config_admin = Self::get_admin(env.clone())?;
+        if admin != config_admin {
+            return Err(Error::NotAuthorized);
+        }
+
+        let key = crate::keys::package_key(package_id);
+        let mut package: Package = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::PackageNotFound)?;
+
+        if !package.evidence_hash.is_empty() {
+            return Err(Error::InvalidState);
+        }
+
+        Self::validate_evidence_hash(&env, &evidence_hash)?;
+
+        package.evidence_hash = evidence_hash.clone();
+        env.storage().persistent().set(&key, &package);
+
+        let timestamp = env.ledger().timestamp();
+        EvidenceAttached {
+            package_id,
+            admin,
+            evidence_hash,
+            timestamp,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
     /// Admin-only package expiration extension using a relative time delta.
     ///
     /// # Deprecated
@@ -1803,7 +2135,37 @@ impl AidEscrow {
         Ok(())
     }
 
-    fn decrement_locked(env: &Env, token: &Address, amount: i128) {
+    /// Increments the global (`KEY_TOTAL_LOCKED`) and, if `metadata` carries a
+    /// `campaign_ref`, the matching per-campaign (`KEY_CAMPAIGN_TOKEN_LOCKED`)
+    /// locked total for `token` by `amount`. The single call site for both
+    /// updates guarantees they can never drift apart. Used by `create_package`;
+    /// `batch_create_packages` uses its own batched variant,
+    /// `apply_campaign_locked_batch_deltas`, for the per-campaign half so a
+    /// large batch does not pay one read-modify-write per package.
+    fn increment_locked(env: &Env, token: &Address, metadata: &Map<Symbol, String>, amount: i128) {
+        let mut locked_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_LOCKED)
+            .unwrap_or(Map::new(env));
+
+        let current = locked_map.get(token.clone()).unwrap_or(0);
+        locked_map.set(token.clone(), current + amount);
+        env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+
+        Self::adjust_campaign_token_amount(
+            env,
+            &KEY_CAMPAIGN_TOKEN_LOCKED,
+            metadata,
+            token,
+            amount,
+        );
+    }
+
+    /// Decrements (floored at zero) the global and, if applicable, the
+    /// per-campaign locked total for `token` by `amount`. See
+    /// [`Self::increment_locked`] for why both updates are made in one place.
+    fn decrement_locked(env: &Env, token: &Address, metadata: &Map<Symbol, String>, amount: i128) {
         let mut locked_map: Map<Address, i128> = env
             .storage()
             .instance()
@@ -1819,6 +2181,122 @@ impl AidEscrow {
 
         locked_map.set(token.clone(), new_locked);
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+
+        Self::adjust_campaign_token_amount(
+            env,
+            &KEY_CAMPAIGN_TOKEN_LOCKED,
+            metadata,
+            token,
+            -amount,
+        );
+    }
+
+    /// Increments the global (`KEY_TOTAL_CLAIMED`) and, if applicable, the
+    /// per-campaign (`KEY_CAMPAIGN_TOKEN_CLAIMED`) claimed total for `token`
+    /// by `amount`. Called only from recipient-initiated claim paths
+    /// (`finalize_claim`, `claim_with_relayer`) — never from `disburse` — so
+    /// both totals keep `KEY_TOTAL_CLAIMED`'s existing, admin-disbursement-
+    /// excluded semantics.
+    fn increment_claimed(env: &Env, token: &Address, metadata: &Map<Symbol, String>, amount: i128) {
+        let mut claimed_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_CLAIMED)
+            .unwrap_or(Map::new(env));
+        let current_total = claimed_map.get(token.clone()).unwrap_or(0);
+        claimed_map.set(token.clone(), current_total + amount);
+        env.storage()
+            .instance()
+            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+
+        Self::adjust_campaign_token_amount(
+            env,
+            &KEY_CAMPAIGN_TOKEN_CLAIMED,
+            metadata,
+            token,
+            amount,
+        );
+    }
+
+    /// Applies `delta` (positive to increment, negative to decrement, floored
+    /// at zero) to the entry for `(campaign_ref, token)` inside the nested map
+    /// stored at `storage_key`. A no-op if `metadata` carries no
+    /// `campaign_ref` — packages not tagged to a campaign are never
+    /// attributed to one.
+    fn adjust_campaign_token_amount(
+        env: &Env,
+        storage_key: &Symbol,
+        metadata: &Map<Symbol, String>,
+        token: &Address,
+        delta: i128,
+    ) {
+        let campaign_ref = match Self::campaign_ref_from_metadata(env, metadata) {
+            Some(r) => r,
+            None => return,
+        };
+
+        let mut campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(storage_key)
+            .unwrap_or(Map::new(env));
+        Self::apply_nested_delta(env, &mut campaign_map, campaign_ref, token, delta);
+        env.storage().instance().set(storage_key, &campaign_map);
+    }
+
+    /// Applies a batch of per-campaign locked deltas for a single `token` to
+    /// `KEY_CAMPAIGN_TOKEN_LOCKED` in one read-modify-write, regardless of how
+    /// many distinct campaigns appear in `deltas`. Used by
+    /// `batch_create_packages` so a large batch is not O(packages) instance
+    /// storage writes.
+    fn apply_campaign_locked_batch_deltas(env: &Env, token: &Address, deltas: &Map<String, i128>) {
+        if deltas.is_empty() {
+            return;
+        }
+
+        let mut campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_TOKEN_LOCKED)
+            .unwrap_or(Map::new(env));
+
+        for campaign_ref in deltas.keys() {
+            let delta = deltas.get(campaign_ref.clone()).unwrap_or(0);
+            Self::apply_nested_delta(env, &mut campaign_map, campaign_ref, token, delta);
+        }
+
+        env.storage()
+            .instance()
+            .set(&KEY_CAMPAIGN_TOKEN_LOCKED, &campaign_map);
+    }
+
+    /// Applies `delta` to `campaign_map[campaign_ref][token]` in memory
+    /// (floored at zero on the way down), inserting empty inner maps as
+    /// needed. Shared by the single-entry and batched adjustment helpers so
+    /// the clamping logic lives in exactly one place.
+    fn apply_nested_delta(
+        env: &Env,
+        campaign_map: &mut Map<String, Map<Address, i128>>,
+        campaign_ref: String,
+        token: &Address,
+        delta: i128,
+    ) {
+        let mut token_map = campaign_map
+            .get(campaign_ref.clone())
+            .unwrap_or(Map::new(env));
+        let current = token_map.get(token.clone()).unwrap_or(0);
+        let updated = if delta >= 0 {
+            current + delta
+        } else {
+            let decrease = -delta;
+            if current > decrease {
+                current - decrease
+            } else {
+                0
+            }
+        };
+        token_map.set(token.clone(), updated);
+        campaign_map.set(campaign_ref, token_map);
     }
 
     fn validate_token(env: &Env, token: &Address) -> Result<u32, Error> {
@@ -1912,19 +2390,9 @@ impl AidEscrow {
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(key, package);
 
-        // Update Global Locked (Bookkeeping)
-        Self::decrement_locked(env, &package.token, package.amount);
-
-        let mut claimed_map: Map<Address, i128> = env
-            .storage()
-            .instance()
-            .get(&KEY_TOTAL_CLAIMED)
-            .unwrap_or(Map::new(env));
-        let current_total = claimed_map.get(package.token.clone()).unwrap_or(0);
-        claimed_map.set(package.token.clone(), current_total + package.amount);
-        env.storage()
-            .instance()
-            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+        // Update Global + Per-Campaign Locked and Claimed (Bookkeeping)
+        Self::decrement_locked(env, &package.token, &package.metadata, package.amount);
+        Self::increment_claimed(env, &package.token, &package.metadata, package.amount);
         Self::record_recipient_claim(env, &package.recipient, now);
 
         // Check if claimant is a delegate (not the recipient)
@@ -2110,6 +2578,25 @@ impl AidEscrow {
         }
     }
 
+    /// Validates that the evidence hash is a 64-character hex string (32 bytes).
+    fn validate_evidence_hash(_env: &Env, hash: &String) -> Result<(), Error> {
+        let len = hash.len() as usize;
+        if len != 64 {
+            return Err(Error::InvalidState);
+        }
+
+        let mut raw = [0u8; 64];
+        hash.copy_into_slice(&mut raw);
+
+        for byte in &raw {
+            if Self::hex_nibble(*byte).is_none() {
+                return Err(Error::InvalidState);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Returns the total amount currently locked for a specific token.
     pub fn get_total_locked(env: Env, token: Address) -> i128 {
         let locked_map: Map<Address, i128> = env
@@ -2128,6 +2615,50 @@ impl AidEscrow {
             .get(&KEY_TOTAL_CLAIMED)
             .unwrap_or(Map::new(&env));
         claimed_map.get(token).unwrap_or(0)
+    }
+
+    /// Returns the amount currently locked for `campaign_ref` in `token`.
+    ///
+    /// Scoped, per-campaign counterpart to [`Self::get_total_locked`]:
+    /// summing this value across every campaign that has ever held `token`
+    /// equals `get_total_locked(token)`, minus whatever is locked in
+    /// packages that carry no `campaign_ref` at all (those are never
+    /// attributed to a campaign). Updated at exactly the same points as
+    /// `get_total_locked`: package creation increments it; claim, disburse,
+    /// refund, revoke, cancellation, and expiry sweep decrement it. Zero for
+    /// an unknown campaign or a campaign that has never held `token`.
+    pub fn get_campaign_token_locked(env: Env, campaign_ref: String, token: Address) -> i128 {
+        let campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_TOKEN_LOCKED)
+            .unwrap_or(Map::new(&env));
+        campaign_map
+            .get(campaign_ref)
+            .and_then(|token_map| token_map.get(token))
+            .unwrap_or(0)
+    }
+
+    /// Returns the cumulative amount claimed for `campaign_ref` in `token`.
+    ///
+    /// Scoped, per-campaign counterpart to [`Self::get_total_claimed`].
+    /// Mirrors its semantics exactly, including only recipient-initiated
+    /// claim paths (`claim`, `claim_with_proof`, `claim_with_relayer`,
+    /// `batch_claim`); an admin-forced `disburse` does not increment either
+    /// total. Summing this value across every campaign that has ever held
+    /// `token` equals `get_total_claimed(token)`, minus claims from packages
+    /// with no `campaign_ref`. Zero for an unknown campaign or a campaign
+    /// that has never had a claim in `token`.
+    pub fn get_campaign_token_claimed(env: Env, campaign_ref: String, token: Address) -> i128 {
+        let campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_TOKEN_CLAIMED)
+            .unwrap_or(Map::new(&env));
+        campaign_map
+            .get(campaign_ref)
+            .and_then(|token_map| token_map.get(token))
+            .unwrap_or(0)
     }
 
     fn require_admin_or_distributor(env: &Env, operator: &Address) -> Result<(), Error> {
@@ -2156,10 +2687,13 @@ impl AidEscrow {
     /// Returns `Error::PackageNotFound` if no package exists with the given `id`.
     pub fn get_package(env: Env, id: u64) -> Result<Package, Error> {
         let key = crate::keys::package_key(id);
-        env.storage()
+        let pkg = env
+            .storage()
             .persistent()
             .get(&key)
-            .ok_or(Error::PackageNotFound)
+            .ok_or(Error::PackageNotFound)?;
+        crate::ttl::bump_persistent(&env, &key);
+        Ok(pkg)
     }
 
     /// Returns only the status of a package.
@@ -2167,6 +2701,16 @@ impl AidEscrow {
     pub fn view_package_status(env: Env, id: u64) -> Result<PackageStatus, Error> {
         let pkg = Self::get_package(env, id)?;
         Ok(pkg.status)
+    }
+
+    /// Returns the evidence hash attached to a package.
+    /// Returns empty string if no evidence hash has been attached.
+    ///
+    /// # Errors
+    /// Returns `Error::PackageNotFound` if no package exists with the given `id`.
+    pub fn get_evidence_hash(env: Env, id: u64) -> Result<String, Error> {
+        let pkg = Self::get_package(env, id)?;
+        Ok(pkg.evidence_hash)
     }
 
     // --- Analytics ---
@@ -2287,12 +2831,18 @@ impl AidEscrow {
     ///
     /// # Arguments
     /// * `recipient` - The address to filter packages by
-    /// * `cursor` - Starting position for pagination (0-indexed)
-    /// * `limit` - Maximum number of results to return
+    /// * `cursor` - Starting position for pagination (0-indexed offset into the
+    ///              global package ID space; if `cursor >= package_counter` an
+    ///              empty result is returned)
+    /// * `limit` - Maximum number of results to return; capped at
+    ///             [`MAX_PAGE_SIZE`] to keep the call within Soroban resource
+    ///             limits
     ///
     /// # Returns
-    /// A Vec<u64> containing package IDs that belong to the recipient,
-    /// starting from the cursor position and limited by the limit parameter.
+    /// A `Vec<u64>` containing package IDs that belong to the recipient,
+    /// starting from `cursor` and bounded by the effective `limit`.
+    /// Use [`get_recipient_package_count`] to obtain the total count for
+    /// constructing subsequent page requests.
     pub fn list_recipient_packages(
         env: Env,
         recipient: Address,
@@ -2302,12 +2852,17 @@ impl AidEscrow {
         let package_counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
         let mut result: Vec<u64> = Vec::new(&env);
 
-        // Calculate the end position: cursor + limit or package_counter, whichever comes first
-        let end_pos = if cursor.saturating_add(limit as u64) > package_counter {
-            package_counter
-        } else {
-            cursor.saturating_add(limit as u64)
-        };
+        // Enforce the page-size cap so callers cannot request unbounded reads.
+        let effective_limit = limit.min(MAX_PAGE_SIZE);
+
+        // Out-of-range cursor: nothing to return.
+        if cursor >= package_counter {
+            return result;
+        }
+
+        // Calculate the end position: cursor + effective_limit or package_counter,
+        // whichever comes first.
+        let end_pos = (cursor.saturating_add(effective_limit as u64)).min(package_counter);
 
         // Iterate from cursor to end_pos
         for id in cursor..end_pos {
@@ -2672,7 +3227,7 @@ impl AidEscrow {
             package.status = PackageStatus::Expired;
             env.storage().persistent().set(&pkg_key, &package);
 
-            Self::decrement_locked(&env, &package.token, package.amount);
+            Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
             PackageSwept {
                 package_id: pkg_id,
@@ -2823,6 +3378,137 @@ mod tests {
 
         let page = client.list_recipient_packages(&recipient, &0, &3);
         assert_eq!(page.len(), 3);
+    }
+
+    // ---- Pagination acceptance tests (issue #963) ----
+
+    /// Empty result when no packages exist for the recipient.
+    #[test]
+    fn test_list_recipient_packages_empty() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        // No packages created — expect empty Vec.
+        let result = client.list_recipient_packages(&recipient, &0, &10);
+        assert_eq!(result.len(), 0);
+    }
+
+    /// Single-page retrieval: all packages fit inside one call.
+    #[test]
+    fn test_list_recipient_packages_single_page() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        sac.mint(&admin, &30_000_000);
+        client.fund(&token, &admin, &30_000_000);
+
+        let meta = Map::new(&env);
+        for i in 0..3_u64 {
+            client.create_package(&admin, &i, &recipient, &10_000_000, &token, &86400, &meta);
+        }
+
+        // Request more than available — should return exactly 3.
+        let result = client.list_recipient_packages(&recipient, &0, &50);
+        assert_eq!(result.len(), 3);
+        // Count helper must agree.
+        assert_eq!(client.get_recipient_package_count(&recipient), 3);
+    }
+
+    /// Multi-page retrieval: iterate through pages and collect all package IDs.
+    #[test]
+    fn test_list_recipient_packages_multi_page() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        sac.mint(&admin, &70_000_000);
+        client.fund(&token, &admin, &70_000_000);
+
+        let meta = Map::new(&env);
+        for i in 0..7_u64 {
+            client.create_package(&admin, &i, &recipient, &10_000_000, &token, &86400, &meta);
+        }
+
+        let total = client.get_recipient_package_count(&recipient);
+        assert_eq!(total, 7);
+
+        // Page 1: IDs 0..3
+        let page1 = client.list_recipient_packages(&recipient, &0, &3);
+        assert_eq!(page1.len(), 3);
+
+        // Page 2: IDs 3..6
+        let page2 = client.list_recipient_packages(&recipient, &3, &3);
+        assert_eq!(page2.len(), 3);
+
+        // Page 3: ID 6
+        let page3 = client.list_recipient_packages(&recipient, &6, &3);
+        assert_eq!(page3.len(), 1);
+
+        // All pages together cover all 7 packages.
+        assert_eq!(page1.len() + page2.len() + page3.len(), 7);
+    }
+
+    /// Out-of-range cursor returns an empty result without panicking.
+    #[test]
+    fn test_list_recipient_packages_out_of_range_cursor() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        sac.mint(&admin, &10_000_000);
+        client.fund(&token, &admin, &10_000_000);
+
+        let meta = Map::new(&env);
+        client.create_package(&admin, &0, &recipient, &10_000_000, &token, &86400, &meta);
+
+        // cursor = 999 is way beyond the single package — must return empty.
+        let result = client.list_recipient_packages(&recipient, &999, &10);
+        assert_eq!(result.len(), 0);
+    }
+
+    /// MAX_PAGE_SIZE is enforced: passing a limit larger than MAX_PAGE_SIZE
+    /// must not return more than MAX_PAGE_SIZE items.
+    #[test]
+    fn test_list_recipient_packages_max_page_size_enforced() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, sac, _) = setup_token(&env, &admin);
+
+        env.mock_all_auths();
+        client.init(&admin);
+
+        // Create MAX_PAGE_SIZE + 5 packages so a full page is possible.
+        let n = (MAX_PAGE_SIZE + 5) as u64;
+        let total_amount = n as i128 * 10_000_000;
+        sac.mint(&admin, &total_amount);
+        client.fund(&token, &admin, &total_amount);
+
+        let meta = Map::new(&env);
+        for i in 0..n {
+            client.create_package(&admin, &i, &recipient, &10_000_000, &token, &86400, &meta);
+        }
+
+        // Requesting more than MAX_PAGE_SIZE must be silently capped.
+        let result = client.list_recipient_packages(&recipient, &0, &(MAX_PAGE_SIZE + 100));
+        assert!(result.len() <= MAX_PAGE_SIZE);
     }
 
     #[test]

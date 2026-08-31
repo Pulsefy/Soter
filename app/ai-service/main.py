@@ -174,6 +174,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Lets metrics.bounded_endpoint_label() resolve raw request paths to their
+# registered route templates (see metrics.py's cardinality guidance).
+metrics.bind_app(app)
+
 app.add_middleware(RequestSizeLimitMiddleware)
 
 proof_of_life_analyzer = ProofOfLifeAnalyzer(
@@ -507,14 +511,18 @@ async def monitor_requests(request: Request, call_next):
         if hasattr(request.app.state, "active_requests"):
             request.app.state.active_requests -= 1
         latency = time.time() - start_time
+        # Bound the endpoint label to the matched route template so ids in
+        # the path (task/artifact/dead-letter-item ids) never become label
+        # values (see metrics.py's cardinality guidance, issue #988).
+        bounded_endpoint = metrics.bounded_endpoint_label(path)
         metrics.REQUEST_COUNT.labels(
             method=request.method,
-            endpoint=path,
+            endpoint=bounded_endpoint,
             http_status=status_code,
         ).inc()
-        metrics.REQUEST_LATENCY.labels(method=request.method, endpoint=path).observe(
-            latency
-        )
+        metrics.REQUEST_LATENCY.labels(
+            method=request.method, endpoint=bounded_endpoint
+        ).observe(latency)
 
         monitored_prefixes = ("/ai/", "/v1/ai/")
         if any(path.startswith(p) for p in monitored_prefixes):

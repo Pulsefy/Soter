@@ -1,15 +1,21 @@
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
+import { Logger, Inject } from '@nestjs/common';
 import { Job } from 'bullmq';
 import {
   NotificationJobData,
   NotificationResult,
+  NotificationType,
 } from './interfaces/notification-job.interface';
 import { PrismaService } from '../prisma/prisma.service';
 
 import { DlqService } from '../jobs/dlq.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { classifyNotificationFailure } from './notification-failure-classifier';
+import {
+  DeliveryAdapter,
+  EMAIL_ADAPTER,
+  SMS_ADAPTER,
+} from './adapters/delivery-adapter.interface';
 
 @Processor('notifications', {
   concurrency: parseInt(process.env.QUEUE_CONCURRENCY || '5'),
@@ -21,6 +27,8 @@ export class NotificationProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly dlqService: DlqService,
     private readonly metricsService: MetricsService,
+    @Inject(EMAIL_ADAPTER) private readonly emailAdapter: DeliveryAdapter,
+    @Inject(SMS_ADAPTER) private readonly smsAdapter: DeliveryAdapter,
   ) {
     super();
   }
@@ -53,17 +61,25 @@ export class NotificationProcessor extends WorkerHost {
     }
 
     try {
-      // Mock: In production, integrate with SendGrid, Twilio, etc.
-      this.logger.debug(
-        `[Mock] Sending ${job.data.type} to ${job.data.recipient}: ${job.data.message}`,
-      );
+      // Select the correct delivery adapter based on notification type
+      const adapter =
+        job.data.type === NotificationType.EMAIL
+          ? this.emailAdapter
+          : this.smsAdapter;
 
-      // Simulate some processing time
-      await new Promise(resolve => setTimeout(resolve, 100));
+      const deliveryResult = await adapter.send({
+        recipient: job.data.recipient,
+        subject: job.data.subject,
+        message: job.data.message,
+      });
+
+      if (!deliveryResult.success) {
+        throw new Error(deliveryResult.error ?? 'Delivery failed');
+      }
 
       return {
         success: true,
-        messageId: `mock-msg-${Date.now()}`,
+        messageId: deliveryResult.providerMessageId,
       };
     } catch (error) {
       this.logger.error(
@@ -112,7 +128,9 @@ export class NotificationProcessor extends WorkerHost {
     );
 
     try {
-      const startedAt = job.processedOn ? new Date(job.processedOn) : new Date();
+      const startedAt = job.processedOn
+        ? new Date(job.processedOn)
+        : new Date();
       const completedAt = new Date();
       await this.prisma.notificationDeliveryAttempt.create({
         data: {
@@ -159,7 +177,7 @@ export class NotificationProcessor extends WorkerHost {
     const maxAttempts =
       typeof job.opts?.attempts === 'number' ? job.opts.attempts : 1;
     const exhausted = job.attemptsMade >= maxAttempts;
-    const status = exhausted ? 'failed' : 'enqueued';
+    const status = exhausted ? 'dead_letter' : 'enqueued';
 
     try {
       await this.prisma.notificationOutbox.update({
@@ -177,6 +195,19 @@ export class NotificationProcessor extends WorkerHost {
       );
     }
 
+    if (exhausted && this.metricsService.setNotificationDeadLetterDepth) {
+      try {
+        const depth = await this.prisma.notificationOutbox.count({
+          where: { status: 'dead_letter' },
+        });
+        this.metricsService.setNotificationDeadLetterDepth(depth);
+      } catch (err) {
+        this.logger.warn(
+          `Could not refresh notification dead-letter depth: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     const failureCategory = classifyNotificationFailure(error);
     this.metricsService.incrementNotificationDeliveryAttempt(
       job.data.type,
@@ -188,7 +219,9 @@ export class NotificationProcessor extends WorkerHost {
     );
 
     try {
-      const startedAt = job.processedOn ? new Date(job.processedOn) : new Date();
+      const startedAt = job.processedOn
+        ? new Date(job.processedOn)
+        : new Date();
       const completedAt = new Date();
       await this.prisma.notificationDeliveryAttempt.create({
         data: {

@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import type { EntityLink, Prisma, RegistryEntityType } from '@prisma/client';
 import {
   CreateEntityLinkDto,
   LinkEntityResult,
@@ -57,7 +58,7 @@ export class EntityLinkingService {
     }
 
     // Create entity link
-    const linkData: any = {
+    const linkData: Prisma.EntityLinkUncheckedCreateInput = {
       sourceType: dto.sourceType,
       sourceId: dto.sourceId,
       extractedName: dto.extractedName,
@@ -65,7 +66,7 @@ export class EntityLinkingService {
       entityType: dto.entityType,
       confidenceScore: dto.confidenceScore,
       matchMethod,
-      metadata: dto.metadata ? JSON.parse(JSON.stringify(dto.metadata)) : null,
+      metadata: (dto.metadata ?? null) as Prisma.InputJsonValue,
     };
 
     // Set the appropriate registry relation
@@ -110,7 +111,7 @@ export class EntityLinkingService {
     const limit = query.limit || 20;
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: Prisma.EntityLinkWhereInput = {};
 
     if (query.sourceType) {
       where.sourceType = query.sourceType;
@@ -157,13 +158,13 @@ export class EntityLinkingService {
     campaignId: string,
     entityType?: string,
   ): Promise<LinkEntityResult[]> {
-    const where: any = {
+    const where: Prisma.EntityLinkWhereInput = {
       sourceType: 'campaign',
       sourceId: campaignId,
     };
 
     if (entityType) {
-      where.entityType = entityType;
+      where.entityType = entityType as RegistryEntityType;
     }
 
     const links = await this.prisma.entityLink.findMany({
@@ -181,13 +182,13 @@ export class EntityLinkingService {
     claimId: string,
     entityType?: string,
   ): Promise<LinkEntityResult[]> {
-    const where: any = {
+    const where: Prisma.EntityLinkWhereInput = {
       sourceType: 'claim',
       sourceId: claimId,
     };
 
     if (entityType) {
-      where.entityType = entityType;
+      where.entityType = entityType as RegistryEntityType;
     }
 
     const links = await this.prisma.entityLink.findMany({
@@ -205,13 +206,13 @@ export class EntityLinkingService {
     verificationId: string,
     entityType?: string,
   ): Promise<LinkEntityResult[]> {
-    const where: any = {
+    const where: Prisma.EntityLinkWhereInput = {
       sourceType: 'verification',
       sourceId: verificationId,
     };
 
     if (entityType) {
-      where.entityType = entityType;
+      where.entityType = entityType as RegistryEntityType;
     }
 
     const links = await this.prisma.entityLink.findMany({
@@ -529,7 +530,7 @@ export class EntityLinkingService {
   /**
    * Helper: Map Prisma entity link to result DTO
    */
-  private mapLinkResult(link: any): LinkEntityResult {
+  private mapLinkResult(link: EntityLink): LinkEntityResult {
     return {
       id: link.id,
       sourceType: link.sourceType,

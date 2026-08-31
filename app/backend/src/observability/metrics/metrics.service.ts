@@ -55,6 +55,16 @@ export class MetricsService {
     public analyticsCacheMissesCounter: Counter<string>,
     @InjectMetric('analytics_cache_invalidations_total')
     public analyticsCacheInvalidationsCounter: Counter<string>,
+
+    // Generic Response Cache Metrics (issue #702)
+    @InjectMetric('cache_hits_total')
+    public cacheHitsCounter: Counter<string>,
+    @InjectMetric('cache_misses_total')
+    public cacheMissesCounter: Counter<string>,
+    @InjectMetric('cache_invalidations_total')
+    public cacheInvalidationsCounter: Counter<string>,
+    @InjectMetric('cache_keys_total')
+    public cacheKeysGauge: Gauge<string>,
     @InjectMetric('verification_jobs_enqueued_total')
     public verificationJobsEnqueuedCounter: Counter<string>,
     @InjectMetric('verification_queue_waiting_by_priority')
@@ -75,6 +85,10 @@ export class MetricsService {
     public claimsInFunnelGauge: Gauge<string>,
     @InjectMetric('claim_funnel_duration_seconds')
     public claimFunnelDuration: Histogram<string>,
+
+    // API Key Rate Limit Metrics (issue #952)
+    @InjectMetric('api_key_rate_limit_rejections_total')
+    public apiKeyRateLimitRejectionsCounter: Counter<string>,
   ) {}
 
   /**
@@ -307,6 +321,58 @@ export class MetricsService {
   }
 
   /**
+   * Record a generic response cache hit for a given key group
+   * (e.g. 'verification', 'analytics', 'user').
+   */
+  recordCacheHit(keyGroup: string): void {
+    this.cacheHitsCounter.inc({ key_group: keyGroup });
+  }
+
+  /**
+   * Record a generic response cache miss for a given key group.
+   */
+  recordCacheMiss(keyGroup: string): void {
+    this.cacheMissesCounter.inc({ key_group: keyGroup });
+  }
+
+  /**
+   * Increment the generic response cache invalidation counter for a key group.
+   */
+  incrementCacheInvalidation(keyGroup: string): void {
+    this.cacheInvalidationsCounter.inc({ key_group: keyGroup });
+  }
+
+  /**
+   * Set the current Redis key count for a cache key group (Redis key health).
+   */
+  setCacheKeyGroupSize(keyGroup: string, count: number): void {
+    this.cacheKeysGauge.set({ key_group: keyGroup }, count);
+  }
+
+  /**
+   * Sum a counter's value across all of its label combinations.
+   */
+  private async sumCounter(counter: Counter<string>): Promise<number> {
+    const data = await counter.get();
+    return data.values.reduce((sum, entry) => sum + entry.value, 0);
+  }
+
+  /** Cumulative count of generic response cache hits across all key groups. */
+  async getCacheHitsTotal(): Promise<number> {
+    return this.sumCounter(this.cacheHitsCounter);
+  }
+
+  /** Cumulative count of generic response cache misses across all key groups. */
+  async getCacheMissesTotal(): Promise<number> {
+    return this.sumCounter(this.cacheMissesCounter);
+  }
+
+  /** Cumulative count of generic response cache invalidations across all key groups. */
+  async getCacheInvalidationsTotal(): Promise<number> {
+    return this.sumCounter(this.cacheInvalidationsCounter);
+  }
+
+  /**
    * Increment the counter for claims created, labelled by campaign_id.
    */
   incrementClaimsCreated(campaignId: string): void {
@@ -361,6 +427,11 @@ export class MetricsService {
    */
   setClaimsInFunnel(status: string, count: number): void {
     this.claimsInFunnelGauge.set({ status }, count);
+  }
+
+  /** Set the current number of notification outbox records awaiting replay. */
+  setNotificationDeadLetterDepth(count: number): void {
+    this.setGauge('notification_dead_letter_depth', count);
   }
 
   /**
@@ -472,5 +543,12 @@ export class MetricsService {
 
     const histogram = this.dynamicHistograms.get(key)!;
     histogram.observe(labels || {}, value);
+  }
+
+  /**
+   * Increment the counter tracking per-API-key rate limit rejections (issue #952).
+   */
+  incrementApiKeyRateLimitRejection(scope: string, apiKeyId: string): void {
+    this.apiKeyRateLimitRejectionsCounter.inc({ scope, api_key_id: apiKeyId });
   }
 }

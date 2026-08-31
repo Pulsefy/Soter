@@ -141,6 +141,28 @@ export const metricsProviders = [
     labelNames: ['reason'],
   }),
 
+  // Generic Response Cache Metrics (issue #702)
+  makeCounterProvider({
+    name: 'cache_hits_total',
+    help: 'Total number of response cache hits, labelled by key group',
+    labelNames: ['key_group'],
+  }),
+  makeCounterProvider({
+    name: 'cache_misses_total',
+    help: 'Total number of response cache misses, labelled by key group',
+    labelNames: ['key_group'],
+  }),
+  makeCounterProvider({
+    name: 'cache_invalidations_total',
+    help: 'Total number of response cache invalidations, labelled by key group',
+    labelNames: ['key_group'],
+  }),
+  makeGaugeProvider({
+    name: 'cache_keys_total',
+    help: 'Current number of Redis keys per cache key group',
+    labelNames: ['key_group'],
+  }),
+
   // Verification Priority Metrics
   makeCounterProvider({
     name: 'verification_jobs_enqueued_total',
@@ -189,5 +211,12 @@ export const metricsProviders = [
     help: 'Time spent within each claim funnel stage before transitioning',
     labelNames: ['from_status', 'to_status'],
     buckets: [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 86400],
+  }),
+
+  // API Key Rate Limit Metrics (issue #952)
+  makeCounterProvider({
+    name: 'api_key_rate_limit_rejections_total',
+    help: 'Total number of per-API-key rate limit rejections',
+    labelNames: ['scope', 'api_key_id'],
   }),
 ];

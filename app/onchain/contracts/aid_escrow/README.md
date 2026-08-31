@@ -106,6 +106,32 @@ Cancelled --> Refunded       (admin refunds)
 | 12 | `MismatchedArrays` | `recipients` and `amounts` lengths differ in batch create. |
 | 13 | `InsufficientSurplus` | `withdraw_surplus` amount exceeds available surplus. |
 | 14 | `ContractPaused` | Operation blocked because contract is paused. |
+| 15 | `ClaimTooEarly` | Claim attempted before the claim window opens. |
+| 16 | `InvalidProof` | Claim proof is invalid or missing. |
+| 17 | `InvalidToken` | Token contract address is not allowed by config. |
+| 18 | `TokenTransferFailed` | Token transfer reverted (e.g. insufficient allowance). |
+| 19 | `NoPendingTransfer` | No pending admin transfer is in progress. |
+| 20 | `InvalidPendingAdmin` | Pending admin address does not match the caller. |
+| 21 | `BatchTooLarge` | Batch operation exceeds the maximum allowed size. |
+| 22 | `ClaimCooldownActive` | Recipient has not yet completed the claim cooldown. |
+
+### Compatibility Policy
+
+The numeric codes in the table above are **stable and part of the public
+contract ABI**. The backend adapter
+(`app/backend/src/onchain/utils/soroban-error.mapper.ts`) maps these codes to
+user-facing messages, so reordering or removing a variant would silently break
+that mapping.
+
+- **Adding a new error**: append the new variant with the **next unused code**
+  (currently `23`). Never reuse, renumber, or skip codes.
+- **Removing an error**: do **not** remove a variant. If it is no longer
+  emitted, keep the variant and its code so existing mappings remain valid.
+- **Renaming**: renaming a variant is allowed only if the numeric code is
+  preserved; update the backend mapper and this table in the same change.
+- **Guarding**: `tests/error_codes.rs` pins every variant to its canonical code
+  and verifies the codes are unique and contiguous. Any reorder or removal
+  fails CI.
 
 ## Data Structures
 

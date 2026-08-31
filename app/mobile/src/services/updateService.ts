@@ -1,5 +1,6 @@
 import { VersionInfo } from '../types/update';
 import { config } from '../config';
+import { structuredLogger } from './logger';
 
 export const fetchVersionInfo = async (): Promise<VersionInfo> => {
   try {
@@ -21,7 +22,11 @@ export const fetchVersionInfo = async (): Promise<VersionInfo> => {
       },
     };
   } catch (error) {
-    console.error('UpdateService: Error fetching version info from backend, falling back to mock:', error);
+    structuredLogger.error(
+      'updates.version_fetch_failed',
+      { error: error instanceof Error ? error.message : String(error) },
+      'updates',
+    );
     return {
       latestVersion: '1.1.0',
       minRequiredVersion: '1.0.0',

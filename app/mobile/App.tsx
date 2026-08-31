@@ -22,6 +22,7 @@ import {
 } from './src/contexts/NotificationContext';
 import { SaverModeProvider } from './src/contexts/SaverModeContext';
 import { SyncDeferralProvider } from './src/contexts/SyncDeferralContext';
+import { LanguageProvider } from './src/contexts/LanguageContext';
 import { UpdateProvider, useUpdate } from './src/contexts/UpdateContext';
 import {
   CrashReportingProvider,
@@ -137,15 +138,17 @@ const CrashReportingGate: React.FC = () => {
     >
       <SafeAreaProvider>
         <ThemeProvider>
-          <UpdateProvider>
-            <SaverModeProvider>
-              <SyncDeferralProvider>
-                <NotificationProvider>
-                  <AppInner />
-                </NotificationProvider>
-              </SyncDeferralProvider>
-            </SaverModeProvider>
-          </UpdateProvider>
+          <LanguageProvider>
+            <UpdateProvider>
+              <SaverModeProvider>
+                <SyncDeferralProvider>
+                  <NotificationProvider>
+                    <AppInner />
+                  </NotificationProvider>
+                </SyncDeferralProvider>
+              </SaverModeProvider>
+            </UpdateProvider>
+          </LanguageProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </ErrorBoundary>

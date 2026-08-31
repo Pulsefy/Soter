@@ -8,22 +8,30 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { AuditModule } from '../audit/audit.module';
 import { ClaimsModule } from '../claims/claims.module';
 
+const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
+
 @Module({
   imports: [
     PrismaModule,
     AuditModule,
     ClaimsModule,
-    BullModule.registerQueueAsync({
-      name: 'recipient-import',
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST') || 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
+    ...(skipBackgroundJobs
+      ? []
+      : [
+          BullModule.registerQueueAsync({
+            name: 'recipient-import',
+            imports: [ConfigModule],
+            useFactory: (configService: ConfigService) => ({
+              connection: {
+                host: configService.get<string>('REDIS_HOST') || 'localhost',
+                port: parseInt(
+                  configService.get<string>('REDIS_PORT') || '6379',
+                ),
+              },
+            }),
+            inject: [ConfigService],
+          }),
+        ]),
   ],
   controllers: [RecipientImportController],
   providers: [RecipientImportService, RecipientImportProcessor],

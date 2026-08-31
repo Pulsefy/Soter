@@ -69,7 +69,8 @@ export class VerificationInboxSseController {
   @ApiQuery({
     name: 'lastEventId',
     required: false,
-    description: 'Fallback for clients that cannot set the Last-Event-ID header.',
+    description:
+      'Fallback for clients that cannot set the Last-Event-ID header.',
   })
   @ApiUnauthorizedResponse({ description: 'No authenticated reviewer.' })
   stream(
@@ -95,16 +96,14 @@ export class VerificationInboxSseController {
       .pipe(map(event => this.toMessageEvent(event)));
 
     const heartbeat$ = interval(this.heartbeatMs()).pipe(
-      map(
-        (): MessageEvent => ({
-          type: INBOX_HEARTBEAT_EVENT,
-          data: {
-            emittedAt: new Date().toISOString(),
-            lastEventId: this.events.lastEventId,
-            reviewerId,
-          },
-        }),
-      ),
+      map((): MessageEvent => ({
+        type: INBOX_HEARTBEAT_EVENT,
+        data: {
+          emittedAt: new Date().toISOString(),
+          lastEventId: this.events.lastEventId,
+          reviewerId,
+        },
+      })),
     );
 
     return merge(updates$, heartbeat$);
@@ -146,11 +145,11 @@ export class VerificationInboxSseController {
   }
 
   private heartbeatMs(): number {
-    const raw = this.config.get<string>(
-      'VERIFICATION_INBOX_SSE_HEARTBEAT_MS',
-    );
+    const raw = this.config.get<string>('VERIFICATION_INBOX_SSE_HEARTBEAT_MS');
     const parsed = Number.parseInt(String(raw ?? ''), 10);
 
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_HEARTBEAT_MS;
+    return Number.isFinite(parsed) && parsed > 0
+      ? parsed
+      : DEFAULT_HEARTBEAT_MS;
   }
 }

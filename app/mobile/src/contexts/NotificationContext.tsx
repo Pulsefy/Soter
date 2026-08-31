@@ -16,6 +16,7 @@ import {
   configureAndroidChannel,
   resolveDeepLink,
 } from '../services/notificationService';
+import { structuredLogger } from '../services/logger';
 
 // ---------------------------------------------------------------------------
 // Context value
@@ -59,7 +60,11 @@ async function markNotificationAsProcessed(id: string): Promise<boolean> {
     await AsyncStorage.setItem(PROCESSED_IDS_KEY, JSON.stringify(processedIds));
     return true; // Successfully marked
   } catch (error) {
-    console.error('[Notifications] Error persisting processed notification ID:', error);
+    structuredLogger.error(
+      'notifications.processed_ids.persist_failed',
+      { id, error: error instanceof Error ? error.message : String(error) },
+      'notifications',
+    );
     return true; // Fallback: allow to prevent blocking user routing
   }
 }
@@ -73,7 +78,9 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
 }) => {
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-  const [pendingDeepLink, setPendingDeepLink] = useState<DeepLinkTarget | null>(null);
+  const [pendingDeepLink, setPendingDeepLink] = useState<DeepLinkTarget | null>(
+    null,
+  );
 
   // Keep refs so listeners always see the latest navigation ref
   const navigationRef = useRef<any>(null);
@@ -90,7 +97,11 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
       const token = await getExpoPushToken();
       setExpoPushToken(token);
       if (token) {
-        console.log('[Notifications] Expo push token:', token);
+        structuredLogger.info(
+          'notifications.push_token.ready',
+          { tokenPreview: token.slice(0, 12) },
+          'notifications',
+        );
         // TODO: send token to backend for per-user push targeting
       }
     }
@@ -105,7 +116,8 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
   // -----------------------------------------------------------------------
   useEffect(() => {
     const checkInitialNotification = async () => {
-      const lastResponse = await Notifications.getLastNotificationResponseAsync();
+      const lastResponse =
+        await Notifications.getLastNotificationResponseAsync();
       if (lastResponse) {
         const id = lastResponse.notification.request.identifier;
         const data = lastResponse.notification.request.content.data as
@@ -133,7 +145,7 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
     //  - The app is in the background and the user taps the notification
     //    (bringing it to the foreground)
     const subscription = Notifications.addNotificationResponseReceivedListener(
-      async (response) => {
+      async response => {
         const id = response.notification.request.identifier;
         const data = response.notification.request.content.data as
           | Record<string, unknown>
@@ -156,10 +168,14 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
   // -----------------------------------------------------------------------
   useEffect(() => {
     const subscription = Notifications.addNotificationReceivedListener(
-      (notification) => {
-        console.log(
-          '[Notifications] Received in foreground:',
-          notification.request.content.title,
+      notification => {
+        structuredLogger.info(
+          'notifications.received',
+          {
+            title: notification.request.content.title,
+            body: notification.request.content.body,
+          },
+          'notifications',
         );
         // Could update badge count or show an in-app banner here
       },
@@ -209,7 +225,13 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
       consumeDeepLink,
       requestPermission,
     }),
-    [permissionGranted, expoPushToken, pendingDeepLink, consumeDeepLink, requestPermission],
+    [
+      permissionGranted,
+      expoPushToken,
+      pendingDeepLink,
+      consumeDeepLink,
+      requestPermission,
+    ],
   );
 
   return (

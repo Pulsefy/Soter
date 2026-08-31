@@ -5,6 +5,10 @@ import { NotificationType } from './interfaces/notification-job.interface';
 import { Job } from 'bullmq';
 import { DlqService } from '../jobs/dlq.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import {
+  EMAIL_ADAPTER,
+  SMS_ADAPTER,
+} from './adapters/delivery-adapter.interface';
 
 describe('NotificationProcessor', () => {
   let processor: NotificationProcessor;
@@ -14,10 +18,16 @@ describe('NotificationProcessor', () => {
     };
   };
   let metricsMock: {
-  incrementCallbackFailure: jest.Mock;
-  incrementNotificationDeliveryAttempt: jest.Mock;
-  incrementNotificationDeliveryFailureByCategory: jest.Mock;
-};
+    incrementCallbackFailure: jest.Mock;
+    incrementNotificationDeliveryAttempt: jest.Mock;
+    incrementNotificationDeliveryFailureByCategory: jest.Mock;
+  };
+  let emailAdapterMock: {
+    send: jest.Mock;
+  };
+  let smsAdapterMock: {
+    send: jest.Mock;
+  };
 
   const makeJob = (
     overrides: Partial<{
@@ -47,10 +57,22 @@ describe('NotificationProcessor', () => {
       },
     };
     metricsMock = {
-  incrementCallbackFailure: jest.fn(),
-  incrementNotificationDeliveryAttempt: jest.fn(),
-  incrementNotificationDeliveryFailureByCategory: jest.fn(),
-};
+      incrementCallbackFailure: jest.fn(),
+      incrementNotificationDeliveryAttempt: jest.fn(),
+      incrementNotificationDeliveryFailureByCategory: jest.fn(),
+    };
+    emailAdapterMock = {
+      send: jest.fn().mockResolvedValue({
+        success: true,
+        providerMessageId: 'sg-msg-id-123',
+      }),
+    };
+    smsAdapterMock = {
+      send: jest.fn().mockResolvedValue({
+        success: true,
+        providerMessageId: 'tw-msg-id-123',
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -68,6 +90,14 @@ describe('NotificationProcessor', () => {
         {
           provide: MetricsService,
           useValue: metricsMock,
+        },
+        {
+          provide: EMAIL_ADAPTER,
+          useValue: emailAdapterMock,
+        },
+        {
+          provide: SMS_ADAPTER,
+          useValue: smsAdapterMock,
         },
       ],
     }).compile();
@@ -161,7 +191,7 @@ describe('NotificationProcessor', () => {
   });
 
   describe('onFailed', () => {
-    it('should update outbox record to failed with retryCount increment and lastError when outboxId is present and exhausted', async () => {
+    it('should move the outbox record to dead_letter with retryCount increment and lastError when exhausted', async () => {
       const job = makeJob({ outboxId: 'outbox-abc' });
       job.opts = { attempts: 1 };
       job.attemptsMade = 1;
@@ -177,7 +207,7 @@ describe('NotificationProcessor', () => {
       expect(prismaMock.notificationOutbox.update).toHaveBeenCalledWith({
         where: { id: 'outbox-abc' },
         data: {
-          status: 'failed',
+          status: 'dead_letter',
           retryCount: { increment: 1 },
           lastError: 'Something went wrong',
         },
