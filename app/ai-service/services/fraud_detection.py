@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # Dedicated logger for the decision audit trail. Kept separate from the
 # general application logger so decision records can be routed/retained
 # independently (e.g. shipped to a different sink or kept longer).
+
 audit_logger = logging.getLogger("audit.fraud_detection")
 
 
@@ -39,9 +40,7 @@ def _band_for_score(score: float, pass_max: float, review_max: float) -> FraudBa
     return FraudBand.REJECT
 
 
-def _log_decision(
-    result: ClaimFraudResult, pass_max: float, review_max: float
-) -> None:
+def _log_decision(result: ClaimFraudResult, pass_max: float, review_max: float) -> None:
     """Record a single claim's decision for audit purposes.
 
     Logs the score, the band it was assigned, and the exact thresholds that were active at decision time - so if thresholds are retuned later, past decisions remain fully explainable from the logs alone.
@@ -96,6 +95,7 @@ def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
 
     if len(claims) == 1:
         # LOF needs at least 2 samples; single claim gets a neutral score
+
         band = _band_for_score(0.0, pass_max, review_max)
         result = ClaimFraudResult(
             claim_id=claims[0].claim_id,
@@ -105,10 +105,10 @@ def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
         )
         _log_decision(result, pass_max, review_max)
         return [result]
-
     X = _vectorize(claims)
 
     # Add tiny random noise to prevent identical point degeneracy and zero-distance division issues
+
     np.random.seed(42)
     X_noise = X + np.random.normal(0, 1e-5, X.shape)
 
@@ -120,12 +120,12 @@ def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
     )  # negative; more negative = more anomalous
 
     # Normalise to [0, 1]: most anomalous → 1, most normal → 0
+
     min_s, max_s = raw_scores.min(), raw_scores.max()
     if max_s == min_s:
         normalised = np.zeros(len(raw_scores))
     else:
         normalised = (max_s - raw_scores) / (max_s - min_s)
-
     results: List[ClaimFraudResult] = []
     for claim, score in zip(claims, normalised):
         score = round(float(score), 4)
@@ -143,7 +143,6 @@ def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
         )
         _log_decision(result, pass_max, review_max)
         results.append(result)
-
     logger.info(
         "Fraud detection complete: %d claims, %d flagged",
         len(claims),
