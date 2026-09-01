@@ -305,8 +305,12 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         accessibilityRole="button"
         accessibilityLabel="Scan QR Code"
         accessibilityHint="Opens the camera to scan a Soter QR code"
+        testID="scan-qr-fab"
       >
         <Text style={styles.scannerFabIcon} accessibilityElementsHidden>📷</Text>
+        {/* Visible label — E2E (Maestro) matches rendered text, not just
+            accessibility labels, so the scanner entry point must show it */}
+        <Text style={styles.scannerFabLabel}>Scan QR Code</Text>
       </TouchableOpacity>
     </SafeAreaView>
   );
@@ -554,13 +558,15 @@ const makeStyles = (colors: AppColors) =>
       position: 'absolute',
       right: 24,
       bottom: 24,
-      // 64×64 — well above the 44 pt minimum
-      width: 64,
-      height: 64,
-      borderRadius: 32,
-      backgroundColor: colors.brand.primary,
-      justifyContent: 'center',
+      // Extended FAB: icon + visible "Scan QR Code" label. Well above the
+      // 44 pt minimum tap-target height (WCAG 2.5.5).
+      flexDirection: 'row',
       alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 18,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: colors.brand.primary,
       shadowColor: colors.brand.primary,
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.3,
@@ -568,6 +574,11 @@ const makeStyles = (colors: AppColors) =>
       elevation: 8,
     },
     scannerFabIcon: {
-      fontSize: 28,
+      fontSize: 22,
+    },
+    scannerFabLabel: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: '#FFFFFF',
     },
   });
