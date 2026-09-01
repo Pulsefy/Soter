@@ -6,6 +6,9 @@ import {
   RetentionPurgeProcessor,
   RETENTION_PURGE_QUEUE,
 } from './retention-purge.processor';
+import { RetentionPurgeScheduler } from './retention-purge.scheduler';
+import { IdempotencyKeyRetentionService } from './idempotency-key-retention.service';
+import { MetricsModule } from '../observability/metrics/metrics.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuditModule } from '../audit/audit.module';
 
@@ -13,10 +16,16 @@ import { AuditModule } from '../audit/audit.module';
   imports: [
     PrismaModule,
     AuditModule,
+    MetricsModule,
     BullModule.registerQueue({ name: RETENTION_PURGE_QUEUE }),
   ],
   controllers: [RetentionPolicyController],
-  providers: [RetentionPolicyService, RetentionPurgeProcessor],
+  providers: [
+    RetentionPolicyService,
+    RetentionPurgeProcessor,
+    RetentionPurgeScheduler,
+    IdempotencyKeyRetentionService,
+  ],
   exports: [RetentionPolicyService],
 })
 export class RetentionPolicyModule {}

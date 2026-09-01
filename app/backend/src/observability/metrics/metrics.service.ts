@@ -49,6 +49,12 @@ export class MetricsService {
     public analyticsCacheMissesCounter: Counter<string>,
     @InjectMetric('analytics_cache_invalidations_total')
     public analyticsCacheInvalidationsCounter: Counter<string>,
+    @InjectMetric('idempotency_keys_purged_total')
+    public idempotencyKeysPurgedCounter: Counter<string>,
+    @InjectMetric('idempotency_purge_executions_total')
+    public idempotencyPurgeExecutionsCounter: Counter<string>,
+    @InjectMetric('idempotency_purge_failures_total')
+    public idempotencyPurgeFailuresCounter: Counter<string>,
   ) {}
 
   /**
@@ -229,6 +235,27 @@ export class MetricsService {
    */
   incrementAnalyticsCacheInvalidation(reason: string): void {
     this.analyticsCacheInvalidationsCounter.inc({ reason });
+  }
+
+  /**
+   * Record the number of expired idempotency keys deleted by a purge batch.
+   */
+  recordIdempotencyKeysPurged(count: number): void {
+    this.idempotencyKeysPurgedCounter.inc(count);
+  }
+
+  /**
+   * Record a completed or failed idempotency key purge execution.
+   */
+  recordIdempotencyPurgeRun(status: 'success' | 'failed'): void {
+    this.idempotencyPurgeExecutionsCounter.inc({ status });
+  }
+
+  /**
+   * Record a failed idempotency key purge execution with a reason.
+   */
+  recordIdempotencyPurgeFailure(reason: string): void {
+    this.idempotencyPurgeFailuresCounter.inc({ reason: reason.slice(0, 80) });
   }
 
   /**

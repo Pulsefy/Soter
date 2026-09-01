@@ -128,4 +128,21 @@ export const metricsProviders = [
     help: 'Total number of analytics cache invalidations',
     labelNames: ['reason'],
   }),
+
+  // Idempotency Key Retention Metrics
+  makeCounterProvider({
+    name: 'idempotency_keys_purged_total',
+    help: 'Total number of expired idempotency keys deleted by the purge job',
+    labelNames: [],
+  }),
+  makeCounterProvider({
+    name: 'idempotency_purge_executions_total',
+    help: 'Total number of idempotency key purge executions',
+    labelNames: ['status'],
+  }),
+  makeCounterProvider({
+    name: 'idempotency_purge_failures_total',
+    help: 'Total number of failed idempotency key purge executions',
+    labelNames: ['reason'],
+  }),
 ];
