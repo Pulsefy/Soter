@@ -68,6 +68,7 @@ export interface ClaimAidPackageParams {
   packageId: string;
   recipientAddress: string;
   receiptPointer?: string;
+  amount?: string;
 }
 
 export interface ClaimAidPackageResult {
@@ -107,6 +108,8 @@ export interface AidPackage {
   createdAt: number;
   expiresAt: number;
   metadata?: Record<string, string>;
+  claimedAmount?: string;
+  remainingAmount?: string;
 }
 
 export interface GetAidPackageResult {

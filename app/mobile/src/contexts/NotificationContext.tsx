@@ -16,6 +16,12 @@ import {
   configureAndroidChannel,
   resolveDeepLink,
 } from '../services/notificationService';
+import { structuredLogger } from '../services/logger';
+import {
+  registerDeviceToken,
+  revokeDeviceToken,
+  DeviceTokenResponse,
+} from '../services/deviceTokenApi';
 
 // ---------------------------------------------------------------------------
 // Context value
@@ -32,6 +38,10 @@ interface NotificationContextValue {
   consumeDeepLink: () => void;
   /** Manually request notification permission (e.g. from Settings) */
   requestPermission: () => Promise<boolean>;
+  /** Whether the device token is registered with the backend */
+  tokenRegistered: boolean;
+  /** Revoke the device token (typically called on sign-out) */
+  revokeToken: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextValue>({
@@ -40,10 +50,13 @@ const NotificationContext = createContext<NotificationContextValue>({
   pendingDeepLink: null,
   consumeDeepLink: () => {},
   requestPermission: async () => false,
+  tokenRegistered: false,
+  revokeToken: async () => {},
 });
 
 const PROCESSED_IDS_KEY = 'SOTER_PROCESSED_NOTIFICATION_IDS';
 const MAX_PROCESSED_IDS_LIMIT = 50;
+const DEVICE_TOKEN_KEY = 'SOTER_DEVICE_TOKEN_ID';
 
 async function markNotificationAsProcessed(id: string): Promise<boolean> {
   try {
@@ -59,7 +72,11 @@ async function markNotificationAsProcessed(id: string): Promise<boolean> {
     await AsyncStorage.setItem(PROCESSED_IDS_KEY, JSON.stringify(processedIds));
     return true; // Successfully marked
   } catch (error) {
-    console.error('[Notifications] Error persisting processed notification ID:', error);
+    structuredLogger.error(
+      'notifications.processed_ids.persist_failed',
+      { id, error: error instanceof Error ? error.message : String(error) },
+      'notifications',
+    );
     return true; // Fallback: allow to prevent blocking user routing
   }
 }
@@ -68,12 +85,15 @@ async function markNotificationAsProcessed(id: string): Promise<boolean> {
 // Provider
 // ---------------------------------------------------------------------------
 
-export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
+export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-  const [pendingDeepLink, setPendingDeepLink] = useState<DeepLinkTarget | null>(null);
+  const [pendingDeepLink, setPendingDeepLink] = useState<DeepLinkTarget | null>(
+    null,
+  );
+  const [deviceTokenId, setDeviceTokenId] = useState<string | null>(null);
 
   // Keep refs so listeners always see the latest navigation ref
   const navigationRef = useRef<any>(null);
@@ -90,8 +110,17 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
       const token = await getExpoPushToken();
       setExpoPushToken(token);
       if (token) {
-        console.log('[Notifications] Expo push token:', token);
-        // TODO: send token to backend for per-user push targeting
+        structuredLogger.info(
+          'notifications.push_token.ready',
+          { tokenPreview: token.slice(0, 12) },
+          'notifications',
+        );
+        // Register token with backend
+        const deviceToken = await registerDeviceToken(token);
+        if (deviceToken) {
+          setDeviceTokenId(deviceToken.id);
+          await AsyncStorage.setItem(DEVICE_TOKEN_KEY, deviceToken.id);
+        }
       }
     }
   }, []);
@@ -105,7 +134,8 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
   // -----------------------------------------------------------------------
   useEffect(() => {
     const checkInitialNotification = async () => {
-      const lastResponse = await Notifications.getLastNotificationResponseAsync();
+      const lastResponse =
+        await Notifications.getLastNotificationResponseAsync();
       if (lastResponse) {
         const id = lastResponse.notification.request.identifier;
         const data = lastResponse.notification.request.content.data as
@@ -133,7 +163,7 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
     //  - The app is in the background and the user taps the notification
     //    (bringing it to the foreground)
     const subscription = Notifications.addNotificationResponseReceivedListener(
-      async (response) => {
+      async response => {
         const id = response.notification.request.identifier;
         const data = response.notification.request.content.data as
           | Record<string, unknown>
@@ -156,14 +186,44 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
   // -----------------------------------------------------------------------
   useEffect(() => {
     const subscription = Notifications.addNotificationReceivedListener(
-      (notification) => {
-        console.log(
-          '[Notifications] Received in foreground:',
-          notification.request.content.title,
+      notification => {
+        structuredLogger.info(
+          'notifications.received',
+          {
+            title: notification.request.content.title,
+            body: notification.request.content.body,
+          },
+          'notifications',
         );
         // Could update badge count or show an in-app banner here
       },
     );
+
+    return () => subscription.remove();
+  }, []);
+
+  // -----------------------------------------------------------------------
+  // Token refresh handler
+  // -----------------------------------------------------------------------
+  // Expo may rotate the push token. When this happens, we need to re-register
+  // with the backend to ensure push notifications continue to work.
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    const subscription = Notifications.addPushTokenListener(async event => {
+      const newToken = event.data;
+      structuredLogger.info(
+        'notifications.push_token.refreshed',
+        { tokenPreview: newToken.slice(0, 12) },
+        'notifications',
+      );
+      setExpoPushToken(newToken);
+      // Re-register with backend
+      const deviceToken = await registerDeviceToken(newToken);
+      if (deviceToken) {
+        setDeviceTokenId(deviceToken.id);
+        await AsyncStorage.setItem(DEVICE_TOKEN_KEY, deviceToken.id);
+      }
+    });
 
     return () => subscription.remove();
   }, []);
@@ -197,9 +257,27 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
     if (granted) {
       const token = await getExpoPushToken();
       setExpoPushToken(token);
+      if (token) {
+        const deviceToken = await registerDeviceToken(token);
+        if (deviceToken) {
+          setDeviceTokenId(deviceToken.id);
+          await AsyncStorage.setItem(DEVICE_TOKEN_KEY, deviceToken.id);
+        }
+      }
     }
     return granted;
   }, []);
+
+  const revokeToken = useCallback(async () => {
+    const tokenId = deviceTokenId || (await AsyncStorage.getItem(DEVICE_TOKEN_KEY));
+    if (tokenId) {
+      const success = await revokeDeviceToken(tokenId, 'User signed out');
+      if (success) {
+        setDeviceTokenId(null);
+        await AsyncStorage.removeItem(DEVICE_TOKEN_KEY);
+      }
+    }
+  }, [deviceTokenId]);
 
   const value = useMemo<NotificationContextValue>(
     () => ({
@@ -208,8 +286,18 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
       pendingDeepLink,
       consumeDeepLink,
       requestPermission,
+      tokenRegistered: !!deviceTokenId,
+      revokeToken,
     }),
-    [permissionGranted, expoPushToken, pendingDeepLink, consumeDeepLink, requestPermission],
+    [
+      permissionGranted,
+      expoPushToken,
+      pendingDeepLink,
+      consumeDeepLink,
+      requestPermission,
+      deviceTokenId,
+      revokeToken,
+    ],
   );
 
   return (

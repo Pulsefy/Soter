@@ -17,6 +17,7 @@ import type {
 import { useActivity } from '@/hooks/useActivity';
 import { useNetworkGuard } from '@/hooks/useNetworkGuard';
 import { NetworkMismatchBanner } from '@/components/NetworkMismatchBanner';
+import { useTranslations } from 'next-intl';
 
 
 /* ─── Accepted image MIME types ─────────────────────────────────────────── */
@@ -297,6 +298,7 @@ export const VerificationFlow: React.FC = () => {
     const { trackJob } = useActivity();
     const { isMismatch } = useNetworkGuard();
     const { toast } = useToast();
+    const tErrors = useTranslations('errors');
     const [restoredDraft] = useState<VerificationDraft | null>(() =>
         readVerificationDraftFromStorage(),
     );
@@ -507,11 +509,21 @@ export const VerificationFlow: React.FC = () => {
             const normalized = normalizeError(err);
             setApiError(err as any);
             
+            let errorMessage = normalized.message;
+            if (normalized.code) {
+              if (tErrors.has(normalized.code)) {
+                errorMessage = tErrors(normalized.code);
+              } else {
+                console.warn(`[VerificationFlow] Unknown error code: ${normalized.code}`);
+                errorMessage = tErrors('generic');
+              }
+            }
+
             toast(
               'Verification Failed',
               normalized.correlationId
-                ? `${normalized.message} (Correlation ID: ${normalized.correlationId})`
-                : normalized.message,
+                ? `${errorMessage} (Correlation ID: ${normalized.correlationId})`
+                : errorMessage,
               'error'
             );
 

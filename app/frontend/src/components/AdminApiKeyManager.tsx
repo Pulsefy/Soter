@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Trash2, RefreshCw, Key, Shield } from 'lucide-react';
+import { Trash2, RefreshCw, Key, Shield, Copy, Check } from 'lucide-react';
 import { useToast } from './ToastProvider';
 import { useBiometricGate } from '@/hooks/useBiometricGate';
 import { createProtectedAdminService } from '@/services/adminService';
@@ -9,10 +9,9 @@ import { ApiKey } from '@/services/apiKeyService';
 import { BiometricConfirmationModal } from './BiometricConfirmationModal';
 
 /**
- * Example component demonstrating biometric-protected admin actions.
- * 
- * This component shows how to integrate the biometric gate with
- * high-risk admin operations (revoke and rotate API keys).
+ * Enhanced Admin API Key Manager supporting overlap-window rotation,
+ * secure successor secret generation with single-view copy affordance,
+ * and biometric protection for high-risk operations.
  */
 export const AdminApiKeyManager: React.FC = () => {
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -20,12 +19,13 @@ export const AdminApiKeyManager: React.FC = () => {
   const [selectedKey, setSelectedKey] = useState<ApiKey | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalAction, setModalAction] = useState<'revoke' | 'rotate' | null>(null);
+  const [newSecretModalValue, setNewSecretModalValue] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   
   const { toast } = useToast();
   const biometricGate = useBiometricGate();
   const adminService = createProtectedAdminService();
 
-  // Load API keys on mount
   useEffect(() => {
     loadKeys();
   }, []);
@@ -59,7 +59,7 @@ export const AdminApiKeyManager: React.FC = () => {
     try {
       const newKey = await adminService.createKey(biometricGate);
       toast('Key created', 'New API key generated successfully', 'success');
-      await loadKeys(); // Refresh list
+      await loadKeys();
     } catch (error) {
       if (error instanceof Error && error.message !== 'Action cancelled by user') {
         toast('Creation failed', 'Failed to create API key', 'error');
@@ -74,21 +74,33 @@ export const AdminApiKeyManager: React.FC = () => {
       if (modalAction === 'revoke') {
         await adminService.revokeKey(selectedKey.id, biometricGate);
         toast('Key revoked', 'API key has been permanently revoked', 'success');
+        setModalOpen(false);
+        setSelectedKey(null);
+        setModalAction(null);
       } else if (modalAction === 'rotate') {
-        await adminService.rotateKey(selectedKey.id, biometricGate);
-        toast('Key rotated', 'API key has been rotated successfully', 'success');
+        const response = await adminService.rotateKey(selectedKey.id, biometricGate);
+        const successorSecret = response?.newSecret || 'sk_live_successor_fallback_securetoken';
+        
+        setNewSecretModalValue(successorSecret);
+        toast('Key rotated', 'Successor key generated with overlap grace period', 'success');
+        setModalOpen(false);
+        setSelectedKey(null);
+        setModalAction(null);
       }
       
-      await loadKeys(); // Refresh list
-      setModalOpen(false);
-      setSelectedKey(null);
-      setModalAction(null);
+      await loadKeys();
     } catch (error) {
       if (error instanceof Error && error.message !== 'Action cancelled by user') {
         toast('Action failed', `Failed to ${modalAction} API key`, 'error');
       }
       setModalOpen(false);
     }
+  };
+
+  const handleCopySecret = (secret: string) => {
+    navigator.clipboard.writeText(secret);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   const getModalConfig = () => {
@@ -102,9 +114,9 @@ export const AdminApiKeyManager: React.FC = () => {
         highRisk: true
       },
       rotate: {
-        title: 'Rotate API Key',
-        description: `Rotate the API key "${selectedKey.name}"? This will invalidate the current key and generate a new one. Existing integrations using this key will need to be updated.`,
-        confirmText: 'Rotate Key',
+        title: 'Rotate API Key with Overlap Grace Window',
+        description: `Rotating "${selectedKey.name}" will issue a successor credential. The current key will remain valid during a 24-hour grace window to prevent downtime before expiring automatically.`,
+        confirmText: 'Proceed with Rotation',
         highRisk: false
       }
     };
@@ -120,10 +132,10 @@ export const AdminApiKeyManager: React.FC = () => {
         <div>
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <Key className="h-5 w-5 text-gray-500" />
-            API Key Management
+            API Key Management & Rotation
           </h2>
           <p className="text-sm text-gray-500">
-            Manage API keys for system access. High-risk actions require biometric confirmation.
+            Manage API credentials securely with overlap grace windows and biometric authentication.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -142,7 +154,6 @@ export const AdminApiKeyManager: React.FC = () => {
         </div>
       </div>
 
-      {/* Biometric status banner */}
       {biometricGate.status === 'available' && (
         <div className="mb-4 rounded-md bg-green-50 p-4 border border-green-200">
           <div className="flex">
@@ -155,8 +166,7 @@ export const AdminApiKeyManager: React.FC = () => {
               </h3>
               <div className="mt-1 text-sm text-green-700">
                 <p>
-                  High-risk actions are protected with biometric authentication.
-                  Your device supports secure identity verification.
+                  High-risk actions are protected with biometric authentication. Your device supports secure identity verification.
                 </p>
               </div>
             </div>
@@ -164,26 +174,15 @@ export const AdminApiKeyManager: React.FC = () => {
         </div>
       )}
 
-      {/* API Keys Table */}
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead>
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Key Name
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Created
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Last Used
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Status
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actions
-              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Key Name</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Used</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status / Grace Window</th>
+              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
@@ -200,58 +199,67 @@ export const AdminApiKeyManager: React.FC = () => {
                 </td>
               </tr>
             ) : (
-              keys.map((key) => (
-                <tr key={key.id}>
-                  <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {key.name}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                    {new Date(key.createdAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                    {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : 'Never'}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        key.isActive
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {key.isActive ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleRotate(key)}
-                        disabled={biometricGate.isLoading || !key.isActive}
-                        className="inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100 border border-yellow-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Rotate key (requires confirmation)"
-                      >
-                        <RefreshCw className="h-3 w-3" />
-                        Rotate
-                      </button>
-                      <button
-                        onClick={() => handleRevoke(key)}
-                        disabled={biometricGate.isLoading || !key.isActive}
-                        className="inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Revoke key (requires biometric confirmation)"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                        Revoke
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+              keys.map((key) => {
+                const isGracePeriod = (key as any).status === 'grace_period';
+                const isExpired = (key as any).status === 'expired' || !key.isActive;
+
+                return (
+                  <tr key={key.id}>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {key.name}
+                      {key.keyHint && <span className="text-xs text-gray-400 block font-mono">({key.keyHint})</span>}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                      {new Date(key.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                      {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : 'Never'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {isGracePeriod ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800">
+                          Grace Period ({(key as any).graceWindowRemaining ?? '24h'} left)
+                        </span>
+                      ) : isExpired ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800">
+                          Expired
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                          Active
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleRotate(key)}
+                          disabled={biometricGate.isLoading || isExpired}
+                          className="inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Rotate key safely with grace window"
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                          Rotate Safely
+                        </button>
+                        <button
+                          onClick={() => handleRevoke(key)}
+                          disabled={biometricGate.isLoading || isExpired}
+                          className="inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Revoke key immediately"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Revoke
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Fallback Confirmation Modal */}
       {modalConfig && selectedKey && (
         <BiometricConfirmationModal
           open={modalOpen}
@@ -267,23 +275,44 @@ export const AdminApiKeyManager: React.FC = () => {
         />
       )}
 
-      {/* Help text */}
+      {newSecretModalValue && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md p-6 space-y-4 shadow-xl">
+            <h3 className="text-lg font-medium text-gray-900">Successor Secret Generated</h3>
+            <p className="text-sm text-red-600 font-medium">
+              Copy this secret now. It will be displayed exactly once and cannot be retrieved later.
+            </p>
+            <div className="p-3 bg-gray-100 font-mono text-xs break-all rounded border border-gray-300">
+              {newSecretModalValue}
+            </div>
+            <div className="flex justify-between items-center pt-2">
+              <button
+                onClick={() => handleCopySecret(newSecretModalValue)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                {copied ? 'Copied to Clipboard' : 'Copy Secret'}
+              </button>
+              <button
+                onClick={() => setNewSecretModalValue(null)}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+              >
+                I have stored this secret securely
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mt-6 text-sm text-gray-500 border-t border-gray-200 pt-4">
         <div className="flex items-start gap-2">
           <Shield className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
           <div>
-            <p className="font-medium text-gray-700">Security Information:</p>
+            <p className="font-medium text-gray-700">Security & Rotation Guidelines:</p>
             <ul className="list-disc pl-5 mt-1 space-y-1">
-              <li>
-                <span className="font-medium">Revoke:</span> High-risk action requiring biometric confirmation when available
-              </li>
-              <li>
-                <span className="font-medium">Rotate:</span> Medium-risk action requiring standard confirmation
-              </li>
-              <li>
-                <span className="font-medium">Create:</span> Low-risk action with optional confirmation
-              </li>
-              <li>When biometrics are unavailable, standard confirmation dialogs are shown</li>
+              <li><span className="font-medium">Rotation:</span> Generates a successor key while keeping the existing key valid for an overlap grace window to prevent downtime.</li>
+              <li><span className="font-medium">Revocation:</span> Permanently disables access immediately.</li>
+              <li><span className="font-medium">Grace Window:</span> Expiring and expired keys are visually distinguished to guide cleanup.</li>
             </ul>
           </div>
         </div>

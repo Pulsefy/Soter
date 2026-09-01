@@ -17,6 +17,7 @@ import { cacheAidList, loadCachedAidList, getCacheTimestamp } from '../services/
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { OfflineBanner } from '../components/OfflineBanner';
 import { useTheme } from '../theme/ThemeContext';
+import { useTranslation } from '../i18n/useTranslation';
 import { AppColors } from '../theme/useAppTheme';
 import { useSync } from '../contexts/SyncContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
@@ -40,6 +41,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const [aidList, setAidList] = useState<AidPackage[]>([]);
@@ -153,7 +155,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
           color={colors.textPrimary}
           accessibilityElementsHidden
         />
-        <Text style={styles.loadingText}>Loading aid operations...</Text>
+        <Text style={styles.loadingText}>{t('aidOverview.loading')}</Text>
       </SafeAreaView>
     );
   }
@@ -204,7 +206,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Search by ID or Title..."
+          placeholder={t('aidOverview.searchPlaceholder')}
           placeholderTextColor={colors.textSecondary}
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -244,7 +246,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
         }
         ListEmptyComponent={
           <View style={styles.centered} accessible accessibilityLabel="No aid operations found">
-            <Text style={styles.emptyText}>No aid operations found.</Text>
+            <Text style={styles.emptyText}>{t('aidOverview.empty')}</Text>
           </View>
         }
       />

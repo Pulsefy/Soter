@@ -401,6 +401,7 @@ pub fn sweep_expired_delegates(env: &Env, limit: u32) -> Result<u32, Error> {
 
             // Emit DelegateRevoked event
             crate::DelegateRevoked {
+                schema_version: crate::EVENT_SCHEMA_VERSION,
                 package_id,
                 recipient,
                 delegate,
@@ -459,6 +460,7 @@ mod tests {
             expires_at: 0,
             claim_starts_at: env.ledger().timestamp(),
             metadata: soroban_sdk::Map::new(env),
+            evidence_hash: soroban_sdk::String::from_str(env, ""),
         };
         env.as_contract(contract, || {
             env.storage()

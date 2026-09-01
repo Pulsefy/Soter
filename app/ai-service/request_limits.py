@@ -23,7 +23,7 @@ def clamp_request_timeout(timeout: float | None, endpoint: str) -> float | None:
         return timeout
 
     metrics.REQUEST_REJECTIONS_TOTAL.labels(
-        endpoint=endpoint, reason="timeout_clamped"
+        endpoint=metrics.bounded_endpoint_label(endpoint), reason="timeout_clamped"
     ).inc()
     return maximum
 
@@ -89,7 +89,8 @@ class RequestSizeLimitMiddleware:
     async def _reject(self, scope: dict, receive: Callable, send: Callable):
         endpoint = scope.get("path", "")
         metrics.REQUEST_REJECTIONS_TOTAL.labels(
-            endpoint=endpoint, reason="request_body_too_large"
+            endpoint=metrics.bounded_endpoint_label(endpoint),
+            reason="request_body_too_large",
         ).inc()
         response = JSONResponse(
             status_code=413,

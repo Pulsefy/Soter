@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![allow(deprecated)]
 
 use aid_escrow::{AidEscrow, AidEscrowClient, Config, Error, PackageStatus};
 use soroban_sdk::{

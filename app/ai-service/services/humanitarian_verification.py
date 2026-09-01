@@ -7,6 +7,7 @@ import time
 import metrics
 
 from config import settings
+from exceptions import ProviderExhaustedError
 from services.humanitarian_prompt import HumanitarianPromptEngine
 from services.circuit_breaker import CircuitBreaker
 from services.providers import ProviderRegistry, ModelProvider, LLMResponse
@@ -95,6 +96,13 @@ class HumanitarianVerificationService:
                         )
                         parsed = self._parse_json_response(response.content)
                         breaker.record_success()
+                        metrics.record_llm_usage(
+                            provider=provider_name,
+                            model=model,
+                            endpoint="humanitarian_verification",
+                            prompt_tokens=response.prompt_tokens,
+                            completion_tokens=response.completion_tokens,
+                        )
                         return {
                             "provider": provider_name,
                             "model": model,
@@ -110,8 +118,9 @@ class HumanitarianVerificationService:
                             "Humanitarian verification attempt failed: %s", err
                         )
 
-            raise RuntimeError(
-                "All humanitarian verification attempts failed: " + " | ".join(errors)
+            raise ProviderExhaustedError(
+                "All LLM providers were attempted and exhausted: " + " | ".join(errors),
+                details={"attempted": errors},
             )
         finally:
             latency = time.time() - start_time

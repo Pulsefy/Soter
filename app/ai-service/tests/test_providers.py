@@ -13,6 +13,7 @@ from services.providers import (
     GroqProvider,
     FixtureProvider,
     TesseractOCRProvider,
+    validate_fallback_order,
 )
 
 # ---------------------------------------------------------------------------
@@ -161,16 +162,41 @@ class TestProviderRegistry:
             mock_settings.test_provider_mode = False
             mock_settings.openai_api_key = "key"
             mock_settings.groq_api_key = "key"
+            mock_settings.get_llm_fallback_order.return_value = ["openai", "groq"]
             result = self.registry.resolve_llm("auto")
             names = [n for n, _ in result]
-            assert "openai" in names
-            assert "groq" in names
+            assert names == ["openai", "groq"]
+
+    def test_resolve_llm_follows_configured_order(self):
+        with patch("services.providers.settings") as mock_settings:
+            mock_settings.test_provider_mode = False
+            mock_settings.openai_api_key = "key"
+            mock_settings.groq_api_key = "key"
+            mock_settings.get_llm_fallback_order.return_value = ["groq", "openai"]
+            result = self.registry.resolve_llm("auto")
+            names = [n for n, _ in result]
+            assert names == ["groq", "openai"]
+
+    def test_resolve_llm_skips_unavailable_providers_in_config(self):
+        with patch("services.providers.settings") as mock_settings:
+            mock_settings.test_provider_mode = False
+            mock_settings.openai_api_key = "key"
+            mock_settings.groq_api_key = None
+            mock_settings.get_llm_fallback_order.return_value = [
+                "openai",
+                "groq",
+                "test",
+            ]
+            result = self.registry.resolve_llm("auto")
+            names = [n for n, _ in result]
+            assert names == ["openai"]
 
     def test_resolve_llm_preference_openai_first(self):
         with patch("services.providers.settings") as mock_settings:
             mock_settings.test_provider_mode = False
             mock_settings.openai_api_key = "key"
             mock_settings.groq_api_key = "key"
+            mock_settings.get_llm_fallback_order.return_value = ["openai", "groq"]
             result = self.registry.resolve_llm("openai")
             names = [n for n, _ in result]
             assert names[0] == "openai"
@@ -180,6 +206,7 @@ class TestProviderRegistry:
             mock_settings.test_provider_mode = False
             mock_settings.openai_api_key = "key"
             mock_settings.groq_api_key = "key"
+            mock_settings.get_llm_fallback_order.return_value = ["openai", "groq"]
             result = self.registry.resolve_llm("groq")
             names = [n for n, _ in result]
             assert names[0] == "groq"
@@ -189,6 +216,11 @@ class TestProviderRegistry:
             mock_settings.test_provider_mode = True
             mock_settings.openai_api_key = None
             mock_settings.groq_api_key = None
+            mock_settings.get_llm_fallback_order.return_value = [
+                "openai",
+                "groq",
+                "test",
+            ]
             result = self.registry.resolve_llm("test")
             names = [n for n, _ in result]
             assert names == ["test"]
@@ -196,6 +228,7 @@ class TestProviderRegistry:
     def test_resolve_ocr_test_mode(self):
         with patch("services.providers.settings") as mock_settings:
             mock_settings.test_provider_mode = True
+            mock_settings.get_ocr_fallback_order.return_value = ["test", "tesseract"]
             result = self.registry.resolve_ocr()
             names = [n for n, _ in result]
             assert names[0] == "test"
@@ -204,10 +237,30 @@ class TestProviderRegistry:
     def test_resolve_ocr_production(self):
         with patch("services.providers.settings") as mock_settings:
             mock_settings.test_provider_mode = False
+            mock_settings.get_ocr_fallback_order.return_value = ["test", "tesseract"]
             result = self.registry.resolve_ocr()
             names = [n for n, _ in result]
             assert "tesseract" in names
             assert "test" not in names
+
+
+class TestFallbackOrderValidation:
+    def test_valid_order_passes(self):
+        validate_fallback_order(
+            "LLM_PROVIDER_FALLBACK_ORDER", ["openai", "groq", "test"]
+        )
+
+    def test_empty_order_rejected(self):
+        with pytest.raises(ValueError, match="at least one provider"):
+            validate_fallback_order("LLM_PROVIDER_FALLBACK_ORDER", [])
+
+    def test_unknown_provider_rejected(self):
+        with pytest.raises(ValueError, match="unknown provider"):
+            validate_fallback_order("LLM_PROVIDER_FALLBACK_ORDER", ["openai", "bogus"])
+
+    def test_duplicate_provider_rejected(self):
+        with pytest.raises(ValueError, match="more than once"):
+            validate_fallback_order("LLM_PROVIDER_FALLBACK_ORDER", ["openai", "openai"])
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +285,11 @@ class TestOpenAIProvider:
             resp = OpenAIProvider().llm_chat("sys", "usr", model="gpt-4")
             assert resp.provider == "openai"
             assert "credible" in resp.content
+            # Deterministic mode never reports real token usage (issue #981):
+            # the fields must stay None (unavailable), never a fabricated 0.
+            assert resp.prompt_tokens is None
+            assert resp.completion_tokens is None
+            assert resp.total_tokens is None
 
     def test_llm_chat_success(self):
         mock_response = MagicMock()
@@ -258,6 +316,43 @@ class TestOpenAIProvider:
                 resp = OpenAIProvider().llm_chat("sys", "usr", model="gpt-4")
                 assert resp.content == "test content"
                 assert resp.provider == "openai"
+                # No "usage" key in the mocked response: unavailable, not 0
+                # (issue #981).
+                assert resp.prompt_tokens is None
+                assert resp.completion_tokens is None
+                assert resp.total_tokens is None
+
+    def test_llm_chat_success_extracts_usage(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "test content"}}],
+            "usage": {
+                "prompt_tokens": 42,
+                "completion_tokens": 17,
+                "total_tokens": 59,
+            },
+        }
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.post.return_value = mock_response
+
+        with patch("services.providers.settings") as mock_settings:
+            mock_settings.openai_api_key = "test-key"
+            mock_settings.ai_deterministic_mode = False
+            mock_settings.llm_timeout_seconds = 30
+
+            with patch("httpx.Client") as MockClient:
+                MockClient.return_value.__enter__ = MagicMock(
+                    return_value=mock_client_instance
+                )
+                MockClient.return_value.__exit__ = MagicMock(return_value=False)
+
+                resp = OpenAIProvider().llm_chat("sys", "usr", model="gpt-4")
+                assert resp.prompt_tokens == 42
+                assert resp.completion_tokens == 17
+                assert resp.total_tokens == 59
 
 
 class TestGroqProvider:

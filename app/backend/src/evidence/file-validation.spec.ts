@@ -196,10 +196,8 @@ describe('validateUploadedFile', () => {
 describe('evidenceFileFilter', () => {
   const run = (file: Partial<Express.Multer.File>) =>
     new Promise<{ err: Error | null; accept: boolean }>(resolve => {
-      evidenceFileFilter(
-        {} as never,
-        file as Express.Multer.File,
-        (err, accept) => resolve({ err: err ? err : null, accept: !!accept }),
+      evidenceFileFilter({} as never, file, (err, accept) =>
+        resolve({ err: err ? err : null, accept: !!accept }),
       );
     });
 

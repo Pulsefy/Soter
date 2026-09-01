@@ -9,7 +9,11 @@ import {
 import { Response } from 'express';
 import { RequestWithRequestId } from '../middleware/request-correlation.middleware';
 import { HealthService } from './health.service';
-import { LivenessResponse, ReadinessResponse } from './health.service';
+import {
+  LivenessResponse,
+  ReadinessResponse,
+  ProviderHealthResponse,
+} from './health.service';
 import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { Public } from '../common/decorators/public.decorator';
 import { SkipThrottle } from '../common/decorators/skip-throttle.decorator';
@@ -97,28 +101,65 @@ export class HealthController {
   @ApiOperation({
     summary: 'Readiness probe',
     description:
-      'Returns dependency readiness (database and optional Stellar RPC). Responds 503 when not ready.',
+      'Checks Postgres, Redis, the AI service, and Soroban RPC with per-dependency timeouts. ' +
+      'Results are cached briefly to protect against probe load. Responds 200 when ready or ' +
+      'degraded (non-critical dependency down), and 503 when a required dependency is down.',
   })
   @ApiOkResponse({
-    description: 'Service is ready to serve traffic.',
+    description:
+      'Service is ready to serve traffic (status may be "ready" or "degraded").',
     schema: {
       example: {
+        status: 'ready',
         ready: true,
-        dependencies: {
-          database: 'up',
-          stellar: 'up',
+        service: 'backend',
+        timestamp: '2025-02-23T12:00:00.000Z',
+        checks: {
+          database: {
+            status: 'up',
+            latencyMs: 4,
+            details: { connected: true },
+          },
+          redis: { status: 'up', latencyMs: 2, details: { connected: true } },
+          aiService: {
+            status: 'up',
+            latencyMs: 18,
+            details: { connected: true },
+          },
+          stellarRpc: {
+            status: 'skipped',
+            latencyMs: 0,
+            details: { reason: 'STELLAR_RPC_URL not configured' },
+          },
         },
       },
     },
   })
   @ApiServiceUnavailableResponse({
-    description: 'Service is not ready (one or more dependencies are down).',
+    description: 'Service is not ready (a required dependency is down).',
     schema: {
       example: {
+        status: 'not_ready',
         ready: false,
-        dependencies: {
-          database: 'down',
-          stellar: 'up',
+        service: 'backend',
+        timestamp: '2025-02-23T12:00:00.000Z',
+        checks: {
+          database: {
+            status: 'down',
+            latencyMs: 2001,
+            details: { connected: false, error: 'timed out' },
+          },
+          redis: { status: 'up', latencyMs: 2, details: { connected: true } },
+          aiService: {
+            status: 'up',
+            latencyMs: 18,
+            details: { connected: true },
+          },
+          stellarRpc: {
+            status: 'skipped',
+            latencyMs: 0,
+            details: { reason: 'STELLAR_RPC_URL not configured' },
+          },
         },
       },
     },
@@ -224,5 +265,43 @@ export class HealthController {
   })
   getMetadata(): MetadataResponse {
     return this.metadataService.getMetadata();
+  }
+
+  @Public()
+  @SkipThrottle()
+  @Get('providers')
+  @Version(API_VERSIONS.V1)
+  @ApiOperation({
+    summary: 'Provider health statuses',
+    description:
+      'Returns the current health status of all known external providers (OCR, LLM, email, SMS, etc.). ' +
+      'Statuses are derived from a sliding window of recent interactions. No sensitive details are exposed.',
+  })
+  @ApiOkResponse({
+    description: 'Provider health statuses retrieved.',
+    schema: {
+      example: {
+        timestamp: '2025-02-23T12:00:00.000Z',
+        providers: {
+          email: {
+            status: 'healthy',
+            failureRate: 0,
+            totalRequests: 42,
+            lastFailure: null,
+            lastSuccess: '2025-02-23T11:59:00.000Z',
+          },
+          ocr: {
+            status: 'degraded',
+            failureRate: 0.35,
+            totalRequests: 20,
+            lastFailure: '2025-02-23T11:58:00.000Z',
+            lastSuccess: '2025-02-23T11:57:00.000Z',
+          },
+        },
+      },
+    },
+  })
+  getProviderHealth(): ProviderHealthResponse {
+    return this.healthService.getProviderHealth();
   }
 }
