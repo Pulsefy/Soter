@@ -7,6 +7,11 @@ This module standardizes prompt construction across providers and model families
 
 from typing import Any, Dict, List
 
+#: Version of the prompt templates below. Bump this whenever the system or
+#: user prompt text changes so decision audit records (issue #990) can tie a
+#: past decision to the exact prompt that produced it.
+HUMANITARIAN_PROMPT_VERSION = "humanitarian-sphere-v1"
+
 SPHERE_HANDBOOK_CRITERIA: Dict[str, List[str]] = {
     "water_supply_sanitation_hygiene": [
         "Minimum daily water access is sufficient and equitable.",
@@ -38,6 +43,10 @@ SPHERE_HANDBOOK_CRITERIA: Dict[str, List[str]] = {
 
 class HumanitarianPromptEngine:
     """Builds standardized humanitarian verification prompts."""
+
+    #: Exposed on the instance so callers (notably the decision audit trail)
+    #: can record which prompt version produced a decision.
+    prompt_version: str = HUMANITARIAN_PROMPT_VERSION
 
     def build_primary_prompt(
         self,

@@ -65,12 +65,23 @@ def validate_fallback_order(setting_name: str, order: "List[str]") -> None:
 
 @dataclass
 class LLMResponse:
-    """Structured return value from an LLM provider."""
+    """Structured return value from an LLM provider.
+
+    ``prompt_tokens``/``completion_tokens``/``total_tokens`` are ``None``
+    (not ``0``) when the provider didn't report usage — e.g. deterministic/
+    fixture mode, or a response missing the ``usage`` block. Callers must
+    treat "unavailable" and "zero" as distinct (issue #981); see
+    ``metrics.record_llm_usage``, which counts an unavailable reading
+    separately rather than as a zero-token request.
+    """
 
     content: str
     provider: str
     model: str
     latency_ms: int = 0
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
 
 
 @dataclass
@@ -241,11 +252,23 @@ class OpenAIProvider(ModelProvider):
         if not content:
             raise RuntimeError("LLM returned empty content")
 
+        # OpenAI and Groq both use the OpenAI-compatible chat-completions
+        # schema, so `usage` (when present) has the same shape from either
+        # provider. It's absent for some error/edge responses, in which
+        # case these stay None rather than being reported as 0 (issue #981).
+        usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        total_tokens = usage.get("total_tokens")
+
         return LLMResponse(
             content=str(content),
             provider=provider_name,
             model=model,
             latency_ms=int((time.time() - start) * 1000),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
 
 

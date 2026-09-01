@@ -9,6 +9,21 @@ class FraudExplanationCode(str, Enum):
     # Additional codes can be added here as new detection rules are implemented
 
 
+class FraudBand(str, Enum):
+    """Decision band derived from a claim's fraud_risk_score.
+
+    PASS: score below FRAUD_PASS_MAX_SCORE - no action needed.
+    REVIEW: score between the pass and review thresholds - a human should
+        look at the claim before it proceeds.
+    REJECT: score at/above FRAUD_REVIEW_MAX_SCORE - treat as fraudulent
+        pending appeal.
+    """
+
+    PASS = "PASS"
+    REVIEW = "REVIEW"
+    REJECT = "REJECT"
+
+
 class ClaimMetadata(BaseModel):
     claim_id: str = Field(examples=["claim-abc123"])
     ip_address: Optional[str] = Field(None, examples=["192.168.1.1"])
@@ -66,6 +81,7 @@ class ClaimFraudResult(BaseModel):
     claim_id: str = Field(examples=["claim-abc123"])
     fraud_risk_score: float = Field(ge=0.0, le=1.0, examples=[0.15, 0.95])
     is_flagged: bool = Field(examples=[False, True])
+    band: FraudBand = Field(examples=[FraudBand.PASS, FraudBand.REJECT])
     code: Optional[FraudExplanationCode] = Field(
         None, examples=[FraudExplanationCode.ANOMALY_DETECTED]
     )

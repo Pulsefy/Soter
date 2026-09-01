@@ -378,7 +378,11 @@ def process_heavy_inference_impl(
         send_webhook_notification(task_id, "completed", result)
 
         inference_latency = time.time() - start_inference
-        metrics.INFERENCE_LATENCY.labels(task_type=task_type).observe(inference_latency)
+        # task_type originates from the client-supplied payload["type"]; bound
+        # it before it becomes a label value (metrics.py, issue #988).
+        metrics.INFERENCE_LATENCY.labels(
+            task_type=metrics.bounded_task_type(task_type)
+        ).observe(inference_latency)
 
         logger.info(
             f"Task {task_id} completed successfully in {inference_latency:.4f}s"

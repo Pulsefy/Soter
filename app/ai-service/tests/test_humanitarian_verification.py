@@ -326,6 +326,78 @@ class TestHumanitarianVerificationService:
         assert any("openai" in entry for entry in attempted)
         assert any("groq" in entry for entry in attempted)
 
+    def test_verify_claim_records_llm_usage_on_success(self, monkeypatch):
+        """issue #981: a successful call must report token usage, labelled
+        by the provider/model actually used and a fixed endpoint literal."""
+        provider = MagicMock(spec=ModelProvider)
+        provider.name = "openai"
+        provider.llm_chat.return_value = LLMResponse(
+            content='{"verdict":"credible","confidence":0.9,"summary":"ok"}',
+            provider="openai",
+            model="gpt-4o-mini",
+            prompt_tokens=123,
+            completion_tokens=45,
+            total_tokens=168,
+        )
+
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda p: "gpt-4o-mini"
+        )
+
+        with patch("metrics.record_llm_usage") as mock_record:
+            self.service.verify_claim(
+                aid_claim="Aid reached households.",
+                supporting_evidence=[],
+                context_factors={},
+                provider_preference="openai",
+            )
+
+        mock_record.assert_called_once_with(
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            prompt_tokens=123,
+            completion_tokens=45,
+        )
+
+    def test_verify_claim_passes_through_unavailable_usage(self, monkeypatch):
+        """A provider that doesn't report usage (e.g. deterministic mode)
+        must still flow through record_llm_usage so it's counted as
+        unavailable rather than silently dropped."""
+        provider = MagicMock(spec=ModelProvider)
+        provider.name = "openai"
+        provider.llm_chat.return_value = LLMResponse(
+            content='{"verdict":"credible","confidence":0.9,"summary":"ok"}',
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda p: "gpt-4o-mini"
+        )
+
+        with patch("metrics.record_llm_usage") as mock_record:
+            self.service.verify_claim(
+                aid_claim="Aid reached households.",
+                supporting_evidence=[],
+                context_factors={},
+                provider_preference="openai",
+            )
+
+        mock_record.assert_called_once_with(
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            prompt_tokens=None,
+            completion_tokens=None,
+        )
+
 
 class TestTestProvider:
     """Tests for the fixture-driven test provider mode."""

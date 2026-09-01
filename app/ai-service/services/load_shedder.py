@@ -30,11 +30,14 @@ REASON_MESSAGES = {
 
 
 def record_shed_request(reason: str, method: str, endpoint: str) -> None:
+    # Bound the raw request path to its route template before it becomes a
+    # label value (see metrics.py's cardinality guidance, issue #988).
+    bounded_endpoint = metrics.bounded_endpoint_label(endpoint)
     metrics.REQUESTS_SHED_TOTAL.labels(
-        reason=reason, method=method, endpoint=endpoint
+        reason=reason, method=method, endpoint=bounded_endpoint
     ).inc()
     metrics.REQUEST_COUNT.labels(
-        method=method, endpoint=endpoint, http_status=503
+        method=method, endpoint=bounded_endpoint, http_status=503
     ).inc()
 
 

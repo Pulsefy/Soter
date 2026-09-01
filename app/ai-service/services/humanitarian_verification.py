@@ -96,6 +96,13 @@ class HumanitarianVerificationService:
                         )
                         parsed = self._parse_json_response(response.content)
                         breaker.record_success()
+                        metrics.record_llm_usage(
+                            provider=provider_name,
+                            model=model,
+                            endpoint="humanitarian_verification",
+                            prompt_tokens=response.prompt_tokens,
+                            completion_tokens=response.completion_tokens,
+                        )
                         return {
                             "provider": provider_name,
                             "model": model,

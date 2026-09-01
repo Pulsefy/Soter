@@ -25,6 +25,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
 import { config } from '../config';
 import { structuredLogger } from '../services/logger';
+import { useTranslation } from '../i18n/useTranslation';
 
 // Derive environment label from config
 const getEnvLabel = (): string => config.envName;
@@ -53,6 +54,7 @@ export const HealthScreen = () => {
   const [copied, setCopied] = useState(false);
 
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const envLabel = getEnvLabel();
@@ -257,7 +259,7 @@ ${recentLogs}`;
           color={colors.brand.primary}
           accessibilityElementsHidden
         />
-        <Text style={styles.loadingText}>Checking system health...</Text>
+        <Text style={styles.loadingText}>{t('health.checking')}</Text>
       </View>
     );
   }
@@ -355,7 +357,7 @@ ${recentLogs}`;
                 accessible
                 accessibilityLabel={`Network: ${config.network}`}
               >
-                <Text style={styles.infoLabel}>Network:</Text>
+                <Text style={styles.infoLabel}>{t('health.network')}</Text>
                 <Text style={styles.infoValue}>
                   {config.network.toUpperCase()}
                 </Text>
@@ -366,7 +368,7 @@ ${recentLogs}`;
                 accessible
                 accessibilityLabel={`API URL: ${config.apiUrl}`}
               >
-                <Text style={styles.infoLabel}>Backend URL:</Text>
+                <Text style={styles.infoLabel}>{t('health.backendUrl')}</Text>
                 <Text
                   style={styles.infoValue}
                   numberOfLines={1}
@@ -383,7 +385,7 @@ ${recentLogs}`;
                   config.sorobanContractId || 'Not Configured'
                 }`}
               >
-                <Text style={styles.infoLabel}>Contract ID:</Text>
+                <Text style={styles.infoLabel}>{t('health.contractId')}</Text>
                 <Text
                   style={[
                     styles.infoValue,
@@ -403,7 +405,7 @@ ${recentLogs}`;
                   config.isValid ? 'Valid' : 'Invalid'
                 }`}
               >
-                <Text style={styles.infoLabel}>Config Status:</Text>
+                <Text style={styles.infoLabel}>{t('health.configStatus')}</Text>
                 <Text
                   style={[
                     styles.infoValue,
@@ -429,7 +431,7 @@ ${recentLogs}`;
               }. Version: ${healthData.version}. Environment: ${healthData.environment}.`}
             >
               <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>Backend Status</Text>
+                <Text style={styles.cardTitle}>{t('health.backendStatus')}</Text>
                 <View
                   style={styles.statusBadge}
                   accessible
@@ -551,7 +553,7 @@ ${recentLogs}`;
               accessibilityLabel="Backend status unavailable. Unable to connect to the backend server and no cached health data is available."
             >
               <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>Backend Status</Text>
+                <Text style={styles.cardTitle}>{t('health.backendStatus')}</Text>
                 <View
                   style={styles.statusBadge}
                   accessible
@@ -583,7 +585,7 @@ ${recentLogs}`;
                 accessible
                 accessibilityLabel={`App Version: ${appVersion}`}
               >
-                <Text style={styles.infoLabel}>App Version:</Text>
+                <Text style={styles.infoLabel}>{t('health.appVersion')}</Text>
                 <Text style={styles.infoValue}>{appVersion}</Text>
               </View>
 
@@ -598,7 +600,7 @@ ${recentLogs}`;
                       : 'Checking...'
                 }`}
               >
-                <Text style={styles.infoLabel}>API Reachability:</Text>
+                <Text style={styles.infoLabel}>{t('health.apiReachability')}</Text>
                 <Text
                   style={[
                     styles.infoValue,
@@ -627,7 +629,7 @@ ${recentLogs}`;
                   netInfo?.isConnected ? 'Connected' : 'Disconnected'
                 }`}
               >
-                <Text style={styles.infoLabel}>Network Status:</Text>
+                <Text style={styles.infoLabel}>{t('health.networkStatus')}</Text>
                 <Text
                   style={[
                     styles.infoValue,
@@ -649,7 +651,7 @@ ${recentLogs}`;
                   netInfo?.type ? netInfo.type.toUpperCase() : 'UNKNOWN'
                 }`}
               >
-                <Text style={styles.infoLabel}>Network Type:</Text>
+                <Text style={styles.infoLabel}>{t('health.networkType')}</Text>
                 <Text style={styles.infoValue}>
                   {netInfo?.type ? netInfo.type.toUpperCase() : 'UNKNOWN'}
                 </Text>
@@ -666,7 +668,7 @@ ${recentLogs}`;
                       : 'Unknown'
                 }`}
               >
-                <Text style={styles.infoLabel}>Internet Reachable:</Text>
+                <Text style={styles.infoLabel}>{t('health.internetReachable')}</Text>
                 <Text
                   style={[
                     styles.infoValue,
@@ -821,9 +823,9 @@ ${recentLogs}`;
             <View
               style={styles.footerEnvRow}
               testID="footer-env-row"
-              accessibilityLabel={`Environment: ${envLabel} · ${shortApiUrl}`}
+              accessibilityLabel={`${t('health.environment')}${envLabel} · ${shortApiUrl}`}
             >
-              <Text style={styles.footerEnvLabel}>Environment: </Text>
+              <Text style={styles.footerEnvLabel}>{t('health.environment')}</Text>
               <Text
                 testID="footer-env-name"
                 style={[styles.footerEnvValue, { color: envBadgeColor }]}
