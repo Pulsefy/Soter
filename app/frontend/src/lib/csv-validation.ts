@@ -41,11 +41,56 @@ export interface ParsedCsvData {
   rows: CsvPreviewRow[];
 }
 
-interface RawValidationMessage {
-  severity: 'warning' | 'error';
-  field?: string;
+// ── Column schema ──────────────────────────────────────────────────────────────
+
+export interface RequiredColumn {
+  key: string;
+  label: string;
+  aliases: string[];
+}
+
+export const REQUIRED_COLUMNS: RequiredColumn[] = [
+  { key: 'name', label: 'Name', aliases: ['fullname', 'recipientname'] },
+  { key: 'wallet', label: 'Wallet Address', aliases: ['walletaddress', 'stellarwallet', 'publickey'] },
+  { key: 'phone', label: 'Phone Number', aliases: ['phonenumber', 'mobile'] },
+];
+
+export interface ColumnValidationError {
+  expectedKey: string;
+  expectedLabel: string;
+  expectedAliases: string[];
+  actualHeader: string | null;
+  suggestion: string | null;
   message: string;
 }
+
+export interface HeaderValidationResult {
+  valid: boolean;
+  errors: ColumnValidationError[];
+}
+
+// ── Progress types ────────────────────────────────────────────────────────────
+
+export interface ParseProgress {
+  phase: 'parsing';
+  rowsParsed: number;
+  percent: number;
+}
+
+export interface ValidateProgress {
+  phase: 'validating';
+  rowsValidated: number;
+  totalRows: number;
+  percent: number;
+}
+
+export type ImportProgress = ParseProgress | ValidateProgress;
+
+// ── Capped display ────────────────────────────────────────────────────────────
+
+export const MAX_DISPLAY_ERRORS = 50;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function cleanValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : value == null ? '' : String(value).trim();
@@ -57,38 +102,164 @@ function normalizeRecord(record: Record<string, unknown>): Record<string, string
   );
 }
 
-export async function parseRecipientsCsv(file: File): Promise<ParsedCsvData> {
+function normalizeHeaderForComparison(header: string): string {
+  return header.toLowerCase().replace(/[_\s-]+/g, '');
+}
+
+function bigramSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  if (!a || !b) return 0;
+
+  const aBigrams = new Set<string>();
+  for (let i = 0; i < a.length - 1; i++) {
+    aBigrams.add(a.substring(i, i + 2));
+  }
+
+  let intersection = 0;
+  for (let i = 0; i < b.length - 1; i++) {
+    if (aBigrams.has(b.substring(i, i + 2))) {
+      intersection++;
+    }
+  }
+
+  const union = aBigrams.size + b.length - 1 - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function findClosestActualHeader(
+  expectedNormalized: string,
+  actualHeaders: string[],
+): string | null {
+  let bestMatch: string | null = null;
+  let bestScore = 0;
+
+  for (const actual of actualHeaders) {
+    const normalized = normalizeHeaderForComparison(actual);
+    if (normalized === expectedNormalized) {
+      return actual;
+    }
+
+    const score = bigramSimilarity(expectedNormalized, normalized);
+    if (score > bestScore && score >= 0.5) {
+      bestScore = score;
+      bestMatch = actual;
+    }
+  }
+
+  return bestMatch;
+}
+
+// ── Column validation (header-level, before row processing) ───────────────────
+
+export function validateHeaders(headers: string[]): HeaderValidationResult {
+  const errors: ColumnValidationError[] = [];
+  const normalizedHeaders = headers.map(h => normalizeHeaderForComparison(h));
+
+  for (const required of REQUIRED_COLUMNS) {
+    const allVariants = [required.key, ...required.aliases];
+
+    const found = allVariants.some(variant => {
+      const normalized = normalizeHeaderForComparison(variant);
+      return normalizedHeaders.some(h => h === normalized);
+    });
+
+    if (found) continue;
+
+    let closestMatch: string | null = null;
+
+    for (const variant of allVariants) {
+      const match = findClosestActualHeader(normalizeHeaderForComparison(variant), headers);
+      if (match) {
+        closestMatch = match;
+        break;
+      }
+    }
+
+    const allNames = allVariants.join(', ');
+    const suggestion = closestMatch
+      ? `Expected column '${required.key}', found '${closestMatch}' — did you mean this?`
+      : `Expected column '${required.key}' (or one of: ${allNames}) was not found in the header row.`;
+
+    errors.push({
+      expectedKey: required.key,
+      expectedLabel: required.label,
+      expectedAliases: required.aliases,
+      actualHeader: closestMatch,
+      suggestion,
+      message: suggestion,
+    });
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+// ── CSV file parsing (streaming / chunked) ────────────────────────────────────
+
+export async function parseRecipientsCsv(
+  file: File,
+  onProgress?: (progress: ParseProgress) => void,
+): Promise<ParsedCsvData> {
+  const text = await file.text();
+
   return new Promise((resolve, reject) => {
-    Papa.parse<Record<string, unknown>>(file, {
+    const allRows: CsvPreviewRow[] = [];
+    let headers: string[] = [];
+    let rowCounter = 0;
+
+    Papa.parse<Record<string, unknown>>(text, {
       header: true,
       skipEmptyLines: 'greedy',
-      transformHeader: header => header.trim(),
-      complete: results => {
-        if (results.errors.length > 0) {
-          reject(new Error(results.errors[0]?.message ?? 'Unable to parse CSV file.'));
-          return;
+      transformHeader: (h: string) => h.trim(),
+      chunk: (results: Papa.ParseResult<Record<string, unknown>>) => {
+        if (headers.length === 0 && results.meta.fields) {
+          headers = results.meta.fields.map((h: string) => h.trim()).filter(Boolean);
         }
 
-        const rows = (results.data ?? [])
+        const processedRows = (results.data ?? [])
           .map(normalizeRecord)
-          .filter(row => Object.values(row).some(Boolean))
-          .map((values, index) => ({ index: index + 1, values }));
+          .filter((row: Record<string, string>) => Object.values(row).some(Boolean))
+          .map((values: Record<string, string>) => ({ index: ++rowCounter, values }));
 
-        const headers =
-          results.meta.fields?.map(header => header.trim()).filter(Boolean) ??
-          Object.keys(rows[0]?.values ?? {});
+        allRows.push(...processedRows);
 
-        if (headers.length === 0) {
+        if (onProgress) {
+          const totalChars = text.length;
+          const percent = totalChars > 0
+            ? Math.min(99, Math.round((results.meta.cursor / totalChars) * 100))
+            : 0;
+          onProgress({
+            phase: 'parsing',
+            rowsParsed: allRows.length,
+            percent,
+          });
+        }
+      },
+      complete: () => {
+        if (headers.length === 0 && allRows.length > 0) {
+          headers = Object.keys(allRows[0].values);
+        }
+
+        if (headers.length === 0 && allRows.length === 0) {
           reject(new Error('The CSV file is empty or missing a header row.'));
           return;
         }
 
-        resolve({ headers, rows });
+        if (onProgress) {
+          onProgress({
+            phase: 'parsing',
+            rowsParsed: allRows.length,
+            percent: 100,
+          });
+        }
+
+        resolve({ headers, rows: allRows });
       },
-      error: error => reject(error),
+      error: (error: Error) => reject(error),
     });
   });
 }
+
+// ── Row-level validation helpers ──────────────────────────────────────────────
 
 function getCandidateValue(values: Record<string, string>, candidates: string[]): string {
   const normalizedEntries = Object.entries(values).map(([key, value]) => [key.toLowerCase(), value] as const);
@@ -101,44 +272,6 @@ function getCandidateValue(values: Record<string, string>, candidates: string[])
   }
 
   return '';
-}
-
-function buildLocalValidation(rows: CsvPreviewRow[]): ValidationResult {
-  const results = rows.map<ValidationRowResult>(({ index, values }) => {
-    const messages: ValidationMessage[] = [];
-    const fullName = getCandidateValue(values, ['fullname', 'name', 'recipientname']);
-    const wallet = getCandidateValue(values, ['wallet', 'walletaddress', 'stellarwallet', 'publickey']);
-    const phone = getCandidateValue(values, ['phone', 'phonenumber', 'mobile']);
-
-    if (!fullName) {
-      messages.push({ severity: 'error', field: 'fullName', message: 'Recipient name is required.' });
-    }
-
-    if (!wallet) {
-      messages.push({ severity: 'error', field: 'wallet', message: 'Wallet address is required.' });
-    } else if (wallet.length < 10) {
-      messages.push({ severity: 'warning', field: 'wallet', message: 'Wallet address looks shorter than expected.' });
-    }
-
-    if (!phone) {
-      messages.push({ severity: 'warning', field: 'phone', message: 'Phone number is missing.' });
-    }
-
-    const status: ValidationSeverity = messages.some(message => message.severity === 'error')
-      ? 'error'
-      : messages.some(message => message.severity === 'warning')
-        ? 'warning'
-        : 'valid';
-
-    return {
-      rowNumber: index,
-      status,
-      values,
-      messages,
-    };
-  });
-
-  return summarizeValidation(results);
 }
 
 function summarizeValidation(rows: ValidationRowResult[]): ValidationResult {
@@ -154,6 +287,71 @@ function summarizeValidation(rows: ValidationRowResult[]): ValidationResult {
   );
 
   return { summary, rows };
+}
+
+const VALIDATION_BATCH_SIZE = 500;
+
+async function buildLocalValidationAsync(
+  rows: CsvPreviewRow[],
+  onProgress?: (progress: ValidateProgress) => void,
+): Promise<ValidationResult> {
+  const results: ValidationRowResult[] = [];
+
+  for (let i = 0; i < rows.length; i += VALIDATION_BATCH_SIZE) {
+    const batch = rows.slice(i, i + VALIDATION_BATCH_SIZE);
+
+    for (const { index, values } of batch) {
+      const messages: ValidationMessage[] = [];
+      const fullName = getCandidateValue(values, ['fullname', 'name', 'recipientname']);
+      const wallet = getCandidateValue(values, ['wallet', 'walletaddress', 'stellarwallet', 'publickey']);
+      const phone = getCandidateValue(values, ['phone', 'phonenumber', 'mobile']);
+
+      if (!fullName) {
+        messages.push({ severity: 'error', field: 'fullName', message: 'Recipient name is required.' });
+      }
+
+      if (!wallet) {
+        messages.push({ severity: 'error', field: 'wallet', message: 'Wallet address is required.' });
+      } else if (wallet.length < 10) {
+        messages.push({ severity: 'warning', field: 'wallet', message: 'Wallet address looks shorter than expected.' });
+      }
+
+      if (!phone) {
+        messages.push({ severity: 'warning', field: 'phone', message: 'Phone number is missing.' });
+      }
+
+      const status: ValidationSeverity = messages.some(m => m.severity === 'error')
+        ? 'error'
+        : messages.some(m => m.severity === 'warning')
+          ? 'warning'
+          : 'valid';
+
+      results.push({ rowNumber: index, status, values, messages });
+    }
+
+    if (onProgress) {
+      onProgress({
+        phase: 'validating',
+        rowsValidated: results.length,
+        totalRows: rows.length,
+        percent: Math.round((results.length / rows.length) * 100),
+      });
+    }
+
+    if (onProgress && i + VALIDATION_BATCH_SIZE < rows.length) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  }
+
+  return summarizeValidation(results);
+}
+
+// ── Backend validation fallback ───────────────────────────────────────────────
+
+interface RawValidationMessage {
+  severity: 'warning' | 'error';
+  field?: string;
+  message: string;
 }
 
 function normalizeValidationMessage(message: unknown): RawValidationMessage | null {
@@ -229,10 +427,13 @@ function normalizeBackendValidation(payload: unknown, fallbackRows: CsvPreviewRo
   return summarizeValidation(rows);
 }
 
+// ── Public API ────────────────────────────────────────────────────────────────
+
 export async function validateRecipientsImport(
   campaignId: string,
   file: File,
   rows: CsvPreviewRow[],
+  onProgress?: (progress: ValidateProgress) => void,
 ): Promise<ValidationResult> {
   const payload = new FormData();
   payload.append('file', file);
@@ -249,9 +450,9 @@ export async function validateRecipientsImport(
     }
 
     const body = (await response.json()) as unknown;
-    return normalizeBackendValidation(body, rows) ?? buildLocalValidation(rows);
+    return normalizeBackendValidation(body, rows) ?? buildLocalValidationAsync(rows, onProgress);
   } catch {
-    return buildLocalValidation(rows);
+    return buildLocalValidationAsync(rows, onProgress);
   }
 }
 
@@ -290,4 +491,259 @@ export function buildValidationReport(result: ValidationResult): Blob {
   );
 
   return new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+}
+
+// ── Structured validation reports ───────────────────────────────────────────
+
+export type ReportSource = 'backend' | 'local';
+
+export interface ValidationReportMeta {
+  campaignId: string;
+  generatedAt: string;
+  reportId?: string;
+  source: ReportSource;
+}
+
+export interface ImportReportDownload {
+  blob: Blob;
+  filename: string;
+  meta: ValidationReportMeta;
+}
+
+/** Batch size used when serializing very large reports so the main thread yields. */
+export const REPORT_SERIALIZATION_BATCH_SIZE = 5000;
+
+interface StructuredReportRecord {
+  rowNumber: number;
+  status: ValidationSeverity;
+  severity: '' | 'warning' | 'error';
+  field: string;
+  message: string;
+  name: string;
+  wallet: string;
+  phone: string;
+}
+
+function getReportValue(values: Record<string, string>, column: string): string {
+  const candidates: string[] =
+    column === 'name'
+      ? ['name', 'fullname', 'recipientname']
+      : column === 'wallet'
+        ? ['wallet', 'walletaddress', 'stellarwallet', 'publickey']
+        : ['phone', 'phonenumber', 'mobile'];
+
+  return getCandidateValue(values, candidates);
+}
+
+function buildStructuredReportRecords(result: ValidationResult): StructuredReportRecord[] {
+  const records: StructuredReportRecord[] = [];
+
+  for (const row of result.rows) {
+    const name = getReportValue(row.values, 'name');
+    const wallet = getReportValue(row.values, 'wallet');
+    const phone = getReportValue(row.values, 'phone');
+
+    if (row.messages.length === 0) {
+      records.push({
+        rowNumber: row.rowNumber,
+        status: row.status,
+        severity: '',
+        field: '',
+        message: '',
+        name,
+        wallet,
+        phone,
+      });
+      continue;
+    }
+
+    for (const message of row.messages) {
+      records.push({
+        rowNumber: row.rowNumber,
+        status: row.status,
+        severity: message.severity,
+        field: message.field ?? '',
+        message: message.message,
+        name,
+        wallet,
+        phone,
+      });
+    }
+  }
+
+  return records;
+}
+
+function serializeRecordsBatched(records: StructuredReportRecord[]): string {
+  if (records.length <= REPORT_SERIALIZATION_BATCH_SIZE) {
+    return Papa.unparse(records, { newline: '\n' });
+  }
+
+  const chunks: string[] = [];
+  for (let i = 0; i < records.length; i += REPORT_SERIALIZATION_BATCH_SIZE) {
+    const batch = records.slice(i, i + REPORT_SERIALIZATION_BATCH_SIZE);
+    const csv = Papa.unparse(batch, { newline: '\n' });
+    // Keep the header line only for the first chunk so rows concatenate cleanly.
+    chunks.push(i === 0 ? csv : csv.slice(csv.indexOf('\n') + 1));
+  }
+
+  return chunks.join('\n');
+}
+
+/**
+ * Builds a structured CSV validation report: metadata comment lines followed by
+ * one record per row-level message (severity + field + message) and the row's
+ * key values, so operators can locate and fix failures without the raw file.
+ */
+export function buildStructuredValidationReport(
+  result: ValidationResult,
+  meta: ValidationReportMeta,
+): Blob {
+  const metadata = [
+    '# Soter recipient import validation report',
+    `# reportId: ${meta.reportId ?? 'local'}`,
+    `# campaignId: ${meta.campaignId}`,
+    `# generatedAt: ${meta.generatedAt}`,
+    `# source: ${meta.source}`,
+    `# totalRows: ${result.summary.totalRows}`,
+    `# validRows: ${result.summary.validRows}`,
+    `# warningRows: ${result.summary.warningRows}`,
+    `# errorRows: ${result.summary.errorRows}`,
+  ].join('\n');
+
+  const body = serializeRecordsBatched(buildStructuredReportRecords(result));
+
+  return new Blob([`${metadata}\n${body}\n`], { type: 'text/csv;charset=utf-8;' });
+}
+
+/**
+ * Downloads the import report generated by the backend. Falls back to a locally
+ * generated structured report when the backend is unreachable or returns an
+ * unusable response, so operators always get a downloadable artifact.
+ */
+export async function downloadImportReport(
+  campaignId: string,
+  file: File,
+  fallback: ValidationResult,
+): Promise<ImportReportDownload> {
+  const filename = `recipient-import-report-${campaignId}.csv`;
+  const payload = new FormData();
+  payload.append('file', file);
+  payload.append('campaignId', campaignId);
+
+  try {
+    const response = await fetchClient(`${API_URL}/recipients/import/report`, {
+      method: 'POST',
+      body: payload,
+    });
+
+    if (response.ok) {
+      const text = await response.text();
+
+      if (text.trim().length > 0) {
+        const meta: ValidationReportMeta = {
+          campaignId,
+          generatedAt: response.headers.get('x-report-generated-at') ?? new Date().toISOString(),
+          reportId: response.headers.get('x-report-id') ?? undefined,
+          source: 'backend',
+        };
+
+        return {
+          blob: new Blob([text], { type: 'text/csv;charset=utf-8;' }),
+          filename,
+          meta,
+        };
+      }
+    }
+  } catch {
+    // Backend unavailable — fall through to the locally generated report.
+  }
+
+  const meta: ValidationReportMeta = {
+    campaignId,
+    generatedAt: new Date().toISOString(),
+    source: 'local',
+  };
+
+  return {
+    blob: buildStructuredValidationReport(fallback, meta),
+    filename,
+    meta,
+  };
+}
+
+// ── Row filtering (search + status) ─────────────────────────────────────────
+
+export type ReportStatusFilter = 'all' | ValidationSeverity;
+
+export const INITIAL_REPORT_PAGE_SIZE = 25;
+export const REPORT_PAGE_INCREMENT = 50;
+
+/**
+ * Filters validation rows by status and a free-text query. The query matches
+ * row numbers, statuses, message text, field names, and row values so operators
+ * can jump straight to a failing row in large imports.
+ */
+export function filterValidationRows(
+  rows: ValidationRowResult[],
+  query: string,
+  status: ReportStatusFilter,
+): ValidationRowResult[] {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  return rows.filter(row => {
+    if (status !== 'all' && row.status !== status) {
+      return false;
+    }
+
+    if (!normalizedQuery) {
+      return true;
+    }
+
+    if (String(row.rowNumber).includes(normalizedQuery)) {
+      return true;
+    }
+
+    if (row.status.includes(normalizedQuery)) {
+      return true;
+    }
+
+    if (
+      row.messages.some(
+        message =>
+          message.message.toLowerCase().includes(normalizedQuery) ||
+          (message.field ?? '').toLowerCase().includes(normalizedQuery),
+      )
+    ) {
+      return true;
+    }
+
+    return Object.entries(row.values).some(
+      ([key, value]) =>
+        key.toLowerCase().includes(normalizedQuery) || value.toLowerCase().includes(normalizedQuery),
+    );
+  });
+}
+
+// ── Error capping ─────────────────────────────────────────────────────────────
+
+export function capValidationErrors(
+  result: ValidationResult,
+  maxDisplay: number = MAX_DISPLAY_ERRORS,
+): { display: ValidationResult; remainingErrors: number; remainingWarnings: number } {
+  const errorRows = result.rows.filter(r => r.status === 'error');
+  const warningRows = result.rows.filter(r => r.status === 'warning');
+  const validRows = result.rows.filter(r => r.status === 'valid');
+
+  const cappedErrorRows = errorRows.slice(0, maxDisplay);
+  const remainingErrors = errorRows.length - cappedErrorRows.length;
+
+  const warningBudget = Math.max(0, maxDisplay - cappedErrorRows.length);
+  const cappedWarningRows = warningRows.slice(0, warningBudget);
+  const remainingWarnings = warningRows.length - cappedWarningRows.length;
+
+  const displayRows = [...cappedErrorRows, ...cappedWarningRows, ...validRows];
+  const display = summarizeValidation(displayRows);
+
+  return { display, remainingErrors, remainingWarnings };
 }

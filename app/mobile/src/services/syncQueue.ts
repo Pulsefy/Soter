@@ -18,15 +18,19 @@ const SAVER_BACKOFF_MULTIPLIER = 3;
 const SAVER_MAX_ACTIONS_PER_FLUSH = 2;
 
 export type SyncActionType = 'status-refresh' | 'claim-confirmation' | 'evidence-upload' | 'claim-submission';
-export type SyncActionState = 'pending' | 'retrying' | 'failed' | 'submitted';
+export type SyncActionState = 'pending' | 'retrying' | 'failed' | 'submitted' | 'conflict';
+
+export type DeferralReason = 'low-battery' | 'metered-connection' | 'large-upload' | 'none';
 
 export interface StatusRefreshPayload {
   aidId: string;
+  urgent?: boolean;
 }
 
 export interface ClaimConfirmationPayload {
   aidId: string;
   claimId: string;
+  urgent?: boolean;
 }
 
 export interface EvidenceUploadPayload {
@@ -39,6 +43,8 @@ export interface EvidenceUploadPayload {
   uploadedChunks?: number[];
   totalChunks?: number;
   progress?: number;
+  urgent?: boolean;
+  estimatedSize?: number;
 }
 
 const getSubtleCrypto = () => {
@@ -109,6 +115,7 @@ export interface ClaimSubmissionPayload {
   aidId: string;
   claimId: string;
   idempotencyKey: string;
+  urgent?: boolean;
 }
 
 export type SyncActionPayload =
@@ -128,6 +135,8 @@ export interface QueuedSyncAction<TPayload = SyncActionPayload> {
   createdAt: string;
   updatedAt: string;
   lastError: string | null;
+  deferralReason?: DeferralReason;
+  deferralLog?: string[];
 }
 
 export interface SyncQueueState {
@@ -135,6 +144,11 @@ export interface SyncQueueState {
   isSyncing: boolean;
   lastSyncAt: string | null;
   lastSyncError: string | null;
+  deferralStatus?: {
+    deferred: boolean;
+    reason: DeferralReason;
+    explanation: string;
+  };
 }
 
 export interface SyncActionSuccessEvent {
@@ -210,7 +224,58 @@ const toErrorMessage = (error: unknown) => {
   return 'Unexpected sync failure';
 };
 
+export const isConflictError = (error: unknown): boolean => {
+  const message = toErrorMessage(error).toLowerCase();
+  const conflictPatterns = [
+    '409',
+    'conflict',
+    'already claimed',
+    'already submitted',
+    'already disbursed',
+    'already verified',
+    'already processed',
+    'duplicate',
+    'version mismatch',
+    'idempotency conflict',
+    'state conflict',
+    'mismatch',
+  ];
+  return conflictPatterns.some((pattern) => message.includes(pattern));
+};
+
+export const mapConflictErrorMessage = (rawError: string | null | undefined): string => {
+  if (!rawError) {
+    return 'Conflict detected with server records.';
+  }
+  const lower = rawError.toLowerCase();
+
+  if (lower.includes('already claimed') || lower.includes('already submitted')) {
+    return 'Conflict: This claim has already been submitted and processed on the server.';
+  }
+  if (lower.includes('already disbursed')) {
+    return 'Conflict: This aid package has already been disbursed to the recipient.';
+  }
+  if (lower.includes('duplicate') || lower.includes('idempotency')) {
+    return 'Conflict: A submission with an identical idempotency key already exists on the server.';
+  }
+  if (lower.includes('version') || lower.includes('mismatch')) {
+    return 'Conflict: Server record version mismatch. The record was updated by another operator.';
+  }
+  if (lower.includes('already verified')) {
+    return 'Conflict: This claim was already verified in a prior transaction.';
+  }
+  if (lower.includes('409') || lower.includes('conflict')) {
+    return 'Conflict: The submission conflicts with existing server records.';
+  }
+
+  return `Conflict: ${rawError}`;
+};
+
 const isRetryableError = (error: unknown) => {
+  if (isConflictError(error)) {
+    return false;
+  }
+
   const message = toErrorMessage(error).toLowerCase();
 
   const permanentFailurePatterns = [
@@ -222,7 +287,6 @@ const isRetryableError = (error: unknown) => {
     'unauthorized',
     'forbidden',
     'not found',
-    'already claimed',
     'validation',
   ];
 
@@ -268,6 +332,27 @@ const replaceQueueItems = async (items: QueuedSyncAction[]) => {
   };
   await persistQueue();
   emitQueueState();
+};
+
+const logDeferral = (action: QueuedSyncAction, reason: DeferralReason, details: string) => {
+  const timestamp = new Date().toISOString();
+  const logEntry = `[${timestamp}] Deferred: ${reason} - ${details}`;
+  
+  const updatedLog = action.deferralLog ? [...action.deferralLog, logEntry] : [logEntry];
+  
+  queueState = {
+    ...queueState,
+    items: queueState.items.map(item =>
+      item.id === action.id
+        ? { ...item, deferralReason: reason, deferralLog: updatedLog }
+        : item
+    ),
+  };
+  
+  void persistQueue();
+  emitQueueState();
+  
+  return logEntry;
 };
 
 const enqueue = async (request: SyncActionRequest) => {
@@ -520,6 +605,28 @@ export const dispatchNetworkAction = async <T extends SyncActionType>(
     });
     return { status: 'completed', result };
   } catch (error) {
+    if (isConflictError(error)) {
+      const now = new Date().toISOString();
+      const conflictMessage = mapConflictErrorMessage(toErrorMessage(error));
+      const action: QueuedSyncAction = {
+        id: makeActionId(),
+        type: request.type,
+        payload: request.payload,
+        state: 'conflict',
+        retryCount: 1,
+        maxRetries: request.maxRetries ?? DEFAULT_MAX_RETRIES,
+        nextRetryAt: now,
+        createdAt: now,
+        updatedAt: now,
+        lastError: toErrorMessage(error),
+      };
+      await replaceQueueItems([...queueState.items, action]);
+      setQueueState({
+        lastSyncError: conflictMessage,
+      });
+      return { status: 'queued', action };
+    }
+
     if (!isRetryableError(error)) {
       throw error;
     }
@@ -532,7 +639,15 @@ export const dispatchNetworkAction = async <T extends SyncActionType>(
   }
 };
 
-export const flushPendingNetworkActions = async (options?: { online?: boolean; saverMode?: boolean }) => {
+export const flushPendingNetworkActions = async (options?: { 
+  online?: boolean; 
+  saverMode?: boolean;
+  forceSync?: boolean;
+  batteryLevel?: number;
+  isCharging?: boolean;
+  isMetered?: boolean;
+  meteredOptIn?: boolean;
+}) => {
   await hydrateQueue();
 
   if (options?.online === false || syncingPromise) {
@@ -540,6 +655,11 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
   }
 
   const isSaverMode = options?.saverMode === true;
+  const forceSync = options?.forceSync === true;
+  const batteryLevel = options?.batteryLevel ?? -1;
+  const isCharging = options?.isCharging ?? false;
+  const isMetered = options?.isMetered ?? false;
+  const meteredOptIn = options?.meteredOptIn ?? false;
 
   syncingPromise = (async () => {
     setQueueState({
@@ -550,9 +670,65 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
     let items = [...queueState.items];
     const now = Date.now();
     let actionsProcessed = 0;
+    let deferredCount = 0;
+    const deferralLog: string[] = [];
 
     for (const action of items) {
       if (new Date(action.nextRetryAt).getTime() > now) {
+        continue;
+      }
+
+      // Check if action should be deferred
+      const payload = action.payload as { urgent?: boolean; estimatedSize?: number };
+      const isUrgent = payload.urgent === true;
+      const estimatedSize = payload.estimatedSize || 0;
+      
+      // Calculate battery threshold
+      const batteryThreshold = 0.2; // Default 20%
+      const isLowBattery = !isCharging && batteryLevel >= 0 && batteryLevel < batteryThreshold;
+      
+      // Calculate large upload threshold
+      const largeUploadThreshold = 5 * 1024 * 1024; // Default 5MB
+      const isLargeUpload = action.type === 'evidence-upload' && estimatedSize > largeUploadThreshold;
+      
+      let shouldDefer = false;
+      let deferralReason: DeferralReason = 'none';
+
+      // Urgent items bypass most deferrals except critical battery
+      if (!isUrgent || (isUrgent && isLowBattery)) {
+        if (!forceSync) {
+          // Low battery deferral
+          if (isLowBattery) {
+            shouldDefer = true;
+            deferralReason = 'low-battery';
+            const logMsg = logDeferral(action, deferralReason, `Battery at ${Math.round(batteryLevel * 100)}%, threshold ${Math.round(batteryThreshold * 100)}%`);
+            deferralLog.push(logMsg);
+          }
+          // Large upload on metered connection deferral
+          else if (isMetered && !meteredOptIn && isLargeUpload) {
+            shouldDefer = true;
+            deferralReason = 'large-upload';
+            const logMsg = logDeferral(action, deferralReason, `Upload size ${Math.round(estimatedSize / 1024 / 1024)}MB on metered connection`);
+            deferralLog.push(logMsg);
+          }
+          // Metered connection deferral
+          else if (isMetered && !meteredOptIn) {
+            shouldDefer = true;
+            deferralReason = 'metered-connection';
+            const logMsg = logDeferral(action, deferralReason, 'Metered connection without user opt-in');
+            deferralLog.push(logMsg);
+          }
+        }
+      }
+
+      if (shouldDefer) {
+        deferredCount++;
+        // Update action with deferral info
+        items = items.map(item =>
+          item.id === action.id
+            ? { ...item, deferralReason, updatedAt: new Date().toISOString() }
+            : item
+        );
         continue;
       }
 
@@ -591,9 +767,13 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
           }),
         );
       } catch (error) {
+        const isConflict = isConflictError(error);
         const retryCount = action.retryCount + 1;
-        const nextState: SyncActionState =
-          retryCount >= action.maxRetries || !isRetryableError(error) ? 'failed' : 'retrying';
+        const nextState: SyncActionState = isConflict
+          ? 'conflict'
+          : retryCount >= action.maxRetries || !isRetryableError(error)
+          ? 'failed'
+          : 'retrying';
 
         // In saver mode, use a longer backoff to reduce network usage
         const backoffMultiplier = isSaverMode ? SAVER_BACKOFF_MULTIPLIER : 1;
@@ -616,7 +796,9 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
         queueState = {
           ...queueState,
           items,
-          lastSyncError: toErrorMessage(error),
+          lastSyncError: isConflict
+            ? mapConflictErrorMessage(toErrorMessage(error))
+            : toErrorMessage(error),
         };
         await persistQueue();
         emitQueueState();
@@ -626,6 +808,11 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
     setQueueState({
       isSyncing: false,
       lastSyncAt: queueState.lastSyncAt ?? new Date().toISOString(),
+      deferralStatus: deferredCount > 0 ? {
+        deferred: true,
+        reason: items.find(i => i.deferralReason)?.deferralReason || 'none',
+        explanation: `${deferredCount} actions deferred due to battery/network constraints`,
+      } : undefined,
     });
   })().finally(() => {
     syncingPromise = null;
@@ -634,14 +821,22 @@ export const flushPendingNetworkActions = async (options?: { online?: boolean; s
   return syncingPromise;
 };
 
-export const retryFailedAction = async (actionId: string) => {
+export const requeueAction = async (actionId: string) => {
   await hydrateQueue();
   const now = new Date().toISOString();
   const items = queueState.items.map((item) =>
-    item.id === actionId && item.state === 'failed'
+    item.id === actionId
       ? { ...item, state: 'pending' as SyncActionState, retryCount: 0, nextRetryAt: now, lastError: null, updatedAt: now }
       : item,
   );
+  await replaceQueueItems(items);
+};
+
+export const retryFailedAction = requeueAction;
+
+export const discardAction = async (actionId: string) => {
+  await hydrateQueue();
+  const items = queueState.items.filter((item) => item.id !== actionId);
   await replaceQueueItems(items);
 };
 

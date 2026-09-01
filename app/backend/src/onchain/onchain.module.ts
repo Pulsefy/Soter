@@ -1,6 +1,7 @@
 import { Module, Provider } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { ScheduleModule } from '@nestjs/schedule';
 import { OnchainAdapter, ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
 export { ONCHAIN_ADAPTER_TOKEN };
 import { MockOnchainAdapter } from './onchain.adapter.mock';
@@ -16,7 +17,12 @@ import { MetricsModule } from '../observability/metrics/metrics.module';
 import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
 import { SorobanTransactionScheduler } from './soroban-transaction.scheduler';
 import { SorobanTransactionProcessor } from './soroban-transaction.processor';
+import { SorobanEventCorrelationService } from './soroban-event-correlation.service';
+import { SorobanEventCorrelationScheduler } from './soroban-event-correlation.scheduler';
 import { PrismaModule } from '../prisma/prisma.module';
+import { CommonServicesModule } from '../common/services/common-services.module';
+
+const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
 
 /**
  * Factory function to create the appropriate adapter based on configuration
@@ -49,31 +55,41 @@ const onchainAdapterProvider: Provider = {
   imports: [
     ConfigModule,
     PrismaModule,
-    BullModule.registerQueueAsync({
-      name: 'onchain',
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST') || 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
-    BullModule.registerQueueAsync({
-      name: 'soroban-transactions',
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST') || 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
+    ...(skipBackgroundJobs
+      ? []
+      : [
+          BullModule.registerQueueAsync({
+            name: 'onchain',
+            imports: [ConfigModule],
+            useFactory: (configService: ConfigService) => ({
+              connection: {
+                host: configService.get<string>('REDIS_HOST') || 'localhost',
+                port: parseInt(
+                  configService.get<string>('REDIS_PORT') || '6379',
+                ),
+              },
+            }),
+            inject: [ConfigService],
+          }),
+          BullModule.registerQueueAsync({
+            name: 'soroban-transactions',
+            imports: [ConfigModule],
+            useFactory: (configService: ConfigService) => ({
+              connection: {
+                host: configService.get<string>('REDIS_HOST') || 'localhost',
+                port: parseInt(
+                  configService.get<string>('REDIS_PORT') || '6379',
+                ),
+              },
+            }),
+            inject: [ConfigService],
+          }),
+        ]),
+    ScheduleModule.forRoot(),
     JobsModule,
     LoggerModule,
     MetricsModule,
+    CommonServicesModule,
   ],
   controllers: [LedgerAdminController],
   providers: [
@@ -87,6 +103,8 @@ const onchainAdapterProvider: Provider = {
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
     SorobanTransactionProcessor,
+    SorobanEventCorrelationService,
+    SorobanEventCorrelationScheduler,
   ],
   exports: [
     ONCHAIN_ADAPTER_TOKEN,
@@ -95,6 +113,7 @@ const onchainAdapterProvider: Provider = {
     LedgerReconciliationService,
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
+    SorobanEventCorrelationService,
   ],
 })
 export class OnchainModule {}

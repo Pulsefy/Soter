@@ -1,6 +1,4 @@
-import { config } from '../config';
-
-const API_URL = config.apiUrl;
+import { apiPost } from './requestLayer';
 
 export interface EvidenceUploadRequest {
   aidId: string;
@@ -20,7 +18,7 @@ export interface EvidenceUploadPayload {
 export const buildEvidenceUploadPayload = (
   payload: EvidenceUploadRequest,
 ): EvidenceUploadPayload => ({
-  url: `${API_URL}/verification/upload`,
+  url: `/verification/upload`,
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -29,17 +27,6 @@ export const buildEvidenceUploadPayload = (
 });
 
 export const uploadEvidence = async (payload: EvidenceUploadRequest) => {
-  const response = await fetch(`${API_URL}/verification/upload`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-
-  return response.json();
+  const { data } = await apiPost('/verification/upload', payload);
+  return data;
 };

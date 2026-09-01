@@ -68,4 +68,13 @@ export class CreateClaimDto {
   @Type(() => Date)
   @IsDate()
   expiresAt?: Date;
+
+  @IsOptional()
+  @IsString()
+  importJobId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  importRowNumber?: number;
 }

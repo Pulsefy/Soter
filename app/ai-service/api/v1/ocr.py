@@ -16,7 +16,8 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 import tasks
-from schemas.ocr import OCRResponse
+from schemas.ocr import BatchOCRDocumentStatus, BatchOCRResponse, OCRData, LanguageHint
+from schemas.common import ResultEnvelope
 from services.ocr_job import run_ocr_from_bytes
 from config import settings
 
@@ -32,6 +33,7 @@ ALLOWED_CONTENT_TYPES = {
     "image/webp",
 }
 
+
 class QueuedOCRResponse(BaseModel):
     success: bool
     task_id: str
@@ -45,8 +47,13 @@ class QueuedOCRResponse(BaseModel):
 async def process_ocr(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
-    anchor_metadata: Annotated[Optional[str], Form(description="JSON encoded AnchorMetadata")] = None,
-) -> OCRResponse:
+    anchor_metadata: Annotated[
+        Optional[str], Form(description="JSON encoded AnchorMetadata")
+    ] = None,
+    language_hint: Annotated[
+        Optional[LanguageHint], Form(description="Language hint for OCR")
+    ] = None,
+) -> ResultEnvelope[OCRData]:
     """Extract text fields from an uploaded document image."""
     start_time = time.time()
 
@@ -75,23 +82,141 @@ async def process_ocr(
             )
 
         _validate_image_bytes(contents)
-        result = run_ocr_from_bytes(contents, anchor_metadata)
+        raw = run_ocr_from_bytes(
+            contents,
+            anchor_metadata,
+            language_hint=language_hint.value if language_hint else None,
+        )
 
-        return OCRResponse(**result)
+        from main import correlation_id_var
+
+        ocr_data = (
+            OCRData(**raw["data"]) if isinstance(raw["data"], dict) else raw["data"]
+        )
+        fields = ocr_data.fields
+        avg_confidence: Optional[float] = (
+            round(sum(f.confidence for f in fields.values()) / len(fields), 4)
+            if fields
+            else None
+        )
+
+        return ResultEnvelope[OCRData](
+            result=ocr_data,
+            confidence=avg_confidence,
+            reasons=None,
+            anchor_metadata=raw.get("anchor_metadata"),
+            trace_id=correlation_id_var.get() or None,
+        )
 
     except HTTPException:
         raise
     except Exception as e:
         processing_time_ms = int((time.time() - start_time) * 1000)
-        return OCRResponse(
-            success=False,
-            error={
+        # Surface as a structured HTTP error rather than returning a partial envelope
+        raise HTTPException(
+            status_code=500,
+            detail={
                 "code": "processing_error",
                 "message": str(e),
             },
-            processing_time_ms=processing_time_ms,
-            anchor_metadata=None, # Cannot easily re-parse here without duplicating, so omit or ignore
         )
+
+
+@router.post(
+    "/ai/ocr/batch",
+    response_model=BatchOCRResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+@limiter.limit(settings.request_rate_limit)
+async def queue_batch_ocr_jobs(
+    request: Request,
+    files: Annotated[
+        list[UploadFile], File(description="One or more image files to process")
+    ],
+    anchor_metadata: Annotated[
+        Optional[str], Form(description="JSON encoded AnchorMetadata")
+    ] = None,
+    language_hint: Annotated[
+        Optional[LanguageHint], Form(description="Language hint for OCR")
+    ] = None,
+) -> BatchOCRResponse:
+    """Queue OCR processing for a batch of uploaded document images."""
+    if not files:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "empty_batch",
+                "message": "At least one image file is required for batch OCR",
+            },
+        )
+
+    document_statuses: list[BatchOCRDocumentStatus] = []
+    for image in files:
+        try:
+            if image.content_type not in ALLOWED_CONTENT_TYPES:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "invalid_content_type",
+                        "message": (
+                            f"Invalid content type: {image.content_type}. "
+                            f"Allowed: {', '.join(ALLOWED_CONTENT_TYPES)}"
+                        ),
+                    },
+                )
+
+            contents = await image.read()
+            if len(contents) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "empty_image",
+                        "message": "Uploaded image is empty",
+                    },
+                )
+
+            _validate_image_bytes(contents)
+            task_id = tasks.create_task(
+                task_type="ocr",
+                payload={
+                    "image_base64": base64.b64encode(contents).decode("ascii"),
+                    "content_type": image.content_type,
+                    "filename": image.filename,
+                    "anchor_metadata": anchor_metadata,
+                    "language_hint": language_hint.value if language_hint else None,
+                },
+            )
+
+            document_statuses.append(
+                BatchOCRDocumentStatus(
+                    filename=image.filename,
+                    status="pending",
+                    task_id=task_id,
+                    status_url=f"/v1/ai/jobs/{task_id}",
+                )
+            )
+        except HTTPException as exc:
+            document_statuses.append(
+                BatchOCRDocumentStatus(
+                    filename=image.filename,
+                    status="failed",
+                    error=(
+                        exc.detail
+                        if isinstance(exc.detail, dict)
+                        else {"code": "processing_error", "message": str(exc.detail)}
+                    ),
+                )
+            )
+        except Exception as exc:
+            document_statuses.append(
+                BatchOCRDocumentStatus(
+                    filename=image.filename,
+                    status="failed",
+                    error={"code": "processing_error", "message": str(exc)},
+                )
+            )
+
+    return BatchOCRResponse(success=True, documents=document_statuses)
 
 
 @router.post(
@@ -103,7 +228,12 @@ async def process_ocr(
 async def queue_ocr_job(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
-    anchor_metadata: Annotated[Optional[str], Form(description="JSON encoded AnchorMetadata")] = None,
+    anchor_metadata: Annotated[
+        Optional[str], Form(description="JSON encoded AnchorMetadata")
+    ] = None,
+    language_hint: Annotated[
+        Optional[LanguageHint], Form(description="Language hint for OCR")
+    ] = None,
 ) -> QueuedOCRResponse:
     """Queue OCR processing and return immediately with a pollable job URL."""
     if image.content_type not in ALLOWED_CONTENT_TYPES:
@@ -137,6 +267,7 @@ async def queue_ocr_job(
             "content_type": image.content_type,
             "filename": image.filename,
             "anchor_metadata": anchor_metadata,
+            "language_hint": language_hint.value if language_hint else None,
         },
     )
 

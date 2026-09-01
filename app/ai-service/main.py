@@ -11,15 +11,18 @@ import logging
 import uuid
 from contextvars import ContextVar
 from pythonjsonlogger import jsonlogger
+from logging_redaction import RedactionFilter
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
-from exceptions import AIServiceError
+from exceptions import AIServiceError, LoadShedError
 from schemas.errors import ErrorDetail, ErrorEnvelope
 import time
+import asyncio
 import metrics
+import re
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -32,6 +35,7 @@ from api.routes import router as ocr_router
 from api.v1.router import v1_router
 
 from config import settings
+from request_limits import RequestSizeLimitMiddleware, clamp_request_timeout
 import tasks
 from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
 from schemas.anonymization import AnonymizeRequest, AnonymizeResponse
@@ -41,6 +45,8 @@ from schemas.humanitarian import (
     HumanitarianVerificationResponse,
 )
 from services.humanitarian_verification import HumanitarianVerificationService
+from services.evidence_access_control import EvidenceAccessControl
+from services.decision_audit import build_store_from_settings, set_store
 
 # Context variable for correlation ID
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
@@ -55,7 +61,9 @@ class CorrelationIdFilter(logging.Filter):
 limiter = Limiter(key_func=get_remote_address)
 
 # Set up structured logging with correlation ID
-log_level_name = settings.log_level.upper() if hasattr(settings, "log_level") else "INFO"
+log_level_name = (
+    settings.log_level.upper() if hasattr(settings, "log_level") else "INFO"
+)
 log_level = getattr(logging, log_level_name, logging.INFO)
 
 # Configure root logger
@@ -75,6 +83,7 @@ json_formatter = jsonlogger.JsonFormatter(
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(json_formatter)
 stream_handler.addFilter(CorrelationIdFilter())
+stream_handler.addFilter(RedactionFilter())
 root_logger.addHandler(stream_handler)
 
 # Get logger for this module
@@ -105,6 +114,16 @@ _LEGACY_PREFIX_MAP: list = [
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up Soter AI Service...")
+
+    # Fail fast on invalid configuration: raising inside the lifespan
+    # prevents uvicorn from ever serving traffic. All offending keys are
+    # reported together by validate_configuration().
+    settings.validate_configuration()
+
+    # Report optional values still at their defaults (DEBUG only; secrets
+    # are never included, consistent with logging_redaction.py).
+    settings.report_boot_configuration(logger)
+
     if not settings.validate_api_keys():
         logger.warning("No API keys configured. AI features will be unavailable.")
     else:
@@ -116,14 +135,52 @@ async def lifespan(app: FastAPI):
 
     # Initialize cache service
     from services.cache import CacheService
+
     app.state.cache = CacheService(settings)
     if app.state.cache.enabled:
         logger.info("Response caching enabled with Redis")
     else:
         logger.warning("Response caching disabled (Redis unavailable)")
 
+    # Expose the long-lived collaboration/AIService collaborators on app state
+    # so versioned routers can resolve them via ``request.app.state`` instead of
+    # importing private globals from this module.  Tests inject Mocks onto the
+    # same keys via TestClient.app.state.
+    app.state.artifact_access_control = evidence_access_control
+    app.state.humanitarian_verification_service = humanitarian_verification_service
+    app.state.rate_limiter = rate_limiter
+    # Re-assert the decision audit store (issue #990) and apply the retention
+    # policy once at startup, so an instance that was down past the retention
+    # window compacts its log before it starts serving.
+    app.state.decision_audit_store = decision_audit_store
+    if decision_audit_store is not None and decision_audit_store.enabled:
+        dropped = decision_audit_store.prune()
+        logger.info(
+            "Decision audit store ready: path=%s retention_days=%s records=%d expired_dropped=%d",
+            decision_audit_store.path,
+            settings.decision_audit_retention_days,
+            len(decision_audit_store),
+            dropped,
+        )
+    else:
+        logger.warning("Decision audit disabled (DECISION_AUDIT_ENABLED=false)")
+    app.state.is_shutting_down = False
+    app.state.active_requests = 0
+
     yield
     logger.info("Shutting down Soter AI Service...")
+    app.state.is_shutting_down = True
+
+    drain_timeout = settings.drain_timeout_seconds
+    start_time = time.time()
+
+    while app.state.active_requests > 0 and (time.time() - start_time) < drain_timeout:
+        await asyncio.sleep(0.1)
+
+    if app.state.active_requests > 0:
+        logger.warning(
+            f"Drain timeout ({drain_timeout}s) reached with {app.state.active_requests} active requests."
+        )
 
 
 app = FastAPI(
@@ -133,6 +190,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Lets metrics.bounded_endpoint_label() resolve raw request paths to their
+# registered route templates (see metrics.py's cardinality guidance).
+metrics.bind_app(app)
+
+app.add_middleware(RequestSizeLimitMiddleware)
+
 proof_of_life_analyzer = ProofOfLifeAnalyzer(
     config=ProofOfLifeConfig(
         confidence_threshold=settings.proof_of_life_confidence_threshold,
@@ -141,6 +204,43 @@ proof_of_life_analyzer = ProofOfLifeAnalyzer(
 )
 pii_scrubber_service = PIIScrubberService()
 humanitarian_verification_service = HumanitarianVerificationService()
+
+# Initialize evidence access control service
+from services.artifact_access import ArtifactAccessService
+from services.evidence_access_control import EvidenceAccessControl
+from services.rate_limiter import rate_limiter
+
+# Create artifact access service and wrap with evidence access control
+artifact_access_service_instance = ArtifactAccessService(
+    artifacts_dir=settings.verification_artifacts_dir,
+    signing_secret=settings.artifact_signing_secret,
+    ttl_seconds=settings.verification_artifact_url_ttl_seconds,
+)
+evidence_access_control = EvidenceAccessControl(artifact_access_service_instance)
+
+# Wire the long-lived collaborators onto ``app.state`` at module-init time so
+# the production app *and* ``TestClient(app)`` (which does not enter lifespan
+# unless used as a context manager) both have these resolvable.  ``lifespan``
+# re-asserts the same references on startup so hot-reload / re-import
+# scenarios stay consistent.
+# Durable decision audit store (issue #990). Built at module-init time - like
+# the collaborators above - so ``TestClient(app)`` (which does not enter the
+# lifespan unless used as a context manager) can still audit decisions. It is
+# also published via ``set_store()`` so non-HTTP paths (Celery tasks) can reach
+# the same instance.
+try:
+    decision_audit_store = build_store_from_settings(settings)
+except Exception as _audit_exc:  # pragma: no cover - defensive
+    # A bad audit path must not stop the service from booting; the endpoints
+    # degrade to "no audit record" and log loudly instead.
+    logger.error("Failed to initialise decision audit store: %s", _audit_exc)
+    decision_audit_store = None
+set_store(decision_audit_store)
+
+app.state.humanitarian_verification_service = humanitarian_verification_service
+app.state.artifact_access_control = evidence_access_control
+app.state.rate_limiter = rate_limiter
+app.state.decision_audit_store = decision_audit_store
 
 
 class InferenceRequest(BaseModel):
@@ -185,6 +285,86 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    """
+    Custom CORS middleware with allowlist-based origin validation.
+
+    - Validates origins against configured allowlist
+    - Supports Vercel preview deployments via wildcard patterns
+    - Protects sensitive endpoints by disallowing CORS entirely
+    - Handles preflight OPTIONS requests
+    """
+    origin = request.headers.get("origin")
+    path = request.url.path
+
+    # Sensitive endpoints that should NEVER allow CORS
+    # These require direct server-to-server communication or same-origin
+    SENSITIVE_ENDPOINTS = {
+        "/v1/ai/verification-artifacts",
+        "/ai/verification-artifacts",
+    }
+
+    is_sensitive = any(path.startswith(endpoint) for endpoint in SENSITIVE_ENDPOINTS)
+
+    # For sensitive endpoints, reject CORS entirely
+    if is_sensitive and origin:
+        logger.warning(
+            "cors_rejected_sensitive_endpoint",
+            extra={
+                "event": "cors_rejected",
+                "origin": origin,
+                "path": path,
+                "reason": "sensitive_endpoint",
+            },
+        )
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "code": "CORS_NOT_ALLOWED",
+                    "message": "CORS not allowed for sensitive endpoints",
+                }
+            },
+        )
+
+    # Check if origin is allowed
+    is_allowed = False
+    if origin:
+        is_allowed = settings.is_origin_allowed(origin)
+
+    # Handle preflight requests
+    if request.method == "OPTIONS":
+        if is_allowed:
+            response = Response()
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = (
+                "GET, POST, PUT, DELETE, OPTIONS"
+            )
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Content-Type, Authorization, X-User-Role, X-Org-Id, X-User-Id, X-Correlation-Id, X-Request-Id"
+            )
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Max-Age"] = "86400"
+            return response
+        else:
+            # Reject preflight for disallowed origins
+            return Response(status_code=204)
+
+    # Process the request
+    response = await call_next(request)
+
+    # Add CORS headers for allowed origins on non-sensitive endpoints
+    if is_allowed and not is_sensitive:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Expose-Headers"] = (
+            "X-Correlation-Id, X-Request-Id, Trace-Id"
+        )
+
+    return response
+
+
+@app.middleware("http")
 async def legacy_redirect_middleware(request: Request, call_next):
     """
     Transparently redirect un-versioned /ai/* paths to their /v1
@@ -222,24 +402,55 @@ async def legacy_redirect_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
-    correlation_id = request.headers.get("x-correlation-id") or request.headers.get("x-request-id") or str(uuid.uuid4())
-    
+    correlation_id = (
+        request.headers.get("x-correlation-id")
+        or request.headers.get("x-request-id")
+        or str(uuid.uuid4())
+    )
+
     # Attach correlation ID to request state
     request.state.correlation_id = correlation_id
-    
+
     # Set context variable for logging
     correlation_id_token = correlation_id_var.set(correlation_id)
-    
+
     try:
         response = await call_next(request)
     finally:
         correlation_id_var.reset(correlation_id_token)
-    
+
     # Set correlation ID headers in response
     response.headers["x-correlation-id"] = correlation_id
     response.headers["x-request-id"] = correlation_id
     response.headers["trace_id"] = correlation_id
-    
+
+    return response
+
+
+@app.middleware("http")
+async def demo_mode_header_middleware(request: Request, call_next):
+    """
+    Stamp every response with an ``X-Demo-Mode`` header so clients and
+    contributors can tell at a glance whether they are seeing fixture-driven
+    or deterministic data instead of live AI inference.
+
+    Header values:
+    - ``fixture``       — TEST_PROVIDER_MODE is active (no API keys used)
+    - ``deterministic`` — AI_DETERMINISTIC_MODE is active (hardcoded outputs)
+    - ``live``          — real provider is in use
+
+    The companion ``/health/mode`` endpoint exposes the same information as
+    JSON for programmatic consumers.
+    """
+    response = await call_next(request)
+
+    if settings.test_provider_mode:
+        response.headers["X-Demo-Mode"] = "fixture"
+    elif settings.ai_deterministic_mode:
+        response.headers["X-Demo-Mode"] = "deterministic"
+    else:
+        response.headers["X-Demo-Mode"] = "live"
+
     return response
 
 
@@ -271,40 +482,78 @@ async def monitor_requests(request: Request, call_next):
     if path in _NEVER_THROTTLE or is_redirect_path:
         return await call_next(request)
 
-    # Gracefully throttle if memory pressure is critical.
-    if not metrics.check_system_resources(memory_threshold_percent=90.0):
-        metrics.REQUEST_COUNT.labels(
-            method=request.method,
-            endpoint=path,
-            http_status=503,
-        ).inc()
+    if getattr(request.app.state, "is_shutting_down", False):
         return JSONResponse(
             status_code=503,
-            content={
-                "detail": (
-                    "Service unavailable: System resources (RAM/VRAM) exhausted, "
-                    "gracefully throttling."
+            content=ErrorEnvelope(
+                error=ErrorDetail(
+                    code="SERVICE_UNAVAILABLE", message="Service is shutting down"
                 )
-            },
+            ).model_dump(),
         )
+
+    from services.rate_limiter import evaluate_rate_limit
+
+    rate_limit_response = evaluate_rate_limit(request)
+    if rate_limit_response is not None:
+        return rate_limit_response
+
+    from services.load_shedder import evaluate_load_shed
+
+    shed_response = evaluate_load_shed(request)
+    if shed_response is not None:
+        return shed_response
+
+    if hasattr(request.app.state, "active_requests"):
+        request.app.state.active_requests += 1
 
     start_time = time.time()
     try:
         response = await call_next(request)
         status_code = response.status_code
+
+        # Attach rate limit metadata headers if present
+        rl_res = getattr(request.state, "rate_limit_result", None)
+        if rl_res is not None:
+            response.headers["X-RateLimit-Limit"] = str(rl_res.limit)
+            response.headers["X-RateLimit-Remaining"] = str(rl_res.remaining)
+            response.headers["X-RateLimit-Reset"] = str(rl_res.reset_seconds)
+    except asyncio.CancelledError as e:
+        status_code = 499
+        logger.warning(f"Request {path} cancelled during shutdown. Dead-lettering.")
+        from services.dead_letter import dead_letter_queue
+
+        dead_letter_queue.add(
+            kind="async_job",
+            task_id=(
+                request.state.correlation_id
+                if hasattr(request.state, "correlation_id")
+                else str(uuid.uuid4())
+            ),
+            payload={"path": path, "method": request.method},
+            error="Request cancelled during graceful shutdown",
+            task_type="sync_request",
+        )
+        raise e
     except Exception as e:
         status_code = 500
         raise e
     finally:
+        if hasattr(request.app.state, "active_requests"):
+            request.app.state.active_requests -= 1
         latency = time.time() - start_time
+        # Bound the endpoint label to the matched route template so ids in
+        # the path (task/artifact/dead-letter-item ids) never become label
+        # values (see metrics.py's cardinality guidance, issue #988).
+        bounded_endpoint = metrics.bounded_endpoint_label(path)
         metrics.REQUEST_COUNT.labels(
             method=request.method,
-            endpoint=path,
+            endpoint=bounded_endpoint,
             http_status=status_code,
         ).inc()
-        metrics.REQUEST_LATENCY.labels(method=request.method, endpoint=path).observe(
-            latency
-        )
+        metrics.REQUEST_LATENCY.labels(
+            method=request.method, endpoint=bounded_endpoint
+        ).observe(latency)
 
         monitored_prefixes = ("/ai/", "/v1/ai/")
         if any(path.startswith(p) for p in monitored_prefixes):
@@ -333,8 +582,46 @@ async def get_metrics():
 
 
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request):
+    if getattr(request.app.state, "is_shutting_down", False):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "draining",
+                "service": "soter-ai-service",
+                "version": "1.0.0",
+            },
+        )
     return {"status": "healthy", "service": "soter-ai-service", "version": "1.0.0"}
+
+
+@app.get("/health/mode")
+async def health_mode():
+    """
+    Returns the current AI provider mode so contributors and the frontend
+    can detect demo/degraded states explicitly.
+
+    Response fields:
+    - ``demo_mode``          — one of ``fixture``, ``deterministic``, or ``live``
+    - ``test_provider_mode`` — whether TEST_PROVIDER_MODE is enabled
+    - ``deterministic_mode`` — whether AI_DETERMINISTIC_MODE is enabled
+    - ``active_provider``    — resolved provider name (``test``, ``openai``, ``groq``, or ``null``)
+    - ``app_env``            — current APP_ENV value
+    """
+    if settings.test_provider_mode:
+        demo_mode = "fixture"
+    elif settings.ai_deterministic_mode:
+        demo_mode = "deterministic"
+    else:
+        demo_mode = "live"
+
+    return {
+        "demo_mode": demo_mode,
+        "test_provider_mode": settings.test_provider_mode,
+        "deterministic_mode": settings.ai_deterministic_mode,
+        "active_provider": settings.get_active_provider(),
+        "app_env": settings.app_env,
+    }
 
 
 @app.get("/health/dependencies")
@@ -383,12 +670,21 @@ async def health_dependencies():
 
 @app.get("/")
 async def root():
+    if settings.test_provider_mode:
+        demo_mode = "fixture"
+    elif settings.ai_deterministic_mode:
+        demo_mode = "deterministic"
+    else:
+        demo_mode = "live"
+
     return {
         "service": "Soter AI Service",
         "version": "1.0.0",
         "docs": "/docs",
         "health": "/health",
+        "mode": "/health/mode",
         "api_v1": "/v1",
+        "demo_mode": demo_mode,
     }
 
 
@@ -417,6 +713,8 @@ async def _legacy_create_inference_task(
             "message": "Task queued for processing",
             "status_url": f"/v1/ai/status/{task_id}",
         }
+    except LoadShedError:
+        raise
     except Exception as e:
         logger.error(f"Failed to create inference task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")
@@ -477,13 +775,14 @@ async def _legacy_verify_humanitarian_claim(request: HumanitarianVerificationReq
     logger.info("[legacy] Processing humanitarian verification request")
 
     try:
+        timeout = clamp_request_timeout(request.timeout, "/ai/humanitarian/verify")
         try:
             result = humanitarian_verification_service.verify_claim(
                 aid_claim=request.aid_claim,
                 supporting_evidence=request.supporting_evidence,
                 context_factors=request.context_factors,
                 provider_preference=request.provider_preference,
-                timeout=request.timeout,
+                timeout=timeout,
             )
         except TypeError as exc:
             if "timeout" in str(exc):
@@ -589,6 +888,20 @@ async def validation_exception_handler(request, exc: RequestValidationError):
     )
 
 
+@app.exception_handler(LoadShedError)
+async def load_shed_exception_handler(request, exc: LoadShedError):
+    from services.load_shedder import build_shed_response
+
+    path = request.url.path
+    logger.warning("Load shedding request to %s due to %s", path, exc.reason)
+    return build_shed_response(
+        exc.reason,
+        request.method,
+        path,
+        details=exc.details,
+    )
+
+
 @app.exception_handler(AIServiceError)
 async def ai_service_exception_handler(request, exc: AIServiceError):
     logger.error(f"AI service error: {exc.message}", exc_info=True)
@@ -606,7 +919,9 @@ async def general_exception_handler(request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content=ErrorEnvelope(
-            error=ErrorDetail(code="INTERNAL_SERVER_ERROR", message="Internal server error")
+            error=ErrorDetail(
+                code="INTERNAL_SERVER_ERROR", message="Internal server error"
+            )
         ).model_dump(),
     )
 

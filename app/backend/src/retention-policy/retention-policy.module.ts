@@ -12,12 +12,16 @@ import { MetricsModule } from '../observability/metrics/metrics.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuditModule } from '../audit/audit.module';
 
+const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
+
 @Module({
   imports: [
     PrismaModule,
     AuditModule,
     MetricsModule,
-    BullModule.registerQueue({ name: RETENTION_PURGE_QUEUE }),
+    ...(skipBackgroundJobs
+      ? []
+      : [BullModule.registerQueue({ name: RETENTION_PURGE_QUEUE })]),
   ],
   controllers: [RetentionPolicyController],
   providers: [

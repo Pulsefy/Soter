@@ -12,7 +12,11 @@ import { ClaimReceiptScreen } from '../screens/ClaimReceiptScreen';
 import type { RootStackParamList } from '../navigation/types';
 import { ThemeProvider } from '../theme/ThemeContext';
 
+const mockFetch = jest.fn();
+global.fetch = mockFetch as unknown as typeof fetch;
+
 const mockQueueClaimConfirmation = jest.fn().mockResolvedValue({ status: 'completed', result: {} });
+const mockConfirmValueAction = jest.fn().mockResolvedValue(true);
 
 // Mock heavy dependencies
 jest.mock('../contexts/WalletContext', () => ({
@@ -30,7 +34,11 @@ jest.mock('../contexts/WalletContext', () => ({
 }));
 
 jest.mock('../contexts/BiometricContext', () => ({
-  useBiometric: () => ({ biometricEnabled: false, authenticate: jest.fn().mockResolvedValue(true) }),
+  useBiometric: () => ({
+    biometricEnabled: false,
+    authenticate: jest.fn().mockResolvedValue(true),
+    confirmValueAction: mockConfirmValueAction,
+  }),
 }));
 
 jest.mock('../services/api', () => ({
@@ -56,6 +64,8 @@ jest.mock('../services/aidApi', () => ({
     status: 'verified',
     claimId: 'claim-aid-1',
     createdAt: '2026-01-01T00:00:00Z',
+    verifiedAt: '2026-01-01T01:00:00Z',
+    approvalTransactionHash: 'a'.repeat(64),
   }),
   getMockAidDetails: jest.fn(),
 }));
@@ -64,6 +74,10 @@ jest.mock('../services/aidCache', () => ({
   cacheAidList: jest.fn(),
   loadCachedAidList: jest.fn().mockResolvedValue([]),
   getCacheTimestamp: jest.fn().mockResolvedValue(null),
+  cacheAidDetails: jest.fn().mockResolvedValue(undefined),
+  loadCachedAidDetails: jest.fn().mockResolvedValue(null),
+  getAidDetailsCacheTimestamp: jest.fn().mockResolvedValue(null),
+  clearAidDetailsCache: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../hooks/useNetworkStatus', () => ({
@@ -119,6 +133,24 @@ function TestNavigator({
 }
 
 describe('Navigation: Home -> AidOverview -> AidDetails', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockQueueClaimConfirmation.mockResolvedValue({ status: 'completed', result: {} });
+    mockConfirmValueAction.mockResolvedValue(true);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({
+        claimId: 'claim-aid-1',
+        packageId: 'aid-1',
+        status: 'disbursed',
+        amount: 500,
+        timestamp: '2026-01-01T01:00:00Z',
+        explorerLink: 'https://example.com/claim-aid-1',
+      }),
+    });
+  });
+
   it('renders HomeScreen with title', async () => {
     const { getByText } = render(<TestNavigator initialRoute="Home" />);
     await waitFor(() => {
@@ -153,5 +185,38 @@ describe('Navigation: Home -> AidOverview -> AidDetails', () => {
     await waitFor(() => {
       expect(getByText(/Your proof of claim completion/i)).toBeTruthy();
     });
+
+    expect(mockConfirmValueAction).toHaveBeenCalledWith('Confirm claim submission');
+  });
+
+  it('aborts claim confirmation when device confirmation is cancelled', async () => {
+    mockConfirmValueAction.mockResolvedValue(false);
+    const { getByText } = render(
+      <TestNavigator initialRoute="AidDetails" initialParams={{ aidId: 'aid-1' }} />,
+    );
+
+    await waitFor(() => expect(getByText(/Package ID: aid-1/i)).toBeTruthy());
+    fireEvent.press(getByText(/Confirm Claim/i));
+
+    await waitFor(() => {
+      expect(mockConfirmValueAction).toHaveBeenCalledWith('Confirm claim submission');
+    });
+    expect(mockQueueClaimConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('shows claim status timeline with pending onchain milestones and hash actions', async () => {
+    const { getByText } = render(
+      <TestNavigator initialRoute="AidDetails" initialParams={{ aidId: 'aid-1' }} />,
+    );
+
+    await waitFor(() => expect(getByText('Status Timeline')).toBeTruthy());
+
+    expect(getByText('Verification')).toBeTruthy();
+    expect(getByText('Approval')).toBeTruthy();
+    expect(getByText('Claim')).toBeTruthy();
+    expect(getByText('Disbursement')).toBeTruthy();
+    expect(getByText(/Explorer aaaaaaaa...aaaaaa/i)).toBeTruthy();
+    expect(getByText('Copy hash')).toBeTruthy();
+    expect(getByText('Pending onchain update')).toBeTruthy();
   });
 });

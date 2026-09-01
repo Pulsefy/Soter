@@ -4,7 +4,7 @@ use aid_escrow::{Aggregates, AidEscrow, AidEscrowClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token::{StellarAssetClient, TokenClient},
-    Address, Env, Map,
+    Address, Env, Map, String, Symbol,
 };
 
 fn setup_token(env: &Env, admin: &Address) -> (TokenClient<'static>, StellarAssetClient<'static>) {
@@ -399,4 +399,66 @@ fn test_aggregates_unknown_token() {
     let unknown_token = Address::generate(&env);
     let agg = client.get_aggregates(&unknown_token);
     assert_eq!(agg.total_committed, 0);
+}
+
+#[test]
+fn test_campaign_count_helpers_are_deterministic_and_read_only() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, token_client, admin, _contract_id) = setup_funded(&env, 100_000_000);
+    let r1 = Address::generate(&env);
+    let r2 = Address::generate(&env);
+    let r3 = Address::generate(&env);
+    let expiry = env.ledger().timestamp() + 86400;
+    let campaign = String::from_str(&env, "campaign-123");
+    let other_campaign = String::from_str(&env, "campaign-999");
+
+    let mut package_meta_a = Map::new(&env);
+    package_meta_a.set(Symbol::new(&env, "campaign_ref"), campaign.clone());
+
+    let mut package_meta_b = Map::new(&env);
+    package_meta_b.set(Symbol::new(&env, "campaign_ref"), campaign.clone());
+
+    let mut package_meta_c = Map::new(&env);
+    package_meta_c.set(Symbol::new(&env, "campaign_ref"), other_campaign.clone());
+
+    client.create_package(
+        &admin,
+        &1,
+        &r1,
+        &10_000_000,
+        &token_client.address,
+        &expiry,
+        &package_meta_a,
+    );
+    client.create_package(
+        &admin,
+        &2,
+        &r2,
+        &20_000_000,
+        &token_client.address,
+        &expiry,
+        &package_meta_b,
+    );
+    client.create_package(
+        &admin,
+        &3,
+        &r3,
+        &30_000_000,
+        &token_client.address,
+        &expiry,
+        &package_meta_c,
+    );
+
+    client.claim(&2);
+
+    assert_eq!(client.get_campaign_package_count(&campaign), 2);
+    assert_eq!(client.get_campaign_claim_count(&campaign), 1);
+    assert_eq!(client.get_campaign_package_count(&other_campaign), 1);
+    assert_eq!(client.get_campaign_claim_count(&other_campaign), 0);
+
+    let agg = client.get_aggregates(&token_client.address);
+    assert_eq!(agg.total_committed, 40_000_000);
+    assert_eq!(agg.total_claimed, 20_000_000);
 }

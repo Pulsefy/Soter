@@ -47,7 +47,7 @@ export class LedgerBackfillService {
         endLedger,
         campaignId,
         batchSize,
-      } as BackfillJobData,
+      },
       {
         attempts: 3,
         backoff: {

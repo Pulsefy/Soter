@@ -4,12 +4,13 @@ import {
   Get,
   Delete,
   Param,
+  Body,
+  UseGuards,
   UseInterceptors,
   UploadedFiles,
   Request,
   HttpCode,
   HttpStatus,
-  BadRequestException,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
@@ -21,8 +22,14 @@ import {
   ApiOkResponse,
   ApiCreatedResponse,
   ApiBearerAuth,
+  ApiSecurity,
 } from '@nestjs/swagger';
 import { EvidenceService } from './evidence.service';
+import { ArtifactOwnershipTokenService } from './artifact-ownership-token.service';
+import {
+  ArtifactTokenGuard,
+  RequireArtifactToken,
+} from '../common/guards/artifact-token.guard';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 import {
@@ -32,12 +39,19 @@ import {
   evidenceMulterOptions,
   validateUploadedFile,
 } from './file-validation';
+import {
+  AppException,
+  INTEGRATION_ERROR_CODES,
+} from '../common/constants/integration-error-codes';
 
 @ApiTags('Evidence Queue')
 @ApiBearerAuth('JWT-auth')
 @Controller('evidence')
 export class EvidenceController {
-  constructor(private readonly evidenceService: EvidenceService) {}
+  constructor(
+    private readonly evidenceService: EvidenceService,
+    private readonly artifactTokenService: ArtifactOwnershipTokenService,
+  ) {}
 
   @Post('upload')
   @Roles(AppRole.operator, AppRole.admin)
@@ -90,16 +104,24 @@ export class EvidenceController {
     files: Express.Multer.File[] | undefined,
   ): Express.Multer.File {
     if (!files || files.length === 0) {
-      throw new BadRequestException('No file uploaded');
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_MISSING_FILE,
+        400,
+        'No file uploaded',
+      );
     }
     if (files.length > 1) {
-      throw new BadRequestException(
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_MISSING_FILE,
+        400,
         `Only a single file may be uploaded in the "${UPLOAD_FIELD}" field`,
       );
     }
     const file = files[0];
     if (file.fieldname !== UPLOAD_FIELD) {
-      throw new BadRequestException(
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_MISSING_FILE,
+        400,
         `Unexpected field "${file.fieldname}"; file must be sent in the "${UPLOAD_FIELD}" field`,
       );
     }
@@ -143,5 +165,133 @@ export class EvidenceController {
   remove(@Param('id') id: string, @Request() req: ExpressRequest) {
     const ownerId = req.user?.apiKeyId || req.user?.authType || 'system';
     return this.evidenceService.remove(id, ownerId);
+  }
+
+  @Post(':id/token')
+  @Roles(AppRole.operator, AppRole.admin)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Generate artifact ownership token',
+    description:
+      'Creates a signed ownership token for an artifact. ' +
+      'This token is required for backend-initiated access to evidence artifacts.',
+  })
+  @ApiCreatedResponse({
+    description: 'Artifact ownership token created successfully.',
+    schema: {
+      type: 'object',
+      properties: {
+        token: { type: 'string', description: 'Signed ownership token' },
+        expiresAt: { type: 'string', format: 'date-time' },
+        artifactId: { type: 'string' },
+        orgId: { type: 'string' },
+      },
+    },
+  })
+  async generateArtifactToken(
+    @Param('id') id: string,
+    @Body('orgId') orgId: string,
+    @Body('ttlSeconds') ttlSeconds?: number,
+    @Request() req?: ExpressRequest,
+  ) {
+    if (!orgId) {
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_MISSING_FILE,
+        400,
+        'orgId is required',
+      );
+    }
+
+    const userId = req?.user?.apiKeyId || req?.user?.authType || 'system';
+    const role = req?.user?.role || 'operator';
+
+    // Validate artifact ownership
+    const ownsArtifact =
+      await this.artifactTokenService.validateArtifactOwnership(id, orgId);
+    if (!ownsArtifact) {
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_ACCESS_DENIED,
+        401,
+        'Artifact does not belong to the specified organization',
+      );
+    }
+
+    const token = await this.artifactTokenService.createToken({
+      artifactId: id,
+      orgId,
+      userId,
+      role,
+      ttlSeconds,
+    });
+
+    // Get expiration time from token
+    const payload = JSON.parse(
+      Buffer.from(token.split('.')[0], 'base64url').toString('utf-8'),
+    );
+
+    return {
+      token,
+      expiresAt: new Date(payload.exp * 1000).toISOString(),
+      artifactId: id,
+      orgId,
+    };
+  }
+
+  @Post(':id/access')
+  @RequireArtifactToken()
+  @UseGuards(ArtifactTokenGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiSecurity('artifact-token')
+  @ApiOperation({
+    summary: 'Access artifact with ownership token',
+    description:
+      'Provides access to an artifact using a valid ownership token. ' +
+      'The token must be provided via Authorization header or query parameter.',
+  })
+  @ApiOkResponse({
+    description: 'Artifact access granted.',
+    schema: {
+      type: 'object',
+      properties: {
+        artifactId: { type: 'string' },
+        filePath: { type: 'string' },
+        metadata: { type: 'object' },
+      },
+    },
+  })
+  async accessArtifact(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ) {
+    const tokenPayload = req['artifactToken'];
+
+    // Additional validation: ensure token artifact ID matches URL
+    if (tokenPayload.artifactId !== id) {
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_ACCESS_DENIED,
+        401,
+        'Token artifact ID mismatch',
+      );
+    }
+
+    // Get artifact details from evidence service
+    const artifact = await this.evidenceService.findQueue(tokenPayload.userId);
+    const artifactItem = artifact.find(item => item.id === id);
+
+    if (!artifactItem) {
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.EVIDENCE_NOT_FOUND,
+        401,
+        'Artifact not found',
+      );
+    }
+
+    return {
+      artifactId: artifactItem.id,
+      filePath: artifactItem.filePath,
+      metadata: artifactItem.metadata,
+      accessedAt: new Date().toISOString(),
+      accessedBy: tokenPayload.userId,
+    };
   }
 }

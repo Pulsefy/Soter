@@ -22,6 +22,7 @@ jest.mock('next-themes', () => {
           'data-default-theme': props.defaultTheme,
           'data-enable-system': String(props.enableSystem),
           'data-enable-color-scheme': String(props.enableColorScheme),
+          'data-storage-key': props.storageKey,
         },
         children,
       ),
@@ -46,6 +47,7 @@ describe('ThemeProvider', () => {
     expect(provider).toHaveAttribute('data-default-theme', 'system');
     expect(provider).toHaveAttribute('data-enable-system', 'true');
     expect(provider).toHaveAttribute('data-enable-color-scheme', 'true');
+    expect(provider).toHaveAttribute('data-storage-key', 'soter-theme');
   });
 });
 

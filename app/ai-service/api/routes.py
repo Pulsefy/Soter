@@ -1,13 +1,13 @@
 import io
 import time
-from typing import Annotated
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 import metrics
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from schemas.ocr import OCRData, OCRFieldResult, OCRResponse
+from schemas.ocr import OCRData, OCRFieldResult, OCRResponse, LanguageHint
 from services.ocr import OCRService
 from config import settings
 
@@ -31,6 +31,9 @@ ocr_service = OCRService()
 async def process_ocr(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
+    language_hint: Annotated[
+        Optional[LanguageHint], Form(description="Language hint for OCR")
+    ] = None,
 ) -> OCRResponse:
     start_time = time.time()
 
@@ -69,9 +72,11 @@ async def process_ocr(
             )
 
         start_inference = time.time()
-        result = ocr_service.process_image(img)
+        result = ocr_service.process_image(
+            img, language_hint=language_hint.value if language_hint else None
+        )
         inference_latency = time.time() - start_inference
-        
+
         metrics.INFERENCE_LATENCY.labels(task_type="ocr").observe(inference_latency)
         metrics.logger.info(f"OCR Inference completed in {inference_latency:.4f}s")
 

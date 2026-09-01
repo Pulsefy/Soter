@@ -14,6 +14,8 @@ export type RetentionPurgeScope = 'policies' | 'idempotency-key-expiry';
 export interface RetentionPurgeJobData {
   triggeredBy: string; // 'cron' | 'manual' | 'api'
   timestamp: number;
+  dryRun?: boolean;
+  batchSize?: number;
   scope?: RetentionPurgeScope;
 }
 
@@ -40,7 +42,10 @@ export class RetentionPurgeProcessor extends WorkerHost {
     }
 
     try {
-      const results = await this.retentionService.executePurge();
+      const results = await this.retentionService.executePurge({
+        dryRun: job.data.dryRun ?? false,
+        batchSize: job.data.batchSize ?? undefined,
+      });
       const totalAffected = results.reduce((sum, r) => sum + r.affected, 0);
 
       this.logger.log(

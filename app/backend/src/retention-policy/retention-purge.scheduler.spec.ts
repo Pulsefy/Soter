@@ -5,6 +5,7 @@ import {
 } from './retention-purge.processor';
 import { RetentionPurgeScheduler } from './retention-purge.scheduler';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('RetentionPurgeScheduler', () => {
   let queue: { add: jest.Mock };
@@ -17,6 +18,7 @@ describe('RetentionPurgeScheduler', () => {
 
     scheduler = new RetentionPurgeScheduler(
       queue as unknown as Queue<RetentionPurgeJobData>,
+      { get: jest.fn() } as unknown as ConfigService,
       metrics as unknown as MetricsService,
     );
   });

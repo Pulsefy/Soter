@@ -8,6 +8,8 @@ import { FilterPresets } from './FilterPresets';
 import { ExportControls } from './ExportControls';
 import type { AidPackageFilters } from '@/types/aid-package';
 
+const DEFAULT_PAGE_SIZE = 10;
+
 export function DashboardContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -15,6 +17,10 @@ export function DashboardContent() {
   const urlSearch = searchParams.get('search') ?? '';
   const urlStatus = searchParams.get('status') ?? '';
   const urlToken = searchParams.get('token') ?? '';
+  const urlPage = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1);
+  const urlSize = Math.min(100, Math.max(1, parseInt(searchParams.get('size') ?? String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE));
+  const urlSortBy = searchParams.get('sortBy') ?? 'id';
+  const urlSortDirection = (searchParams.get('sortDirection') as 'asc' | 'desc') ?? 'asc';
 
   // Local state for immediate input responsiveness
   const [localSearch, setLocalSearch] = useState(urlSearch);
@@ -42,6 +48,10 @@ export function DashboardContent() {
       } else {
         params.delete(key);
       }
+      // Reset to page 1 when filters change (but not when page itself changes)
+      if (key !== 'page' && key !== 'size') {
+        params.delete('page');
+      }
       router.replace(`?${params.toString()}`, { scroll: false });
     },
     [router, searchParams],
@@ -64,6 +74,16 @@ export function DashboardContent() {
     },
     [updateParam],
   );
+
+  const handlePageChange = useCallback((newPage: number) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (newPage > 1) {
+      params.set('page', String(newPage));
+    } else {
+      params.delete('page');
+    }
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [router, searchParams]);
 
   /**
    * Apply a preset (or restore defaults) by rebuilding the URL from scratch.
@@ -117,7 +137,12 @@ export function DashboardContent() {
       />
 
       {/* Package list */}
-      <FilteredPackageList filters={filters} />
+      <FilteredPackageList
+        filters={filters}
+        page={urlPage}
+        size={urlSize}
+        onPageChange={handlePageChange}
+      />
     </div>
   );
 }

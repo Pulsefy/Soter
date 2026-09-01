@@ -40,6 +40,12 @@ expires and is refunded.
 | `pause(env)` | Admin | Pauses the contract (blocks package creation and claims). |
 | `unpause(env)` | Admin | Unpauses the contract. |
 | `is_paused(env)` | — | Returns true if the contract is paused. |
+| `pause_action(env, action)` | Admin | Pauses a single action (`create`/`claim`/`refund`/`withdraw`). |
+| `unpause_action(env, action)` | Admin | Unpauses a single action. |
+| `is_action_paused(env, action)` | — | Returns true if the action is paused (or the contract is globally paused). |
+| `pause_campaign(env, campaign_ref)` | Admin | Pauses `claim`/`disburse`/`refund` for packages tagged with this `campaign_ref`. |
+| `unpause_campaign(env, campaign_ref)` | Admin | Unpauses the campaign. |
+| `is_campaign_paused(env, campaign_ref)` | — | Returns true if the campaign is paused (or the contract is globally paused). |
 
 ### Funding
 
@@ -54,11 +60,13 @@ expires and is refunded.
 | `create_package(env, operator, id, recipient, amount, token, expires_at)` | Admin / Distributor | Creates a single aid package with a specific ID. Locks funds from the available pool. |
 | `batch_create_packages(env, operator, recipients, amounts, token, expires_in)` | Admin / Distributor | Creates multiple packages in one transaction using auto-incrementing IDs. |
 | `claim(env, id)` | Recipient | Recipient claims the package. Transfers tokens to recipient and marks package as claimed. |
+| `reassign_package(env, package_id, new_recipient)` | Admin | Reassigns an unclaimed, unexpired package while preserving its ID and history. |
 | `disburse(env, id)` | Admin | Admin manually disburses a package to its recipient. |
 | `revoke(env, id)` | Admin | Admin revokes a package, returning funds to the surplus pool. |
 | `refund(env, id)` | Admin | Refunds an expired or cancelled package to the admin. |
 | `cancel_package(env, package_id)` | Admin | Cancels a package (transitions to Cancelled status). |
-| `extend_expiration(env, package_id, additional_time)` | Admin / Distributor | Extends the expiration time of an active package. |
+| `extend_expiry(env, id, new_expires_at)` | Admin / Distributor | Extends the expiration time of an active package using an absolute timestamp. |
+| `extend_expiration(env, package_id, additional_time)` | Admin / Distributor | **Deprecated**: Use `extend_expiry` instead. Extends using a relative time delta. |
 
 ### Queries
 
@@ -98,6 +106,32 @@ Cancelled --> Refunded       (admin refunds)
 | 12 | `MismatchedArrays` | `recipients` and `amounts` lengths differ in batch create. |
 | 13 | `InsufficientSurplus` | `withdraw_surplus` amount exceeds available surplus. |
 | 14 | `ContractPaused` | Operation blocked because contract is paused. |
+| 15 | `ClaimTooEarly` | Claim attempted before the claim window opens. |
+| 16 | `InvalidProof` | Claim proof is invalid or missing. |
+| 17 | `InvalidToken` | Token contract address is not allowed by config. |
+| 18 | `TokenTransferFailed` | Token transfer reverted (e.g. insufficient allowance). |
+| 19 | `NoPendingTransfer` | No pending admin transfer is in progress. |
+| 20 | `InvalidPendingAdmin` | Pending admin address does not match the caller. |
+| 21 | `BatchTooLarge` | Batch operation exceeds the maximum allowed size. |
+| 22 | `ClaimCooldownActive` | Recipient has not yet completed the claim cooldown. |
+
+### Compatibility Policy
+
+The numeric codes in the table above are **stable and part of the public
+contract ABI**. The backend adapter
+(`app/backend/src/onchain/utils/soroban-error.mapper.ts`) maps these codes to
+user-facing messages, so reordering or removing a variant would silently break
+that mapping.
+
+- **Adding a new error**: append the new variant with the **next unused code**
+  (currently `23`). Never reuse, renumber, or skip codes.
+- **Removing an error**: do **not** remove a variant. If it is no longer
+  emitted, keep the variant and its code so existing mappings remain valid.
+- **Renaming**: renaming a variant is allowed only if the numeric code is
+  preserved; update the backend mapper and this table in the same change.
+- **Guarding**: `tests/error_codes.rs` pins every variant to its canonical code
+  and verifies the codes are unique and contiguous. Any reorder or removal
+  fails CI.
 
 ## Data Structures
 
@@ -136,6 +170,13 @@ pub struct Aggregates {
 }
 ```
 
+## Storage
+
+All ledger keys (singletons, namespaced package records, delegate data) are
+centralized in `src/keys.rs`. The canonical key-space reference — every key's
+encoded value, stored type, lifetime, and the keys a migration must consider —
+is documented in [`STORAGE_KEYS.md`](./STORAGE_KEYS.md).
+
 ## Events
 
 All state-changing operations emit events with stable topics for indexer consumption:
@@ -143,6 +184,7 @@ All state-changing operations emit events with stable topics for indexer consump
 - `EscrowFunded` — pool funded
 - `PackageCreated` — package created
 - `PackageClaimed` — recipient claimed
+- `PackageReassigned` — package recipient changed by the admin
 - `PackageDisbursed` — admin disbursed
 - `PackageRevoked` — admin revoked
 - `PackageRefunded` — admin refunded
