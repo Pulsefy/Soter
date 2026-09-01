@@ -7,6 +7,10 @@ This module standardizes prompt construction across providers and model families
 
 from typing import Any, Dict, List
 
+#: Version of the prompt templates below. Bump this whenever the system or
+#: user prompt text changes so decision audit records (issue #990) can tie a
+#: past decision to the exact prompt that produced it.
+HUMANITARIAN_PROMPT_VERSION = "humanitarian-sphere-v1"
 
 SPHERE_HANDBOOK_CRITERIA: Dict[str, List[str]] = {
     "water_supply_sanitation_hygiene": [
@@ -40,6 +44,10 @@ SPHERE_HANDBOOK_CRITERIA: Dict[str, List[str]] = {
 class HumanitarianPromptEngine:
     """Builds standardized humanitarian verification prompts."""
 
+    #: Exposed on the instance so callers (notably the decision audit trail)
+    #: can record which prompt version produced a decision.
+    prompt_version: str = HUMANITARIAN_PROMPT_VERSION
+
     def build_primary_prompt(
         self,
         aid_claim: str,
@@ -68,15 +76,15 @@ class HumanitarianPromptEngine:
             f"Context Factors (from backend):\n{context_text}\n\n"
             "Output JSON schema exactly:\n"
             "{\n"
-            "  \"verdict\": \"credible|partially_credible|inconclusive|not_credible\",\n"
-            "  \"confidence\": 0.0,\n"
-            "  \"summary\": \"short neutral summary\",\n"
-            "  \"criteria_assessment\": [\n"
-            "    {\"criterion\": \"string\", \"status\": \"met|partially_met|not_met|unknown\", \"reason\": \"string\"}\n"
+            '  "verdict": "credible|partially_credible|inconclusive|not_credible",\n'
+            '  "confidence": 0.0,\n'
+            '  "summary": "short neutral summary",\n'
+            '  "criteria_assessment": [\n'
+            '    {"criterion": "string", "status": "met|partially_met|not_met|unknown", "reason": "string"}\n'
             "  ],\n"
-            "  \"risk_flags\": [\"string\"],\n"
-            "  \"missing_information\": [\"string\"],\n"
-            "  \"recommended_next_steps\": [\"string\"]\n"
+            '  "risk_flags": ["string"],\n'
+            '  "missing_information": ["string"],\n'
+            '  "recommended_next_steps": ["string"]\n'
             "}"
         )
 
@@ -102,9 +110,9 @@ class HumanitarianPromptEngine:
             f"Evidence: {evidence_text}\n"
             f"Context: {context_text}\n\n"
             "Respond with JSON only:\n"
-            "{\"verdict\":\"credible|partially_credible|inconclusive|not_credible\","
-            "\"confidence\":0.0,\"summary\":\"\","
-            "\"risk_flags\":[],\"missing_information\":[],\"recommended_next_steps\":[]}"
+            '{"verdict":"credible|partially_credible|inconclusive|not_credible",'
+            '"confidence":0.0,"summary":"",'
+            '"risk_flags":[],"missing_information":[],"recommended_next_steps":[]}'
         )
 
         return {"system": system_prompt, "user": user_prompt}

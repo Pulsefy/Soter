@@ -97,6 +97,18 @@ export const metricsProviders = [
     labelNames: ['callback_type', 'reason'],
   }),
 
+  // Notification Delivery Metrics (issue #716)
+  makeCounterProvider({
+    name: 'notification_delivery_attempts_total',
+    help: 'Total number of notification delivery attempts, labelled by type and outcome',
+    labelNames: ['type', 'outcome'],
+  }),
+  makeCounterProvider({
+    name: 'notification_delivery_failures_by_category_total',
+    help: 'Total number of failed notification delivery attempts, labelled by type and a bounded failure category (not raw error text)',
+    labelNames: ['type', 'failure_category'],
+  }),
+
   // Error Rate Metrics
   makeCounterProvider({
     name: 'error_rate_total',
@@ -129,20 +141,100 @@ export const metricsProviders = [
     labelNames: ['reason'],
   }),
 
-  // Idempotency Key Retention Metrics
+  // Generic Response Cache Metrics (issue #702)
   makeCounterProvider({
-    name: 'idempotency_keys_purged_total',
-    help: 'Total number of expired idempotency keys deleted by the purge job',
-    labelNames: [],
+    name: 'cache_hits_total',
+    help: 'Total number of response cache hits, labelled by key group',
+    labelNames: ['key_group'],
   }),
   makeCounterProvider({
-    name: 'idempotency_purge_executions_total',
-    help: 'Total number of idempotency key purge executions',
+    name: 'cache_misses_total',
+    help: 'Total number of response cache misses, labelled by key group',
+    labelNames: ['key_group'],
+  }),
+  makeCounterProvider({
+    name: 'cache_invalidations_total',
+    help: 'Total number of response cache invalidations, labelled by key group',
+    labelNames: ['key_group'],
+  }),
+  makeGaugeProvider({
+    name: 'cache_keys_total',
+    help: 'Current number of Redis keys per cache key group',
+    labelNames: ['key_group'],
+  }),
+
+  // Verification Priority Metrics
+  makeCounterProvider({
+    name: 'verification_jobs_enqueued_total',
+    help: 'Total number of verification jobs enqueued, labelled by priority tier',
+    labelNames: ['priority'],
+  }),
+  makeGaugeProvider({
+    name: 'verification_queue_waiting_by_priority',
+    help: 'Current number of waiting verification jobs by priority tier',
+    labelNames: ['priority'],
+  }),
+
+  // Claim Funnel Metrics
+  makeCounterProvider({
+    name: 'claims_created_total',
+    help: 'Total number of claims created',
+    labelNames: ['campaign_id'],
+  }),
+  makeCounterProvider({
+    name: 'claims_verified_total',
+    help: 'Total number of claims verified',
+    labelNames: ['campaign_id'],
+  }),
+  makeCounterProvider({
+    name: 'claims_approved_total',
+    help: 'Total number of claims approved',
+    labelNames: ['campaign_id'],
+  }),
+  makeCounterProvider({
+    name: 'claims_disbursed_total',
+    help: 'Total number of claims disbursed',
+    labelNames: ['campaign_id', 'onchain_enabled'],
+  }),
+  makeCounterProvider({
+    name: 'claims_cancelled_total',
+    help: 'Total number of claims cancelled',
+    labelNames: ['campaign_id', 'from_status'],
+  }),
+  makeGaugeProvider({
+    name: 'claims_in_funnel',
+    help: 'Current number of claims at each funnel stage',
     labelNames: ['status'],
   }),
+  makeHistogramProvider({
+    name: 'claim_funnel_duration_seconds',
+    help: 'Time spent within each claim funnel stage before transitioning',
+    labelNames: ['from_status', 'to_status'],
+    buckets: [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 86400],
+  }),
+
+  // Entity Link Review Queue Metrics (issue #949)
+  makeGaugeProvider({
+    name: 'entity_link_review_queue_depth',
+    help: 'Current number of entity links awaiting review, by entity type',
+    labelNames: ['entity_type'],
+  }),
   makeCounterProvider({
-    name: 'idempotency_purge_failures_total',
-    help: 'Total number of failed idempotency key purge executions',
-    labelNames: ['reason'],
+    name: 'entity_link_review_decisions_total',
+    help: 'Total number of entity link review decisions made, by decision type',
+    labelNames: ['decision'],
+  }),
+  makeHistogramProvider({
+    name: 'entity_link_review_duration_seconds',
+    help: 'Time a link spent in the review queue before a reviewer decided it',
+    labelNames: ['decision'],
+    buckets: [60, 300, 900, 3600, 14400, 86400, 259200, 604800],
+  }),
+
+  // API Key Rate Limit Metrics (issue #952)
+  makeCounterProvider({
+    name: 'api_key_rate_limit_rejections_total',
+    help: 'Total number of per-API-key rate limit rejections',
+    labelNames: ['scope', 'api_key_id'],
   }),
 ];

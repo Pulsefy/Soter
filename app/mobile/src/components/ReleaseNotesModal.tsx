@@ -10,9 +10,11 @@ import {
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useUpdate } from '../contexts/UpdateContext';
+import { useTranslation } from '../i18n/useTranslation';
 
 export const ReleaseNotesModal: React.FC = () => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const { isUpdateAvailable, hasSeenReleaseNotes, versionInfo, markReleaseNotesSeen } = useUpdate();
 
   // Only show if update is available, user hasn't seen notes, and not a force upgrade
@@ -57,7 +59,7 @@ export const ReleaseNotesModal: React.FC = () => {
               style={[styles.button, { backgroundColor: colors.brand.primary }]}
               onPress={markReleaseNotesSeen}
             >
-              <Text style={styles.buttonText}>Got it!</Text>
+              <Text style={styles.buttonText}>{t('releaseNotes.gotIt')}</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>

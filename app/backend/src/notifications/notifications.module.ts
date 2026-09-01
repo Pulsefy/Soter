@@ -4,29 +4,38 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { NotificationsService } from './notifications.service';
 import { NotificationProcessor } from './notifications.processor';
 import { OutboxController } from './outbox.controller';
+import { NotificationsController } from './notifications.controller';
 import { JobsModule } from '../jobs/jobs.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
 import { LoggerModule } from '../logger/logger.module';
 
+const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
+
 @Module({
   imports: [
     ConfigModule,
-    BullModule.registerQueueAsync({
-      name: 'notifications',
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST') || 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
+    ...(skipBackgroundJobs
+      ? []
+      : [
+          BullModule.registerQueueAsync({
+            name: 'notifications',
+            imports: [ConfigModule],
+            useFactory: (configService: ConfigService) => ({
+              connection: {
+                host: configService.get<string>('REDIS_HOST') || 'localhost',
+                port: parseInt(
+                  configService.get<string>('REDIS_PORT') || '6379',
+                ),
+              },
+            }),
+            inject: [ConfigService],
+          }),
+        ]),
     JobsModule,
     MetricsModule,
     LoggerModule,
   ],
-  controllers: [OutboxController],
+  controllers: [OutboxController, NotificationsController],
   providers: [NotificationsService, NotificationProcessor],
   exports: [NotificationsService],
 })

@@ -2,11 +2,15 @@
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
+import { ErrorInline } from './ErrorInline';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { EvidenceArtifactViewer } from './EvidenceArtifactViewer';
 import { RedactionControls } from './RedactionControls';
 import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
 import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
+import { useToast } from '@/components/ToastProvider';
+import { normalizeError } from '@/lib/error-utils';
+import { useTranslations } from 'next-intl';
 import type {
     PiiDetectionResult,
     ValidationErrors,
@@ -64,9 +68,10 @@ interface EnhancedFlowState {
     imageFile: File | null;
     textInput: string;
     errors: ValidationErrors;
-    apiError: string | null;
+    apiError: Error | string | null;
     result: VerificationResult | null;
     evidenceArtifact: EvidenceArtifact | null;
+    artifactNotes?: string;
     showArtifactViewer: boolean;
 }
 
@@ -121,6 +126,8 @@ export const EnhancedVerificationFlow: React.FC = () => {
     const uid = useId();
     const role = getAppUserRole();
     const { isMismatch } = useNetworkGuard();
+    const { toast } = useToast();
+    const tErrors = useTranslations('errors');
     const [restoredDraft] = useState<EnhancedVerificationDraft | null>(() =>
         readEnhancedVerificationDraftFromStorage(),
     );
@@ -273,7 +280,8 @@ export const EnhancedVerificationFlow: React.FC = () => {
             apiError: null,
             evidenceArtifact,
             showArtifactViewer: true,
-            step: 'analysing',
+            artifactNotes: '',
+            step: 'review',
         }));
     }, [imageFile, textInput, validateUploadForm, detectPII]);
 
@@ -295,15 +303,21 @@ export const EnhancedVerificationFlow: React.FC = () => {
             })
             .catch((err: unknown) => {
                 if (cancelled) return;
-                if (err instanceof VerificationApiError) {
-                    setFlowState(prev => ({ ...prev, apiError: err.message, step: 'upload' }));
-                } else {
-                    setFlowState(prev => ({
-                        ...prev,
-                        apiError: 'An unexpected error occurred. Please try again.',
-                        step: 'upload',
-                    }));
-                }
+                const normalized = normalizeError(err);
+                
+                toast(
+                    'Verification Failed',
+                    normalized.correlationId
+                        ? `${normalized.message} (Correlation ID: ${normalized.correlationId})`
+                        : normalized.message,
+                    'error'
+                );
+
+                setFlowState(prev => ({
+                    ...prev,
+                    apiError: err as any,
+                    step: 'upload',
+                }));
                 pendingPayload.current = null;
             });
 
@@ -426,11 +440,13 @@ export const EnhancedVerificationFlow: React.FC = () => {
                     )}
                     
                     {flowState.apiError && (
-                        <div
-                            role="alert"
-                            className="mb-4 p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 text-sm"
-                        >
-                            {flowState.apiError}
+                        <div className="mb-6">
+                            <ErrorInline
+                                error={flowState.apiError}
+                                onRetry={() => setFlowState(prev => ({ ...prev, apiError: null }))}
+                                onClose={() => setFlowState(prev => ({ ...prev, apiError: null }))}
+                                variant="card"
+                            />
                         </div>
                     )}
 
@@ -543,31 +559,44 @@ export const EnhancedVerificationFlow: React.FC = () => {
                 </div>
             )}
 
-            {/* Artifact Viewer Step */}
-            {flowState.step === 'analysing' && flowState.evidenceArtifact && (
+            {/* Review Step */}
+            {flowState.step === 'review' && flowState.evidenceArtifact && (
                 <div>
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-lg font-semibold">Review Evidence & Apply Redactions</h2>
                         <button
-                            onClick={() => setFlowState(prev => ({ ...prev, step: 'upload' }))}
+                            onClick={() => setFlowState(prev => ({ ...prev, step: 'upload', evidenceArtifact: null, artifactNotes: '' }))}
                             className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                         >
-                            Back to Upload
+                            Remove Artifact
                         </button>
                     </div>
-                    
                     <EvidenceArtifactViewer
                         artifact={flowState.evidenceArtifact}
                         onRedactionChange={handleRedactionChange}
                         onArtifactUpdate={handleArtifactUpdate}
                         className="mb-4"
                     />
-                    
+                    {flowState.evidenceArtifact.metadata.piiDetected && (
+                        <div className="p-4 mb-4 bg-yellow-100 border border-yellow-300 text-yellow-800 rounded">
+                            <strong>Privacy Warning:</strong> This evidence contains personally identifiable information.
+                        </div>
+                    )}
+                    <div className="mb-4">
+                        <label className="block text-sm font-medium mb-1" htmlFor="artifact-notes">Notes (optional)</label>
+                        <textarea
+                            id="artifact-notes"
+                            value={flowState.artifactNotes}
+                            onChange={e => setFlowState(prev => ({ ...prev, artifactNotes: e.target.value }))}
+                            rows={3}
+                            className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                    </div>
                     <RedactionControls
                         artifact={flowState.evidenceArtifact}
-                        isEditing={false} // Will be managed by the viewer component
+                        isEditing={false}
                         selectedTool={selectedTool}
-                        selectedRegions={[]} // Will be managed by the viewer component
+                        selectedRegions={[]}
                         onToggleEdit={() => {}}
                         onToolChange={setSelectedTool}
                         onRegionRemove={() => {}}
@@ -575,18 +604,16 @@ export const EnhancedVerificationFlow: React.FC = () => {
                         onAutoRedaction={handleAutoRedaction}
                         onClearAllRedactions={handleClearAllRedactions}
                     />
-                    
                     <div className="mt-4 flex justify-end">
                         <button
-                            onClick={() => setFlowState(prev => ({ ...prev, step: 'result' }))}
-                            className="px-6 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                            onClick={() => setFlowState(prev => ({ ...prev, step: 'analysing' }))}
+                            className="px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
                         >
-                            Continue to Verification
+                            Confirm Upload
                         </button>
                     </div>
                 </div>
             )}
-
             {/* Analysis Step */}
             {flowState.step === 'analysing' && !flowState.evidenceArtifact && (
                 <div className="flex flex-col items-center justify-center py-12 space-y-6">

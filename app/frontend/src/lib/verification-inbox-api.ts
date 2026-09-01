@@ -1,4 +1,5 @@
 import { fetchClient } from '@/lib/mock-api/client';
+import { extractApiError } from '@/lib/error-utils';
 import type {
   VerificationInboxResponse,
   VerificationInboxItem,
@@ -26,19 +27,19 @@ export async function fetchInbox(
   filters: Partial<ReviewFilters>,
 ): Promise<VerificationInboxResponse> {
   const res = await fetchClient(`${BASE}${buildParams(filters)}`);
-  if (!res.ok) throw new Error(`Failed to fetch inbox: ${res.status}`);
+  if (!res.ok) throw await extractApiError(res);
   return res.json() as Promise<VerificationInboxResponse>;
 }
 
 export async function fetchStats(): Promise<VerificationStats> {
   const res = await fetchClient(`${BASE}/stats`);
-  if (!res.ok) throw new Error(`Failed to fetch stats: ${res.status}`);
+  if (!res.ok) throw await extractApiError(res);
   return res.json() as Promise<VerificationStats>;
 }
 
 export async function fetchDetails(id: string): Promise<VerificationInboxItem> {
   const res = await fetchClient(`${BASE}/${id}`);
-  if (!res.ok) throw new Error(`Failed to fetch verification: ${res.status}`);
+  if (!res.ok) throw await extractApiError(res);
   return res.json() as Promise<VerificationInboxItem>;
 }
 
@@ -52,10 +53,7 @@ export async function approveVerification(
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(
-      (body as { message?: string }).message ?? `Approve failed: ${res.status}`,
-    );
+    throw await extractApiError(res);
   }
   return res.json() as Promise<VerificationInboxItem>;
 }
@@ -74,10 +72,7 @@ export async function rejectVerification(
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(
-      (body as { message?: string }).message ?? `Reject failed: ${res.status}`,
-    );
+    throw await extractApiError(res);
   }
   return res.json() as Promise<VerificationInboxItem>;
 }
@@ -96,18 +91,14 @@ export async function requestResubmission(
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(
-      (body as { message?: string }).message ??
-        `Resubmission request failed: ${res.status}`,
-    );
+    throw await extractApiError(res);
   }
   return res.json() as Promise<VerificationInboxItem>;
 }
 
 export async function fetchNotes(id: string): Promise<InternalNote[]> {
   const res = await fetchClient(`${BASE}/${id}/notes`);
-  if (!res.ok) throw new Error(`Failed to fetch notes: ${res.status}`);
+  if (!res.ok) throw await extractApiError(res);
   return res.json() as Promise<InternalNote[]>;
 }
 
@@ -121,11 +112,8 @@ export async function addNote(
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(
-      (body as { message?: string }).message ??
-        `Add note failed: ${res.status}`,
-    );
+    throw await extractApiError(res);
   }
   return res.json() as Promise<InternalNote>;
 }
+

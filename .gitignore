@@ -146,6 +146,8 @@ CLAUDE.local.md
 # Google Gemini CLI
 .gemini/
 GEMINI.md
+# OpenCode
+AGENTS.md
 # Sourcegraph Cody
 .cody/
 # SpecStory

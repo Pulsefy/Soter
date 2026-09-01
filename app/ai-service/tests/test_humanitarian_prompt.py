@@ -20,7 +20,10 @@ class TestHumanitarianPromptEngine:
         prompt = self.engine.build_primary_prompt(
             aid_claim="Temporary shelter distribution completed.",
             supporting_evidence=[],
-            context_factors={"security_level": "high_risk", "displacement_status": "ongoing"},
+            context_factors={
+                "security_level": "high_risk",
+                "displacement_status": "ongoing",
+            },
         )
 
         assert "Context Factors" in prompt["user"]

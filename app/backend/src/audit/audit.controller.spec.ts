@@ -1,10 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditController } from './audit.controller';
 import { AuditService } from './audit.service';
+import { MetricsService } from 'src/audit/metrics.service';
 
 describe('AuditController', () => {
   let controller: AuditController;
   let service: AuditService;
+  let metricsService: MetricsService;
 
   const mockExportResult = {
     data: [
@@ -31,10 +33,18 @@ describe('AuditController', () => {
     buildCsv: jest.fn().mockReturnValue('id,actorHash,...\nlog-1,...'),
   };
 
+  const mockMetricsService = {
+    getMetrics: jest.fn().mockResolvedValue('# HELP ...'),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuditController],
       providers: [
+        {
+          provide: MetricsService,
+          useValue: mockMetricsService,
+        },
         {
           provide: AuditService,
           useValue: mockAuditService,
@@ -44,6 +54,7 @@ describe('AuditController', () => {
 
     controller = module.get<AuditController>(AuditController);
     service = module.get<AuditService>(AuditService);
+    metricsService = module.get<MetricsService>(MetricsService);
   });
 
   it('should be defined', () => {
@@ -57,7 +68,7 @@ describe('AuditController', () => {
         setHeader: jest.fn(),
       } as any;
 
-      await controller.getLogs(query as any, res);
+      await controller.getLogs(query, res);
 
       expect(service.findLogs).toHaveBeenCalledWith(query);
       expect(res.setHeader).toHaveBeenCalledWith('X-Total-Count', '0');
@@ -87,7 +98,7 @@ describe('AuditController', () => {
     it('should return CSV string and set headers when format=csv', async () => {
       const res = makeRes();
       const returned = await controller.exportLogs(
-        { format: 'csv' } as any,
+        { format: 'csv' },
         res as any,
       );
 
@@ -107,7 +118,7 @@ describe('AuditController', () => {
     it('should pass from/to filters to exportLogs', async () => {
       const res = makeRes();
       await controller.exportLogs(
-        { from: '2024-01-01', to: '2024-12-31' } as any,
+        { from: '2024-01-01', to: '2024-12-31' },
         res as any,
       );
 
@@ -115,6 +126,21 @@ describe('AuditController', () => {
         from: '2024-01-01',
         to: '2024-12-31',
       });
+    });
+  });
+
+  describe('getMetrics', () => {
+    it('should call metricsService.getMetrics and set headers', async () => {
+      const res = {
+        set: jest.fn(),
+        send: jest.fn(),
+      } as any;
+
+      await controller.getMetrics(res);
+
+      expect(metricsService.getMetrics).toHaveBeenCalled();
+      expect(res.set).toHaveBeenCalledWith('Content-Type', 'text/plain');
+      expect(res.send).toHaveBeenCalledWith('# HELP ...');
     });
   });
 });

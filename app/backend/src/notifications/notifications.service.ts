@@ -1,13 +1,40 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { NotificationOutbox } from '@prisma/client';
+import {
+  AuditLog,
+  NotificationOutbox,
+  NotificationDeliveryAttempt,
+  DeliveryAttemptOutcome,
+} from '@prisma/client';
 import {
   NotificationJobData,
   NotificationType,
 } from './interfaces/notification-job.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
+import { AuditService } from '../audit/audit.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
+
+export interface ActivityFeedItem {
+  id: string;
+  type: 'notification' | 'audit' | 'review';
+  status: 'pending' | 'processing' | 'succeeded' | 'failed';
+  title: string;
+  description: string;
+  timestamp: Date;
+  read: boolean;
+  correlationId?: string;
+  linkHref?: string;
+  linkLabel?: string;
+  metadata?: Record<string, unknown>;
+}
 
 @Injectable()
 export class NotificationsService {
@@ -17,6 +44,8 @@ export class NotificationsService {
     @InjectQueue('notifications') private readonly notificationsQueue: Queue,
     private readonly prisma: PrismaService,
     private readonly loggerService: LoggerService,
+    @Optional() private readonly auditService?: AuditService,
+    @Optional() private readonly metricsService?: MetricsService,
   ) {}
 
   async sendEmail(
@@ -138,6 +167,67 @@ export class NotificationsService {
   }
 
   /**
+   * Returns the full delivery-attempt timeline for a single outbox record,
+   * newest first (issue #716). NotificationOutbox only ever holds the
+   * latest attempt's outcome; this is what makes a real timeline possible.
+   */
+  async getDeliveryAttempts(
+    outboxId: string,
+  ): Promise<NotificationDeliveryAttempt[]> {
+    return this.prisma.notificationDeliveryAttempt.findMany({
+      where: { outboxId },
+      orderBy: { startedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Returns a filtered, paginated slice of delivery attempts across all
+   * outbox records, for the admin delivery-history endpoint (issue #716).
+   */
+  async getDeliveryHistory(filters: {
+    outcome?: DeliveryAttemptOutcome;
+    failureCategory?: string;
+    type?: string;
+    from?: Date;
+    to?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ items: NotificationDeliveryAttempt[]; total: number }> {
+    const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
+    const offset = Math.max(filters.offset ?? 0, 0);
+
+    const where: {
+      outcome?: DeliveryAttemptOutcome;
+      failureCategory?: string;
+      startedAt?: { gte?: Date; lte?: Date };
+      outbox?: { type: string };
+    } = {};
+
+    if (filters.outcome) where.outcome = filters.outcome;
+    if (filters.failureCategory)
+      where.failureCategory = filters.failureCategory;
+    if (filters.type) where.outbox = { type: filters.type };
+    if (filters.from || filters.to) {
+      where.startedAt = {
+        ...(filters.from ? { gte: filters.from } : {}),
+        ...(filters.to ? { lte: filters.to } : {}),
+      };
+    }
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.notificationDeliveryAttempt.findMany({
+        where,
+        orderBy: { startedAt: 'desc' },
+        take: limit,
+        skip: offset,
+      }),
+      this.prisma.notificationDeliveryAttempt.count({ where }),
+    ]);
+
+    return { items, total };
+  }
+
+  /**
    * Returns all outbox records stuck in pending or enqueued status for more
    * than 10 minutes, ordered by scheduledFor ascending (oldest first).
    */
@@ -150,5 +240,232 @@ export class NotificationsService {
       },
       orderBy: { scheduledFor: 'asc' },
     });
+  }
+
+  async getDeadLetterNotifications(page = 1, limit = 50) {
+    const take = Math.min(Math.max(limit, 1), 200);
+    const currentPage = Math.max(page, 1);
+    const skip = (currentPage - 1) * take;
+    const where = { status: 'dead_letter' as const };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.notificationOutbox.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip,
+        take,
+      }),
+      this.prisma.notificationOutbox.count({ where }),
+    ]);
+    return { items, total, page: currentPage, limit: take };
+  }
+
+  async replayDeadLetterNotification(id: string, actorId: string) {
+    const record = await this.prisma.notificationOutbox.findUnique({
+      where: { id },
+    });
+    if (!record)
+      throw new NotFoundException(`Outbox record with id "${id}" not found`);
+    if (record.status !== 'dead_letter') {
+      throw new BadRequestException(
+        'Only dead-lettered notifications can be replayed',
+      );
+    }
+
+    const claimed = await this.prisma.notificationOutbox.updateMany({
+      where: { id, status: 'dead_letter' },
+      data: {
+        status: 'enqueued',
+        retryCount: { increment: 1 },
+        lastError: null,
+      },
+    });
+    if (claimed.count !== 1) {
+      throw new BadRequestException(
+        'Notification replay is already in progress',
+      );
+    }
+
+    const jobName =
+      (record.type as NotificationType) === NotificationType.SMS
+        ? 'send-sms'
+        : 'send-email';
+    try {
+      const job = await this.notificationsQueue.add(
+        jobName,
+        {
+          type: record.type as NotificationType,
+          recipient: record.recipient,
+          ...(record.subject ? { subject: record.subject } : {}),
+          message: record.message,
+          timestamp: Date.now(),
+          outboxId: record.id,
+          correlationId:
+            typeof this.parseMetadata(record.metadata).correlationId ===
+            'string'
+              ? (this.parseMetadata(record.metadata).correlationId as string)
+              : undefined,
+        } satisfies NotificationJobData,
+        { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
+      );
+      await this.prisma.notificationOutbox.update({
+        where: { id },
+        data: { jobId: String(job.id) },
+      });
+      await this.auditService?.record({
+        actorId,
+        entity: 'NotificationOutbox',
+        entityId: id,
+        action: 'replay_notification_dead_letter',
+        metadata: { jobId: String(job.id), type: record.type },
+      });
+      await this.refreshDeadLetterDepth();
+      return { success: true, outboxId: id, replayedJobId: String(job.id) };
+    } catch (error) {
+      await this.prisma.notificationOutbox.update({
+        where: { id },
+        data: {
+          status: 'dead_letter',
+          lastError: error instanceof Error ? error.message : String(error),
+        },
+      });
+      throw error;
+    }
+  }
+
+  async replayDeadLetterNotifications(ids: string[], actorId: string) {
+    const results = await Promise.allSettled(
+      ids.map(id => this.replayDeadLetterNotification(id, actorId)),
+    );
+    return {
+      replayed: results.filter(result => result.status === 'fulfilled').length,
+      skipped: results.filter(result => result.status === 'rejected').length,
+      results,
+    };
+  }
+
+  private async refreshDeadLetterDepth() {
+    if (!this.metricsService) return;
+    const depth = await this.prisma.notificationOutbox.count({
+      where: { status: 'dead_letter' },
+    });
+    this.metricsService.setNotificationDeadLetterDepth(depth);
+  }
+
+  async getActivityFeed(limit = 30): Promise<ActivityFeedItem[]> {
+    const take = Math.min(Math.max(limit, 1), 100);
+    const [notifications, auditLogs, reviews] = await this.prisma.$transaction([
+      this.prisma.notificationOutbox.findMany({
+        orderBy: { createdAt: 'desc' },
+        take,
+      }),
+      this.prisma.auditLog.findMany({
+        where: { deletedAt: null },
+        orderBy: { timestamp: 'desc' },
+        take,
+      }),
+      this.prisma.verificationRequest.findMany({
+        where: { deletedAt: null },
+        orderBy: [{ reviewedAt: 'desc' }, { updatedAt: 'desc' }],
+        take,
+      }),
+    ]);
+
+    return [
+      ...notifications.map(record => this.mapOutboxToFeedItem(record)),
+      ...auditLogs.map(record => this.mapAuditToFeedItem(record)),
+      ...reviews.map(record => ({
+        id: `review:${record.id}`,
+        type: 'review' as const,
+        status:
+          record.status === 'rejected'
+            ? ('failed' as const)
+            : record.status === 'approved'
+              ? ('succeeded' as const)
+              : ('pending' as const),
+        title: `Verification ${record.status.replaceAll('_', ' ')}`,
+        description: record.nextStepMessage
+          ? record.nextStepMessage
+          : record.reviewedBy
+            ? `Reviewed by ${record.reviewedBy}`
+            : 'Awaiting reviewer action',
+        timestamp: record.reviewedAt ?? record.updatedAt ?? record.createdAt,
+        read: record.status === 'approved' || record.status === 'rejected',
+        linkHref: `/verification-review?requestId=${record.id}`,
+        linkLabel: 'Open review',
+        metadata: { requestId: record.id, orgId: record.orgId },
+      })),
+    ]
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      .slice(0, take);
+  }
+
+  private mapOutboxToFeedItem(record: NotificationOutbox): ActivityFeedItem {
+    const metadata = this.parseMetadata(record.metadata);
+    const correlationId =
+      typeof metadata.correlationId === 'string'
+        ? metadata.correlationId
+        : (record.jobId ?? undefined);
+
+    return {
+      id: `notification:${record.id}`,
+      type: 'notification',
+      status:
+        record.status === 'failed'
+          ? 'failed'
+          : record.status === 'sent'
+            ? 'succeeded'
+            : record.status === 'enqueued'
+              ? 'processing'
+              : 'pending',
+      title: record.subject ?? `${record.type.toUpperCase()} notification`,
+      description: record.lastError ?? record.message,
+      timestamp: record.sentAt ?? record.lastAttemptAt ?? record.createdAt,
+      read: record.status === 'sent',
+      correlationId,
+      linkHref: `/notifications/outbox/${record.id}`,
+      linkLabel: 'Open outbox record',
+      metadata: {
+        ...metadata,
+        outboxId: record.id,
+        recipient: record.recipient,
+      },
+    };
+  }
+
+  private mapAuditToFeedItem(record: AuditLog): ActivityFeedItem {
+    const metadata =
+      record.metadata && typeof record.metadata === 'object'
+        ? (record.metadata as Record<string, unknown>)
+        : {};
+    const correlationId =
+      typeof metadata.correlationId === 'string'
+        ? metadata.correlationId
+        : undefined;
+
+    return {
+      id: `audit:${record.id}`,
+      type: 'audit',
+      status: 'succeeded',
+      title: `${record.action} ${record.entity}`,
+      description: `Actor ${record.actorId} updated ${record.entityId}`,
+      timestamp: record.timestamp,
+      read: true,
+      correlationId,
+      linkHref: `/${record.entity.toLowerCase()}s/${record.entityId}`,
+      linkLabel: 'Open record',
+      metadata,
+    };
+  }
+
+  private parseMetadata(metadata: string | null): Record<string, unknown> {
+    if (!metadata) return {};
+    try {
+      const parsed = JSON.parse(metadata);
+      return parsed && typeof parsed === 'object'
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
   }
 }

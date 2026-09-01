@@ -1,47 +1,32 @@
-import {
-  Controller,
-  Delete,
-  InternalServerErrorException,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
-import { AppRole } from '../auth/app-role.enum';
-import { Roles } from '../auth/roles.decorator';
-import { SandboxGuard } from './sandbox.guard';
-import { SeedService } from './seed.service';
+import { Controller, Post, HttpCode, HttpStatus } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { SandboxService } from './sandbox.service';
+import { Public } from '../common/decorators/public.decorator';
 
-@Controller({ path: 'admin/sandbox', version: '1' })
-@Roles(AppRole.admin)
-@UseGuards(SandboxGuard)
+@ApiTags('Sandbox')
+@Controller('sandbox')
 export class SandboxController {
-  constructor(private readonly seedService: SeedService) {}
+  constructor(private readonly sandboxService: SandboxService) {}
 
-  @Post('seed/tenant')
-  seedTenant() {
-    return this.seedService.seedTenant();
-  }
-
-  @Post('seed/campaigns')
-  seedCampaigns() {
-    return this.seedService.seedCampaigns();
-  }
-
-  @Post('seed/claims')
-  seedClaims() {
-    return this.seedService.seedClaims();
-  }
-
-  @Post('seed')
-  async seedAll() {
-    try {
-      return await this.seedService.seedAll();
-    } catch (err) {
-      throw new InternalServerErrorException((err as Error).message);
-    }
-  }
-
-  @Delete('seed')
-  resetSeed() {
-    return this.seedService.resetSeed();
+  @Post('reset-demo-seed')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reset demo seed data (Testnet environments only)',
+    description:
+      'Deletes all existing demo data and recreates a deterministic demo state. This endpoint is only available in development, test, and sandbox environments.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Demo seed data reset successfully.',
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Forbidden. This operation is not allowed in this environment.',
+  })
+  @Public() // Allow unauthenticated access, as the service handles environment-based authorization
+  async resetDemoSeed(): Promise<{ message: string }> {
+    await this.sandboxService.resetDemoState();
+    return { message: 'Demo seed data reset successfully.' };
   }
 }

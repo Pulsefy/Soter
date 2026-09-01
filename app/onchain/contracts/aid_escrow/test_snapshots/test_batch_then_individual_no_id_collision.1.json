@@ -523,7 +523,7 @@
             },
             "ext": "v0"
           },
-          4095
+          1555200
         ]
       ],
       [
@@ -585,6 +585,14 @@
                       },
                       "val": {
                         "u64": "0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
                       }
                     },
                     {
@@ -707,6 +715,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -825,6 +841,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -877,7 +901,7 @@
             },
             "ext": "v0"
           },
-          4095
+          1555200
         ]
       ],
       [
@@ -923,6 +947,14 @@
                               },
                               "val": {
                                 "vec": []
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "claim_cooldown"
+                              },
+                              "val": {
+                                "u64": "0"
                               }
                             },
                             {

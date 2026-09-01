@@ -5,7 +5,8 @@ import createNextIntlPlugin from 'next-intl/plugin';
 const withNextIntl = createNextIntlPlugin('./src/i18n.ts');
 
 const nextConfig: NextConfig = {
-    allowedDevOrigins: ['127.0.0.1', 'localhost'],
+  output: 'standalone',
+  allowedDevOrigins: ['127.0.0.1', 'localhost', '*.run.app'],
   turbopack: {
     root: path.join(__dirname, '../..'),
   },

@@ -4,12 +4,18 @@ import Link from 'next/link';
 import { useMemo, useRef, useState, useEffect } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronLeft, Download, FileSpreadsheet, RefreshCcw, UploadCloud } from 'lucide-react';
 import { useToast } from '@/components/ToastProvider';
+import { normalizeError } from '@/lib/error-utils';
+import { useTranslations } from 'next-intl';
 import {
-  buildValidationReport,
   confirmRecipientsImport,
+  downloadImportReport,
   parseRecipientsCsv,
-  type ParsedCsvData,
+  validateHeaders,
   validateRecipientsImport,
+  type HeaderValidationResult,
+  type ImportProgress,
+  type ParsedCsvData,
+  type ReportSource,
   type ValidationResult,
   type WizardStep,
 } from '@/lib/csv-validation';
@@ -17,6 +23,7 @@ import { Step1Upload } from './Step1Upload';
 import { Step2Preview } from './Step2Preview';
 import { Step3Validation } from './Step3Validation';
 import { Step4Confirm } from './Step4Confirm';
+import { useNetworkGuard } from '@/hooks/useNetworkGuard';
 
 const steps: Array<{ id: WizardStep; title: string; description: string }> = [
   { id: 1, title: 'Upload', description: 'Select recipient CSV' },
@@ -31,6 +38,7 @@ interface ImportRecipientsWizardProps {
 
 export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardProps) {
   const { toast } = useToast();
+  const { isMismatch } = useNetworkGuard();
   const [step, setStep] = useState<WizardStep>(1);
   const [file, setFile] = useState<File | null>(null);
   const [parsedData, setParsedData] = useState<ParsedCsvData | null>(null);
@@ -41,29 +49,30 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [headerValidation, setHeaderValidation] = useState<HeaderValidationResult | null>(null);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [liveMessage, setLiveMessage] = useState('');
+  const [isDownloadingReport, setIsDownloadingReport] = useState(false);
+  const [lastReportSource, setLastReportSource] = useState<ReportSource | null>(null);
+  const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const liveRegionRef = useRef<HTMLDivElement | null>(null);
 
-  /** Focus target for each step — set on the heading of the active step panel. */
-  const stepHeadingRef = useRef<HTMLHeadingElement>(null);
-  /** Polite live region for step transitions and CSV feedback. */
-  const liveRegionRef = useRef<HTMLDivElement>(null);
+  function announce(message: string) {
+    setLiveMessage(message);
+  }
 
-  /** Move focus to the step heading whenever the active step changes. */
   useEffect(() => {
-    stepHeadingRef.current?.focus();
+    if (stepHeadingRef.current) {
+      stepHeadingRef.current.focus();
+    }
   }, [step]);
 
   const summary = validationResult?.summary;
   const canAdvanceToPreview = Boolean(file && parsedData && !fileError);
-  const canAdvanceToValidation = Boolean(parsedData?.rows.length);
+  const canAdvanceToValidation = Boolean(parsedData?.rows.length && headerValidation?.valid !== false);
   const canAdvanceToConfirm = Boolean(validationResult);
   const hasBlockingErrors = Boolean(summary && summary.errorRows > 0);
   const previewRows = useMemo(() => parsedData?.rows.slice(0, 12) ?? [], [parsedData]);
-
-  /** Update the polite live region for screen-reader announcements. */
-  const announce = (message: string) => {
-    setLiveMessage(message);
-  };
 
   async function handleFileSelected(nextFile: File | null) {
     setFile(nextFile);
@@ -72,6 +81,9 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
     setFileError(null);
     setSubmitMessage(null);
     setSubmitError(null);
+    setHeaderValidation(null);
+    setImportProgress(null);
+    setLastReportSource(null);
 
     if (!nextFile) {
       return;
@@ -84,16 +96,45 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
 
     setIsParsing(true);
     try {
-      const data = await parseRecipientsCsv(nextFile);
+      const data = await parseRecipientsCsv(nextFile, (progress) => {
+        setImportProgress(progress);
+      });
       setParsedData(data);
-      toast('CSV ready', `Loaded ${data.rows.length} recipient rows for review.`, 'success');
-      announce(`CSV ready, ${data.rows.length} rows loaded.`);
+
+      const headerResult = validateHeaders(data.headers);
+      setHeaderValidation(headerResult);
+
+      if (!headerResult.valid) {
+        const missingCols = headerResult.errors.map(e => e.expectedKey).join(', ');
+        toast(
+          'Missing columns',
+          `Required columns not found: ${missingCols}. Check the CSV headers.`,
+          'warning',
+        );
+        announce(`Warning: Required columns not found: ${missingCols}. Check the CSV headers.`);
+      } else {
+        toast('CSV ready', `Loaded ${data.rows.length} recipient rows for review.`, 'success');
+        announce(`CSV ready. Loaded ${data.rows.length} recipient rows for review.`);
+      }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to parse the selected CSV file.';
-      setFileError(message);
-      toast('Upload problem', message, 'error');
+      const normalized = normalizeError(error);
+      let msg = normalized.message;
+      if (normalized.code) {
+        if (tErrors.has(normalized.code)) {
+          msg = tErrors(normalized.code);
+        } else {
+          console.warn(`[ImportRecipientsWizard] Unknown error code: ${normalized.code}`);
+          msg = tErrors('generic');
+        }
+      }
+      const toastMsg = normalized.correlationId
+        ? `${msg} (Correlation ID: ${normalized.correlationId})`
+        : msg;
+      setFileError(msg);
+      toast('Upload problem', toastMsg, 'error');
     } finally {
       setIsParsing(false);
+      setImportProgress(null);
     }
   }
 
@@ -105,9 +146,12 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
     setIsValidating(true);
     setSubmitMessage(null);
     setSubmitError(null);
+    setImportProgress(null);
 
     try {
-      const result = await validateRecipientsImport(campaignId, file, parsedData.rows);
+      const result = await validateRecipientsImport(campaignId, file, parsedData.rows, (progress) => {
+        setImportProgress(progress);
+      });
       setValidationResult(result);
       setStep(3);
 
@@ -119,32 +163,73 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
         announce(`Validation complete. ${result.summary.validRows} valid row(s) ready to import.`);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to validate this import.';
-      setSubmitError(message);
-      toast('Validation failed', message, 'error');
+      const normalized = normalizeError(error);
+      let msg = normalized.message;
+      if (normalized.code) {
+        if (tErrors.has(normalized.code)) {
+          msg = tErrors(normalized.code);
+        } else {
+          console.warn(`[ImportRecipientsWizard] Unknown error code: ${normalized.code}`);
+          msg = tErrors('generic');
+        }
+      }
+      const toastMsg = normalized.correlationId
+        ? `${msg} (Correlation ID: ${normalized.correlationId})`
+        : msg;
+      setSubmitError(msg);
+      toast('Validation failed', toastMsg, 'error');
     } finally {
       setIsValidating(false);
+      setImportProgress(null);
     }
   }
 
-  function handleDownloadReport() {
-    if (!validationResult) {
+  async function handleDownloadReport() {
+    if (!validationResult || !file || isDownloadingReport) {
       return;
     }
 
-    const blob = buildValidationReport(validationResult);
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `recipient-validation-report-${campaignId}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    setIsDownloadingReport(true);
+    try {
+      const report = await downloadImportReport(campaignId, file, validationResult);
+
+      const url = URL.createObjectURL(report.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = report.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      setLastReportSource(report.meta.source);
+
+      if (report.meta.source === 'backend') {
+        toast('Report ready', 'Backend import report downloaded.', 'success');
+        announce('Backend import report downloaded.');
+      } else {
+        toast('Report ready', 'Backend unavailable — generated the validation report locally.', 'warning');
+        announce('Backend unavailable. The validation report was generated locally and downloaded.');
+      }
+    } catch (error) {
+      const normalized = normalizeError(error);
+      let msg = normalized.message;
+      if (normalized.code) {
+        if (tErrors.has(normalized.code)) {
+          msg = tErrors(normalized.code);
+        } else {
+          console.warn(`[ImportRecipientsWizard] Unknown error code: ${normalized.code}`);
+          msg = tErrors('generic');
+        }
+      }
+      toast('Report failed', msg, 'error');
+    } finally {
+      setIsDownloadingReport(false);
+    }
   }
 
   async function handleConfirmImport() {
-    if (!file) {
+    if (isMismatch || !file) {
       return;
     }
 
@@ -157,9 +242,21 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
       setSubmitMessage(message);
       toast('Import complete', message, 'success');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to complete import.';
-      setSubmitError(message);
-      toast('Import failed', message, 'error');
+      const normalized = normalizeError(error);
+      let msg = normalized.message;
+      if (normalized.code) {
+        if (tErrors.has(normalized.code)) {
+          msg = tErrors(normalized.code);
+        } else {
+          console.warn(`[ImportRecipientsWizard] Unknown error code: ${normalized.code}`);
+          msg = tErrors('generic');
+        }
+      }
+      const toastMsg = normalized.correlationId
+        ? `${msg} (Correlation ID: ${normalized.correlationId})`
+        : msg;
+      setSubmitError(msg);
+      toast('Import failed', toastMsg, 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -171,11 +268,15 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
     setParsedData(null);
     setValidationResult(null);
     setFileError(null);
+    setHeaderValidation(null);
+    setImportProgress(null);
     setIsParsing(false);
     setIsValidating(false);
     setIsSubmitting(false);
+    setIsDownloadingReport(false);
     setSubmitMessage(null);
     setSubmitError(null);
+    setLastReportSource(null);
     announce('Started over. Step 1: Upload recipient file.');
   }
 
@@ -192,7 +293,13 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
               Back to campaigns
             </Link>
             <div className="space-y-1">
-              <h1 className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">Import recipients</h1>
+              <h1
+                ref={stepHeadingRef}
+                tabIndex={-1}
+                className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-50"
+              >
+                Import recipients
+              </h1>
               <p className="max-w-2xl text-sm text-slate-600 dark:text-slate-300">
                 Upload a recipient list, inspect the parsed rows, clear validation issues, and confirm the final import for campaign <span className="font-medium text-slate-900 dark:text-slate-100">{campaignId}</span>.
               </p>
@@ -203,11 +310,12 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
             {validationResult && (
               <button
                 type="button"
-                onClick={handleDownloadReport}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                onClick={() => void handleDownloadReport()}
+                disabled={isDownloadingReport}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <Download className="h-4 w-4" />
-                Download validation report
+                {isDownloadingReport ? 'Preparing report…' : 'Download validation report'}
               </button>
             )}
             <button
@@ -228,10 +336,14 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
                 file={file}
                 fileError={fileError}
                 isParsing={isParsing}
-                onFileSelected={handleFileSelected}
-                onNext={() => { setStep(2); announce('Step 2: Preview recipient data'); }}
+                parseProgress={importProgress?.phase === 'parsing' ? importProgress : null}
                 canProceed={canAdvanceToPreview}
                 headingRef={stepHeadingRef}
+                onFileSelected={handleFileSelected}
+                onNext={() => {
+                  setStep(2);
+                  announce('Step 2: Preview recipient data');
+                }}
               />
             )}
 
@@ -241,11 +353,19 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
                 headers={parsedData.headers}
                 previewRows={previewRows}
                 totalRows={parsedData.rows.length}
-                onBack={() => { setStep(1); announce('Step 1: Upload recipient file'); }}
-                onNext={handleRunValidation}
+                headerValidation={headerValidation}
                 isValidating={isValidating}
+                validateProgress={importProgress?.phase === 'validating' ? importProgress : null}
                 canProceed={canAdvanceToValidation}
                 headingRef={stepHeadingRef}
+                onBack={() => {
+                  setStep(1);
+                  announce('Step 1: Upload recipient file');
+                }}
+                onNext={() => {
+                  handleRunValidation();
+                  announce('Running validation on parsed rows');
+                }}
               />
             )}
 
@@ -253,27 +373,36 @@ export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardPro
               <Step3Validation
                 result={validationResult}
                 headers={parsedData.headers}
-                onBack={() => { setStep(2); announce('Step 2: Preview recipient data'); }}
-                onNext={() => { setStep(4); announce('Step 4: Confirm import'); }}
-                onDownloadReport={handleDownloadReport}
                 isValidating={isValidating}
                 canProceed={canAdvanceToConfirm}
+                isDownloadingReport={isDownloadingReport}
+                lastReportSource={lastReportSource}
                 headingRef={stepHeadingRef}
+                onBack={() => {
+                  setStep(2);
+                  announce('Step 2: Preview recipient data');
+                }}
+                onNext={() => {
+                  setStep(4);
+                  announce('Step 4: Confirm import');
+                }}
+                onDownloadReport={() => void handleDownloadReport()}
               />
             )}
 
             {step === 4 && validationResult && (
-              <Step4Confirm
-                result={validationResult}
-                isSubmitting={isSubmitting}
-                hasBlockingErrors={hasBlockingErrors}
-                submitMessage={submitMessage}
-                submitError={submitError}
-                onBack={() => { setStep(3); announce('Step 3: Resolve validation issues'); }}
-                onConfirm={handleConfirmImport}
-                onStartOver={handleStartOver}
-                headingRef={stepHeadingRef}
-              />
+                <Step4Confirm
+                  result={validationResult}
+                  isSubmitting={isSubmitting}
+                  hasBlockingErrors={hasBlockingErrors}
+                  isMismatch={isMismatch}
+                  submitMessage={submitMessage}
+                  submitError={submitError}
+                  onBack={() => { setStep(3); announce('Step 3: Resolve validation issues'); }}
+                  onConfirm={handleConfirmImport}
+                  onStartOver={handleStartOver}
+                  headingRef={stepHeadingRef}
+                />
             )}
           </div>
 

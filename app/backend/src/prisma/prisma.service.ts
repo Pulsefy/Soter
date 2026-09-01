@@ -5,6 +5,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
 @Injectable()
 export class PrismaService
@@ -13,6 +14,16 @@ export class PrismaService
 {
   private readonly logger = new Logger(PrismaService.name);
   private connected = false;
+
+  constructor() {
+    super({
+      adapter: new PrismaPg({
+        connectionString:
+          process.env.DATABASE_URL ||
+          'postgresql://soter_user:soter123@localhost:5432/soter_db',
+      }),
+    });
+  }
 
   async onModuleInit() {
     const isTest =

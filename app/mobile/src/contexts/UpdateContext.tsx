@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VersionInfo, UpdateState } from '../types/update';
 import { fetchVersionInfo, compareVersions } from '../services/updateService';
+import { structuredLogger } from '../services/logger';
 
 interface UpdateContextType extends UpdateState {
   markReleaseNotesSeen: () => Promise<void>;
@@ -14,7 +15,9 @@ const UpdateContext = createContext<UpdateContextType | undefined>(undefined);
 
 const SEEN_RELEASE_NOTES_KEY = '@Soter:SeenReleaseNotes';
 
-export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [state, setState] = useState<UpdateState>({
     isUpdateAvailable: false,
     isForceUpgrade: false,
@@ -29,13 +32,17 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       setIsLoading(true);
       const versionInfo = await fetchVersionInfo();
-      
-      const updateAvailable = compareVersions(versionInfo.latestVersion, currentVersion) > 0;
-      const forceUpgrade = compareVersions(versionInfo.minRequiredVersion, currentVersion) > 0;
-      
+
+      const updateAvailable =
+        compareVersions(versionInfo.latestVersion, currentVersion) > 0;
+      const forceUpgrade =
+        compareVersions(versionInfo.minRequiredVersion, currentVersion) > 0;
+
       let hasSeen = true;
       if (updateAvailable) {
-        const storedVersion = await AsyncStorage.getItem(SEEN_RELEASE_NOTES_KEY);
+        const storedVersion = await AsyncStorage.getItem(
+          SEEN_RELEASE_NOTES_KEY,
+        );
         hasSeen = storedVersion === versionInfo.latestVersion;
       }
 
@@ -46,7 +53,11 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         hasSeenReleaseNotes: hasSeen,
       });
     } catch (error) {
-      console.error('UpdateProvider: Failed to check for updates', error);
+      structuredLogger.error(
+        'updates.check_failed',
+        { error: error instanceof Error ? error.message : String(error) },
+        'updates',
+      );
     } finally {
       setIsLoading(false);
     }
@@ -54,7 +65,10 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const markReleaseNotesSeen = async () => {
     if (state.versionInfo) {
-      await AsyncStorage.setItem(SEEN_RELEASE_NOTES_KEY, state.versionInfo.latestVersion);
+      await AsyncStorage.setItem(
+        SEEN_RELEASE_NOTES_KEY,
+        state.versionInfo.latestVersion,
+      );
       setState(prev => ({ ...prev, hasSeenReleaseNotes: true }));
     }
   };
@@ -64,12 +78,12 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   return (
-    <UpdateContext.Provider 
-      value={{ 
-        ...state, 
-        markReleaseNotesSeen, 
+    <UpdateContext.Provider
+      value={{
+        ...state,
+        markReleaseNotesSeen,
         checkUpdates,
-        isLoading 
+        isLoading,
       }}
     >
       {children}

@@ -11,9 +11,11 @@ import {
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useUpdate } from '../contexts/UpdateContext';
+import { useTranslation } from '../i18n/useTranslation';
 
 export const ForceUpgradeScreen: React.FC = () => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const { versionInfo } = useUpdate();
 
   const handleUpdate = () => {
@@ -52,7 +54,7 @@ export const ForceUpgradeScreen: React.FC = () => {
           style={[styles.button, { backgroundColor: colors.brand.primary }]}
           onPress={handleUpdate}
         >
-          <Text style={styles.buttonText}>Update Now</Text>
+          <Text style={styles.buttonText}>{t('forceUpgrade.updateNow')}</Text>
         </TouchableOpacity>
         
         <Text style={[styles.footerText, { color: colors.textMuted }]}>

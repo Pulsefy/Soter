@@ -208,4 +208,12 @@ export const DEMO_CLAIM_SEEDS: DemoClaimSeed[] = [
     status: ClaimStatus.approved,
     evidenceRef: 'evidence/demo-recipient-003/approval-doc.pdf',
   },
+  {
+    // Rejected claim — rejected after review.
+    campaignName: DEMO_CAMPAIGN_SEEDS[1].name, // 'Demo Campaign — Active'
+    recipientRef: 'demo-recipient-004',
+    amount: 250,
+    status: ClaimStatus.cancelled,
+    evidenceRef: 'evidence/demo-recipient-004/rejection-reason.pdf',
+  },
 ];

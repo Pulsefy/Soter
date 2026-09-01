@@ -18,13 +18,21 @@ export type RootStackParamList = {
 export const DEEP_LINK_SCREEN_MAP: Record<string, keyof RootStackParamList> = {
   AidDetails: 'AidDetails',
   ClaimReceipt: 'ClaimReceipt',
+  EvidenceUpload: 'EvidenceUpload',
   Settings: 'Settings',
   AidOverview: 'AidOverview',
+  TaskList: 'TaskList',
+  SubmissionQueue: 'SubmissionQueue',
+  Health: 'Health',
 };
 
 /**
  * Convert a DeepLinkTarget from a notification payload into the params
  * object that React Navigation expects for the corresponding screen.
+ *
+ * Returns null if:
+ *  - the screen name is not in DEEP_LINK_SCREEN_MAP, or
+ *  - a required route param (e.g. aidId, claimId) is missing or empty.
  */
 export function deepLinkToNavParams(
   target: DeepLinkTarget,
@@ -33,11 +41,29 @@ export function deepLinkToNavParams(
   if (!screen) return null;
 
   switch (screen) {
-    case 'AidDetails':
-      return { screen, params: { aidId: target.params?.aidId ?? '' } };
-    case 'ClaimReceipt':
-      return { screen, params: { claimId: target.params?.claimId ?? '' } };
-    default:
+    case 'AidDetails': {
+      const aidId = target.params?.aidId;
+      if (!aidId) return null;
+      return { screen, params: { aidId } };
+    }
+    case 'ClaimReceipt': {
+      const claimId = target.params?.claimId;
+      if (!claimId) return null;
+      return { screen, params: { claimId } };
+    }
+    case 'EvidenceUpload': {
+      const aidId = target.params?.aidId;
+      if (!aidId) return null;
+      return { screen, params: { aidId } };
+    }
+    // Screens that require no route params
+    case 'Settings':
+    case 'AidOverview':
+    case 'TaskList':
+    case 'SubmissionQueue':
+    case 'Health':
       return { screen, params: undefined as any };
+    default:
+      return null;
   }
 }

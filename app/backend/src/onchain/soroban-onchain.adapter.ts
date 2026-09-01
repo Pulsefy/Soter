@@ -7,6 +7,7 @@ import {
   ONCHAIN_ADAPTER_TOKEN,
   InitEscrowParams,
   InitEscrowResult,
+  AidPackage,
   CreateAidPackageParams,
   CreateAidPackageResult,
   BatchCreateAidPackagesParams,
@@ -33,6 +34,47 @@ import {
   GetTransactionStatusResult,
   TxStatus,
 } from './onchain.adapter';
+
+/**
+ * Narrow an RPC result to a plain object so its fields can be read.
+ *
+ * Soroban RPC responses are untyped JSON, so every field access has to tolerate
+ * a missing, null or non-object payload. Returns an empty record rather than
+ * null so callers can read through with their existing ?? defaults.
+ */
+function asRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
+/** Read a field from an untyped RPC result as a string, with a fallback. */
+function readString(value: unknown, fallback: string): string {
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : fallback;
+}
+
+const PACKAGE_STATUSES = [
+  'Created',
+  'Claimed',
+  'Expired',
+  'Cancelled',
+  'Refunded',
+] as const satisfies readonly AidPackage['status'][];
+
+/**
+ * Read a package status from an untyped RPC result.
+ *
+ * Falls back to 'Created' when the chain reports a status this build does not
+ * recognise, rather than passing an unknown string through the adapter contract.
+ */
+function readPackageStatus(value: unknown): AidPackage['status'] {
+  return PACKAGE_STATUSES.includes(value as AidPackage['status'])
+    ? (value as AidPackage['status'])
+    : 'Created';
+}
 
 /** Calls the Soroban RPC endpoint and returns the result value. */
 async function rpcCall(
@@ -158,9 +200,9 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
   async claimAidPackage(
     params: ClaimAidPackageParams,
   ): Promise<ClaimAidPackageResult> {
-    await this.invokeContract('claim_package', [
+    await this.invokeContract('claim', [
       params.packageId,
-      params.recipientAddress,
+      params.receiptPointer ?? null,
     ]);
     return {
       packageId: params.packageId,
@@ -174,9 +216,9 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
   async disburseAidPackage(
     params: DisburseAidPackageParams,
   ): Promise<DisburseAidPackageResult> {
-    await this.invokeContract('disburse_package', [
+    await this.invokeContract('disburse', [
       params.packageId,
-      params.operatorAddress,
+      params.receiptPointer ?? null,
     ]);
     return {
       packageId: params.packageId,
@@ -194,16 +236,16 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       contractId: this.contractId,
       key: params.packageId,
     });
-    const pkg = result as any;
+    const pkg = asRecord(result);
     return {
       package: {
         id: params.packageId,
-        recipient: pkg?.recipient ?? '',
-        amount: String(pkg?.amount ?? '0'),
-        token: pkg?.token ?? '',
-        status: pkg?.status ?? 'Created',
-        createdAt: Number(pkg?.created_at ?? 0),
-        expiresAt: Number(pkg?.expires_at ?? 0),
+        recipient: readString(pkg.recipient, ''),
+        amount: readString(pkg.amount, '0'),
+        token: readString(pkg.token, ''),
+        status: readPackageStatus(pkg.status),
+        createdAt: Number(pkg.created_at ?? 0),
+        expiresAt: Number(pkg.expires_at ?? 0),
       },
       timestamp: new Date(),
     };
@@ -216,12 +258,12 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       contractId: this.contractId,
       key: 'aggregates_' + params.token,
     });
-    const agg = result as any;
+    const agg = asRecord(result);
     return {
       aggregates: {
-        totalCommitted: String(agg?.total_committed ?? '0'),
-        totalClaimed: String(agg?.total_claimed ?? '0'),
-        totalExpiredCancelled: String(agg?.total_expired_cancelled ?? '0'),
+        totalCommitted: readString(agg.total_committed, '0'),
+        totalClaimed: readString(agg.total_claimed, '0'),
+        totalExpiredCancelled: readString(agg.total_expired_cancelled, '0'),
       },
       timestamp: new Date(),
     };
@@ -237,7 +279,7 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     return {
       tokenAddress: params.tokenAddress,
       accountAddress: params.accountAddress,
-      balance: String((result as any) ?? '0'),
+      balance: readString(result, '0'),
       timestamp: new Date(),
     };
   }
@@ -247,9 +289,10 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       contractId: this.contractId,
       key: 'metadata',
     });
+    const meta = asRecord(result);
     return {
-      version: (result as any)?.version ?? '1.0.0',
-      name: (result as any)?.name ?? 'Soroban Contract',
+      version: readString(meta.version, '1.0.0'),
+      name: readString(meta.name, 'Soroban Contract'),
       timestamp: new Date(),
     };
   }
@@ -260,7 +303,7 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       key: 'paused',
     });
     return {
-      isPaused: (result as any) ?? false,
+      isPaused: typeof result === 'boolean' ? result : false,
       timestamp: new Date(),
     };
   }
@@ -270,9 +313,10 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       contractId: this.contractId,
       key: 'fee_config',
     });
+    const fee = asRecord(result);
     return {
-      feePercentage: (result as any)?.fee_percentage ?? '0',
-      maxFee: (result as any)?.max_fee ?? '0',
+      feePercentage: readString(fee.fee_percentage, '0'),
+      maxFee: readString(fee.max_fee, '0'),
       timestamp: new Date(),
     };
   }
@@ -282,11 +326,12 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       contractId: this.contractId,
       key: 'summary_' + packageId,
     });
+    const summary = asRecord(result);
     return {
       packageId,
-      totalAmount: (result as any)?.total_amount ?? '0',
-      claimedAmount: (result as any)?.claimed_amount ?? '0',
-      status: (result as any)?.status ?? 'Active',
+      totalAmount: readString(summary.total_amount, '0'),
+      claimedAmount: readString(summary.claimed_amount, '0'),
+      status: readString(summary.status, 'Active'),
       timestamp: new Date(),
     };
   }
@@ -312,6 +357,7 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     const result = await this.disburseAidPackage({
       packageId: params.packageId,
       operatorAddress: params.recipientAddress ?? this.secretKey,
+      receiptPointer: params.receiptPointer,
     });
     return {
       transactionHash: result.transactionHash,
@@ -329,9 +375,9 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       const result = await rpcCall(this.http, this.rpcUrl, 'getTransaction', {
         hash,
       });
-      const r = result as any;
+      const r = asRecord(result);
       let status: TxStatus;
-      switch (r?.status) {
+      switch (r.status) {
         case 'SUCCESS':
           status = 'succeeded';
           break;
@@ -348,10 +394,10 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
         hash,
         status,
         timestamp: new Date(),
-        ledger: typeof r?.ledger === 'number' ? r.ledger : undefined,
+        ledger: typeof r.ledger === 'number' ? r.ledger : undefined,
         errorMessage:
           status === 'failed'
-            ? (r?.resultXdr ?? 'Transaction failed')
+            ? readString(r.resultXdr, 'Transaction failed')
             : undefined,
       };
     } catch {

@@ -5,6 +5,7 @@ import { fetchClient } from '@/lib/mock-api/client';
 import type {
   Campaign,
   CampaignCreatePayload,
+  CampaignTimelineMilestone,
   CampaignUpdatePayload,
 } from '@/types/campaign';
 import { useActivity } from './useActivity';
@@ -27,6 +28,34 @@ async function fetchCampaigns(): Promise<Campaign[]> {
   const body = (await res.json()) as ApiResponse<Campaign[]>;
   if (!body.success) {
     throw new Error(body.message ?? 'Failed to fetch campaigns');
+  }
+
+  return body.data ?? [];
+}
+
+async function fetchCampaign(id: string): Promise<Campaign> {
+  const res = await fetchClient(`${API_URL}/campaigns/${id}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch campaign: ${res.status}`);
+  }
+
+  const body = (await res.json()) as ApiResponse<Campaign>;
+  if (!body.success) {
+    throw new Error(body.message ?? 'Failed to fetch campaign');
+  }
+
+  return body.data as Campaign;
+}
+
+async function fetchCampaignTimeline(id: string): Promise<CampaignTimelineMilestone[]> {
+  const res = await fetchClient(`${API_URL}/campaigns/${id}/timeline`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch campaign timeline: ${res.status}`);
+  }
+
+  const body = (await res.json()) as ApiResponse<CampaignTimelineMilestone[]>;
+  if (!body.success) {
+    throw new Error(body.message ?? 'Failed to fetch campaign timeline');
   }
 
   return body.data ?? [];
@@ -74,6 +103,22 @@ async function patchCampaign(id: string, payload: CampaignUpdatePayload): Promis
 
 export function useCampaigns() {
   return useQuery({ queryKey: ['campaigns'], queryFn: fetchCampaigns });
+}
+
+export function useCampaign(id: string) {
+  return useQuery({
+    queryKey: ['campaign', id],
+    queryFn: () => fetchCampaign(id),
+    enabled: Boolean(id),
+  });
+}
+
+export function useCampaignTimeline(id: string) {
+  return useQuery({
+    queryKey: ['campaign', id, 'timeline'],
+    queryFn: () => fetchCampaignTimeline(id),
+    enabled: Boolean(id),
+  });
 }
 
 export function useCreateCampaign() {

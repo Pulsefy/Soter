@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
   Text,
   View,
@@ -8,11 +8,15 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
+import { CameraView, BarcodeScanningResult } from 'expo-camera';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
+import { useTranslation } from '../i18n/useTranslation';
 import { useSync } from '../contexts/SyncContext';
+import { createScanDeduper } from './scanDeduper';
+import { useCameraPermission } from '../hooks/useCameraPermission';
+import { CameraPermissionDenied } from '../components/CameraPermissionDenied';
 
 type BulkScannerScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'BulkScanner'>;
 
@@ -27,10 +31,11 @@ interface SessionStats {
   skipped: number;
 }
 
+type ScanResult = { status: 'success' | 'error' | 'skipped'; message: string };
+
 export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [lastScanResult, setLastScanResult] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
+  const [lastScanResult, setLastScanResult] = useState<ScanResult | null>(null);
   const [stats, setStats] = useState<SessionStats>({
     scanned: 0,
     verified: 0,
@@ -39,24 +44,36 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
   });
 
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const { queueClaimConfirmation, isConnected } = useSync();
+  const [isDuplicateScan] = useState(() => createScanDeduper());
 
-  useEffect(() => {
-    const getBarCodeScannerPermissions = async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
-      setHasPermission(status === 'granted');
-    };
+  const {
+    permissionState,
+    isGranted,
+    isDenied,
+    isBlocked,
+    isChecking,
+    requestPermission,
+    openSettings,
+    statusMessage,
+  } = useCameraPermission();
 
-    getBarCodeScannerPermissions();
-  }, []);
-
-  const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
+  const handleBarCodeScanned = async ({ data }: BarcodeScanningResult) => {
     if (isProcessing) return;
+
+    const normalizedData = data.trim();
+    if (isDuplicateScan(normalizedData)) {
+      setStats(prev => ({ ...prev, skipped: prev.skipped + 1 }));
+      setLastScanResult({ status: 'skipped', message: 'Duplicate scan skipped. Ready for the next package.' });
+      return;
+    }
+
     setIsProcessing(true);
 
     // Check if it's the correct format: soter://package/{id}
     const regex = /^soter:\/\/package\/(.+)$/;
-    const match = data.match(regex);
+    const match = normalizedData.match(regex);
 
     setStats(prev => ({ ...prev, scanned: prev.scanned + 1 }));
 
@@ -90,32 +107,38 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
     }, 2000);
   };
 
-  if (hasPermission === null) {
+  // ── Permission: checking/requesting ──────────────────────────────────────
+  if (isChecking || permissionState === 'undetermined' || permissionState === 'requesting') {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.textPrimary }}>Requesting camera permission…</Text>
+        <ActivityIndicator size="large" color={colors.brand.primary} />
+        <Text style={{ color: colors.textPrimary, marginTop: 16 }}>
+          Requesting camera permission…
+        </Text>
       </View>
     );
   }
 
-  if (hasPermission === false) {
+  // ── Permission: denied or blocked ───────────────────────────────────────
+  if (isDenied || isBlocked) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.textPrimary, marginBottom: 20 }}>No access to camera</Text>
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: colors.brand.primary }]}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.buttonText}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+      <CameraPermissionDenied
+        permissionState={permissionState}
+        statusMessage={statusMessage}
+        canRequestAgain={isDenied}
+        onRequestPermission={requestPermission}
+        onOpenSettings={openSettings}
+        onGoBack={() => navigation.goBack()}
+        context="scanner"
+      />
     );
   }
 
   return (
     <View style={styles.container}>
-      <BarCodeScanner
-        onBarCodeScanned={isProcessing ? undefined : handleBarCodeScanned}
+      <CameraView
+        onBarcodeScanned={isProcessing ? undefined : handleBarCodeScanned}
+        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
         style={StyleSheet.absoluteFillObject}
       />
 
@@ -124,15 +147,19 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.statsHeader}>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{stats.scanned}</Text>
-            <Text style={styles.statLabel}>Scanned</Text>
+            <Text style={styles.statLabel}>{t('scannerBulk.scanned')}</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: colors.success }]}>{stats.verified}</Text>
-            <Text style={styles.statLabel}>Verified</Text>
+            <Text style={styles.statLabel}>{t('scannerBulk.verified')}</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: colors.error }]}>{stats.failed}</Text>
-            <Text style={styles.statLabel}>Failed</Text>
+            <Text style={styles.statLabel}>{t('scannerBulk.failed')}</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: colors.warning }]}>{stats.skipped}</Text>
+            <Text style={styles.statLabel}>{t('scannerBulk.skipped')}</Text>
           </View>
         </View>
 
@@ -145,33 +172,33 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
           {isProcessing && !lastScanResult && (
             <View style={styles.processingIndicator}>
               <ActivityIndicator color="white" size="small" />
-              <Text style={styles.processingText}>Processing...</Text>
+              <Text style={styles.processingText}>{t('scannerBulk.processing')}</Text>
             </View>
           )}
 
           {lastScanResult && (
             <View style={[
               styles.resultBadge, 
-              { backgroundColor: lastScanResult.status === 'success' ? colors.success : colors.error }
+              { backgroundColor: lastScanResult.status === 'success' ? colors.success : lastScanResult.status === 'skipped' ? colors.warning : colors.error }
             ]}>
               <Text style={styles.resultText}>{lastScanResult.message}</Text>
             </View>
           )}
           {lastScanResult && lastScanResult.status === 'error' && (
             <TouchableOpacity style={styles.retryButton} onPress={() => { setLastScanResult(null); setIsProcessing(false); }}>
-              <Text style={styles.retryButtonText}>Retry</Text>
+              <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
             </TouchableOpacity>
           )}
 
           {!isProcessing && !lastScanResult && (
-            <Text style={styles.instructionText}>Align QR code to scan</Text>
+            <Text style={styles.instructionText}>{t('scannerBulk.alignQr')}</Text>
           )}
 
           <TouchableOpacity
             style={styles.closeButton}
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.closeButtonText}>End Session</Text>
+            <Text style={styles.closeButtonText}>{t('scannerBulk.endSession')}</Text>
           </TouchableOpacity>
         </View>
       </View>

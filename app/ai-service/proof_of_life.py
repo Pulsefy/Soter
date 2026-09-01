@@ -21,7 +21,6 @@ import metrics
 from config import settings
 from services.test_provider import TestProvider
 
-
 BBox = Tuple[int, int, int, int]
 
 
@@ -44,13 +43,17 @@ class ProofOfLifeAnalyzer:
         self.face_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
-        metrics.MODEL_LOAD_TIME.labels(model_name="haarcascade_frontalface").observe(time.time() - start_load)
+        metrics.MODEL_LOAD_TIME.labels(model_name="haarcascade_frontalface").observe(
+            time.time() - start_load
+        )
 
         start_load2 = time.time()
         self.eye_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_eye.xml"
         )
-        metrics.MODEL_LOAD_TIME.labels(model_name="haarcascade_eye").observe(time.time() - start_load2)
+        metrics.MODEL_LOAD_TIME.labels(model_name="haarcascade_eye").observe(
+            time.time() - start_load2
+        )
 
         if self.face_cascade.empty() or self.eye_cascade.empty():
             raise RuntimeError("Unable to load OpenCV Haar cascade models")
@@ -68,9 +71,15 @@ class ProofOfLifeAnalyzer:
             Dict with is_real_person, confidence score, threshold and checks.
         """
         if settings.test_provider_mode:
-            return self.test_provider.get_response("proof_of_life", {
-                "has_burst": burst_images_base64 is not None,
-            })
+            threshold = self._resolve_threshold(confidence_threshold)
+            return self.test_provider.get_response(
+                "proof_of_life",
+                {
+                    "has_burst": burst_images_base64 is not None,
+                    "confidence_threshold": threshold,
+                    "burst_count": len(burst_images_base64 or []),
+                },
+            )
         start_inference = time.time()
         selfie = self._decode_image(selfie_image_base64)
         selfie_gray = cv2.cvtColor(selfie, cv2.COLOR_BGR2GRAY)
@@ -120,7 +129,9 @@ class ProofOfLifeAnalyzer:
 
         burst_required = bool(burst_images_base64)
         has_liveness_evidence = (
-            checks["blink_detected"] or checks["head_movement_detected"] or not burst_required
+            checks["blink_detected"]
+            or checks["head_movement_detected"]
+            or not burst_required
         )
         is_real_person = confidence >= threshold and has_liveness_evidence
 
@@ -128,7 +139,10 @@ class ProofOfLifeAnalyzer:
         if burst_required and not has_liveness_evidence:
             reason = "No liveness signal detected from burst frames"
         elif confidence < threshold:
-            reason = "Confidence score is below threshold"
+            if abs(confidence - threshold) <= 0.05:
+                reason = "Borderline confidence: score is close to the threshold and liveness evidence is limited"
+            else:
+                reason = "Confidence score is below threshold"
 
         result = {
             "is_real_person": is_real_person,
@@ -137,9 +151,13 @@ class ProofOfLifeAnalyzer:
             "checks": checks,
             "reason": reason,
         }
-        
-        metrics.INFERENCE_LATENCY.labels(task_type="proof_of_life").observe(time.time() - start_inference)
-        metrics.logger.info(f"Proof of life inference completed in {time.time() - start_inference:.4f}s")
+
+        metrics.INFERENCE_LATENCY.labels(task_type="proof_of_life").observe(
+            time.time() - start_inference
+        )
+        metrics.logger.info(
+            f"Proof of life inference completed in {time.time() - start_inference:.4f}s"
+        )
         return result
 
     def _decode_image(self, image_base64: str) -> np.ndarray:
@@ -224,7 +242,9 @@ class ProofOfLifeAnalyzer:
         if len(centers) >= 2 and face_widths:
             x_positions = [c[0] for c in centers]
             y_positions = [c[1] for c in centers]
-            movement = max(max(x_positions) - min(x_positions), max(y_positions) - min(y_positions))
+            movement = max(
+                max(x_positions) - min(x_positions), max(y_positions) - min(y_positions)
+            )
             avg_width = max(float(sum(face_widths) / len(face_widths)), 1.0)
             head_movement_detected = (movement / avg_width) >= 0.15
 
@@ -234,7 +254,9 @@ class ProofOfLifeAnalyzer:
             "processed_burst_frames": processed,
         }
 
-    def _estimate_face_confidence(self, face_bbox: BBox, image_shape: Tuple[int, int]) -> float:
+    def _estimate_face_confidence(
+        self, face_bbox: BBox, image_shape: Tuple[int, int]
+    ) -> float:
         """Estimate face confidence from face size relative to image."""
         _, _, w, h = face_bbox
         image_area = float(image_shape[0] * image_shape[1])
@@ -276,9 +298,13 @@ class ProofOfLifeAnalyzer:
 
         return round(min(score, 1.0), 4)
 
-    def _combine_scores(self, face_confidence: float, quality_score: float, liveness_score: float) -> float:
+    def _combine_scores(
+        self, face_confidence: float, quality_score: float, liveness_score: float
+    ) -> float:
         """Combine face, quality, and liveness scores into final confidence."""
-        confidence = (face_confidence * 0.50) + (quality_score * 0.20) + (liveness_score * 0.30)
+        confidence = (
+            (face_confidence * 0.50) + (quality_score * 0.20) + (liveness_score * 0.30)
+        )
         return round(min(max(confidence, 0.0), 1.0), 4)
 
     def _resolve_threshold(self, override: Optional[float]) -> float:
