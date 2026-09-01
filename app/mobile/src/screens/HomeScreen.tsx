@@ -304,14 +304,14 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         onPress={() => navigation.navigate('Scanner')}
         activeOpacity={0.8}
         accessibilityRole="button"
-        accessibilityLabel="Scan QR Code"
-        accessibilityHint="Opens the camera to scan a Soter QR code"
+        accessibilityLabel={t('home.scanQrCode')}
+        accessibilityHint={t('home.scanQrHint')}
         testID="scan-qr-fab"
       >
         <Text style={styles.scannerFabIcon} accessibilityElementsHidden>📷</Text>
         {/* Visible label — E2E (Maestro) matches rendered text, not just
             accessibility labels, so the scanner entry point must show it */}
-        <Text style={styles.scannerFabLabel}>Scan QR Code</Text>
+        <Text style={styles.scannerFabLabel}>{t('home.scanQrCode')}</Text>
       </TouchableOpacity>
     </SafeAreaView>
   );

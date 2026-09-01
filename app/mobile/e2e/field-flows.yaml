@@ -9,9 +9,20 @@ onFlowFailure:
   - takeScreenshot: failure
 
 ---
-# Scan flow: open the scanner from the home screen FAB.
+# On a fresh install the update check falls back to a newer mock version,
+# so the release-notes modal can cover the home screen at launch. Dismiss it
+# when present, then open the scanner from the home screen FAB.
+# tapOn waits up to `timeout` for the button; `optional` skips it if the
+# modal never renders (e.g. update check matches the installed version).
 - tapOn:
-    text: "Scan QR Code"
+    text: "Got it!"
+    optional: true
+    timeout: 5000
+- waitForAnimationToEnd
+# The FAB exposes a stable testID (maps to the Android resource-id); its
+# label text is merged into the button's accessibility node, so match by id.
+- tapOn:
+    id: "scan-qr-fab"
     retryTapIfNoChange: true
 - assertVisible: "Scan QR Code"
 - assertVisible: "Align QR code within the frame"
