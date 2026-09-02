@@ -68,7 +68,9 @@ When making event schema changes:
 | `package_refunded`        | `refund`            | Admin refunds an expired/cancelled package.            |
 | `package_swept`           | `sweep_expired_packages` | Sweep transitions an expired `Created` package to terminal `Expired` (funds released from locked). |
 | `extended_event`          | `extend_expiration` | Admin extends a package expiry.                        |
-| `surplus_withdrawn_event` | `withdraw_surplus`  | Admin withdraws unallocated surplus from the pool.     |
+| `surplus_withdrawal_proposed` | `propose_surplus_withdrawal` | Admin proposes a surplus withdrawal, starting the timelock. |
+| `surplus_withdrawal_cancelled` | `cancel_surplus_withdrawal` | Admin cancels a pending surplus withdrawal.            |
+| `surplus_withdrawn_event` | `execute_surplus_withdrawal` | A proposed surplus withdrawal clears its timelock and funds move. |
 | `contract_paused_event`   | `pause`             | Admin pauses the whole contract.                       |
 | `contract_unpaused_event` | `unpause`           | Admin unpauses the whole contract.                     |
 | `action_paused_event`     | `pause_action`      | Admin pauses a single action (create/claim/withdraw).  |
@@ -107,6 +109,8 @@ Pool / administrative events:
 | `EscrowFunded`          | `schema_version: u32`, `from: Address`, `token: Address`, `amount: i128`, `timestamp: u64`         |
 | `BatchCreatedEvent`     | `schema_version: u32`, `ids: Vec<u64>`, `admin: Address`, `total_amount: i128`                     |
 | `ExtendedEvent`         | `schema_version: u32`, `package_id: u64`, `admin: Address`, `old_expires_at: u64`, `new_expires_at: u64` |
+| `SurplusWithdrawalProposed` | `schema_version: u32`, `admin: Address`, `to: Address`, `token: Address`, `amount: i128`, `unlock_time: u64`, `timestamp: u64` |
+| `SurplusWithdrawalCancelled` | `schema_version: u32`, `admin: Address`, `to: Address`, `token: Address`, `amount: i128`, `timestamp: u64` |
 | `SurplusWithdrawnEvent` | `schema_version: u32`, `to: Address`, `token: Address`, `amount: i128`                             |
 | `ContractPausedEvent`   | `schema_version: u32`, `admin: Address`                                                            |
 | `ContractUnpausedEvent` | `schema_version: u32`, `admin: Address`                                                            |

@@ -443,6 +443,59 @@ fn test_batch_created_event() {
 }
 
 #[test]
+fn test_surplus_withdrawal_proposed_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
+
+    let now = env.ledger().timestamp();
+    client.propose_surplus_withdrawal(&recipient, &UNIT, &token_client.address);
+
+    let data = last_event_data(&env, &contract_id, "surplus_withdrawal_proposed");
+    assert_schema_version(&env, &data, 1);
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_eq!(data_address(&env, &data, "to"), recipient);
+    assert_eq!(data_address(&env, &data, "token"), token_client.address);
+    assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+    assert_eq!(data_u64(&env, &data, "unlock_time"), now + 86400);
+}
+
+#[test]
+fn test_surplus_withdrawal_cancelled_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
+
+    client.propose_surplus_withdrawal(&recipient, &UNIT, &token_client.address);
+    client.cancel_surplus_withdrawal();
+
+    let data = last_event_data(&env, &contract_id, "surplus_withdrawal_cancelled");
+    assert_schema_version(&env, &data, 1);
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_eq!(data_address(&env, &data, "to"), recipient);
+    assert_eq!(data_address(&env, &data, "token"), token_client.address);
+    assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+}
+
+#[test]
 fn test_surplus_withdrawn_event() {
     let env = Env::default();
     env.mock_all_auths();
@@ -457,7 +510,9 @@ fn test_surplus_withdrawn_event() {
     token_admin_client.mint(&admin, &(10 * UNIT));
     client.fund(&token_client.address, &admin, &(5 * UNIT));
 
-    client.withdraw_surplus(&recipient, &UNIT, &token_client.address);
+    client.set_surplus_withdrawal_delay(&0);
+    client.propose_surplus_withdrawal(&recipient, &UNIT, &token_client.address);
+    client.execute_surplus_withdrawal();
 
     let data = last_event_data(&env, &contract_id, "surplus_withdrawn_event");
     assert_schema_version(&env, &data, 1);

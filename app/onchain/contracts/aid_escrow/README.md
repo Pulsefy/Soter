@@ -46,6 +46,8 @@ expires and is refunded.
 | `pause_campaign(env, campaign_ref)` | Admin | Pauses `claim`/`disburse`/`refund` for packages tagged with this `campaign_ref`. |
 | `unpause_campaign(env, campaign_ref)` | Admin | Unpauses the campaign. |
 | `is_campaign_paused(env, campaign_ref)` | — | Returns true if the campaign is paused (or the contract is globally paused). |
+| `get_surplus_withdrawal_delay(env)` | — | Returns the configured surplus withdrawal timelock delay, in seconds. |
+| `set_surplus_withdrawal_delay(env, delay_seconds)` | Admin | Configures the surplus withdrawal timelock delay. |
 
 ### Funding
 
@@ -75,7 +77,10 @@ expires and is refunded.
 | `get_package(env, id)` | — | Returns full package details. |
 | `view_package_status(env, id)` | — | Returns only the status (cheaper for polling). |
 | `get_aggregates(env, token)` | — | Returns aggregate stats: total committed, claimed, expired/cancelled for a token. |
-| `withdraw_surplus(env, token, to, amount)` | Admin | Withdraws surplus (unlocked) tokens from the contract. |
+| `propose_surplus_withdrawal(env, to, amount, token)` | Admin | Proposes a surplus (unlocked) withdrawal; executable only after the configured timelock delay. Overwrites any existing proposal. |
+| `get_pending_surplus_withdrawal(env)` | — | Returns the pending surplus withdrawal proposal, if any. |
+| `cancel_surplus_withdrawal(env)` | Admin | Cancels the pending surplus withdrawal proposal. |
+| `execute_surplus_withdrawal(env)` | Admin | Executes the pending surplus withdrawal once its timelock has elapsed. |
 
 ## Package Lifecycle
 
@@ -104,7 +109,7 @@ Cancelled --> Refunded       (admin refunds)
 | 10 | `PackageIdExists` | Duplicate ID in `create_package`. |
 | 11 | `InvalidState` | Generic state violation (e.g. paused, bad config). |
 | 12 | `MismatchedArrays` | `recipients` and `amounts` lengths differ in batch create. |
-| 13 | `InsufficientSurplus` | `withdraw_surplus` amount exceeds available surplus. |
+| 13 | `InsufficientSurplus` | Requested surplus withdrawal amount exceeds available surplus. |
 | 14 | `ContractPaused` | Operation blocked because contract is paused. |
 | 15 | `ClaimTooEarly` | Claim attempted before the claim window opens. |
 | 16 | `InvalidProof` | Claim proof is invalid or missing. |
@@ -114,6 +119,11 @@ Cancelled --> Refunded       (admin refunds)
 | 20 | `InvalidPendingAdmin` | Pending admin address does not match the caller. |
 | 21 | `BatchTooLarge` | Batch operation exceeds the maximum allowed size. |
 | 22 | `ClaimCooldownActive` | Recipient has not yet completed the claim cooldown. |
+| 23 | `DistributorAlreadyExists` | `add_distributor` called for an address that is already a distributor. |
+| 24 | `DistributorNotFound` | `remove_distributor` called for an address that is not a distributor. |
+| 25 | `DistributorSetFull` | `add_distributor` would exceed the configured maximum distributor set size. |
+| 26 | `TimelockNotElapsed` | `execute_surplus_withdrawal` called before the proposal's timelock elapsed. |
+| 27 | `NoPendingWithdrawal` | `cancel_surplus_withdrawal` / `execute_surplus_withdrawal` called with no proposal outstanding. |
 
 ### Compatibility Policy
 
@@ -124,7 +134,7 @@ user-facing messages, so reordering or removing a variant would silently break
 that mapping.
 
 - **Adding a new error**: append the new variant with the **next unused code**
-  (currently `23`). Never reuse, renumber, or skip codes.
+  (currently `28`). Never reuse, renumber, or skip codes.
 - **Removing an error**: do **not** remove a variant. If it is no longer
   emitted, keep the variant and its code so existing mappings remain valid.
 - **Renaming**: renaming a variant is allowed only if the numeric code is

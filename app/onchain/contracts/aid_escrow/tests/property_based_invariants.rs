@@ -2,7 +2,7 @@
 #![allow(clippy::all)]
 #![allow(dead_code)]
 
-use aid_escrow::{AidEscrow, AidEscrowClient, Config};
+use aid_escrow::{AidEscrow, AidEscrowClient, Config, Error};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use soroban_sdk::{
@@ -42,6 +42,10 @@ fn setup_env() -> (
     let contract_id = env.register(AidEscrow, ());
     let client = AidEscrowClient::new(&env, &contract_id);
     client.init(&admin);
+    // Zero delay: fuzz iterations below collapse propose+execute into one
+    // step via `try_withdraw_surplus_now`, exercising the same accounting
+    // paths the old single-step `withdraw_surplus` did.
+    client.set_surplus_withdrawal_delay(&0);
     client.set_config(&Config {
         min_amount: 1,
         max_expires_in: 0,
@@ -61,6 +65,23 @@ fn advance_time(env: &Env, seconds: u64) {
     let mut info = env.ledger().get();
     info.timestamp += seconds;
     env.ledger().set(info);
+}
+
+/// Test-only helper collapsing propose + execute into a single call so the
+/// fuzz call sites below (which pre-date the withdrawal timelock) can keep
+/// asserting on one try-result, same as the old single-step
+/// `withdraw_surplus`. Only behaves this way because `setup_env` configures
+/// a zero-second withdrawal delay.
+fn try_withdraw_surplus_now(
+    client: &AidEscrowClient,
+    to: &Address,
+    amount: &i128,
+    token: &Address,
+) -> Result<Result<(), Error>, Result<Error, soroban_sdk::InvokeError>> {
+    match client.try_propose_surplus_withdrawal(to, amount, token) {
+        Ok(Ok(())) => client.try_execute_surplus_withdrawal(),
+        other => other,
+    }
 }
 
 // --- Invariant assertion ---
@@ -297,7 +318,7 @@ fn test_fund_accounting_invariants() {
                 // WITHDRAW_SURPLUS: try to pull surplus
                 let amount = UNIT * iter_rng.gen_range(1..=3) as i128;
                 let to = Address::generate(&env);
-                match client.try_withdraw_surplus(&to, &amount, &token) {
+                match try_withdraw_surplus_now(&client, &to, &amount, &token) {
                     Ok(Ok(())) => {
                         total_withdrawn += amount;
                         ops_log.push((
@@ -531,7 +552,7 @@ fn test_claim_revolve_invariants() {
                 // WITHDRAW_SURPLUS
                 let amount = UNIT * iter_rng.gen_range(1..=5) as i128;
                 let to = Address::generate(&env);
-                match client.try_withdraw_surplus(&to, &amount, &token) {
+                match try_withdraw_surplus_now(&client, &to, &amount, &token) {
                     Ok(Ok(())) => {
                         total_withdrawn += amount;
                         ops_log.push((
@@ -800,7 +821,7 @@ fn test_full_lifecycle_invariants() {
         let final_step = base_step + packages.len();
         let surplus_amount = UNIT * iter_rng.gen_range(1..=10) as i128;
         let to = Address::generate(&env);
-        match client.try_withdraw_surplus(&to, &surplus_amount, &token) {
+        match try_withdraw_surplus_now(&client, &to, &surplus_amount, &token) {
             Ok(Ok(())) => {
                 total_withdrawn += surplus_amount;
                 ops_log.push((
@@ -1025,7 +1046,7 @@ fn test_randomized_state_machine() {
                 // WITHDRAW_SURPLUS
                 let amount = UNIT * iter_rng.gen_range(1..=10) as i128;
                 let to = Address::generate(&env);
-                match client.try_withdraw_surplus(&to, &amount, &token) {
+                match try_withdraw_surplus_now(&client, &to, &amount, &token) {
                     Ok(Ok(())) => {
                         total_withdrawn += amount;
                         ops_log.push((
