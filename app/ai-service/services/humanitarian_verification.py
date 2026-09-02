@@ -120,7 +120,7 @@ class HumanitarianVerificationService:
                             model,
                             prompt_variant,
                         )
-                        parsed, raw_content = self._call_and_validate(
+                        parsed, response = self._call_and_validate(
                             provider=provider,
                             provider_name=provider_name,
                             model=model,
@@ -140,7 +140,7 @@ class HumanitarianVerificationService:
                             "model": model,
                             "prompt_variant": prompt_variant,
                             "verification": parsed,
-                            "raw_response": raw_content,
+                            "raw_response": response.content,
                         }
                     except (MalformedProviderOutputError, ProviderRefusalError) as exc:
                         # The provider answered -- the content just wasn't
@@ -235,8 +235,8 @@ class HumanitarianVerificationService:
         model: str,
         prompt: Dict[str, str],
         timeout: Optional[float],
-    ) -> Tuple[Dict[str, Any], str]:
-        """Calls `provider` and returns `(validated_payload, raw_content)`.
+    ) -> Tuple[Dict[str, Any], LLMResponse]:
+        """Calls `provider` and returns `(validated_payload, response)`.
 
         On malformed JSON or a schema-validation failure, retries up to
         `_MAX_ATTEMPTS_PER_PROMPT` total attempts, asking the model to
@@ -268,7 +268,7 @@ class HumanitarianVerificationService:
             try:
                 parsed = self._parse_json_response(content)
                 self._validate_schema(parsed)
-                return parsed, content
+                return parsed, response
             except (
                 json.JSONDecodeError,
                 RuntimeError,
