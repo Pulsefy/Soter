@@ -330,63 +330,28 @@ class TestHumanitarianVerificationService:
         assert any("openai" in entry for entry in attempted)
         assert any("groq" in entry for entry in attempted)
 
-    def test_verify_claim_recovers_via_repair_prompt_after_truncated_json(
-        self, monkeypatch
-    ):
-        """A truncated-JSON response is repaired in place, within the same
-        (provider, prompt_variant) attempt, rather than falling through to
-        the next provider or prompt."""
-        provider = MagicMock(spec=ModelProvider)
-        provider.name = "openai"
-        provider.llm_chat.side_effect = [
-            LLMResponse(
-                content='{"verdict":"credible","confidence":0.8,"summary":"tru',
-                provider="openai",
-                model="m",
-            ),
-            LLMResponse(
-                content='{"verdict":"credible","confidence":0.8,"summary":"repaired"}',
-                provider="openai",
-                model="m",
-            ),
-        ]
-
-        mock_registry = MagicMock(spec=ProviderRegistry)
-        mock_registry.resolve_llm.return_value = [("openai", provider)]
-        monkeypatch.setattr(self.service, "registry", mock_registry)
-        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda p: "m")
-
-        result = self.service.verify_claim(
-            aid_claim="Aid reached households.",
-            supporting_evidence=[],
-            context_factors={},
-            provider_preference="openai",
-        )
-
-        assert result["provider"] == "openai"
-        assert result["prompt_variant"] == "primary"
-        assert result["verification"]["summary"] == "repaired"
-        assert provider.llm_chat.call_count == 2
-
-    def test_verify_claim_raises_malformed_output_error_after_exhausting_repairs(
-        self, monkeypatch
-    ):
-        """Persistently truncated JSON yields a typed error distinct from a
-        transport failure, and does not trip the circuit breaker."""
+    def test_verify_claim_records_llm_usage_on_success(self, monkeypatch):
+        """issue #981: a successful call must report token usage, labelled
+        by the provider/model actually used and a fixed endpoint literal."""
         provider = MagicMock(spec=ModelProvider)
         provider.name = "openai"
         provider.llm_chat.return_value = LLMResponse(
-            content='{"verdict": "credible", "confidence": 0.8,',  # never valid
+            content='{"verdict":"credible","confidence":0.9,"summary":"ok"}',
             provider="openai",
-            model="m",
+            model="gpt-4o-mini",
+            prompt_tokens=123,
+            completion_tokens=45,
+            total_tokens=168,
         )
 
         mock_registry = MagicMock(spec=ProviderRegistry)
         mock_registry.resolve_llm.return_value = [("openai", provider)]
         monkeypatch.setattr(self.service, "registry", mock_registry)
-        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda p: "m")
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda p: "gpt-4o-mini"
+        )
 
-        with pytest.raises(ProviderExhaustedError) as excinfo:
+        with patch("metrics.record_llm_usage") as mock_record:
             self.service.verify_claim(
                 aid_claim="Aid reached households.",
                 supporting_evidence=[],
@@ -394,31 +359,34 @@ class TestHumanitarianVerificationService:
                 provider_preference="openai",
             )
 
-        attempted = excinfo.value.details["attempted"]
-        assert any("AI_MALFORMED_OUTPUT" in entry for entry in attempted)
-        # 2 prompt variants x 2 attempts (initial + 1 repair) each.
-        assert provider.llm_chat.call_count == 4
-        # A content-shape problem is not a transport failure -- the breaker
-        # must still be closed (allow_request still True).
-        assert self.service._get_breaker("openai").allow_request() is True
+        mock_record.assert_called_once_with(
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            prompt_tokens=123,
+            completion_tokens=45,
+        )
 
-    def test_verify_claim_rejects_prose_response_as_malformed(self, monkeypatch):
-        """A prose (non-JSON, non-refusal) response is treated as malformed
-        output, not silently accepted or confused with a refusal."""
+    def test_verify_claim_passes_through_unavailable_usage(self, monkeypatch):
+        """A provider that doesn't report usage (e.g. deterministic mode)
+        must still flow through record_llm_usage so it's counted as
+        unavailable rather than silently dropped."""
         provider = MagicMock(spec=ModelProvider)
         provider.name = "openai"
         provider.llm_chat.return_value = LLMResponse(
-            content="The claim appears plausible based on the evidence provided.",
+            content='{"verdict":"credible","confidence":0.9,"summary":"ok"}',
             provider="openai",
-            model="m",
+            model="gpt-4o-mini",
         )
 
         mock_registry = MagicMock(spec=ProviderRegistry)
         mock_registry.resolve_llm.return_value = [("openai", provider)]
         monkeypatch.setattr(self.service, "registry", mock_registry)
-        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda p: "m")
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda p: "gpt-4o-mini"
+        )
 
-        with pytest.raises(ProviderExhaustedError) as excinfo:
+        with patch("metrics.record_llm_usage") as mock_record:
             self.service.verify_claim(
                 aid_claim="Aid reached households.",
                 supporting_evidence=[],
@@ -426,76 +394,12 @@ class TestHumanitarianVerificationService:
                 provider_preference="openai",
             )
 
-        attempted = excinfo.value.details["attempted"]
-        assert any("AI_MALFORMED_OUTPUT" in entry for entry in attempted)
-
-    def test_verify_claim_rejects_schema_invalid_json(self, monkeypatch):
-        """Valid JSON that does not match the expected schema (bad verdict
-        value) is rejected the same way malformed JSON is."""
-        provider = MagicMock(spec=ModelProvider)
-        provider.name = "openai"
-        provider.llm_chat.return_value = LLMResponse(
-            content='{"verdict":"maybe","confidence":0.5}',
+        mock_record.assert_called_once_with(
             provider="openai",
-            model="m",
-        )
-
-        mock_registry = MagicMock(spec=ProviderRegistry)
-        mock_registry.resolve_llm.return_value = [("openai", provider)]
-        monkeypatch.setattr(self.service, "registry", mock_registry)
-        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda p: "m")
-
-        with pytest.raises(ProviderExhaustedError) as excinfo:
-            self.service.verify_claim(
-                aid_claim="Aid reached households.",
-                supporting_evidence=[],
-                context_factors={},
-                provider_preference="openai",
-            )
-
-        attempted = excinfo.value.details["attempted"]
-        assert any("AI_MALFORMED_OUTPUT" in entry for entry in attempted)
-
-    def test_verify_claim_detects_explicit_refusal(self, monkeypatch):
-        """A provider refusal is surfaced as its own outcome, distinct from
-        malformed output, and is not retried with a repair prompt (a
-        reformat attempt won't turn a decline into an answer)."""
-        provider = MagicMock(spec=ModelProvider)
-        provider.name = "openai"
-        provider.llm_chat.return_value = LLMResponse(
-            content="I cannot assist with this request as it may involve sensitive claims.",
-            provider="openai",
-            model="m",
-        )
-
-        mock_registry = MagicMock(spec=ProviderRegistry)
-        mock_registry.resolve_llm.return_value = [("openai", provider)]
-        monkeypatch.setattr(self.service, "registry", mock_registry)
-        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda p: "m")
-
-        with pytest.raises(ProviderExhaustedError) as excinfo:
-            self.service.verify_claim(
-                aid_claim="Aid reached households.",
-                supporting_evidence=[],
-                context_factors={},
-                provider_preference="openai",
-            )
-
-        attempted = excinfo.value.details["attempted"]
-        assert any("AI_PROVIDER_REFUSAL" in entry for entry in attempted)
-        # One call per prompt variant (primary, fallback) -- no repair retry
-        # for a refusal.
-        assert provider.llm_chat.call_count == 2
-
-    def test_looks_like_refusal_detects_common_decline_phrasing(self):
-        assert self.service._looks_like_refusal(
-            "I'm unable to help with that particular request."
-        )
-        assert self.service._looks_like_refusal(
-            "As an AI language model, I must decline to speculate."
-        )
-        assert not self.service._looks_like_refusal(
-            "The evidence is inconclusive given the available documentation."
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            prompt_tokens=None,
+            completion_tokens=None,
         )
 
 

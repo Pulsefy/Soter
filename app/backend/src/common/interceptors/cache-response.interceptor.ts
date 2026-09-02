@@ -10,6 +10,7 @@ import { Observable, of, from } from 'rxjs';
 import { tap, switchMap } from 'rxjs/operators';
 import { Request } from 'express';
 import { RedisService } from '../../../cache/redis.service';
+import { MetricsService } from '../../observability/metrics/metrics.service';
 import {
   CACHE_RESPONSE_KEY,
   CacheResponseOptions,
@@ -23,6 +24,7 @@ export class CacheResponseInterceptor implements NestInterceptor {
   constructor(
     private readonly reflector: Reflector,
     private readonly redisService: RedisService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
@@ -38,16 +40,20 @@ export class CacheResponseInterceptor implements NestInterceptor {
 
     const request = context.switchToHttp().getRequest<Request>();
     const cacheKey = this.generateCacheKey(request, options);
+    const keyGroup =
+      options.prefix || request.route?.path || request.path || 'unknown';
 
     // Try to retrieve from cache
     return from(this.redisService.get<any>(cacheKey)).pipe(
       switchMap(cachedResponse => {
         if (cachedResponse !== null) {
           this.logger.debug(`Cache HIT: ${cacheKey}`);
+          this.metricsService.recordCacheHit(keyGroup);
           return of(cachedResponse);
         }
 
         this.logger.debug(`Cache MISS: ${cacheKey}`);
+        this.metricsService.recordCacheMiss(keyGroup);
 
         // Cache miss: execute handler and cache the result
         return next.handle().pipe(

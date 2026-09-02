@@ -242,7 +242,9 @@ export class ClaimsService {
             operation: SorobanOperationType.disburse_claim,
             packageId,
             operatorAddress: 'admin',
-            recipientAddress: this.encryptionService.decrypt(claim.recipientRef),
+            recipientAddress: this.encryptionService.decrypt(
+              claim.recipientRef,
+            ),
             amount: claim.amount.toString(),
             tokenAddress,
             correlationId,

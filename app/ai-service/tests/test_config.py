@@ -253,6 +253,56 @@ def test_empty_llm_fallback_order_rejected(monkeypatch):
     assert "LLM_PROVIDER_FALLBACK_ORDER" in str(excinfo.value)
 
 
+def test_default_llm_model_cost_rates_validate(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.validate_configuration()
+    assert "gpt-4o-mini" in settings.llm_model_cost_per_1k_tokens
+    assert "llama-3.3-70b-versatile" in settings.llm_model_cost_per_1k_tokens
+
+
+def test_negative_llm_model_cost_rate_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.llm_model_cost_per_1k_tokens = {
+        "some-model": {"prompt": -0.001, "completion": 0.002},
+    }
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        settings.validate_configuration()
+
+    message = str(excinfo.value)
+    assert "LLM_MODEL_COST_PER_1K_TOKENS" in message
+    assert "some-model" in message
+    assert "prompt" in message
+
+
+def test_llm_model_cost_rate_missing_direction_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.llm_model_cost_per_1k_tokens = {
+        "partial-model": {"prompt": 0.001},
+    }
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        settings.validate_configuration()
+
+    message = str(excinfo.value)
+    assert "LLM_MODEL_COST_PER_1K_TOKENS" in message
+    assert "partial-model" in message
+    assert "completion" in message
+
+
+def test_empty_llm_model_cost_rates_still_validates(monkeypatch):
+    """An empty rate table is valid - it just means no model has a known
+    cost yet, not a configuration error (issue #981: an unrated model
+    results in no cost estimate, not a validation failure)."""
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.llm_model_cost_per_1k_tokens = {}
+    settings.validate_configuration()
+
+
 def test_boot_report_logs_defaults_at_debug_level(monkeypatch, caplog):
     _isolate_env(monkeypatch)
     settings = Settings(_env_file=None)

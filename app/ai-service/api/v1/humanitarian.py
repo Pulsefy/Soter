@@ -15,6 +15,8 @@ from schemas.humanitarian import (
 )
 from services.cache import cached_response
 from services.artifact_access import ArtifactAccessError
+from services.decision_audit import get_store as get_decision_audit_store
+from services.humanitarian_prompt import HUMANITARIAN_PROMPT_VERSION
 from services.evidence_access_control import (
     EvidenceAccessControl,
     EvidenceAccessControlError,
@@ -24,6 +26,87 @@ from request_limits import clamp_request_timeout
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["humanitarian"])
+
+#: Value written to ``decision_type`` on every audit record from this endpoint.
+DECISION_TYPE = "humanitarian_verification"
+
+
+def _resolve_audit_store(http_request: Request):
+    """Resolve the decision audit store (issue #990).
+
+    Prefers ``app.state`` - matching how the other collaborators on this
+    endpoint are wired and how tests inject fakes - and falls back to the
+    process-wide store published by ``main``.
+    """
+    store = getattr(http_request.app.state, "decision_audit_store", None)
+    return store if store is not None else get_decision_audit_store()
+
+
+def _audit_inputs(request: HumanitarianVerificationRequest) -> Dict[str, Any]:
+    """Build the ``inputs`` half of the audit record.
+
+    Everything a reviewer needs to re-run the decision by hand. The values are
+    redacted by the store per ``logging_redaction.py`` before they are written,
+    so the claim text and evidence can be captured verbatim here.
+    """
+    return {
+        "aid_claim": request.aid_claim,
+        "supporting_evidence": list(request.supporting_evidence),
+        "context_factors": dict(request.context_factors),
+        "artifact_ids": list(request.artifact_ids),
+        "provider_preference": request.provider_preference,
+        "requested_timeout": request.timeout,
+    }
+
+
+def _write_audit_record(
+    http_request: Request,
+    request: HumanitarianVerificationRequest,
+    *,
+    outcome: str,
+    correlation_id: str,
+    org_id: str,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    prompt_variant: Optional[str] = None,
+    confidence: Optional[float] = None,
+    reasons: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Durably record one verification decision (issue #990).
+
+    Best-effort by design: ``DecisionAuditStore.record`` swallows its own
+    storage errors, and this wrapper guards the lookup as well, so an audit
+    problem can never turn a completed verification into a 500.
+    """
+    store = _resolve_audit_store(http_request)
+    if store is None:
+        logger.warning(
+            "decision_audit_store_unavailable",
+            extra={"event": "decision_audit_skipped", "correlation_id": correlation_id},
+        )
+        return
+    anchor = request.anchor_metadata
+    try:
+        store.record(
+            DECISION_TYPE,
+            outcome,
+            trace_id=correlation_id,
+            claim_id=getattr(anchor, "claim_id", None),
+            campaign_ref=getattr(anchor, "campaign_ref", None),
+            package_id=getattr(anchor, "package_id", None),
+            org_id=org_id,
+            provider=provider,
+            model=model,
+            prompt_version=HUMANITARIAN_PROMPT_VERSION,
+            prompt_variant=prompt_variant,
+            confidence=confidence,
+            reasons=reasons or [],
+            inputs=_audit_inputs(request),
+            metadata=metadata or {},
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("decision_audit_record_failed: %s", exc)
 
 
 @cached_response(
@@ -264,6 +347,36 @@ async def verify_humanitarian_claim(
                 reasons = [str(r) for r in raw_reason]
                 break
 
+        # Issue #990: durably record the decision *before* it is returned,
+        # capturing the inputs, provider, model, prompt version, and outcome
+        # that produced it. ``eligible`` is the disbursement-relevant outcome
+        # when the model supplied it; otherwise the record still proves a
+        # completed decision.
+        eligible = verification.get("eligible")
+        if isinstance(eligible, bool):
+            outcome = "eligible" if eligible else "ineligible"
+        else:
+            outcome = "completed"
+        _write_audit_record(
+            http_request,
+            request,
+            outcome=outcome,
+            correlation_id=correlation_id,
+            org_id=x_org_id,
+            provider=raw.get("provider"),
+            model=raw.get("model"),
+            prompt_variant=raw.get("prompt_variant"),
+            confidence=confidence,
+            reasons=reasons,
+            metadata={
+                "verification": verification,
+                "model_version": model_version,
+                "artifact_tag": artifact_tag,
+                "user_id": x_user_id,
+                "user_role": x_user_role,
+            },
+        )
+
         return ResultEnvelope[Dict[str, Any]](
             result=raw,
             confidence=confidence,
@@ -271,7 +384,38 @@ async def verify_humanitarian_claim(
             anchor_metadata=request.anchor_metadata,
             trace_id=correlation_id or None,
         )
+    except HTTPException as http_exc:
+        # Access-control denials and misconfiguration are decisions too: they
+        # determine that no verification happened, which is exactly what an
+        # investigator needs to see weeks later.
+        _write_audit_record(
+            http_request,
+            request,
+            outcome="denied" if http_exc.status_code in (400, 403) else "error",
+            correlation_id=correlation_id,
+            org_id=x_org_id,
+            reasons=[str(http_exc.detail)],
+            metadata={
+                "status_code": http_exc.status_code,
+                "user_id": x_user_id,
+                "user_role": x_user_role,
+            },
+        )
+        raise
     except Exception as e:
         logger.error("Humanitarian verification failed: %s", str(e), exc_info=True)
+        _write_audit_record(
+            http_request,
+            request,
+            outcome="error",
+            correlation_id=correlation_id,
+            org_id=x_org_id,
+            reasons=[str(e)],
+            metadata={
+                "error_type": type(e).__name__,
+                "user_id": x_user_id,
+                "user_role": x_user_role,
+            },
+        )
         # Re-raise so the global exception handler formats the error envelope
         raise
