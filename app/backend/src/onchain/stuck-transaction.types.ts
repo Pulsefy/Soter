@@ -1,8 +1,5 @@
 /** Non-terminal statuses — transactions still in-flight. */
-export const NON_TERMINAL_STATUSES = new Set<string>([
-  'pending',
-  'submitted',
-]);
+export const NON_TERMINAL_STATUSES = new Set<string>(['pending', 'submitted']);
 
 /** Terminal statuses — transactions that will not change. */
 export const TERMINAL_STATUSES = new Set<string>([

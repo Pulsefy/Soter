@@ -1,5 +1,4 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CronExpression } from '@nestjs/schedule';
 import { SorobanTransactionLifecycleService } from '../soroban-transaction-lifecycle.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MetricsService } from '../../observability/metrics/metrics.service';
