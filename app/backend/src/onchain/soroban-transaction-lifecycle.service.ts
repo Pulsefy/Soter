@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { Inject } from '@nestjs/common';
@@ -569,7 +569,7 @@ export class SorobanTransactionLifecycleService {
    * Core stuck-detection scan. Finds all transactions in a non-terminal
    * state whose age exceeds `maxAgeMs` and updates in-memory metrics.
    */
-  @Cron(CronExpression.EVERY_30_SECONDS, {
+  @Cron('*/30 * * * * *', {
     name: 'stuck-transaction-scan',
   })
   async detectStuckTransactions(): Promise<StuckTransactionInfo[]> {
@@ -616,7 +616,7 @@ export class SorobanTransactionLifecycleService {
         attemptCount: tx.attemptCount,
         maxAttempts: tx.maxAttempts,
         isRetryable: tx.isRetryable,
-        errorType: tx.errorType as string | null,
+        errorType: tx.errorType,
         lastError: tx.lastError,
         createdAt: tx.createdAt,
         updatedAt: tx.updatedAt,
@@ -626,14 +626,12 @@ export class SorobanTransactionLifecycleService {
       stuckTransactions.push(info);
 
       // Aggregate by operation type
-      const opCount =
-        this.lastStuckCountByOperation.get(tx.operation) ?? 0;
+      const opCount = this.lastStuckCountByOperation.get(tx.operation) ?? 0;
       this.lastStuckCountByOperation.set(tx.operation, opCount + 1);
 
       // Aggregate by error type
       if (tx.errorType) {
-        const errCount =
-          this.lastStuckCountByError.get(tx.errorType) ?? 0;
+        const errCount = this.lastStuckCountByError.get(tx.errorType) ?? 0;
         this.lastStuckCountByError.set(tx.errorType, errCount + 1);
       }
 

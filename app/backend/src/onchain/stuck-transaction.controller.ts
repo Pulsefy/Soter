@@ -1,10 +1,5 @@
 import { Controller, Get, Query, HttpCode, HttpStatus } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiQuery,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
 import {
   StuckTransactionInfo,
@@ -46,12 +41,12 @@ export class StuckTransactionController {
 
     if (operationType) {
       stuck = stuck.filter(
-        (tx) => tx.operationType.toLowerCase() === operationType.toLowerCase(),
+        tx => tx.operationType.toLowerCase() === operationType.toLowerCase(),
       );
     }
 
     if (retryableOnly === 'true') {
-      stuck = stuck.filter((tx) => tx.isRetryable);
+      stuck = stuck.filter(tx => tx.isRetryable);
     }
 
     return stuck;

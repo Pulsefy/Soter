@@ -104,12 +104,6 @@ describe('SorobanTransactionLifecycleService', () => {
         status: SorobanTransactionStatus.submitted,
         createdAt: new Date(Date.now() - 600_000), // 10 min ago
       });
-      const txYoung = makeTx({
-        id: 'tx-young',
-        operation: SorobanOperationType.disburse_claim,
-        status: SorobanTransactionStatus.submitted,
-        createdAt: new Date(Date.now() - 60_000), // 1 min ago
-      });
 
       // Only return the old tx since the service filters by createdAt < cutoff
       prisma.sorobanTransaction.findMany.mockResolvedValue([txOld]);
