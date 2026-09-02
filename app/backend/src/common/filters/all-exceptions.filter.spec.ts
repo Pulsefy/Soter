@@ -1,6 +1,8 @@
 import { ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
+import { ValidationError } from 'class-validator';
 import { AllExceptionsFilter, ErrorResponse } from './http-exception.filter';
 import { LoggerService } from '../../logger/logger.service';
+import { AppException, ERROR_CODES } from '../constants/error-codes';
 
 describe('AllExceptionsFilter', () => {
   let filter: AllExceptionsFilter;
@@ -45,7 +47,7 @@ describe('AllExceptionsFilter', () => {
   });
 
   describe('ErrorResponse shape', () => {
-    it('should always include code, message, timestamp, and path', () => {
+    it('should always include code, message, timestamp, path, and errorCode', () => {
       const exception = new Error('Test error');
 
       filter.catch(exception, mockHost);
@@ -55,10 +57,13 @@ describe('AllExceptionsFilter', () => {
       expect(body).toHaveProperty('message');
       expect(body).toHaveProperty('timestamp');
       expect(body).toHaveProperty('path');
+      expect(body).toHaveProperty('errorCode');
       expect(typeof body.code).toBe('number');
       expect(typeof body.message).toBe('string');
       expect(typeof body.timestamp).toBe('string');
       expect(typeof body.path).toBe('string');
+      expect(typeof body.errorCode).toBe('string');
+      expect(body.errorCode).toBe(ERROR_CODES.INTERNAL_SERVER_ERROR);
     });
 
     it('should include traceId from x-request-id header', () => {
@@ -70,7 +75,7 @@ describe('AllExceptionsFilter', () => {
       expect(body.traceId).toBe('test-trace-id-123');
     });
 
-    it('should have undefined traceId when x-request-id header is absent', () => {
+    it('should have undefined traceId when headers are absent', () => {
       mockRequest.headers = {};
       const exception = new Error('Test error');
 
@@ -78,6 +83,43 @@ describe('AllExceptionsFilter', () => {
 
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.traceId).toBeUndefined();
+    });
+  });
+
+  describe('AppException handling', () => {
+    it('should emit the exact canonical errorCode and status defined on AppException', () => {
+      const exception = new AppException(
+        ERROR_CODES.AI_SERVICE_UNAVAILABLE,
+        503,
+        'AI service unavailable',
+        { retryAfter: 60 },
+      );
+
+      filter.catch(exception, mockHost);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(503);
+      const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
+      expect(body.code).toBe(503);
+      expect(body.errorCode).toBe(ERROR_CODES.AI_SERVICE_UNAVAILABLE);
+      expect(body.message).toBe('AI service unavailable');
+      expect(body.details).toEqual({ retryAfter: 60 });
+      expect(body.traceId).toBe('test-trace-id-123');
+    });
+
+    it('should handle domain-specific AppException like CLAIM_NOT_FOUND', () => {
+      const exception = new AppException(
+        ERROR_CODES.CLAIM_NOT_FOUND,
+        404,
+        'Claim not found',
+      );
+
+      filter.catch(exception, mockHost);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(404);
+      const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
+      expect(body.code).toBe(404);
+      expect(body.errorCode).toBe(ERROR_CODES.CLAIM_NOT_FOUND);
+      expect(body.message).toBe('Claim not found');
     });
   });
 
@@ -93,6 +135,7 @@ describe('AllExceptionsFilter', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(400);
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(400);
+      expect(body.errorCode).toBe(ERROR_CODES.BAD_REQUEST);
       expect(body.message).toBe('Bad request');
     });
 
@@ -104,6 +147,7 @@ describe('AllExceptionsFilter', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(404);
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(404);
+      expect(body.errorCode).toBe(ERROR_CODES.NOT_FOUND);
     });
 
     it('should handle UnauthorizedException (401)', () => {
@@ -117,6 +161,7 @@ describe('AllExceptionsFilter', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(401);
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(401);
+      expect(body.errorCode).toBe(ERROR_CODES.UNAUTHORIZED);
       expect(body.message).toBe('Unauthorized');
     });
 
@@ -128,6 +173,7 @@ describe('AllExceptionsFilter', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(403);
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(403);
+      expect(body.errorCode).toBe(ERROR_CODES.FORBIDDEN);
     });
 
     it('should handle InternalServerErrorException (500)', () => {
@@ -141,11 +187,16 @@ describe('AllExceptionsFilter', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(500);
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(500);
+      expect(body.errorCode).toBe(ERROR_CODES.INTERNAL_SERVER_ERROR);
     });
 
-    it('should extract message from object response', () => {
+    it('should extract message and preserve custom errorCode from object response', () => {
       const exception = new HttpException(
-        { statusCode: 400, message: 'Validation failed', error: 'Bad Request' },
+        {
+          statusCode: 400,
+          message: 'Campaign funding cap exceeded',
+          errorCode: ERROR_CODES.CAMPAIGN_FUNDING_CAP_EXCEEDED,
+        },
         HttpStatus.BAD_REQUEST,
       );
 
@@ -153,13 +204,52 @@ describe('AllExceptionsFilter', () => {
 
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(400);
-      expect(body.message).toBe('Validation failed');
-      expect(body.details).toEqual(
-        expect.objectContaining({
+      expect(body.message).toBe('Campaign funding cap exceeded');
+      expect(body.errorCode).toBe(ERROR_CODES.CAMPAIGN_FUNDING_CAP_EXCEEDED);
+    });
+
+    it('should map array validation messages to VALIDATION_ERROR', () => {
+      const exception = new HttpException(
+        {
           statusCode: 400,
-          message: 'Validation failed',
-        }),
+          message: ['email must be an email', 'name should not be empty'],
+          error: 'Bad Request',
+        },
+        HttpStatus.BAD_REQUEST,
       );
+
+      filter.catch(exception, mockHost);
+
+      const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
+      expect(body.code).toBe(400);
+      expect(body.errorCode).toBe(ERROR_CODES.VALIDATION_ERROR);
+      expect(body.message).toContain('email must be an email');
+    });
+  });
+
+  describe('Validation errors handling', () => {
+    it('should handle class-validator ValidationError array as 422 VALIDATION_ERROR', () => {
+      const validationError = new ValidationError();
+      validationError.property = 'email';
+      validationError.value = 'invalid-email';
+      validationError.constraints = { isEmail: 'email must be an email' };
+
+      filter.catch([validationError], mockHost);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(422);
+      const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
+      expect(body.code).toBe(422);
+      expect(body.errorCode).toBe(ERROR_CODES.VALIDATION_ERROR);
+      expect(body.message).toBe('Validation failed');
+      expect(body.details).toEqual({
+        errors: [
+          {
+            property: 'email',
+            value: 'invalid-email',
+            constraints: { isEmail: 'email must be an email' },
+          },
+        ],
+      });
     });
   });
 
@@ -177,6 +267,7 @@ describe('AllExceptionsFilter', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(409);
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(409);
+      expect(body.errorCode).toBe(ERROR_CODES.UNIQUE_CONSTRAINT_VIOLATION);
       expect(body.message).toBe('Unique constraint violation');
       expect(body.details).toEqual({
         target: ['email'],
@@ -197,6 +288,7 @@ describe('AllExceptionsFilter', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(404);
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(404);
+      expect(body.errorCode).toBe(ERROR_CODES.RECORD_NOT_FOUND);
       expect(body.message).toBe('Record not found');
     });
 
@@ -213,6 +305,7 @@ describe('AllExceptionsFilter', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(400);
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(400);
+      expect(body.errorCode).toBe(ERROR_CODES.FOREIGN_KEY_VIOLATION);
       expect(body.message).toBe('Foreign key constraint violation');
     });
 
@@ -229,10 +322,11 @@ describe('AllExceptionsFilter', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(400);
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(400);
+      expect(body.errorCode).toBe(ERROR_CODES.VALUE_TOO_LONG);
       expect(body.message).toBe('Value too long for column');
     });
 
-    it('should handle unknown Prisma errors as 500', () => {
+    it('should handle unknown Prisma errors as 500 DATABASE_ERROR', () => {
       const prismaError = new Error('Unknown DB error');
       Object.assign(prismaError, {
         code: 'P9999',
@@ -245,6 +339,7 @@ describe('AllExceptionsFilter', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(500);
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(500);
+      expect(body.errorCode).toBe(ERROR_CODES.DATABASE_ERROR);
       expect(body.details).toEqual({
         code: 'P9999',
         meta: { something: 'unexpected' },
@@ -253,7 +348,7 @@ describe('AllExceptionsFilter', () => {
   });
 
   describe('Generic error handling', () => {
-    it('should handle generic Error as 500', () => {
+    it('should handle generic Error as 500 INTERNAL_SERVER_ERROR', () => {
       const exception = new Error('Something went wrong');
 
       filter.catch(exception, mockHost);
@@ -261,6 +356,7 @@ describe('AllExceptionsFilter', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(500);
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.code).toBe(500);
+      expect(body.errorCode).toBe(ERROR_CODES.INTERNAL_SERVER_ERROR);
       expect(body.message).toBe('Something went wrong');
       expect(body.details).toEqual(
         expect.objectContaining({ error_type: 'Error' }),
@@ -274,6 +370,7 @@ describe('AllExceptionsFilter', () => {
 
       const body: ErrorResponse = mockResponse.json.mock.calls[0][0];
       expect(body.message).toBe('Internal server error');
+      expect(body.errorCode).toBe(ERROR_CODES.INTERNAL_SERVER_ERROR);
     });
   });
 

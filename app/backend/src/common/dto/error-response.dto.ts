@@ -1,12 +1,40 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { INTEGRATION_ERROR_CODES } from '../constants/integration-error-codes';
-
-// Re-export integration codes so consumers only need one import path.
-export { INTEGRATION_ERROR_CODES } from '../constants/integration-error-codes';
-export {
+import {
+  ERROR_CODES,
+  API_ERROR_CODES,
+  BASE_ERROR_CODES,
+  VALIDATION_ERROR_CODES,
+  DATABASE_ERROR_CODES,
+  AUTH_ERROR_CODES,
+  DOMAIN_ERROR_CODES,
+  INTEGRATION_ERROR_CODES,
+  ApiErrorCode,
+  ErrorCode,
+  ErrorCodeDescriptor,
+  ERROR_CODE_METADATA,
+  getErrorCodeFromStatus,
   AppException,
   type IntegrationErrorCode,
-} from '../constants/integration-error-codes';
+} from '../constants/error-codes';
+
+// Re-export error codes, enums, metadata and AppException so consumers can import from DTO or constants
+export {
+  ERROR_CODES,
+  API_ERROR_CODES,
+  BASE_ERROR_CODES,
+  VALIDATION_ERROR_CODES,
+  DATABASE_ERROR_CODES,
+  AUTH_ERROR_CODES,
+  DOMAIN_ERROR_CODES,
+  INTEGRATION_ERROR_CODES,
+  ApiErrorCode,
+  ErrorCode,
+  ErrorCodeDescriptor,
+  ERROR_CODE_METADATA,
+  getErrorCodeFromStatus,
+  AppException,
+  type IntegrationErrorCode,
+};
 
 /**
  * Standardized error response format for all API endpoints
@@ -61,52 +89,4 @@ export class ErrorResponseDto {
     example: 'req_abc123',
   })
   correlationId?: string;
-}
-
-/**
- * Standard error codes for programmatic handling.
- * Integration-specific codes are merged in from INTEGRATION_ERROR_CODES so
- * both the base and domain codes are accessible from a single constant.
- */
-export const ERROR_CODES = {
-  // Base codes
-  VALIDATION_ERROR: 'VALIDATION_ERROR',
-  NOT_FOUND: 'NOT_FOUND',
-  UNAUTHORIZED: 'UNAUTHORIZED',
-  FORBIDDEN: 'FORBIDDEN',
-  CONFLICT: 'CONFLICT',
-  BAD_REQUEST: 'BAD_REQUEST',
-  INTERNAL_SERVER_ERROR: 'INTERNAL_SERVER_ERROR',
-  RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
-  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
-  DATABASE_ERROR: 'DATABASE_ERROR',
-  FOREIGN_KEY_VIOLATION: 'FOREIGN_KEY_VIOLATION',
-  UNIQUE_CONSTRAINT_VIOLATION: 'UNIQUE_CONSTRAINT_VIOLATION',
-  RECORD_NOT_FOUND: 'RECORD_NOT_FOUND',
-  VALUE_TOO_LONG: 'VALUE_TOO_LONG',
-  INVALID_OPERATION: 'INVALID_OPERATION',
-  DEPENDENCY_FAILURE: 'DEPENDENCY_FAILURE',
-  TIMEOUT: 'TIMEOUT',
-  // Integration codes (AI, onchain, evidence, webhook)
-  ...INTEGRATION_ERROR_CODES,
-} as const;
-
-export type ErrorCode = keyof typeof ERROR_CODES;
-
-/**
- * Map HTTP status codes to error codes
- */
-export function getErrorCodeFromStatus(status: number): ErrorCode {
-  const statusMap: Record<number, ErrorCode> = {
-    400: 'BAD_REQUEST',
-    401: 'UNAUTHORIZED',
-    403: 'FORBIDDEN',
-    404: 'NOT_FOUND',
-    409: 'CONFLICT',
-    422: 'VALIDATION_ERROR',
-    429: 'RATE_LIMIT_EXCEEDED',
-    500: 'INTERNAL_SERVER_ERROR',
-    503: 'SERVICE_UNAVAILABLE',
-  };
-  return statusMap[status] || 'INTERNAL_SERVER_ERROR';
 }

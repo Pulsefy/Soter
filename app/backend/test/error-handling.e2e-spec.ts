@@ -7,6 +7,7 @@ import {
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { RequestIdInterceptor } from '../src/common/interceptors/request-id.interceptor';
+import { ERROR_CODES } from '../src/common/constants/error-codes';
 
 describe('Error Handling (e2e)', () => {
   let app: INestApplication;
@@ -46,10 +47,12 @@ describe('Error Handling (e2e)', () => {
     expect(body).toHaveProperty('message');
     expect(body).toHaveProperty('timestamp');
     expect(body).toHaveProperty('path');
+    expect(body).toHaveProperty('errorCode');
     expect(typeof body.code).toBe('number');
     expect(typeof body.message).toBe('string');
     expect(typeof body.timestamp).toBe('string');
     expect(typeof body.path).toBe('string');
+    expect(typeof body.errorCode).toBe('string');
   };
 
   it('/test-error/generic-error (GET) - should return standardized error response', () => {
@@ -67,6 +70,8 @@ describe('Error Handling (e2e)', () => {
           traceId: expect.any(String),
           timestamp: expect.any(String),
           path: '/api/v1/test-error/generic-error',
+          errorCode: ERROR_CODES.INTERNAL_SERVER_ERROR,
+          correlationId: expect.any(String),
         });
       });
   });
@@ -84,6 +89,8 @@ describe('Error Handling (e2e)', () => {
           traceId: expect.any(String),
           timestamp: expect.any(String),
           path: '/api/v1/test-error/bad-request',
+          errorCode: ERROR_CODES.BAD_REQUEST,
+          correlationId: expect.any(String),
         });
       });
   });
@@ -101,6 +108,8 @@ describe('Error Handling (e2e)', () => {
           traceId: expect.any(String),
           timestamp: expect.any(String),
           path: '/api/v1/test-error/internal-server-error',
+          errorCode: ERROR_CODES.INTERNAL_SERVER_ERROR,
+          correlationId: expect.any(String),
         });
       });
   });
@@ -112,6 +121,7 @@ describe('Error Handling (e2e)', () => {
       .then(response => {
         expectErrorEnvelope(response.body);
         expect(response.body.code).toBe(401);
+        expect(response.body.errorCode).toBe(ERROR_CODES.UNAUTHORIZED);
         expect(response.body.message).toBe('Authentication required');
         expect(response.body).toHaveProperty('traceId');
       });
@@ -124,6 +134,7 @@ describe('Error Handling (e2e)', () => {
       .then(response => {
         expectErrorEnvelope(response.body);
         expect(response.body.code).toBe(403);
+        expect(response.body.errorCode).toBe(ERROR_CODES.FORBIDDEN);
         expect(response.body.message).toBe('Access denied');
         expect(response.body).toHaveProperty('traceId');
       });
@@ -136,6 +147,7 @@ describe('Error Handling (e2e)', () => {
       .then(response => {
         expectErrorEnvelope(response.body);
         expect(response.body.code).toBe(404);
+        expect(response.body.errorCode).toBe(ERROR_CODES.NOT_FOUND);
         expect(response.body.message).toBe('Resource not found');
         expect(response.body).toHaveProperty('traceId');
       });
@@ -149,6 +161,7 @@ describe('Error Handling (e2e)', () => {
       .then(response => {
         expectErrorEnvelope(response.body);
         expect(response.body.code).toBe(400);
+        expect(response.body.errorCode).toBe(ERROR_CODES.VALIDATION_ERROR);
         expect(response.body).toHaveProperty('traceId');
       });
   });
@@ -169,6 +182,8 @@ describe('Error Handling (e2e)', () => {
           traceId: expect.any(String),
           timestamp: expect.any(String),
           path: '/api/v1/test-error/prisma-error-simulation',
+          errorCode: ERROR_CODES.UNIQUE_CONSTRAINT_VIOLATION,
+          correlationId: expect.any(String),
         });
       });
   });
