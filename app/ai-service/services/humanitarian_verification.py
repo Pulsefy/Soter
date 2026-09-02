@@ -262,7 +262,11 @@ class HumanitarianVerificationService:
                 parsed = self._parse_json_response(content)
                 self._validate_schema(parsed)
                 return parsed, content
-            except (json.JSONDecodeError, RuntimeError, MalformedProviderOutputError) as exc:
+            except (
+                json.JSONDecodeError,
+                RuntimeError,
+                MalformedProviderOutputError,
+            ) as exc:
                 last_error = exc
                 logger.warning(
                     "Malformed output from provider=%s (attempt %d/%d): %s",
