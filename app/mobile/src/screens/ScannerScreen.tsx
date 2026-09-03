@@ -8,13 +8,14 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
+import { CameraView, BarcodeScanningResult } from 'expo-camera';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
 import { createScanDeduper } from './scanDeduper';
 import { useCameraPermission } from '../hooks/useCameraPermission';
 import { CameraPermissionDenied } from '../components/CameraPermissionDenied';
+import { useTranslation } from '../i18n/useTranslation';
 
 type ScannerScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Scanner'>;
 
@@ -51,6 +52,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
   const [scanned, setScanned] = useState(false);
   const [isDuplicateScan] = useState(() => createScanDeduper());
   const { colors } = useTheme();
+  const { t } = useTranslation();
 
   const {
     permissionState,
@@ -63,7 +65,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
     statusMessage,
   } = useCameraPermission();
 
-  const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
+  const handleBarCodeScanned = ({ data }: BarcodeScanningResult) => {
     if (isDuplicateScan(data.trim())) return;
 
     setScanned(true);
@@ -117,8 +119,9 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
   // ── Scanner active ───────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      <BarCodeScanner
-        onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
+      <CameraView
+        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
         style={StyleSheet.absoluteFillObject}
         // The camera view itself is not interactive for screen readers;
         // the overlay controls below provide all necessary actions.
@@ -157,7 +160,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityHint="Closes the scanner and returns to the previous screen"
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Text style={styles.cancelText}>{t('common.cancel')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -184,7 +187,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityHint="Resets the scanner so you can scan another QR code"
             onPress={() => setScanned(false)}
           >
-            <Text style={styles.rescanButtonText}>Tap to Scan Again</Text>
+            <Text style={styles.rescanButtonText}>{t('scanner.tapToScanAgain')}</Text>
           </TouchableOpacity>
         </View>
       )}

@@ -12,3 +12,5 @@ allowBuilds:
   protobufjs: true
   sharp: false
   unrs-resolver: false
+minimumReleaseAgeExclude:
+  - '@aws-sdk/client-s3@3.1119.0'

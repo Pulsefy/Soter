@@ -134,7 +134,17 @@ export function ReviewActionDialog({
       onOpenChange(false);
     } catch (err) {
       const normalized = normalizeError(err);
-      const inlineMsg = normalized.message ?? 'Something went wrong. Please try again.';
+      let inlineMsg = normalized.message ?? 'Something went wrong. Please try again.';
+      
+      if (normalized.code) {
+        if (t.has(`errors.${normalized.code}`)) {
+          inlineMsg = t(`errors.${normalized.code}`);
+        } else {
+          console.warn(`[ReviewActionDialog] Unknown error code: ${normalized.code}`);
+          inlineMsg = t('errors.generic');
+        }
+      }
+
       const toastMsg = normalized.correlationId
         ? `${inlineMsg} (Correlation ID: ${normalized.correlationId})`
         : inlineMsg;

@@ -4,11 +4,13 @@ import { Reflector } from '@nestjs/core';
 import { of } from 'rxjs';
 import { CacheResponseInterceptor } from './cache-response.interceptor';
 import { RedisService } from '../../../cache/redis.service';
+import { MetricsService } from '../../observability/metrics/metrics.service';
 
 describe('CacheResponseInterceptor', () => {
   let interceptor: CacheResponseInterceptor;
   let reflector: Reflector;
   let redisService: RedisService;
+  let metricsService: MetricsService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -27,6 +29,13 @@ describe('CacheResponseInterceptor', () => {
             set: jest.fn(),
           },
         },
+        {
+          provide: MetricsService,
+          useValue: {
+            recordCacheHit: jest.fn(),
+            recordCacheMiss: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -35,6 +44,7 @@ describe('CacheResponseInterceptor', () => {
     );
     reflector = module.get<Reflector>(Reflector);
     redisService = module.get<RedisService>(RedisService);
+    metricsService = module.get<MetricsService>(MetricsService);
   });
 
   it('should be defined', () => {
@@ -89,6 +99,8 @@ describe('CacheResponseInterceptor', () => {
           expect(result).toEqual(cachedData);
           expect(redisService.get).toHaveBeenCalled();
           expect(mockCallHandler.handle).not.toHaveBeenCalled();
+          expect(metricsService.recordCacheHit).toHaveBeenCalledWith('/test');
+          expect(metricsService.recordCacheMiss).not.toHaveBeenCalled();
           done();
         });
     });
@@ -108,6 +120,8 @@ describe('CacheResponseInterceptor', () => {
           expect(result).toEqual(handlerData);
           expect(redisService.get).toHaveBeenCalled();
           expect(mockCallHandler.handle).toHaveBeenCalled();
+          expect(metricsService.recordCacheMiss).toHaveBeenCalledWith('/test');
+          expect(metricsService.recordCacheHit).not.toHaveBeenCalled();
 
           // Set is called asynchronously, give it a moment
           setTimeout(() => {

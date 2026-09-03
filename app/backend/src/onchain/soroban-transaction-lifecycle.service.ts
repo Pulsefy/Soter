@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import { ConfigService } from '@nestjs/config';
 import { Inject } from '@nestjs/common';
 import {
   OnchainAdapter,
@@ -53,28 +54,22 @@ export class SorobanTransactionLifecycleService {
   // Transaction expiry time
   private readonly TRANSACTION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-  // ── Stuck transaction detection ──────────────────────────────────
-  private readonly DEFAULT_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
-  private readonly DEFAULT_SCAN_INTERVAL_MS = 60_000; // 1 minute
-
-  private stuckDetectionConfig: StuckDetectionConfig = {
-    maxAgeMs: this.DEFAULT_MAX_AGE_MS,
-    scanIntervalMs: this.DEFAULT_SCAN_INTERVAL_MS,
-  };
-
-  // In-memory metrics from last scan
-  private lastStuckCountByOperation: Map<string, number> = new Map();
-  private lastStuckCountByError: Map<string, number> = new Map();
-  private lastTotalStuck = 0;
-  private lastOldestStuckAgeMs: number | null = null;
-  private lastScanAt: Date | null = null;
+  // Stuck transaction detection threshold (configurable)
+  private readonly STUCK_TRANSACTION_THRESHOLD_MS: number;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly metricsService: MetricsService,
+    private readonly configService: ConfigService,
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
-  ) {}
+  ) {
+    this.STUCK_TRANSACTION_THRESHOLD_MS = parseInt(
+      this.configService.get<string>('STUCK_TRANSACTION_THRESHOLD_MS') ||
+        '300000',
+      10,
+    ); // 5 minutes default
+  }
 
   /**
    * Create a new Soroban transaction record with lifecycle tracking
@@ -476,6 +471,82 @@ export class SorobanTransactionLifecycleService {
     }
 
     return result.count;
+  }
+
+  /**
+   * Detect transactions stuck in a non-terminal state past the configured threshold.
+   * A transaction is considered stuck if it is in `pending` or `submitted` status
+   * and has not progressed within the allowed ledger window.
+   */
+  async detectStuckTransactions() {
+    const stuckThreshold = new Date(
+      Date.now() - this.STUCK_TRANSACTION_THRESHOLD_MS,
+    );
+
+    const stuckTransactions = await this.prisma.sorobanTransaction.findMany({
+      where: {
+        status: {
+          in: [
+            SorobanTransactionStatus.pending,
+            SorobanTransactionStatus.submitted,
+          ],
+        },
+        updatedAt: {
+          lt: stuckThreshold,
+        },
+      },
+      orderBy: {
+        updatedAt: 'asc',
+      },
+    });
+
+    const stuckCount = stuckTransactions.length;
+
+    if (stuckCount > 0) {
+      this.logger.warn(`Detected ${stuckCount} stuck Soroban transactions`, {
+        thresholdMs: this.STUCK_TRANSACTION_THRESHOLD_MS,
+        operations: stuckTransactions.map(t => t.operation),
+      });
+
+      this.metricsService.setGauge(
+        'soroban_transaction_stuck_total',
+        stuckCount,
+      );
+
+      const countsByOperation = stuckTransactions.reduce<
+        Record<string, number>
+      >((acc, tx) => {
+        acc[tx.operation] = (acc[tx.operation] || 0) + 1;
+        return acc;
+      }, {});
+
+      for (const [operation, count] of Object.entries(countsByOperation)) {
+        this.metricsService.setGauge(
+          'soroban_transaction_stuck_by_operation',
+          count,
+          {
+            operation,
+          },
+        );
+      }
+    }
+
+    return {
+      stuckCount,
+      thresholdMs: this.STUCK_TRANSACTION_THRESHOLD_MS,
+      transactions: stuckTransactions.map(tx => ({
+        id: tx.id,
+        operation: tx.operation,
+        status: tx.status,
+        errorType: tx.errorType,
+        lastError: tx.lastError,
+        isRetryable: tx.isRetryable,
+        updatedAt: tx.updatedAt,
+        createdAt: tx.createdAt,
+        claimId: tx.claimId,
+        correlationId: tx.correlationId,
+      })),
+    };
   }
 
   /**

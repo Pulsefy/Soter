@@ -1,0 +1,115 @@
+name: Mobile Cold Start Budget
+
+# Measures cold-start-to-interactive time for the Soter mobile app on a
+# low-end Android device profile and fails when it regresses beyond the
+# budget committed in app/mobile/perf/cold-start-budget.json (issue #931).
+# See app/mobile/COLD_START_BUDGET.md for what this measures and how to
+# run it locally.
+
+on:
+  push:
+    paths:
+      - 'app/mobile/**'
+      - '.github/workflows/mobile-cold-start-budget.yml'
+    branches: [ main ]
+  pull_request:
+    paths:
+      - 'app/mobile/**'
+      - '.github/workflows/mobile-cold-start-budget.yml'
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  cold-start-budget:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Required for the Android emulator to use hardware acceleration on
+      # GitHub-hosted Linux runners; without this the emulator falls back
+      # to software rendering and boots/measures far slower than any real
+      # device, making the budget meaningless.
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Generate native Android project
+        working-directory: app/mobile
+        # CI=1 puts Expo CLI in non-interactive mode (the --non-interactive
+        # flag itself is not recognized by this CLI version).
+        run: CI=1 npx expo prebuild --platform android
+        env:
+          CI: '1'
+
+      # No separate signing step needed: Expo's generated build.gradle
+      # defaults buildTypes.release.signingConfig to signingConfigs.debug
+      # unless real release-signing credentials are configured, so the
+      # release APK is already installable as-is. The JS bundle still
+      # needs a release build specifically — a debug APK expects a live
+      # Metro server, not an embedded bundle, and would just show a
+      # connection error in the emulator.
+      # This build never publishes a real release: @sentry/cli's binary
+      # download is blocked by pnpm-workspace.yaml's allowBuilds policy,
+      # and app.json's Sentry authToken is a placeholder with no secret
+      # wired into this workflow, so the Gradle plugin's default
+      # source-map/native-symbol upload tasks have no working credential
+      # path anyway. These two env vars are @sentry/react-native's own
+      # supported way to skip those tasks (see its sentry.gradle) rather
+      # than fail on them.
+      - name: Build release APK
+        working-directory: app/mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+        env:
+          SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+          SENTRY_DISABLE_NATIVE_DEBUG_UPLOAD: 'true'
+
+      - name: Run cold-start measurement on a low-end emulator profile
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 27
+          target: default
+          arch: x86_64
+          profile: Nexus 6
+          # Explicit RAM/CPU constraints on top of the "Nexus 6" hardware
+          # profile: emulator defaults are far more generous than the
+          # field devices this budget represents.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 2048 -cores 2
+          disable-animations: true
+          working-directory: app/mobile
+          script: |
+            adb install -r android/app/build/outputs/apk/release/app-release.apk
+            node scripts/measure-cold-start.js --iterations 5
+
+      - name: Upload cold-start report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cold-start-report
+          path: |
+            app/mobile/perf/cold-start-report.json
+            app/mobile/perf/cold-start-report.md
+          if-no-files-found: warn

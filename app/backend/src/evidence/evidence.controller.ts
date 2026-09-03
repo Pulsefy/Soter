@@ -288,7 +288,9 @@ export class EvidenceController {
 
     return {
       artifactId: artifactItem.id,
-      filePath: artifactItem.filePath,
+      storageKey: artifactItem.storageKey,
+      // Retained for backward compatibility with older clients.
+      filePath: artifactItem.storageKey,
       metadata: artifactItem.metadata,
       accessedAt: new Date().toISOString(),
       accessedBy: tokenPayload.userId,
