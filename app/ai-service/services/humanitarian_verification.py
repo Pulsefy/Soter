@@ -169,7 +169,7 @@ class HumanitarianVerificationService:
                         # transport problem), so this does not trip the
                         # circuit breaker the way a connection/timeout
                         # failure would.
-                        err = f"provider={provider_name}, model={model}, prompt={prompt_variant}, error={exc}"
+                        err = f"provider={provider_name}, model={model}, prompt={prompt_variant_label}, error={exc}"
                         errors.append(err)
                         logger.warning(
                             "Humanitarian verification attempt failed: %s", err
@@ -319,7 +319,7 @@ class HumanitarianVerificationService:
                     exc,
                 )
                 if attempt < _MAX_ATTEMPTS_PER_PROMPT:
-                    repair_prompt = self.prompt_engine.build_repair_prompt(
+                    repair_prompt = self.prompt_registry.build_repair_prompt(
                         original_user_prompt=user_prompt,
                         malformed_content=content,
                         error_message=str(exc),
