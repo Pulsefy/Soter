@@ -3,42 +3,66 @@ import { IsOptional, IsString, IsIn, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ListAidPackagesDto {
-  @ApiPropertyOptional({ description: 'Page number (1-based)', default: 1, minimum: 1 })
+  @ApiPropertyOptional({
+    description: 'Page number (1-based)',
+    default: 1,
+    minimum: 1,
+  })
   @IsOptional()
   @Type(() => Number)
   @Min(1)
   page?: number = 1;
 
-  @ApiPropertyOptional({ description: 'Items per page', default: 10, minimum: 1, maximum: 100 })
+  @ApiPropertyOptional({
+    description: 'Items per page',
+    default: 10,
+    minimum: 1,
+    maximum: 100,
+  })
   @IsOptional()
   @Type(() => Number)
   @Min(1)
   @Max(100)
   size?: number = 10;
 
-  @ApiPropertyOptional({ description: 'Sort field', enum: ['id', 'title', 'status', 'amount'] })
+  @ApiPropertyOptional({
+    description: 'Sort field',
+    enum: ['id', 'title', 'status', 'amount'],
+  })
   @IsOptional()
   @IsString()
   @IsIn(['id', 'title', 'status', 'amount'])
   sortBy?: string = 'id';
 
-  @ApiPropertyOptional({ description: 'Sort direction', enum: ['asc', 'desc'], default: 'asc' })
+  @ApiPropertyOptional({
+    description: 'Sort direction',
+    enum: ['asc', 'desc'],
+    default: 'asc',
+  })
   @IsOptional()
   @IsString()
   @IsIn(['asc', 'desc'])
   sortDirection?: 'asc' | 'desc' = 'asc';
 
-  @ApiPropertyOptional({ description: 'Filter by search text (matches id, title, region)' })
+  @ApiPropertyOptional({
+    description: 'Filter by search text (matches id, title, region)',
+  })
   @IsOptional()
   @IsString()
   search?: string;
 
-  @ApiPropertyOptional({ description: 'Filter by status', enum: ['Active', 'Claimed', 'Expired'] })
+  @ApiPropertyOptional({
+    description: 'Filter by status',
+    enum: ['Active', 'Claimed', 'Expired'],
+  })
   @IsOptional()
   @IsString()
   status?: string;
 
-  @ApiPropertyOptional({ description: 'Filter by token type', enum: ['USDC', 'XLM', 'EURC'] })
+  @ApiPropertyOptional({
+    description: 'Filter by token type',
+    enum: ['USDC', 'XLM', 'EURC'],
+  })
   @IsOptional()
   @IsString()
   token?: string;

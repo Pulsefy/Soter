@@ -1,3 +1,11 @@
+/* eslint-disable import/first -- intentional: the cold-start marker below
+ * must execute before the imports that follow it, not be hoisted above
+ * them. Metro/Babel compiles `import` to `require()` in source order
+ * (unlike spec ESM hoisting), so keeping this literally first in the file
+ * genuinely captures JS execution start (issue #931 cold-start measurement). */
+import { markColdStartPhase } from './src/startup/coldStartTracker';
+markColdStartPhase('jsStart');
+
 import '@walletconnect/react-native-compat';
 import 'react-native-get-random-values';
 import 'fast-text-encoding';

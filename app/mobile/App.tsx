@@ -22,6 +22,7 @@ import {
 } from './src/contexts/NotificationContext';
 import { SaverModeProvider } from './src/contexts/SaverModeContext';
 import { SyncDeferralProvider } from './src/contexts/SyncDeferralContext';
+import { LanguageProvider } from './src/contexts/LanguageContext';
 import { UpdateProvider, useUpdate } from './src/contexts/UpdateContext';
 import {
   CrashReportingProvider,
@@ -29,6 +30,7 @@ import {
 } from './src/contexts/CrashReportingContext';
 import { ReleaseNotesModal } from './src/components/ReleaseNotesModal';
 import { ForceUpgradeScreen } from './src/screens/ForceUpgradeScreen';
+import { markColdStartPhase } from './src/startup/coldStartTracker';
 
 // ---------------------------------------------------------------------------
 // Deep-link configuration for React Navigation
@@ -100,7 +102,10 @@ const AppInner = () => {
               linking={linking}
               theme={navTheme}
               ref={navigationRef}
-              onReady={() => setIsNavReady(true)}
+              onReady={() => {
+                markColdStartPhase('navigationReady');
+                setIsNavReady(true);
+              }}
             >
               <AppNavigator />
               <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
@@ -137,15 +142,17 @@ const CrashReportingGate: React.FC = () => {
     >
       <SafeAreaProvider>
         <ThemeProvider>
-          <UpdateProvider>
-            <SaverModeProvider>
-              <SyncDeferralProvider>
-                <NotificationProvider>
-                  <AppInner />
-                </NotificationProvider>
-              </SyncDeferralProvider>
-            </SaverModeProvider>
-          </UpdateProvider>
+          <LanguageProvider>
+            <UpdateProvider>
+              <SaverModeProvider>
+                <SyncDeferralProvider>
+                  <NotificationProvider>
+                    <AppInner />
+                  </NotificationProvider>
+                </SyncDeferralProvider>
+              </SaverModeProvider>
+            </UpdateProvider>
+          </LanguageProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
@@ -153,6 +160,7 @@ const CrashReportingGate: React.FC = () => {
 };
 
 export default function App() {
+  markColdStartPhase('appRenderStart');
   return (
     <CrashReportingProvider>
       <CrashReportingGate />

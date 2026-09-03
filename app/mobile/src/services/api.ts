@@ -1,7 +1,6 @@
-import { config } from '../config';
 import { guardAgainstPinningFailure } from './certificatePinning';
-
-const API_URL = config.apiUrl;
+import { structuredLogger } from './logger';
+import { apiGet } from './requestLayer';
 
 export interface HealthStatus {
   status: string;
@@ -13,19 +12,11 @@ export interface HealthStatus {
 }
 
 export const fetchHealthStatus = async (): Promise<HealthStatus> => {
-  const url = `${API_URL}/health`;
   try {
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
+    const { data } = await apiGet<HealthStatus>('/health');
     return data;
   } catch (error) {
-    console.error('Failed to fetch health status:', error);
-    return guardAgainstPinningFailure(url, error);
+    return guardAgainstPinningFailure(`${process.env.API_URL}/health`, error);
   }
 };
 
@@ -38,16 +29,10 @@ export interface AidPackage {
 }
 
 export const getAidPackages = async (): Promise<AidPackage[]> => {
-  const url = `${API_URL}/aid`;
   try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
+    const { data } = await apiGet<AidPackage[]>('/aid');
     return data;
   } catch (error) {
-    console.error('Failed to fetch aid packages:', error);
-    return guardAgainstPinningFailure(url, error);
+    return guardAgainstPinningFailure(`${process.env.API_URL}/aid`, error);
   }
 };

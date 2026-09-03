@@ -20,6 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
+import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 
@@ -29,6 +30,7 @@ export class LedgerAdminController {
   constructor(
     private readonly backfillService: LedgerBackfillService,
     private readonly reconciliationService: LedgerReconciliationService,
+    private readonly sorobanTransactionLifecycleService: SorobanTransactionLifecycleService,
   ) {}
 
   @Post('backfill')
@@ -250,5 +252,51 @@ export class LedgerAdminController {
       throw new Error('Job not found');
     }
     return status;
+  }
+
+  @Get('soroban/stuck')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'List stuck Soroban transactions',
+    description:
+      'Returns Soroban transactions that have been in a non-terminal state (pending or submitted) longer than the configured threshold.',
+  })
+  @ApiOkResponse({
+    description: 'Stuck transactions retrieved successfully.',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          stuckCount: 2,
+          thresholdMs: 300000,
+          transactions: [
+            {
+              id: 'tx_123',
+              operation: 'create_claim',
+              status: 'pending',
+              errorType: 'network_timeout',
+              lastError: 'timeout waiting for response',
+              isRetryable: true,
+              updatedAt: '2026-08-25T20:00:00.000Z',
+              createdAt: '2026-08-25T19:50:00.000Z',
+              claimId: 'claim_456',
+              correlationId: 'corr_789',
+            },
+          ],
+        },
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - admin role required.',
+  })
+  async getStuckSorobanTransactions() {
+    const result =
+      await this.sorobanTransactionLifecycleService.detectStuckTransactions();
+    return { success: true, data: result };
   }
 }

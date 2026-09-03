@@ -29,6 +29,9 @@ export class RecipientImportService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    if (process.env.SKIP_BACKGROUND_JOBS === 'true') {
+      return;
+    }
     await this.resumeInterruptedJobs();
   }
 

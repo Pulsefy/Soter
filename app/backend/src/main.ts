@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { LoggerService } from './logger/logger.service';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
@@ -17,6 +17,7 @@ import {
   createHelmetMiddleware,
   createRateLimiter,
 } from './common/security/security.module';
+import { buildSwaggerConfig } from './swagger-config';
 
 async function bootstrap() {
   // Load environment variables
@@ -91,62 +92,10 @@ async function bootstrap() {
   app.useGlobalInterceptors(new LoggingInterceptor(logger));
 
   // Swagger/OpenAPI Documentation
-  const config = new DocumentBuilder()
-    .setTitle('Pulsefy/Soter API')
-    .setDescription(
-      `API documentation for Pulsefy/Soter platform - Emergency aid and verification system
-
-## API Versioning
-
-This API uses URI-based versioning. The current version is **v1**.
-
-### Version Format
-All endpoints are prefixed with the version number: \`/api/v1/...\`
-
-### Supported Versions
-| Version | Status | Description |
-|---------|--------|-------------|
-| v1 | Current | Active version with full support |
-
-### Deprecation Policy
-- Deprecated endpoints will be marked with \`@Deprecated\` in the documentation
-- Deprecated versions will be supported for at least 6 months after deprecation notice
-- Clients will receive deprecation warnings via the \`Sunset\` HTTP header
-- Migration guides will be provided for major version changes
-
-### Future Versions
-When new versions are released:
-- New endpoints will be available at \`/api/v2/...\`, etc.
-- Previous versions remain accessible during the deprecation period
-- Clients should monitor the API documentation for version updates`,
-    )
-    .setVersion('1.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        name: 'Authorization',
-        in: 'header',
-        description: 'Enter JWT token',
-      },
-      'JWT-auth',
-    )
-    .addApiKey(
-      {
-        type: 'apiKey',
-        name: 'x-api-key',
-        in: 'header',
-        description: 'API key for external access',
-      },
-      'api-key',
-    )
-    .addServer('http://localhost:3000/api/v1', 'Local Development (v1)')
-    .addServer('https://api.pulsefy.dev/api/v1', 'Staging (v1)')
-    .addServer('https://api.pulsefy.com/api/v1', 'Production (v1)')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
+  // Config is sourced from swagger-config.ts — the same module used by
+  // generate-spec.ts and check-spec-drift.ts — so the served UI always
+  // matches the committed openapi/openapi.json artifact.
+  const document = SwaggerModule.createDocument(app, buildSwaggerConfig());
   SwaggerModule.setup('api/docs', app, document, {
     customSiteTitle: 'Pulsefy API Docs',
     customfavIcon: 'https://pulsefy.com/favicon.ico',
@@ -161,11 +110,15 @@ When new versions are released:
     },
   });
 
+  // Also expose the raw OpenAPI JSON at /api/docs-json for tooling
+  // (the SwaggerModule already does this automatically at /api/docs-json).
+
   const port = process.env.PORT || 3000;
   await app.listen(port);
 
   logger.log(`🚀 Application is running on: http://localhost:${port}`);
-  logger.log(`📚 API Documentation: http://localhost:${port}/api/docs`);
+  logger.log(`📚 Swagger UI:  http://localhost:${port}/api/docs`);
+  logger.log(`📄 OpenAPI JSON: http://localhost:${port}/api/docs-json`);
   logger.log(`🔍 API Version: v1`);
 }
 

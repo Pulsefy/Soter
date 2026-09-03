@@ -3,6 +3,26 @@ from pydantic import BaseModel, Field
 from schemas.common import AnchorMetadata
 
 
+class LLMVerificationPayload(BaseModel):
+    """Expected shape of a verification LLM's parsed JSON response.
+
+    Only the fields every prompt variant asks for and that downstream code
+    actually reads (`verdict`, `confidence`) are required; the rest of the
+    requested schema (`criteria_assessment`, `risk_flags`, etc.) is accepted
+    but not enforced here; the response is still processed by the caller
+    with those fields present if the provider included them. This model
+    exists to catch what genuinely renders a response unusable -- a missing
+    verdict, an out-of-range confidence, or a wrong type -- not to be a
+    strict superset check that would reject an otherwise-usable answer over
+    an omitted optional field.
+    """
+
+    model_config = {"extra": "allow"}
+
+    verdict: Literal["credible", "partially_credible", "inconclusive", "not_credible"]
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
 class HumanitarianVerificationRequest(BaseModel):
     aid_claim: str = Field(
         min_length=10,

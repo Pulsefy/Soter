@@ -29,6 +29,35 @@ from exceptions import AIServiceError
 logger = logging.getLogger(__name__)
 
 
+# Provider names that can appear in a configured fallback order. Kept here so
+# the registry and the configuration validator share a single source of truth.
+KNOWN_LLM_PROVIDERS = frozenset({"openai", "groq", "test"})
+KNOWN_OCR_PROVIDERS = frozenset({"test", "tesseract"})
+
+
+def validate_fallback_order(setting_name: str, order: "List[str]") -> None:
+    """Validate a configured provider fallback order.
+
+    Args:
+        setting_name: The configuration key being validated (for messages).
+        order: The ordered list of provider names from configuration.
+
+    Raises:
+        ValueError: if ``order`` references an unknown provider, contains
+            duplicates, or is empty.
+    """
+    known = KNOWN_LLM_PROVIDERS | KNOWN_OCR_PROVIDERS
+    if not order:
+        raise ValueError("must list at least one provider")
+    seen: "set[str]" = set()
+    for name in order:
+        if name not in known:
+            raise ValueError(f"references unknown provider {name!r}")
+        if name in seen:
+            raise ValueError(f"lists provider {name!r} more than once")
+        seen.add(name)
+
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
@@ -36,12 +65,23 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LLMResponse:
-    """Structured return value from an LLM provider."""
+    """Structured return value from an LLM provider.
+
+    ``prompt_tokens``/``completion_tokens``/``total_tokens`` are ``None``
+    (not ``0``) when the provider didn't report usage — e.g. deterministic/
+    fixture mode, or a response missing the ``usage`` block. Callers must
+    treat "unavailable" and "zero" as distinct (issue #981); see
+    ``metrics.record_llm_usage``, which counts an unavailable reading
+    separately rather than as a zero-token request.
+    """
 
     content: str
     provider: str
     model: str
     latency_ms: int = 0
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
 
 
 @dataclass
@@ -212,11 +252,23 @@ class OpenAIProvider(ModelProvider):
         if not content:
             raise RuntimeError("LLM returned empty content")
 
+        # OpenAI and Groq both use the OpenAI-compatible chat-completions
+        # schema, so `usage` (when present) has the same shape from either
+        # provider. It's absent for some error/edge responses, in which
+        # case these stay None rather than being reported as 0 (issue #981).
+        usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        total_tokens = usage.get("total_tokens")
+
         return LLMResponse(
             content=str(content),
             provider=provider_name,
             model=model,
             latency_ms=int((time.time() - start) * 1000),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
 
 
@@ -439,23 +491,41 @@ class ProviderRegistry:
         return available
 
     def resolve_llm(self, preference: str = "auto") -> List[Tuple[str, ModelProvider]]:
-        """Return (name, provider) pairs in attempt order for LLM chat."""
-        available = self.available_llm_providers()
-        pref = (preference or "auto").lower()
-        if pref == "test" and "test" in available:
-            return [("test", self.get("test"))]
-        if pref in available:
-            ordered = [pref] + [p for p in available if p != pref]
-        else:
-            ordered = available
-        return [(name, self.get(name)) for name in ordered]
+        """Return (name, provider) pairs in attempt order for LLM chat.
+
+        The base attempt order is the operator-configured
+        ``settings.llm_provider_fallback_order``, filtered to the providers that
+        are actually available, preserving configuration order. An explicit
+        ``preference`` (other than ``"auto"``) is moved to the front so callers
+        can pin a provider without editing configuration.
+        """
+        return self._resolve(
+            available=self.available_llm_providers(),
+            configured_order=settings.get_llm_fallback_order(),
+            preference=preference,
+        )
 
     def resolve_ocr(self, preference: str = "auto") -> List[Tuple[str, ModelProvider]]:
-        """Return (name, provider) pairs in attempt order for OCR."""
-        available = self.available_ocr_providers()
+        """Return (name, provider) pairs in attempt order for OCR.
+
+        See :meth:`resolve_llm` for the ordering semantics. OCR does not
+        currently honour an explicit ``preference`` beyond the configured order.
+        """
+        return self._resolve(
+            available=self.available_ocr_providers(),
+            configured_order=settings.get_ocr_fallback_order(),
+            preference=preference,
+        )
+
+    def _resolve(
+        self,
+        available: List[str],
+        configured_order: List[str],
+        preference: str = "auto",
+    ) -> List[Tuple[str, ModelProvider]]:
+        available_set = set(available)
+        ordered = [name for name in configured_order if name in available_set]
         pref = (preference or "auto").lower()
-        if pref in available:
-            ordered = [pref] + [p for p in available if p != pref]
-        else:
-            ordered = available
+        if pref != "auto" and pref in ordered:
+            ordered = [pref] + [name for name in ordered if name != pref]
         return [(name, self.get(name)) for name in ordered]

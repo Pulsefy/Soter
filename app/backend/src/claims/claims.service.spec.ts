@@ -118,6 +118,9 @@ describe('ClaimsService', () => {
             sorobanTransaction: {
               create: jest.fn(),
             },
+            sorobanEventCorrelation: {
+              findFirst: jest.fn(),
+            },
             $transaction: jest.fn(),
           },
         },
@@ -194,6 +197,9 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
 
       jest
         .spyOn(prismaService, '$transaction')
@@ -213,6 +219,7 @@ describe('ClaimsService', () => {
         expect.objectContaining({
           claimId: 'claim-123',
           operation: SorobanOperationType.disburse_claim,
+          packageId: 'real-package-id',
         }),
       );
       expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalled();
@@ -225,6 +232,9 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
       jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
@@ -248,6 +258,9 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
       const transactionMock = jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
@@ -437,6 +450,9 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findMany')
         .mockResolvedValue([expiredClaim] as never);
+      jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
       jest.spyOn(prismaService.claim, 'update').mockResolvedValue({
         ...expiredClaim,
         status: ClaimStatus.archived,
@@ -484,6 +500,9 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findMany')
         .mockResolvedValue([expiredClaim] as never);
+      jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
       jest.spyOn(prismaService.claim, 'update').mockResolvedValue({
         ...expiredClaim,
         status: ClaimStatus.archived,

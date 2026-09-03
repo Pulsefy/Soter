@@ -22,6 +22,11 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+#: Version of the prompt templates below. Bump this whenever the system or
+#: user prompt text changes so decision audit records (issue #990) can tie a
+#: past decision to the exact prompt that produced it.
+HUMANITARIAN_PROMPT_VERSION = "humanitarian-sphere-v1"
+
 SPHERE_HANDBOOK_CRITERIA: Dict[str, List[str]] = {
     "water_supply_sanitation_hygiene": [
         "Minimum daily water access is sufficient and equitable.",
@@ -171,6 +176,11 @@ class PromptRegistry:
         return versions[resolved_version]
 
     def build_prompt(
+    #: Exposed on the instance so callers (notably the decision audit trail)
+    #: can record which prompt version produced a decision.
+    prompt_version: str = HUMANITARIAN_PROMPT_VERSION
+
+    def build_primary_prompt(
         self,
         name: str,
         version: Optional[str] = None,
@@ -332,3 +342,55 @@ def _format_context_factors(context_factors: Dict[str, Any]) -> str:
         value = context_factors[key]
         lines.append(f"- {key}: {value}")
     return "\n".join(lines)
+    def build_repair_prompt(
+        self,
+        original_user_prompt: str,
+        malformed_content: str,
+        error_message: str,
+    ) -> Dict[str, str]:
+        """Asks the model to reformat its own previous, unusable response.
+
+        Used for a bounded retry when a response is malformed JSON or fails
+        schema validation -- distinct from `build_fallback_prompt`, which
+        re-asks the *original question* from scratch with a different
+        prompt, rather than asking the model to fix what it already wrote.
+        """
+        system_prompt = (
+            "Your previous response could not be parsed as valid JSON matching "
+            "the requested schema. Return ONLY corrected, strictly valid JSON. "
+            "Do not include prose, explanations, or markdown code fences."
+        )
+        user_prompt = (
+            "Your previous response could not be used because: "
+            f"{error_message}\n\n"
+            "Previous response:\n"
+            f"{malformed_content}\n\n"
+            "Original request:\n"
+            f"{original_user_prompt}\n\n"
+            "Reply again with corrected JSON only, matching the schema from "
+            "the original request exactly."
+        )
+        return {"system": system_prompt, "user": user_prompt}
+
+    def _format_sphere_criteria(self) -> str:
+        lines: List[str] = []
+        for section, items in SPHERE_HANDBOOK_CRITERIA.items():
+            lines.append(f"- {section}:")
+            for item in items:
+                lines.append(f"  * {item}")
+        return "\n".join(lines)
+
+    def _format_evidence(self, supporting_evidence: List[str]) -> str:
+        if not supporting_evidence:
+            return "- No supporting evidence provided"
+        return "\n".join(f"- {entry}" for entry in supporting_evidence)
+
+    def _format_context_factors(self, context_factors: Dict[str, Any]) -> str:
+        if not context_factors:
+            return "- No context factors provided"
+
+        lines: List[str] = []
+        for key in sorted(context_factors.keys()):
+            value = context_factors[key]
+            lines.append(f"- {key}: {value}")
+        return "\n".join(lines)

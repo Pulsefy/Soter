@@ -6,7 +6,11 @@ allowBuilds:
   '@scarf/scarf': false
   '@sentry/cli': false
   '@swc/core': false
+  core-js: true
   msgpackr-extract: false
   prisma: false
+  protobufjs: true
   sharp: false
   unrs-resolver: false
+minimumReleaseAgeExclude:
+  - '@aws-sdk/client-s3@3.1119.0'

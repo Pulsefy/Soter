@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus, Linking, Platform } from 'react-native';
 import { Camera } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import { structuredLogger } from '../services/logger';
 
 export type PermissionState =
   | 'undetermined' // Not yet requested
@@ -108,7 +109,7 @@ export function useCameraPermission(
 
       return 'undetermined';
     } catch (error) {
-      console.warn('Error checking camera permission:', error);
+      structuredLogger.warn('camera.permission.check_failed', { error: error instanceof Error ? error.message : String(error) }, 'camera');
       return 'undetermined';
     }
   }, []);
@@ -150,7 +151,7 @@ export function useCameraPermission(
       setPermissionState('undetermined');
       return false;
     } catch (error) {
-      console.warn('Error requesting camera permission:', error);
+      structuredLogger.warn('camera.permission.request_failed', { error: error instanceof Error ? error.message : String(error) }, 'camera');
       setPermissionState('denied');
       return false;
     } finally {
@@ -169,12 +170,12 @@ export function useCameraPermission(
         await Linking.openSettings();
       }
     } catch (error) {
-      console.warn('Error opening settings:', error);
+      structuredLogger.warn('camera.settings.open_failed', { error: error instanceof Error ? error.message : String(error) }, 'camera');
       // Fallback for older Android versions
       try {
         await Linking.openURL('app-settings:');
       } catch {
-        console.warn('Could not open settings');
+        structuredLogger.warn('camera.settings.open_fallback_failed', undefined, 'camera');
       }
     }
   }, []);

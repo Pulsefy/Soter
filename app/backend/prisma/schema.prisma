@@ -537,7 +537,8 @@ enum EvidenceStatus {
 model EvidenceQueueItem {
   id            String         @id @default(cuid())
   fileName      String
-  filePath      String?        // Path to local encrypted file
+  filePath      String?        // Staging path of the encrypted file before durable upload; null once stored
+  storageKey    String?        // Retrievable key in the selected StorageDriver (local path/key or S3 object key)
   fileHash      String         @unique // To prevent duplicate uploads globally
   fingerprint   String?        // Stable fingerprint for near-duplicate detection
   mimeType      String
@@ -559,6 +560,7 @@ model EvidenceQueueItem {
   @@index([orgId])
   @@index([fingerprint])
   @@index([nearDuplicateOf])
+  @@index([storageKey])
 }
 
 enum UploadSessionStatus {
@@ -792,6 +794,18 @@ enum EntityLinkSourceType {
   verification
 }
 
+/// Lifecycle state of an EntityLink relative to the confidence-banding
+/// review queue (issue #949). `pending_review` is the queue: links land
+/// there instead of being auto-applied when `confidenceScore` is below
+/// the configured threshold (see `common/config/entity-link-confidence.config.ts`).
+enum EntityLinkReviewStatus {
+  auto_accepted
+  pending_review
+  accepted
+  rejected
+  remapped
+}
+
 /// Links extracted entities to canonical registry records
 model EntityLink {
   id              String             @id @default(cuid())
@@ -818,6 +832,8 @@ model EntityLink {
   // Confidence & auditability
   confidenceScore Float              // 0.0 to 1.0
   matchMethod     String?            // e.g., "exact", "fuzzy", "manual"
+  reviewStatus    EntityLinkReviewStatus @default(auto_accepted)
+  queuedAt        DateTime?          // Set when reviewStatus becomes pending_review; used to compute decision latency
   reviewedBy      String?            // User ID if manually reviewed
   reviewedAt      DateTime?
   reviewNotes     String?
@@ -832,6 +848,7 @@ model EntityLink {
   @@index([projectId])
   @@index([confidenceScore])
   @@index([isActive])
+  @@index([reviewStatus])
 }
 
 // ============================================================================

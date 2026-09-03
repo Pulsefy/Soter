@@ -1,7 +1,10 @@
 import pytest
 from dataclasses import dataclass
+from config import settings
 from services.ocr import FieldDetector, OCRService, FieldMatch, OCRResult
 from services.providers import ProviderRegistry, OCRField, OCRResponse, ModelProvider
+from services.circuit_breaker import CircuitBreaker
+from exceptions import ProviderExhaustedError
 from unittest.mock import patch, MagicMock
 
 
@@ -79,12 +82,16 @@ class StubOCRProvider(ModelProvider):
 
     def __init__(self, response):
         self._response = response
+        self._call_count = 0
 
     @property
     def name(self):
         return "stub"
 
     def ocr_extract(self, image, *, language_hint=None):
+        self._call_count += 1
+        if isinstance(self._response, Exception):
+            raise self._response
         return self._response
 
 
@@ -156,12 +163,96 @@ class TestOCRService:
         assert captured_hints == ["fra"]
         assert result.raw_text == "Name: Jane"
 
-    def test_process_image_empty_image(self):
+    def test_process_image_empty_image(self, monkeypatch):
         from PIL import Image
+
+        # Use the fixture provider so the test does not depend on a real OCR
+        # engine being available; it still exercises the degenerate-image path
+        # through the full service without exhausting providers.
+        monkeypatch.setattr(settings, "test_provider_mode", True)
 
         img = Image.new("RGB", (0, 0), color="white")
         result = self.ocr.process_image(img)
         assert isinstance(result, OCRResult)
+
+    @patch("metrics.PIPELINE_STEP_LATENCY.labels")
+    def test_process_image_records_serving_provider(self, mock_labels, monkeypatch):
+        from PIL import Image
+
+        mock_observe = MagicMock()
+        mock_labels.return_value.observe = mock_observe
+
+        stub_response = OCRResponse(
+            fields={"name": OCRField(value="John", confidence=0.9)},
+            raw_text="Name: John",
+            processing_time_ms=10,
+            provider="tesseract",
+        )
+        stub_provider = StubOCRProvider(stub_response)
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_ocr.return_value = [("tesseract", stub_provider)]
+        monkeypatch.setattr(self.ocr, "registry", mock_registry)
+
+        img = Image.new("RGB", (200, 100), color="white")
+        result = self.ocr.process_image(img)
+        assert result.provider == "tesseract"
+
+    @patch("metrics.PIPELINE_STEP_LATENCY.labels")
+    def test_process_image_skips_open_circuit_provider(self, mock_labels, monkeypatch):
+        from PIL import Image
+
+        mock_observe = MagicMock()
+        mock_labels.return_value.observe = mock_observe
+
+        tesseract = StubOCRProvider(
+            OCRResponse(
+                fields={}, raw_text="", processing_time_ms=1, provider="tesseract"
+            )
+        )
+        fallback = StubOCRProvider(
+            OCRResponse(
+                fields={"name": OCRField(value="Jane", confidence=0.9)},
+                raw_text="Name: Jane",
+                processing_time_ms=1,
+                provider="test",
+            )
+        )
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_ocr.return_value = [
+            ("tesseract", tesseract),
+            ("test", fallback),
+        ]
+        monkeypatch.setattr(self.ocr, "registry", mock_registry)
+
+        breaker = CircuitBreaker(name="tesseract", failure_threshold=1)
+        breaker.record_failure()
+        self.ocr.breakers["tesseract"] = breaker
+
+        img = Image.new("RGB", (200, 100), color="white")
+        result = self.ocr.process_image(img)
+        assert result.provider == "test"
+        # tesseract was skipped because its circuit is OPEN
+        assert tesseract._call_count == 0
+
+    @patch("metrics.PIPELINE_STEP_LATENCY.labels")
+    def test_process_image_exhaustion_raises_distinct_error(
+        self, mock_labels, monkeypatch
+    ):
+        from PIL import Image
+
+        mock_observe = MagicMock()
+        mock_labels.return_value.observe = mock_observe
+
+        failing = StubOCRProvider(RuntimeError("ocr boom"))
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_ocr.return_value = [("tesseract", failing)]
+        monkeypatch.setattr(self.ocr, "registry", mock_registry)
+
+        img = Image.new("RGB", (200, 100), color="white")
+        with pytest.raises(ProviderExhaustedError) as excinfo:
+            self.ocr.process_image(img)
+        assert excinfo.value.code == "AI_PROVIDERS_EXHAUSTED"
+        assert excinfo.value.details["attempted"]
 
 
 class TestOCRResult:

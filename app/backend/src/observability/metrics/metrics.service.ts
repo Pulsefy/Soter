@@ -55,6 +55,16 @@ export class MetricsService {
     public analyticsCacheMissesCounter: Counter<string>,
     @InjectMetric('analytics_cache_invalidations_total')
     public analyticsCacheInvalidationsCounter: Counter<string>,
+
+    // Generic Response Cache Metrics (issue #702)
+    @InjectMetric('cache_hits_total')
+    public cacheHitsCounter: Counter<string>,
+    @InjectMetric('cache_misses_total')
+    public cacheMissesCounter: Counter<string>,
+    @InjectMetric('cache_invalidations_total')
+    public cacheInvalidationsCounter: Counter<string>,
+    @InjectMetric('cache_keys_total')
+    public cacheKeysGauge: Gauge<string>,
     @InjectMetric('verification_jobs_enqueued_total')
     public verificationJobsEnqueuedCounter: Counter<string>,
     @InjectMetric('verification_queue_waiting_by_priority')
@@ -76,9 +86,25 @@ export class MetricsService {
     @InjectMetric('claim_funnel_duration_seconds')
     public claimFunnelDuration: Histogram<string>,
 
+    // Entity Link Review Queue Metrics (issue #949)
+    @InjectMetric('entity_link_review_queue_depth')
+    public entityLinkReviewQueueDepthGauge: Gauge<string>,
+    @InjectMetric('entity_link_review_decisions_total')
+    public entityLinkReviewDecisionsCounter: Counter<string>,
+    @InjectMetric('entity_link_review_duration_seconds')
+    public entityLinkReviewDuration: Histogram<string>,
+
     // API Key Rate Limit Metrics (issue #952)
     @InjectMetric('api_key_rate_limit_rejections_total')
     public apiKeyRateLimitRejectionsCounter: Counter<string>,
+
+    // Idempotency Key Retention Metrics
+    @InjectMetric('idempotency_keys_purged_total')
+    public idempotencyKeysPurgedCounter: Counter<string>,
+    @InjectMetric('idempotency_purge_executions_total')
+    public idempotencyPurgeExecutionsCounter: Counter<string>,
+    @InjectMetric('idempotency_purge_failures_total')
+    public idempotencyPurgeFailuresCounter: Counter<string>,
   ) {}
 
   /**
@@ -311,6 +337,79 @@ export class MetricsService {
   }
 
   /**
+   * Record the number of expired idempotency keys deleted by a purge batch.
+   */
+  recordIdempotencyKeysPurged(count: number): void {
+    this.idempotencyKeysPurgedCounter.inc(count);
+  }
+
+  /**
+   * Record a completed or failed idempotency key purge execution.
+   */
+  recordIdempotencyPurgeRun(status: 'success' | 'failed'): void {
+    this.idempotencyPurgeExecutionsCounter.inc({ status });
+  }
+
+  /**
+   * Record a failed idempotency key purge execution with a reason.
+   */
+  recordIdempotencyPurgeFailure(reason: string): void {
+    this.idempotencyPurgeFailuresCounter.inc({ reason: reason.slice(0, 80) });
+  }
+
+  /**
+   * Record a generic response cache hit for a given key group
+   * (e.g. 'verification', 'analytics', 'user').
+   */
+  recordCacheHit(keyGroup: string): void {
+    this.cacheHitsCounter.inc({ key_group: keyGroup });
+  }
+
+  /**
+   * Record a generic response cache miss for a given key group.
+   */
+  recordCacheMiss(keyGroup: string): void {
+    this.cacheMissesCounter.inc({ key_group: keyGroup });
+  }
+
+  /**
+   * Increment the generic response cache invalidation counter for a key group.
+   */
+  incrementCacheInvalidation(keyGroup: string): void {
+    this.cacheInvalidationsCounter.inc({ key_group: keyGroup });
+  }
+
+  /**
+   * Set the current Redis key count for a cache key group (Redis key health).
+   */
+  setCacheKeyGroupSize(keyGroup: string, count: number): void {
+    this.cacheKeysGauge.set({ key_group: keyGroup }, count);
+  }
+
+  /**
+   * Sum a counter's value across all of its label combinations.
+   */
+  private async sumCounter(counter: Counter<string>): Promise<number> {
+    const data = await counter.get();
+    return data.values.reduce((sum, entry) => sum + entry.value, 0);
+  }
+
+  /** Cumulative count of generic response cache hits across all key groups. */
+  async getCacheHitsTotal(): Promise<number> {
+    return this.sumCounter(this.cacheHitsCounter);
+  }
+
+  /** Cumulative count of generic response cache misses across all key groups. */
+  async getCacheMissesTotal(): Promise<number> {
+    return this.sumCounter(this.cacheMissesCounter);
+  }
+
+  /** Cumulative count of generic response cache invalidations across all key groups. */
+  async getCacheInvalidationsTotal(): Promise<number> {
+    return this.sumCounter(this.cacheInvalidationsCounter);
+  }
+
+  /**
    * Increment the counter for claims created, labelled by campaign_id.
    */
   incrementClaimsCreated(campaignId: string): void {
@@ -370,6 +469,45 @@ export class MetricsService {
   /** Set the current number of notification outbox records awaiting replay. */
   setNotificationDeadLetterDepth(count: number): void {
     this.setGauge('notification_dead_letter_depth', count);
+  }
+
+  /**
+   * Adjust the gauge tracking how many entity links are currently sitting
+   * in the review queue for a given entity type. Increments (+1) when a
+   * link is queued, decrements (-1) when a reviewer decides it.
+   */
+  adjustEntityLinkReviewQueueDepth(entityType: string, delta: 1 | -1): void {
+    this.entityLinkReviewQueueDepthGauge.inc(
+      { entity_type: entityType },
+      delta,
+    );
+  }
+
+  /**
+   * Set the absolute entity-link review queue depth for an entity type.
+   * Used for periodic refresh to correct drift from incremental updates.
+   */
+  setEntityLinkReviewQueueDepth(entityType: string, count: number): void {
+    this.entityLinkReviewQueueDepthGauge.set(
+      { entity_type: entityType },
+      count,
+    );
+  }
+
+  /** Record a reviewer decision on a queued entity link ('accept'|'reject'|'remap'). */
+  incrementEntityLinkReviewDecision(decision: string): void {
+    this.entityLinkReviewDecisionsCounter.inc({ decision });
+  }
+
+  /**
+   * Record how long a link sat in the review queue before a reviewer
+   * decided it (seconds between `queuedAt` and the decision).
+   */
+  recordEntityLinkReviewDuration(
+    decision: string,
+    durationSeconds: number,
+  ): void {
+    this.entityLinkReviewDuration.observe({ decision }, durationSeconds);
   }
 
   /**

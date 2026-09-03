@@ -10,6 +10,7 @@ import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/l
 import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
 import { useToast } from '@/components/ToastProvider';
 import { normalizeError } from '@/lib/error-utils';
+import { useTranslations } from 'next-intl';
 import type {
     PiiDetectionResult,
     ValidationErrors,
@@ -126,6 +127,7 @@ export const EnhancedVerificationFlow: React.FC = () => {
     const role = getAppUserRole();
     const { isMismatch } = useNetworkGuard();
     const { toast } = useToast();
+    const tErrors = useTranslations('errors');
     const [restoredDraft] = useState<EnhancedVerificationDraft | null>(() =>
         readEnhancedVerificationDraftFromStorage(),
     );
