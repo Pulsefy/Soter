@@ -78,7 +78,21 @@ class HumanitarianVerificationResponse(BaseModel):
     success: bool = Field(examples=[True])
     provider: Optional[str] = Field(None, examples=["test"])
     model: Optional[str] = Field(None, examples=["gpt-4o"])
-    prompt_variant: Optional[str] = Field(None, examples=["v1"])
+    prompt_variant: Optional[str] = Field(None, examples=["primary"])
+    prompt_name: Optional[str] = Field(
+        None,
+        description="Prompt name as registered in the PromptRegistry (e.g. humanitarian_primary).",
+        examples=["humanitarian_primary"],
+    )
+    prompt_version: Optional[str] = Field(
+        None,
+        description="Prompt version string used for this result.",
+        examples=["1.0"],
+    )
+    prompt_content_hash: Optional[str] = Field(
+        None,
+        description="SHA256 hex digest of the rendered prompt text for audit.",
+    )
     verification: Optional[Dict[str, Any]] = Field(
         None,
         examples=[
@@ -93,13 +107,17 @@ class HumanitarianVerificationResponse(BaseModel):
     anchor_metadata: Optional[AnchorMetadata] = None
 
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "examples": [
                 {
                     "success": True,
                     "provider": "test",
                     "model": "gpt-4o",
-                    "prompt_variant": "v1",
+                    "prompt_variant": "primary",
+                    "prompt_name": "humanitarian_primary",
+                    "prompt_version": "1.0",
+                    "prompt_content_hash": "a1b2c3d4e5f6",
                     "verification": {
                         "eligible": True,
                         "confidence": 0.9,

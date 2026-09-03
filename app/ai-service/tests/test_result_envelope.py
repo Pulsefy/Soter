@@ -312,6 +312,9 @@ class TestHumanitarianEnvelope:
         "provider": "test",
         "model": "test-provider/fixture",
         "prompt_variant": "primary",
+        "prompt_name": "humanitarian_primary",
+        "prompt_version": "1.0",
+        "prompt_content_hash": "deadbeefcafebabedeadbeefcafebabedeadbeefcafebabedeadbeefcafebabe",
         "verification": {
             "verdict": "credible",
             "confidence": 0.82,
@@ -372,3 +375,35 @@ class TestHumanitarianEnvelope:
         ):
             data = client.post("/v1/ai/humanitarian/verify", json=self._REQUEST).json()
         assert data["result"]["provider"] == "test"
+
+    def test_prompt_versions_recorded_on_envelope(self):
+        """AC: the prompt version used is recorded on the result envelope."""
+        with patch.object(
+            main.humanitarian_verification_service,
+            "verify_claim",
+            return_value=self._FAKE_VERIFY,
+        ):
+            data = client.post("/v1/ai/humanitarian/verify", json=self._REQUEST).json()
+
+        assert data["prompt_versions"] is not None, (
+            "prompt_versions map must be populated on the humanitarian envelope"
+        )
+        primary_info = data["prompt_versions"]["primary"]
+        assert primary_info["name"] == "humanitarian_primary"
+        assert primary_info["version"] == "1.0"
+        assert (
+            primary_info["content_hash"]
+            == "deadbeefcafebabedeadbeefcafebabedeadbeefcafebabedeadbeefcafebabe"
+        )
+
+    def test_result_inner_payload_carries_name_version_hash(self):
+        with patch.object(
+            main.humanitarian_verification_service,
+            "verify_claim",
+            return_value=self._FAKE_VERIFY,
+        ):
+            data = client.post("/v1/ai/humanitarian/verify", json=self._REQUEST).json()
+        inner = data["result"]
+        assert inner["prompt_name"] == "humanitarian_primary"
+        assert inner["prompt_version"] == "1.0"
+        assert "prompt_content_hash" in inner
