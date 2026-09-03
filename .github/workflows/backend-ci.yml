@@ -75,8 +75,11 @@ jobs:
           DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_test
           SHADOW_DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_shadow
 
-      - name: Lint
+      - name: Lint (check)
         run: pnpm --filter backend run lint:check
+
+      - name: Lint
+        run: pnpm --filter backend run lint
 
       - name: Test
         run: pnpm --filter backend run test
