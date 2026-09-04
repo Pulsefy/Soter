@@ -1,0 +1,16 @@
+{
+  "name": "ledger-events-backfill",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Range-based, checkpointed backfill of Soroban contract events with progress logs and metrics",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/checkpoint.spec.js test/events.spec.js test/progress.spec.js test/metrics.spec.js test/split.spec.js test/end-to-end.spec.js"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^14.6.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

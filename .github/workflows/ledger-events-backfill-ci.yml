@@ -1,0 +1,42 @@
+name: Ledger Events Backfill CI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'tools/ledger-events-backfill/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'tools/ledger-events-backfill/**'
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: tools/ledger-events-backfill
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Smoke-run --help
+        run: node index.js --help
+
+      - name: Run unit + e2e tests
+        run: npm test
+
+      - name: Smoke-run --status with missing checkpoint (must exit 2)
+        run: |
+          node index.js --checkpoint /tmp/_nonexistent.json --status; \
+          if [ $? -ne 2 ]; then echo "Expected exit code 2, got $?"; exit 1; fi
