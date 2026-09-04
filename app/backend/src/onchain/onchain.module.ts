@@ -11,6 +11,7 @@ import { OnchainService } from './onchain.service';
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { LedgerAdminController } from './ledger-admin.controller';
+import { StuckTransactionController } from './stuck-transaction.controller';
 import { JobsModule } from '../jobs/jobs.module';
 import { LoggerModule } from '../logger/logger.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
@@ -91,7 +92,7 @@ const onchainAdapterProvider: Provider = {
     MetricsModule,
     CommonServicesModule,
   ],
-  controllers: [LedgerAdminController],
+  controllers: [LedgerAdminController, StuckTransactionController],
   providers: [
     MockOnchainAdapter,
     SorobanAdapter,
