@@ -445,7 +445,10 @@ export class ApiKeysService {
         where: { id },
         select: selectFields,
       });
-      return toAdminView(row!, this.reminderWindowDays());
+      if (!row) {
+        throw new NotFoundException('API key not found');
+      }
+      return toAdminView(row, this.reminderWindowDays());
     }
 
     const row = await this.prisma.apiKey.update({
