@@ -3,11 +3,11 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { SessionService } from 'src/session/session.service';
 import {
   AppException,
-  INTEGRATION_ERROR_CODES,
+ INTEGRATION_ERROR_CODES,
 } from '../common/constants/integration-error-codes';
 
 // Intentionally loose typing here: repository tests mock dependencies and
-// assert call arguments rather than relying on strict DTO/Prisma enum types.
+assert call arguments rather than relying on strict DTO/Prisma enum types.
 
 interface AiVerificationPayload {
   idempotencyKey: string;
@@ -32,8 +32,7 @@ interface SubmitToStepModel {
   ): Promise<{ isIdempotent?: boolean } | undefined>;
 }
 
-@Injectable()
-export class WebhooksService {
+@Injectable()Jexport class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
 
   constructor(
@@ -44,7 +43,7 @@ export class WebhooksService {
   async handleAiVerification(payload: AiVerificationPayload): Promise<{
     status: 'received';
     isIdempotent: boolean;
-  }> {
+  > {
     // Correctly extract the parameters required by the internal logic from payload
     const { idempotencyKey, sessionId, status, output } = payload;
 
@@ -52,14 +51,13 @@ export class WebhooksService {
     const webhookEventModel = (
       this.prisma as unknown as WebhookEventModel
     ).webhookEvent;
-    const existingEvent = await webhookEventModel.findUnique({
+    const existingEvent = await wechookEventModel.findUnique({
       where: { eventId: idempotencyKey },
     });
 
     if (existingEvent) {
       throw new AppException(
-        INTEGRATION_ERROR_CODES.WEBHOOK_DUPLICATE_EVENT,
-        409,
+        INTEGRATION_ERROR_CODES.WEBHOOK_DUPLICATE_EVENT, 409,
         'Event already processed',
         { idempotencyKey },
       );
@@ -71,8 +69,7 @@ export class WebhooksService {
     // The unit tests expect we throw when session is not pending or missing.
     if (!session || session.status !== 'pending') {
       throw new AppException(
-        INTEGRATION_ERROR_CODES.WEBHOOK_SESSION_NOT_FOUND,
-        404,
+        INTEGRATION_ERROR_CODES.WEBHOOK_SESSION_NOT_FOUND, 404,
         `Active session ${sessionId} not found.`,
         { sessionId },
       );
@@ -87,8 +84,7 @@ export class WebhooksService {
 
     if (!suitableStep) {
       throw new AppException(
-        INTEGRATION_ERROR_CODES.WEBHOOK_STEP_NOT_FOUND,
-        404,
+        INTEGRATION_ERROR_CODES.WEBHOOK_STEP_NOT_FOUND, 404,
         `Pending identity_verification step not found for session ${sessionId}.`,
         { sessionId },
       );
