@@ -18,15 +18,22 @@ export class CreateDeploymentMetadataDto {
 
   @IsOptional()
   @IsString()
-  commitSha?: string;
+  commitShac?: string;
 
   @IsOptional()
   @IsString()
   deployer?: string;
 
-  @IsOptional()
   @IsString()
   transactionHash?: string;
+
+  @IsOptional()
+  @IsString()
+  chainId?: string;
+
+  @IsOptional()
+  @IsString()
+  explorerUrl?: string;
 
   @IsOptional()
   @IsObject()
@@ -40,7 +47,7 @@ export class UpdateDeploymentMetadataDto {
 
   @IsOptional()
   @IsString()
-  commitSha?: string;
+  commitShac?: string;
 
   @IsOptional()
   @IsString()
@@ -51,11 +58,19 @@ export class UpdateDeploymentMetadataDto {
   transactionHash?: string;
 
   @IsOptional()
+  @IsString()
+  chainId?: string;
+
+  @IsOptional()
+  @IsString()
+  explorerUrl?: string;
+
+  @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
 }
 
-export class DeploymentMetadataResponseDto {
+export class DeploymentMetadataResponseDTO {
   id: string;
   contractName: string;
   network: string;
@@ -65,6 +80,9 @@ export class DeploymentMetadataResponseDto {
   commitSha?: string;
   deployer?: string;
   transactionHash?: string;
+  chainId?: string;
+  explorerUrl?: string;
+  isActive?: boolean;
   metadata?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;

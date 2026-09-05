@@ -16,7 +16,12 @@ import { RotateApiKeyDto } from './dto/rotate-api-key.dto';
 type Actor = { apiKeyId?: string; authType?: string; role?: AppRole };
 
 export type ApiKeyRotationStatus =
-  'active' | 'expiring_soon' | 'expired' | 'revoked' | 'grace' | 'rotated';
+  | 'active'
+  | 'expiring_soon'
+  | 'expired'
+  | 'revoked'
+  | 'grace'
+  | 'rotated';
 
 /** Default overlap window during which a rotated-out predecessor stays valid. */
 export const DEFAULT_API_KEY_ROTATION_GRACE_HOURS = 24;
@@ -170,14 +175,13 @@ export function deriveRotationStatus(
     : parseScopes(row.scopes);
   const highRisk = isHighRiskApiKey(row.role, scopes);
 
-  if (row.replacedById || row.revokedReason === 'rotated') {
+  if (
+    !row.revokedAt &&
+    (row.replacedById || row.revokedReason === 'rotated')
+  ) {
     // A predecessor that has not been hard-revoked yet remains usable during
     // its overlap (grace) window.
-    if (
-      !row.revokedAt &&
-      row.graceExpiresAt &&
-      row.graceExpiresAt.getTime() > now.getTime()
-    ) {
+    if (row.graceExpiresAt && row.graceExpiresAt.getTime() > now.getTime()) {
       return {
         rotationStatus: 'grace',
         daysUntilExpiry: daysUntil(row.graceExpiresAt, now),
@@ -445,7 +449,10 @@ export class ApiKeysService {
         where: { id },
         select: selectFields,
       });
-      return toAdminView(row!, this.reminderWindowDays());
+      if (!row) {
+        throw new NotFoundException('API key not found');
+      }
+      return toAdminView(row, this.reminderWindowDays());
     }
 
     const row = await this.prisma.apiKey.update({

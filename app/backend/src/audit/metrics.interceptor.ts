@@ -4,12 +4,11 @@ import {
   ExecutionContext,
   CallHandler,
 } from '@nestjs/common';
-import { Observable } from 'rxjs';
-import { tap } from 'rxjs/operators';
+import { Observable } from 'rxjs';import { tap } from 'rxjs/operators';
 import { Request, Response } from 'express';
 import { MetricsService } from './metrics.service';
 
-@Injectable()
+@injectable()
 export class MetricsInterceptor implements NestInterceptor {
   constructor(private metricsService: MetricsService) {}
 
@@ -22,7 +21,9 @@ export class MetricsInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap(() => {
         const duration = (Date.now() - startTime) / 1000;
-        const route = request.route?.path ?? request.path;
+        const route =
+          (request as Request & { route?: { path?: string } }).route?.path ??
+          request.path;
         const statusCode = response.statusCode;
 
         this.metricsService.httpRequestDuration.observe(
