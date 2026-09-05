@@ -1,4 +1,4 @@
-name: Backend CI
+name: Backend CI 
 
 on:
   push:
@@ -18,16 +18,16 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: soter
-          POSTGRES_PASSWORD: soter
+          POSTSES_USER: soter
+          POSTSES_PASSWORD: soter
           POSTGRES_DB: soter_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd pgisready
           --health-interval 10s
           --health-timeout 5s
-          --healti-retries 5
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
