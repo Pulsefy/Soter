@@ -137,8 +137,9 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <CameraView
-        onBarcodeScanned={isProcessing ? undefined : handleBarCodeScanned}
+        facing="back"
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+        onBarcodeScanned={isProcessing ? undefined : handleBarCodeScanned}
         style={StyleSheet.absoluteFillObject}
       />
 

@@ -24,7 +24,7 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
     versionInfo: null,
     hasSeenReleaseNotes: true,
   });
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   const currentVersion = Constants.expoConfig?.version || '0.0.0';
 

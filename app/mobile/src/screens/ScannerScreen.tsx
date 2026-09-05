@@ -120,9 +120,11 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <CameraView
-        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+        facing="back"
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
         style={StyleSheet.absoluteFillObject}
+        testID="scan-fixture"
         // The camera view itself is not interactive for screen readers;
         // the overlay controls below provide all necessary actions.
         accessibilityElementsHidden

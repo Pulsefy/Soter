@@ -1,0 +1,86 @@
+name: Mobile E2E
+
+on:
+  pull_request:
+    paths:
+      - 'app/mobile/**'
+      - '.github/workflows/mobile-e2e.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/mobile/**'
+      - '.github/workflows/mobile-e2e.yml'
+
+jobs:
+  maestro-android:
+    name: Android field flows
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: app/mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/mobile/package.json
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --ignore-scripts
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+
+      - name: Install Maestro
+        working-directory: .
+        run: |
+          curl -Ls https://get.maestro.mobile.dev | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Run field flows on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          MAESTRO_CLI_NO_ANALYTICS: '1'
+        with:
+          working-directory: app/mobile
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics
+          # The runner splits `script` on newlines and executes each line as a
+          # separate `sh -c` from `working-directory`, so the `cd android` and all
+          # Gradle commands that depend on it must stay on one line.
+          script: |
+            adb wait-for-device
+            adb shell input keyevent 82 >/dev/null 2>&1 || true
+            CI=1 npx expo prebuild --no-install && cd android && ( test -x ./gradlew || gradle wrapper --gradle-version 8.13 --distribution-type bin ) && chmod +x ./gradlew && ./gradlew assembleDebug --no-daemon --stacktrace
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            mkdir -p artifacts && maestro test e2e/field-flows.yaml --format junit --output artifacts/maestro.xml
+
+      - name: Upload E2E screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-e2e-artifacts
+          path: |
+            app/mobile/artifacts/**
+            ~/.maestro/tests/**
+          if-no-files-found: warn

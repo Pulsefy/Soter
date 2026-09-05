@@ -85,9 +85,8 @@ const AppInner = () => {
     }
   }, [pendingDeepLink, isNavReady, consumeDeepLink]);
 
-  if (isLoading) {
-    return null;
-  }
+  // Update checks are best-effort; render the app while they are pending so
+  // offline field workflows are not blocked by a backend request.
 
   if (isForceUpgrade) {
     return <ForceUpgradeScreen />;

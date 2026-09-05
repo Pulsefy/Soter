@@ -70,6 +70,15 @@ jest.mock('expo-notifications', () => ({
   addNotificationReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
 }));
 
+jest.mock('expo-camera', () => ({
+  CameraView: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Camera: {
+    requestCameraPermissionsAsync: jest
+      .fn()
+      .mockResolvedValue({ status: 'granted' }),
+  },
+}));
+
 jest.mock('../contexts/WalletContext', () => ({
   useWallet: jest.fn(),
 }));
