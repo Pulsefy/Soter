@@ -202,6 +202,26 @@ class Settings(BaseSettings):
     proof_of_life_confidence_threshold: float = 0.65
     proof_of_life_min_face_size: int = 80
 
+    # OCR confidence & review threshold settings
+    ocr_confidence_threshold: float = 0.75
+    ocr_confidence_thresholds_by_document_type: Dict[str, float] = Field(
+        default_factory=lambda: {
+            "id_card": 0.85,
+            "passport": 0.85,
+            "national_id": 0.85,
+            "driver_license": 0.80,
+            "receipt": 0.70,
+            "invoice": 0.75,
+            "general": 0.75,
+            "default": 0.75,
+        }
+    )
+
+    # OCR manual review routing (issue #984). When enabled, OCR results whose
+    # confidence is below the applicable document-type threshold are routed to
+    # manual review instead of being accepted/rejected automatically.
+    ocr_manual_review_enabled: bool = True
+
     # Verification artifact access settings
     verification_artifacts_dir: str = "./artifacts/verification"
     verification_artifact_url_ttl_seconds: int = 300
@@ -227,7 +247,9 @@ class Settings(BaseSettings):
             self.request_rate_limit = "5/minute"
             self.ai_deterministic_mode = True
             if not (
-                self.openai_api_key or self.groq_api_key or self.test_provider_mode
+                self.openai_api_key
+                or self.groq_api_key
+                or "test_provider_mode" in self.model_fields_set
             ):
                 self.test_provider_mode = True
 
@@ -235,7 +257,9 @@ class Settings(BaseSettings):
             self.request_rate_limit = "5/minute"
             self.ai_deterministic_mode = True
             if not (
-                self.openai_api_key or self.groq_api_key or self.test_provider_mode
+                self.openai_api_key
+                or self.groq_api_key
+                or "test_provider_mode" in self.model_fields_set
             ):
                 self.test_provider_mode = True
 
@@ -359,6 +383,18 @@ class Settings(BaseSettings):
                 "PROOF_OF_LIFE_CONFIDENCE_THRESHOLD",
                 f"must be between 0.0 and 1.0 (got {self.proof_of_life_confidence_threshold})",
             )
+        # --- OCR confidence thresholds ------------------------------------
+        if not 0.0 <= self.ocr_confidence_threshold <= 1.0:
+            _add(
+                "OCR_CONFIDENCE_THRESHOLD",
+                f"must be between 0.0 and 1.0 (got {self.ocr_confidence_threshold})",
+            )
+        for _doc_type, _threshold in self.ocr_confidence_thresholds_by_document_type.items():
+            if not 0.0 <= _threshold <= 1.0:
+                _add(
+                    f"OCR_CONFIDENCE_THRESHOLDS_BY_DOCUMENT_TYPE[{_doc_type}]",
+                    f"must be between 0.0 and 1.0 (got {_threshold})",
+                )
         if not 1 <= int(self.port) <= 65535:
             _add("PORT", f"must be between 1 and 65535 (got {self.port})")
 
@@ -570,6 +606,47 @@ class Settings(BaseSettings):
                 return True
 
         return False
+
+    def get_ocr_threshold(self, document_type: Optional[str] = None) -> float:
+        """
+        Get the OCR confidence threshold for a specific document type.
+
+        Args:
+            document_type: Optional document type name (case-insensitive)
+
+        Returns:
+            The applicable float threshold in [0.0, 1.0].
+        """
+        if not document_type:
+            return self.ocr_confidence_threshold
+
+        normalized = document_type.strip().lower()
+        if (
+            self.ocr_confidence_thresholds_by_document_type
+            and normalized in self.ocr_confidence_thresholds_by_document_type
+        ):
+            return self.ocr_confidence_thresholds_by_document_type[normalized]
+
+        if (
+            self.ocr_confidence_thresholds_by_document_type
+            and "default" in self.ocr_confidence_thresholds_by_document_type
+        ):
+            return self.ocr_confidence_thresholds_by_document_type["default"]
+
+        return self.ocr_confidence_threshold
+
+    def should_route_to_manual_review(
+        self, confidence: float, document_type: Optional[str] = None
+    ) -> bool:
+        """Return whether an OCR result should be routed to manual review.
+
+        Manual review routing is active only when configured and the detected
+        confidence is below the applicable document-type threshold.
+        """
+        return bool(
+            self.ocr_manual_review_enabled
+            and confidence < self.get_ocr_threshold(document_type)
+        )
 
 
 settings = Settings()

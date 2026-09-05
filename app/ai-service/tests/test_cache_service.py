@@ -2,6 +2,7 @@
 Tests for the cache service
 """
 
+import asyncio
 import pytest
 from unittest.mock import Mock, patch
 from services.cache import CacheService, cached_response
@@ -11,9 +12,10 @@ from config import Settings
 @pytest.fixture
 def mock_settings():
     """Create mock settings for testing"""
-    settings = Mock(spec=Settings)
-    settings.redis_url = "redis://localhost:6379/0"
-    settings.cache_ttl_task_status = 30
+    settings = Settings.model_construct(
+        redis_url="redis://localhost:6379/0",
+        cache_ttl_task_status=30,
+    )
     return settings
 
 
@@ -222,8 +224,7 @@ class TestCacheService:
 
 
 class TestCachedResponseDecorator:
-    @pytest.mark.asyncio
-    async def test_cached_response_async_function_cache_miss(self):
+    def test_cached_response_async_function_cache_miss(self):
         """Test async function with cache miss"""
         # Create a mock cache service directly
         mock_cache = Mock()
@@ -242,15 +243,14 @@ class TestCachedResponseDecorator:
         # Temporarily inject cache into function's closure
         with patch("main.app") as mock_app:
             mock_app.state.cache = mock_cache
-            result = await test_func(arg1="value1")
+            result = asyncio.run(test_func(arg1="value1"))
 
         assert result == "result_value1"
         assert call_count == 1
         mock_cache.get.assert_called_once()
         mock_cache.set.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_cached_response_async_function_cache_hit(self):
+    def test_cached_response_async_function_cache_hit(self):
         """Test async function with cache hit"""
         # Create a mock cache service directly
         mock_cache = Mock()
@@ -269,7 +269,7 @@ class TestCachedResponseDecorator:
         # Temporarily inject cache into function's closure
         with patch("main.app") as mock_app:
             mock_app.state.cache = mock_cache
-            result = await test_func("value1")
+            result = asyncio.run(test_func("value1"))
 
         assert result == "cached_result"
         assert call_count == 0  # Function not called
@@ -302,8 +302,7 @@ class TestCachedResponseDecorator:
         mock_cache.get.assert_called_once()
         mock_cache.set.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_cached_response_cache_disabled(self):
+    def test_cached_response_cache_disabled(self):
         """Test that function executes normally when cache is disabled"""
         # Create a mock cache service that's disabled
         mock_cache = Mock()
@@ -320,15 +319,14 @@ class TestCachedResponseDecorator:
         # Temporarily inject cache into function's closure
         with patch("main.app") as mock_app:
             mock_app.state.cache = mock_cache
-            result = await test_func("value1")
+            result = asyncio.run(test_func("value1"))
 
         assert result == "result_value1"
         assert call_count == 1
         mock_cache.get.assert_not_called()
         mock_cache.set.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_cached_response_passes_key_tags_from_kwargs(self):
+    def test_cached_response_passes_key_tags_from_kwargs(self):
         """key_tags should promote named kwargs into the literal `tags` used for the key"""
         mock_cache = Mock()
         mock_cache.enabled = True
@@ -336,27 +334,25 @@ class TestCachedResponseDecorator:
         mock_cache._generate_key = Mock(return_value="test_key")
 
         @cached_response(
-            prefix="test", ttl_seconds=60, key_tags=["artifact_tag", "model_version"]
-        )
-        async def test_func(aid_claim, artifact_tag, model_version):
+            prefix="test", ttl_seconds=60, key_tags=["artifact_tag", "model_version"])
+        async def test_func(artifact_tag, model_version):
             return "result"
 
         with patch("main.app") as mock_app:
             mock_app.state.cache = mock_cache
-            await test_func(
-                aid_claim="claim",
-                artifact_tag="artifact-1",
-                model_version="openai:gpt-4o-mini",
+            result = asyncio.run(
+                test_func(artifact_tag="artifact-123", model_version="openai:gpt-4o-mini")
             )
 
-        _, call_kwargs = mock_cache._generate_key.call_args
-        assert call_kwargs["tags"] == {
-            "artifact_tag": "artifact-1",
+        assert result == "result"
+        call_args = mock_cache._generate_key.call_args
+        assert call_args[1]["tags"] == {
+            "artifact_tag": "artifact-123",
             "model_version": "openai:gpt-4o-mini",
         }
+        mock_cache.set.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_cached_response_without_key_tags_passes_no_tags(self):
+    def test_cached_response_without_key_tags_passes_no_tags(self):
         """Existing decorated functions with no key_tags shouldn't get a tags dict"""
         mock_cache = Mock()
         mock_cache.enabled = True
@@ -369,7 +365,7 @@ class TestCachedResponseDecorator:
 
         with patch("main.app") as mock_app:
             mock_app.state.cache = mock_cache
-            await test_func("value1")
+            asyncio.run(test_func("value1"))
 
         _, call_kwargs = mock_cache._generate_key.call_args
         assert call_kwargs["tags"] is None

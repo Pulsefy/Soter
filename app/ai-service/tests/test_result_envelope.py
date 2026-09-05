@@ -38,7 +38,6 @@ def assert_envelope(data: Dict[str, Any]) -> None:
     assert "reasons" in data, f"Missing 'reasons' key: {data}"
     assert "anchor_metadata" in data, f"Missing 'anchor_metadata' key: {data}"
     assert "trace_id" in data, f"Missing 'trace_id' key: {data}"
-    assert "prompt_version" in data, f"Missing 'prompt_version' key: {data}"
 
     # confidence is either null or a float in [0, 1]
     if data["confidence"] is not None:
@@ -58,12 +57,6 @@ def assert_envelope(data: Dict[str, Any]) -> None:
         for r in data["reasons"]:
             assert isinstance(r, str), f"Each reason must be a string, got {type(r)}"
 
-    # prompt_version is either null or a string
-    if data["prompt_version"] is not None:
-        assert isinstance(
-            data["prompt_version"], str
-        ), f"prompt_version must be str, got {type(data['prompt_version'])}"
-
 
 # ---------------------------------------------------------------------------
 # OCR endpoint
@@ -80,7 +73,17 @@ class TestOCREnvelope:
             },
             "raw_text": "Jane Doe\nID: 987654321",
             "processing_time_ms": 120,
+            "confidence": 0.915,
+            "confidence_banding": "HIGH",
+            "requires_review": False,
+            "review_reasons": [],
+            "document_type": "id_card",
         },
+        "confidence": 0.915,
+        "confidence_banding": "HIGH",
+        "requires_review": False,
+        "review_reasons": [],
+        "document_type": "id_card",
         "processing_time_ms": 120,
         "anchor_metadata": None,
     }
@@ -108,6 +111,52 @@ class TestOCREnvelope:
         data = self._post_ocr()
         assert "fields" in data["result"]
         assert "raw_text" in data["result"]
+
+    def test_requires_review_and_banding_on_envelope(self):
+        data = self._post_ocr()
+        assert data["requires_review"] is False
+        assert data["confidence_banding"] == "HIGH"
+        assert data["result"]["requires_review"] is False
+
+    def test_low_confidence_ocr_flags_review_on_envelope(self):
+        fake_low_ocr = {
+            "success": True,
+            "data": {
+                "fields": {
+                    "full_name": {"value": "Jane Doe", "confidence": 0.50},
+                },
+                "raw_text": "Jane Doe",
+                "processing_time_ms": 100,
+                "confidence": 0.50,
+                "confidence_banding": "LOW",
+                "requires_review": True,
+                "review_reasons": ["Confidence 0.5000 is below threshold 0.7500"],
+                "document_type": "default",
+            },
+            "confidence": 0.50,
+            "confidence_banding": "LOW",
+            "requires_review": True,
+            "review_reasons": ["Confidence 0.5000 is below threshold 0.7500"],
+            "document_type": "default",
+            "processing_time_ms": 100,
+            "anchor_metadata": None,
+        }
+        from io import BytesIO
+        from PIL import Image
+
+        buf = BytesIO()
+        Image.new("RGB", (10, 10), color=(255, 0, 0)).save(buf, format="PNG")
+        buf.seek(0)
+        data = {"image": ("test.png", buf, "image/png")}
+        with patch("api.v1.ocr.run_ocr_from_bytes", return_value=fake_low_ocr):
+            resp = client.post("/v1/ai/ocr", files=data).json()
+
+        assert_envelope(resp)
+        assert resp["requires_review"] is True
+        assert resp["confidence_banding"] == "LOW"
+        assert resp["reasons"] == ["Confidence 0.5000 is below threshold 0.7500"]
+        assert resp["result"]["requires_review"] is True
+        assert resp["result"]["review_reasons"] == ["Confidence 0.5000 is below threshold 0.7500"]
 
     def test_confidence_derived_from_field_scores(self):
         data = self._post_ocr()

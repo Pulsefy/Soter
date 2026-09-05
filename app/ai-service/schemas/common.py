@@ -3,11 +3,10 @@ from pydantic import BaseModel, Field
 
 T = TypeVar("T")
 
-
 class AnchorMetadata(BaseModel):
     campaign_ref: Optional[str] = Field(None, examples=["campaign-2024-001"])
     claim_id: Optional[str] = Field(None, examples=["claim-abc123"])
-    package_id: Optional[str] = Field(None, examples=["package-x7y8z9"])
+    package_id: Optional[str] = Field(None, examples=["packagex7y8z9"])
 
     model_config = {
         "json_schema_extra": {
@@ -23,17 +22,21 @@ class ResultEnvelope(BaseModel, Generic[T]):
     Standardized success-path envelope returned by all AI inference endpoints.
 
     Fields
-    ------
-    result          The endpoint-specific payload (type varies by endpoint).
-    confidence      Aggregate confidence score in [0, 1], when meaningful.
-    reasons         Human-readable list of reasons / explanations.
-    anchor_metadata Pass-through of the caller-supplied correlation metadata.
-    trace_id        Request-scoped correlation ID echoed from the
-                    X-Correlation-Id / X-Request-Id header for distributed
+    ----
+    result              The endpoint-specific payload (type varies by endpoint).
+    confidence          Aggregate confidence score in [0, 1], when meaningful.
+    reasons             Human-readable list of reasons / explanations.
+    anchor_metadata     Pass-through of the caller-supplied correlation metadata.
+    trace_id            Request-scoped correlation ID echoed from the
+                    XCorrelation-Id / X-Request-Id header for distributed
                     tracing.
-    prompt_version  Version of the prompt template used for verification/inference.
+    prompt_version      Version of the prompt template used for
+                        verification/inference.
+    requires_review     Flag indicating if the result requires manual human
+                        review.
+    confidence_banding  Confidence classification banding: HIGH, MEDIUM, LOW,
+                        UNKNOWN.
     """
-
     result: T
     confidence: Optional[float] = Field(
         None,
@@ -57,4 +60,14 @@ class ResultEnvelope(BaseModel, Generic[T]):
         None,
         description="Version of the prompt template used for verification.",
         examples=["v1"],
+    )
+    requires_review: Optional[bool] = Field(
+        None,
+        description="Flag indicating if the result requires manual human review.",
+        examples=[False],
+    )
+    confidence_banding: Optional[str] = Field(
+        None,
+        description="Confidence classification banding: HIGH, MEDIUM, LOW, UNKNOWN.",
+        examples=["HIGH"],
     )

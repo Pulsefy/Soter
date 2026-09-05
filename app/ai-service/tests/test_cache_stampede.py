@@ -2,14 +2,16 @@
 Tests for cache stampede prevention (single-flight suppression)
 """
 
-import pytest
 import asyncio
 from unittest.mock import Mock, patch
+
+import pytest
+
 from services.cache import (
-    cached_response,
     _inflight_computations,
-    _inflight_results,
     _inflight_errors,
+    _inflight_results,
+    cached_response,
 )
 
 
@@ -43,8 +45,10 @@ class TestCacheStampedePrevention:
         _inflight_results.clear()
         _inflight_errors.clear()
 
-    @pytest.mark.asyncio
-    async def test_single_flight_suppression_async(self):
+    def test_single_flight_suppression_async(self):
+        asyncio.run(self._test_single_flight_suppression_async())
+
+    async def _test_single_flight_suppression_async(self):
         """Test that concurrent cache misses result in only one upstream call"""
         # Create a mock cache service
         mock_cache = Mock()
@@ -86,8 +90,10 @@ class TestCacheStampedePrevention:
             # Verify cache.set was called exactly once
             assert mock_cache.set.call_count == 1
 
-    @pytest.mark.asyncio
-    async def test_single_flight_with_cache_hit(self):
+    def test_single_flight_with_cache_hit(self):
+        asyncio.run(self._test_single_flight_with_cache_hit())
+
+    async def _test_single_flight_with_cache_hit(self):
         """Test that cache hits don't trigger single-flight logic"""
         mock_cache = Mock()
         mock_cache.enabled = True
@@ -120,8 +126,10 @@ class TestCacheStampedePrevention:
             for result in results:
                 assert result == "cached_result"
 
-    @pytest.mark.asyncio
-    async def test_single_flight_error_handling(self):
+    def test_single_flight_error_handling(self):
+        asyncio.run(self._test_single_flight_error_handling())
+
+    async def _test_single_flight_error_handling(self):
         """Test that failed computation doesn't block other requests permanently"""
         mock_cache = Mock()
         mock_cache.enabled = True
@@ -156,8 +164,10 @@ class TestCacheStampedePrevention:
             assert call_count == 2
             assert result == "result_value1_retry"
 
-    @pytest.mark.asyncio
-    async def test_single_flight_cleanup(self):
+    def test_single_flight_cleanup(self):
+        asyncio.run(self._test_single_flight_cleanup())
+
+    async def _test_single_flight_cleanup(self):
         """Test that in-flight tracking is cleaned up after computation"""
         mock_cache = Mock()
         mock_cache.enabled = True
@@ -192,8 +202,10 @@ class TestCacheStampedePrevention:
             assert result2 == "cached_result"
             assert call_count == 1  # No additional call
 
-    @pytest.mark.asyncio
-    async def test_concurrent_different_keys(self):
+    def test_concurrent_different_keys(self):
+        asyncio.run(self._test_concurrent_different_keys())
+
+    async def _test_concurrent_different_keys(self):
         """Test that different cache keys don't interfere with each other"""
         mock_cache = Mock()
         mock_cache.enabled = True

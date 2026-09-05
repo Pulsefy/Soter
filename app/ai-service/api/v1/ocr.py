@@ -20,6 +20,7 @@ from schemas.ocr import BatchOCRDocumentStatus, BatchOCRResponse, OCRData, Langu
 from schemas.common import ResultEnvelope
 from services.ocr_job import run_ocr_from_bytes
 from config import settings
+from exceptions import ProviderExhaustedError
 
 router = APIRouter(tags=["ocr"])
 limiter = Limiter(key_func=get_remote_address)
@@ -52,6 +53,9 @@ async def process_ocr(
     ] = None,
     language_hint: Annotated[
         Optional[LanguageHint], Form(description="Language hint for OCR")
+    ] = None,
+    document_type: Annotated[
+        Optional[str], Form(description="Document type for threshold evaluation")
     ] = None,
 ) -> ResultEnvelope[OCRData]:
     """Extract text fields from an uploaded document image."""
@@ -86,6 +90,7 @@ async def process_ocr(
             contents,
             anchor_metadata,
             language_hint=language_hint.value if language_hint else None,
+            document_type=document_type,
         )
 
         from main import correlation_id_var
@@ -93,22 +98,27 @@ async def process_ocr(
         ocr_data = (
             OCRData(**raw["data"]) if isinstance(raw["data"], dict) else raw["data"]
         )
-        fields = ocr_data.fields
-        avg_confidence: Optional[float] = (
-            round(sum(f.confidence for f in fields.values()) / len(fields), 4)
-            if fields
-            else None
-        )
+        low_confidence = (ocr_data.confidence_banding or "").lower() == "low"
+        if low_confidence:
+            ocr_data.requires_review = True
+            review_reasons = list(ocr_data.review_reasons or [])
+            if "low_confidence" not in review_reasons:
+                review_reasons.append("low_confidence")
+            ocr_data.review_reasons = review_reasons
 
         return ResultEnvelope[OCRData](
             result=ocr_data,
-            confidence=avg_confidence,
-            reasons=None,
+            confidence=ocr_data.confidence,
+            reasons=ocr_data.review_reasons or None,
+            requires_review=ocr_data.requires_review,
+            confidence_banding=ocr_data.confidence_banding,
             anchor_metadata=raw.get("anchor_metadata"),
             trace_id=correlation_id_var.get() or None,
         )
 
     except HTTPException:
+        raise
+    except ProviderExhaustedError:
         raise
     except Exception as e:
         processing_time_ms = int((time.time() - start_time) * 1000)
@@ -138,6 +148,9 @@ async def queue_batch_ocr_jobs(
     ] = None,
     language_hint: Annotated[
         Optional[LanguageHint], Form(description="Language hint for OCR")
+    ] = None,
+    document_type: Annotated[
+        Optional[str], Form(description="Document type for threshold evaluation")
     ] = None,
 ) -> BatchOCRResponse:
     """Queue OCR processing for a batch of uploaded document images."""
@@ -184,6 +197,7 @@ async def queue_batch_ocr_jobs(
                     "filename": image.filename,
                     "anchor_metadata": anchor_metadata,
                     "language_hint": language_hint.value if language_hint else None,
+                    "document_type": document_type,
                 },
             )
 
@@ -234,6 +248,9 @@ async def queue_ocr_job(
     language_hint: Annotated[
         Optional[LanguageHint], Form(description="Language hint for OCR")
     ] = None,
+    document_type: Annotated[
+        Optional[str], Form(description="Document type for threshold evaluation")
+    ] = None,
 ) -> QueuedOCRResponse:
     """Queue OCR processing and return immediately with a pollable job URL."""
     if image.content_type not in ALLOWED_CONTENT_TYPES:
@@ -268,6 +285,7 @@ async def queue_ocr_job(
             "filename": image.filename,
             "anchor_metadata": anchor_metadata,
             "language_hint": language_hint.value if language_hint else None,
+            "document_type": document_type,
         },
     )
 

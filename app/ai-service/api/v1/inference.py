@@ -11,7 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field, validator
 
 import tasks
-from exceptions import LoadShedError
+from exceptions import LoadShedError, ProviderExhaustedError
 from services.cache import cached_response
 from config import settings
 
@@ -171,6 +171,8 @@ async def create_inference_task(
 
     except LoadShedError:
         raise
+    except ProviderExhaustedError:
+        raise
     except Exception as e:
         logger.error(f"Failed to create inference task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")
@@ -215,13 +217,11 @@ async def _get_task_status(task_id: str):
         # Ensure metadata is included in response
         if status_info.get("result") and isinstance(status_info["result"], dict):
             # If result has metadata, ensure it's properly formatted
-            if "metadata" not in status_info[
-                "result"
-            ] and "campaign_id" in status_info.get("payload", {}):
+            payload_metadata = (status_info.get("payload") or {}).get("metadata")
+            if "metadata" not in status_info["result"] and payload_metadata:
                 # Reconstruct metadata from payload
-                status_info["result"]["metadata"] = status_info["payload"].get(
-                    "metadata"
-                )
+                status_info["result"]["metadata"] = payload_metadata
+                status_info["metadata"] = payload_metadata
 
         return status_info
 

@@ -5,22 +5,23 @@ Handles background task processing for heavy inference
 
 import logging
 import os
-import uuid
 import time
+import uuid
 from typing import Any, Dict, Optional
+
+import httpx
 from celery import Celery
 from celery.result import AsyncResult
 from celery.schedules import crontab
-import httpx
 
 import metrics
 from config import settings
 from schemas.callback import AiCallbackPayload, CallbackStatus
-from services.load_shedder import ensure_queue_capacity
-from services.pii_scrubber import PIIScrubberService
-from services.humanitarian_verification import HumanitarianVerificationService
-from services.ocr_job import run_ocr_from_base64
 from services.dead_letter import dead_letter_queue
+from services.humanitarian_verification import HumanitarianVerificationService
+from services.load_shedder import ensure_queue_capacity
+from services.ocr_job import run_ocr_from_base64
+from services.pii_scrubber import PIIScrubberService
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -400,14 +401,26 @@ def _process_ocr(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not image_base64:
         raise ValueError("'image_base64' is required for ocr tasks")
 
+    ocr_output = run_ocr_from_base64(
+        image_base64,
+        payload.get("anchor_metadata"),
+        language_hint=payload.get("language_hint"),
+        document_type=payload.get("document_type"),
+    )
+
+    confidence_banding = ocr_output.get("confidence_banding")
+    requires_review = bool(ocr_output.get("requires_review", False))
+    if confidence_banding == "LOW":
+        requires_review = True
+        ocr_output["requires_review"] = True
+
     return {
         "type": "ocr",
         "status": "success",
-        "result": run_ocr_from_base64(
-            image_base64,
-            payload.get("anchor_metadata"),
-            language_hint=payload.get("language_hint"),
-        ),
+        "result": ocr_output,
+        "requires_review": requires_review,
+        "confidence": ocr_output.get("confidence"),
+        "confidence_banding": confidence_banding,
     }
 
 
