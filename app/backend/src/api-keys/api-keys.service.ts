@@ -170,14 +170,13 @@ export function deriveRotationStatus(
     : parseScopes(row.scopes);
   const highRisk = isHighRiskApiKey(row.role, scopes);
 
-  if (row.replacedById || row.revokedReason === 'rotated') {
+  if (
+    !row.revokedAt &&
+    (row.replacedById || row.revokedReason === 'rotated')
+  ) {
     // A predecessor that has not been hard-revoked yet remains usable during
     // its overlap (grace) window.
-    if (
-      !row.revokedAt &&
-      row.graceExpiresAt &&
-      row.graceExpiresAt.getTime() > now.getTime()
-    ) {
+    if (row.graceExpiresAt && row.graceExpiresAt.getTime() > now.getTime()) {
       return {
         rotationStatus: 'grace',
         daysUntilExpiry: daysUntil(row.graceExpiresAt, now),
