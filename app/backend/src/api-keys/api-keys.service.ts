@@ -16,7 +16,12 @@ import { RotateApiKeyDto } from './dto/rotate-api-key.dto';
 type Actor = { apiKeyId?: string; authType?: string; role?: AppRole };
 
 export type ApiKeyRotationStatus =
-  'active' | 'expiring_soon' | 'expired' | 'revoked' | 'grace' | 'rotated';
+  | 'active'
+  | 'expiring_soon'
+  | 'expired'
+  | 'revoked'
+  | 'grace'
+  | 'rotated';
 
 /** Default overlap window during which a rotated-out predecessor stays valid. */
 export const DEFAULT_API_KEY_ROTATION_GRACE_HOURS = 24;
