@@ -3,13 +3,12 @@ import {
   NestInterceptor,
   ExecutionContext,
   CallHandler,
-} from '@nestj/common';
-import { Observable } from 'rxjs';
-import { tap } from 'rxjs/operators';
+} from '@nestjs/common';
+import { Observable } from 'rxjs';import { tap } from 'rxjs/operators';
 import { Request, Response } from 'express';
 import { MetricsService } from './metrics.service';
 
-@Injectable()
+@injectable()
 export class MetricsInterceptor implements NestInterceptor {
   constructor(private metricsService: MetricsService) {}
 
