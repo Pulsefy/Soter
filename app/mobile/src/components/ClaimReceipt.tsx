@@ -164,6 +164,11 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
   }, [claim.timestamp]);
 
   const receiptText = useMemo(() => {
+    const networkLabel =
+      config.network === 'mainnet' ? 'Mainnet'
+      : config.network === 'futurenet' ? 'Futurenet'
+      : 'Testnet';
+
     const lines = [
       'Claim Receipt',
       `Claim ID: ${claim.claimId}`,
@@ -171,6 +176,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
       `Status: ${claim.status.toUpperCase()}`,
       `Amount: ${claim.amount} tokens`,
       `Date: ${formattedDate}`,
+      `Network: ${networkLabel}`,
     ];
     if (claim.tokenAddress) {
       lines.push(`Token Address: ${claim.tokenAddress}`);
@@ -557,28 +563,36 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
         {claim.contractId && (
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel} maxFontSizeMultiplier={2}>
-              Contract ID
+              Network · Contract ID
             </Text>
             <View style={styles.rowWithActions}>
-              <TouchableOpacity
-                onPress={() =>
-                  Linking.openURL(
-                    buildExplorerUrl('contract', claim.contractId!),
-                  )
-                }
-                style={{ flex: 1 }}
-                accessibilityRole="link"
-                accessibilityLabel={`View contract ${claim.contractId} on explorer`}
-              >
+              <View style={{ flex: 1 }}>
                 <Text
-                  style={styles.explorerLinkText}
-                  numberOfLines={2}
-                  ellipsizeMode="middle"
+                  style={[styles.detailValue, { fontSize: 12, opacity: 0.75, marginBottom: 2 }]}
                   maxFontSizeMultiplier={2}
                 >
-                  {claim.contractId}
+                  {config.network === 'mainnet' ? 'Mainnet' : config.network === 'futurenet' ? 'Futurenet' : 'Testnet'}
                 </Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() =>
+                    Linking.openURL(
+                      buildExplorerUrl('contract', claim.contractId!),
+                    )
+                  }
+                  style={{ flex: 1 }}
+                  accessibilityRole="link"
+                  accessibilityLabel={`View contract ${claim.contractId} on explorer`}
+                >
+                  <Text
+                    style={styles.explorerLinkText}
+                    numberOfLines={2}
+                    ellipsizeMode="middle"
+                    maxFontSizeMultiplier={2}
+                  >
+                    {claim.contractId}
+                  </Text>
+                </TouchableOpacity>
+              </View>
               <FieldCopyButton
                 value={claim.contractId}
                 label={t('claimReceipt.contractId')}
