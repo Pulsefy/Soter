@@ -128,6 +128,23 @@ class Settings(BaseSettings):
     circuit_breaker_failure_threshold: int = 3
     circuit_breaker_recovery_timeout_seconds: float = 30.0
 
+    # Circuit breaker alerting (issue #1205).
+    # When a breaker transitions to OPEN (a provider is failing) or back to
+    # CLOSED (the provider recovered), a signed webhook alert is POSTed to
+    # CIRCUIT_BREAKER_ALERT_WEBHOOK_URL so operators hear about an outage
+    # without polling the admin endpoint. The payload is HMAC-SHA256 signed
+    # with AI_WEBHOOK_SECRET using the same ``X-Signature-256`` scheme as the
+    # existing task-callback webhook. See CIRCUIT_BREAKER_ALERTS.md.
+    circuit_breaker_alerts_enabled: bool = True
+    # Dedicated alert sink. Leave unset to disable alert delivery entirely
+    # (the breaker still logs every transition).
+    circuit_breaker_alert_webhook_url: Optional[HttpUrl] = None
+    # Per-(provider, transition-event) de-duplication window in seconds.
+    # Repeated open/close flapping inside this window collapses to a single
+    # alert per transition direction, so a flapping provider cannot spam the
+    # channel. Set to 0 to disable de-duplication.
+    circuit_breaker_alert_dedup_seconds: float = 300.0
+
     # Provider fallback ordering.
     # Explicit, operator-controlled ordering used when a request must fall back
     # across providers (e.g. under ``provider_preference="auto"``). Comma-
@@ -352,6 +369,16 @@ class Settings(BaseSettings):
             )
         if self.decision_audit_enabled and not str(self.decision_audit_path).strip():
             _add("DECISION_AUDIT_PATH", "must not be blank when auditing is enabled")
+
+        # --- Circuit breaker alert de-duplication window (issue #1205) ----
+        # 0 is a valid, documented value meaning "no de-duplication", so this
+        # is a non-negativity check rather than a positivity check.
+        if self.circuit_breaker_alert_dedup_seconds < 0:
+            _add(
+                "CIRCUIT_BREAKER_ALERT_DEDUP_SECONDS",
+                "must be 0 (no de-duplication) or a positive number of seconds "
+                f"(got {self.circuit_breaker_alert_dedup_seconds})",
+            )
 
         # --- Bounded numeric settings ------------------------------------
         if not 0.0 <= self.proof_of_life_confidence_threshold <= 1.0:

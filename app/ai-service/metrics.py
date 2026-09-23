@@ -144,6 +144,18 @@ CACHE_INVALIDATION_TOTAL = Counter(
     ["reason"],
 )
 
+# Circuit breaker alerting metrics (issue #1205)
+#
+# Labels are bounded: `provider` is a code-defined provider name (the same
+# fixed registry used by circuit_breaker_state), `event` is one of the two
+# literal transition events, and `outcome` is a small fixed set. Never label
+# by failure reason or any caller-supplied string (see the module docstring).
+CIRCUIT_BREAKER_ALERTS_TOTAL = Counter(
+    "circuit_breaker_alerts_total",
+    "Circuit breaker alert notifications by provider, event, and outcome",
+    ["provider", "event", "outcome"],
+)
+
 
 def check_system_resources(memory_threshold_percent: float = 90.0) -> bool:
     """

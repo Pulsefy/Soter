@@ -110,6 +110,32 @@ class CircuitBreaker:
                 "reason": reason,
             },
         )
+        self._notify_alert(previous_state, state, reason)
+
+    def _notify_alert(self, previous_state: str, state: str, reason: str) -> None:
+        """Notify operators when this transition is operator-actionable.
+
+        Alerting is best-effort: it is de-duplicated and delivered
+        asynchronously (see ``services/circuit_breaker_alerts.py``, issue
+        #1205), and any failure here is logged rather than propagated so a
+        misconfigured alert sink can never take down verification.
+        """
+        try:
+            # Imported lazily: keeps alerting an optional, decoupled add-on and
+            # avoids a module-import cycle.
+            from services.circuit_breaker_alerts import notify_breaker_transition
+
+            notify_breaker_transition(
+                provider=self.name,
+                from_state=previous_state,
+                to_state=state,
+                failure_count=self.failure_count,
+                reason=reason,
+            )
+        except Exception:  # pragma: no cover - alerting must never break the breaker
+            logger.exception(
+                "circuit_breaker_alert_dispatch_failed provider=%s", self.name
+            )
 
     def allow_request(self) -> bool:
         with self._lock:
