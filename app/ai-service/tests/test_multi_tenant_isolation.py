@@ -684,9 +684,9 @@ class TestContentHashCacheReuse:
             )
             assert second.status_code == 200
 
-        assert first.json() == second.json(), (
-            "identical evidence content must produce the same verification result"
-        )
+        assert (
+            first.json() == second.json()
+        ), "identical evidence content must produce the same verification result"
         svc.verify_claim.assert_not_called(), (
             "re-uploaded identical evidence must hit the content-hash cache "
             "without a second provider call"

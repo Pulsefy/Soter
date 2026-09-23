@@ -515,12 +515,12 @@ class TestCachedResponseDecorator:
             else:
                 primary_keys.add(key)
 
-        assert len(primary_keys) == 2, (
-            "artifact-keyed entries must stay distinct per artifact id"
-        )
-        assert len(content_keys) == 1, (
-            "identical content must share exactly one content-hash entry"
-        )
+        assert (
+            len(primary_keys) == 2
+        ), "artifact-keyed entries must stay distinct per artifact id"
+        assert (
+            len(content_keys) == 1
+        ), "identical content must share exactly one content-hash entry"
         shared_content_key = next(iter(content_keys))
         assert "content_hash=abc123" in shared_content_key
         assert "artifact_tag=" not in shared_content_key
@@ -552,9 +552,9 @@ class TestCachedResponseDecorator:
             r2 = await verify(artifact_tag="artifact-B", content_hash="def456")
 
         assert r1 != r2
-        assert call_count == 2, (
-            "different evidence content must trigger a fresh computation"
-        )
+        assert (
+            call_count == 2
+        ), "different evidence content must trigger a fresh computation"
 
     def test_content_hash_sync_function_reuses_result(self, cache_service_in_memory):
         """Sync-wrapped functions get the same content-hash reuse behaviour."""

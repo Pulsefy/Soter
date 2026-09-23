@@ -57,8 +57,7 @@ class TestCacheInvalidationHelper:
 
         patterns = [c.args[0] for c in mock_cache.delete_pattern.call_args_list]
         assert (
-            "cache:ai:humanitarian_verification:*artifact_tag=*artifact-1*"
-            in patterns
+            "cache:ai:humanitarian_verification:*artifact_tag=*artifact-1*" in patterns
         )
 
     def test_invalidate_verification_by_artifact_deletes_content_hash_entries(

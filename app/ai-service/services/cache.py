@@ -424,7 +424,9 @@ def cached_response(
                     # Still signal waiting requests (they'll get the error)
                     event.set()
                     # Don't store error for future requests - allow retry
-                    asyncio.create_task(_cleanup_inflight(flight_key, delay_seconds=0.1))
+                    asyncio.create_task(
+                        _cleanup_inflight(flight_key, delay_seconds=0.1)
+                    )
                     raise
             else:
                 # We're waiting for the computation to complete
