@@ -81,14 +81,23 @@ class CacheInvalidationHelper:
         part of the hashed inputs, so it can be matched without knowing the
         exact hash of every request that referenced it.
 
+        Content-hash-keyed entries (issue #1203) never embed artifact ids by
+        design, so an artifact update must also wipe the whole content-hash
+        namespace -- the old content hash is unknowable once the file changed,
+        but every such entry could have been keyed on the changed bytes.
+
         Args:
             artifact_id: The evidence artifact ID that changed
 
         Returns:
-            Number of keys deleted
+            Total number of keys deleted across both patterns
         """
-        pattern = f"cache:ai:humanitarian_verification:*artifact_tag=*{artifact_id}*"
-        deleted = self.cache.delete_pattern(pattern)
+        artifact_pattern = (
+            f"cache:ai:humanitarian_verification:*artifact_tag=*{artifact_id}*"
+        )
+        content_pattern = "cache:ai:humanitarian_verification:*content_hash=*"
+        deleted = self.cache.delete_pattern(artifact_pattern)
+        deleted += self.cache.delete_pattern(content_pattern)
         metrics.CACHE_INVALIDATION_TOTAL.labels(reason="artifact_updated").inc()
         if deleted > 0:
             logger.info(

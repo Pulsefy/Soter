@@ -47,7 +47,9 @@ class HumanitarianVerificationRequest(BaseModel):
     artifact_ids: List[str] = Field(
         default_factory=list,
         description="IDs of evidence artifacts (see /ai/verification-artifacts) referenced by this claim. "
-        "Used to key the response cache so it can be explicitly invalidated when an artifact is updated.",
+        "Used to key the response cache so it can be explicitly invalidated when an artifact is updated. "
+        "The cache additionally stores a content-hash key, so re-uploading identical bytes under a new "
+        "artifact ID reuses the cached result.",
         examples=[["artifact_abc123"]],
     )
     prompt_version: Optional[str] = Field(

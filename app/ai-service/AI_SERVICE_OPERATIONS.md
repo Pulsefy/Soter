@@ -545,7 +545,7 @@ Currently cached endpoints via `@cached_response`:
 |-------------------------------|-----------------|------------------------------|-----------------------------------------------------|
 | `task_status`                 | 30              | —                            | cache_decorator pattern; used in tasks/status paths |
 | `artifact_access`             | 60              | —                            | evidence/artifact access wrappers                   |
-| `humanitarian_verification`   | 120             | `model_version`, `artifact_tag` | [api/v1/humanitarian.py](file:///C:/Users/H/Desktop/Soter/app/ai-service/api/v1/humanitarian.py#L28-L32) |
+| `humanitarian_verification`   | 120             | `model_version`, `artifact_tag` (plus a secondary key embedding `content_hash`) | [api/v1/humanitarian.py](file:///C:/Users/H/Desktop/Soter/app/ai-service/api/v1/humanitarian.py#L28-L32) |
 
 What is intentionally **NOT cached**:
 
@@ -590,6 +590,23 @@ time via `humanitarian_verification_service.get_model_version(preference)`
 or `""` when absent.  If either tag is `""`/`None` it is omitted from the
 key (see `_generate_key` — tags with empty values are filtered).
 
+**Content-hash secondary keying** (`cached_response(..., content_hash_arg=...)`):
+
+- In addition to the artifact-keyed entry, a second entry is written whose
+  key embeds `content_hash=<sha256>` and **omits** `artifact_tag`
+  (`content_key_exclude_tags=("artifact_tag",)`).  Both entries share the
+  same `humanitarian_verification` prefix, so model/prompt/global
+  invalidation patterns match both.
+- The content hash is SHA-256 over the length-prefixed raw bytes of the
+  evidence artifacts sorted by artifact id (see `_compute_evidence_content_hash`
+  in [api/v1/humanitarian.py](file:///C:/Users/H/Desktop/Soter/app/ai-service/api/v1/humanitarian.py)).
+  Identical bytes re-uploaded under a new artifact id therefore collide on
+  the same content key, so a repeated-verification request returns the
+  cached result without a new provider call.
+- On a content-key hit the primary artifact key is backfilled; single-flight
+  coalescing is keyed on the content hash when present so concurrent
+  identical-content requests share one computation.
+
 ### 4.3 Safe vs. unsafe caching rules
 
 **Safe to cache:**
@@ -626,7 +643,7 @@ O(N) in key count) and then issues one bulk `DEL` for matching keys.
 |--------------------------------------------|---------------------------------------------------------------|--------------------------------------------------------------------------------------------|
 | Task status changed externally             | `invalidate_task_status(task_id)`                             | `cache:ai:task_status:*<task_id>*`                                                         |
 | Artifact metadata update                   | `invalidate_artifact_access(artifact_id)`                     | `cache:ai:artifact_access:*<artifact_id>*`                                                 |
-| Evidence artifact was re-uploaded / edited | `invalidate_verification_by_artifact(artifact_id)`            | `cache:ai:humanitarian_verification:*artifact_tag=*<artifact_id>*`                         |
+| Evidence artifact was re-uploaded / edited | `invalidate_verification_by_artifact(artifact_id)`            | `cache:ai:humanitarian_verification:*artifact_tag=*<artifact_id>*` **plus** `cache:ai:humanitarian_verification:*content_hash=*` (the old content hash is unknowable, so the whole content namespace is cleared) |
 | Configured model for a provider changed    | `invalidate_verification_by_model_version(provider, model)`   | `cache:ai:humanitarian_verification:*model_version=<sanitized(provider:model)>*`           |
 | Deploy with breaking prompt / major change | `invalidate_all()`                                            | `cache:ai:*`  (nuclear — only use during maintenance windows)                               |
 

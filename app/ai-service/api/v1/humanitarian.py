@@ -2,6 +2,7 @@
 v1 humanitarian verification endpoint.
 """
 
+import hashlib
 import logging
 import time
 from typing import Any, Dict, List, Optional
@@ -29,6 +30,50 @@ router = APIRouter(tags=["humanitarian"])
 
 #: Value written to ``decision_type`` on every audit record from this endpoint.
 DECISION_TYPE = "humanitarian_verification"
+
+
+def _compute_evidence_content_hash(
+    artifact_ids: List[str], artifact_access_control: Any
+) -> str:
+    """Compute a content hash over the raw bytes of every evidence artifact.
+
+    The hash uses only artifact *content* (each blob length-prefixed, in sorted
+    artifact-ID order) so that re-uploading the same document under a new
+    artifact ID yields the *same* hash. The endpoint uses it as a cache key that
+    is independent of artifact identity (see ``content_hash_arg`` on
+    ``@cached_response``), so a resubmitted claim referencing a re-uploaded
+    evidence document reuses the previously computed verification result instead
+    of triggering another paid provider call.
+
+    Returns ``""`` when there are no artifacts or any artifact cannot be read;
+    the caller then falls back to artifact-ID-keyed caching alone. Cache keying
+    is best-effort and must never fail the request.
+    """
+    if not artifact_ids:
+        return ""
+    access_service = getattr(artifact_access_control, "artifact_access_service", None)
+    if access_service is None:
+        access_service = artifact_access_control
+
+    hasher = hashlib.sha256()
+    for artifact_id in sorted(artifact_ids):
+        try:
+            artifact_path, _metadata = access_service.resolve_artifact(artifact_id)
+            with open(artifact_path, "rb") as f:
+                data = f.read()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "evidence_content_hash_skipped",
+                extra={
+                    "event": "evidence_content_hash_skipped",
+                    "artifact_id": artifact_id,
+                    "error": str(exc),
+                },
+            )
+            return ""
+        hasher.update(len(data).to_bytes(8, "big"))
+        hasher.update(data)
+    return hasher.hexdigest()
 
 
 def _resolve_audit_store(http_request: Request):
@@ -113,6 +158,7 @@ def _write_audit_record(
     prefix="humanitarian_verification",
     ttl_seconds=settings.cache_ttl_verification,
     key_tags=["model_version", "artifact_tag", "org_id", "prompt_version"],
+    content_hash_arg="content_hash",
 )
 async def _verify_claim_cached(
     humanitarian_verification_service,
@@ -125,6 +171,7 @@ async def _verify_claim_cached(
     artifact_tag: str,
     org_id: str,
     prompt_version: str = "",
+    content_hash: str = "",
 ) -> Dict[str, Any]:
     """
     Cacheable wrapper around HumanitarianVerificationService.verify_claim.
@@ -143,6 +190,13 @@ async def _verify_claim_cached(
     or across tenants: including ``org_id`` scopes every cache entry to the
     requesting organization so one tenant can never be served a response that
     was computed for another tenant's request.
+
+    `content_hash` is a SHA-256 of the evidence artifact content (see
+    ``_compute_evidence_content_hash``). It does NOT affect the provider call,
+    but the decorator uses it as an additional cache key that is independent of
+    artifact identity: an identical document re-uploaded under a new artifact ID
+    (a common occurrence when a claim is resubmitted) reuses the cached result
+    instead of triggering a fresh, paid provider call.
     """
     try:
         return humanitarian_verification_service.verify_claim(
@@ -344,6 +398,9 @@ async def verify_humanitarian_claim(
         artifact_tag = (
             ",".join(sorted(request.artifact_ids)) if request.artifact_ids else ""
         )
+        content_hash = _compute_evidence_content_hash(
+            request.artifact_ids, artifact_access_control
+        )
 
         raw = await _verify_claim_cached(
             humanitarian_verification_service,
@@ -356,6 +413,7 @@ async def verify_humanitarian_claim(
             artifact_tag=artifact_tag,
             org_id=x_org_id,
             prompt_version=prompt_version,
+            content_hash=content_hash,
         )
 
         verification: Dict[str, Any] = (
