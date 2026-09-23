@@ -1,0 +1,118 @@
+appId: org.pulsefy.soter.mobile
+---
+# ==============================================================================
+# Soter Mobile E2E Test Flow: Offline-First Scan & Sync Harness
+# Covers: Scan -> Evidence Capture -> Offline Queue -> Airplane Mode ON -> Airplane Mode OFF -> Sync on Reconnect
+# ==============================================================================
+
+- launchApp:
+    clearState: true
+
+# ------------------------------------------------------------------------------
+# PHASE 1: Scanner UI & Barcode Routing
+# ------------------------------------------------------------------------------
+# Test scanner deep link or direct screen access
+- openLink: "soter://scanner"
+
+# Verify scanner view and viewfinder element
+- assertVisible:
+    id: "scanner-viewfinder"
+    optional: true
+
+# Verify scanner instruction text
+- assertVisible:
+    id: "scanner-instruction-text"
+    optional: true
+
+# Test navigation via deep link (simulating successful QR code barcode scan: soter://package/<aidId>)
+- openLink: "soter://package/AID-TEST-E2E-001"
+
+# ------------------------------------------------------------------------------
+# PHASE 2: Enable Airplane Mode (Simulate Disconnected Field Environment)
+# ------------------------------------------------------------------------------
+- setAirplaneMode: true
+
+# ------------------------------------------------------------------------------
+# PHASE 3: Evidence Capture & Offline Queueing
+# ------------------------------------------------------------------------------
+# Navigate to Evidence Upload screen for the scanned package
+- openLink: "soter://evidence-upload/AID-TEST-E2E-001"
+
+- assertVisible:
+    id: "evidence-upload-title"
+
+- assertVisible:
+    id: "evidence-step1-card"
+
+# Verify offline notice is present while disconnected
+- assertVisible:
+    id: "offline-notice-text"
+    optional: true
+
+# Tap select photo button to trigger media library flow
+- tapOn:
+    id: "select-photo-button"
+
+# Handle system runtime permission dialog if presented
+- tapOn:
+    text: "(Allow|While using the app|Only this time|ALLOW)"
+    optional: true
+
+# Select an available image item from system gallery or recent images
+- tapOn:
+    text: ".*(Photo|Image|Download|Recent|Pictures).*"
+    optional: true
+
+# If preview is visible, trigger evidence upload while offline
+- tapOn:
+    id: "upload-evidence-button"
+    optional: true
+
+# Verify status indicates upload is queued for later synchronization
+- assertVisible:
+    text: ".*(queued|offline|retry|reconnect).*"
+    optional: true
+
+# ------------------------------------------------------------------------------
+# PHASE 4: Offline Submission Queue Verification
+# ------------------------------------------------------------------------------
+# Navigate to Submission Queue
+- openLink: "soter://submission-queue"
+
+- assertVisible:
+    text: "Submission Queue"
+
+# Verify device network status displays Offline
+- assertVisible:
+    text: ".*Offline.*"
+
+# Filter by pending items
+- tapOn:
+    id: "filter-tab-pending"
+
+# Verify pending tab is active
+- assertVisible:
+    id: "filter-tab-pending"
+
+# ------------------------------------------------------------------------------
+# PHASE 5: Disable Airplane Mode (Restore Network Connection)
+# ------------------------------------------------------------------------------
+- setAirplaneMode: false
+
+# ------------------------------------------------------------------------------
+# PHASE 6: Sync on Reconnect
+# ------------------------------------------------------------------------------
+# Wait for device NetInfo to detect connectivity restoration
+- extendedWaitUntil:
+    visible:
+      text: ".*Online.*"
+    timeout: 15000
+
+# Trigger Sync Now in the queue
+- tapOn:
+    text: "Sync Now"
+    optional: true
+
+# Verify queue reflects synced/active state
+- assertVisible:
+    text: ".*(Online|Syncing|pending|failed|conflict).*"

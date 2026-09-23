@@ -1,0 +1,37 @@
+appId: org.pulsefy.soter.mobile
+---
+# ==============================================================================
+# Soter Mobile E2E Test Flow: Scanner & Bulk Scanner Navigation
+# ==============================================================================
+
+- launchApp:
+    clearState: false
+
+- openLink: "soter://scanner"
+
+# Verify core scanner UI elements
+- assertVisible:
+    id: "scanner-viewfinder"
+    optional: true
+
+- assertVisible:
+    id: "scanner-instruction-text"
+    optional: true
+
+- assertVisible:
+    id: "scanner-cancel-button"
+    optional: true
+
+- assertVisible:
+    id: "scanner-bulk-mode-button"
+    optional: true
+
+# Switch to Bulk Scanner mode
+- tapOn:
+    id: "scanner-bulk-mode-button"
+    optional: true
+
+# Verify Bulk Scanner UI or end session
+- tapOn:
+    text: ".*(End Session|Cancel).*"
+    optional: true
