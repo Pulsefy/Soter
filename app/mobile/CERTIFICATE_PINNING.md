@@ -17,11 +17,19 @@ covered automatically — no per-call changes are needed.
 
 ## Behavior
 
-- **Pin validation failure blocks the request.** A pin mismatch fails the TLS
-  handshake, so the underlying `fetch()` call rejects. [`src/services/certificatePinning.ts`](src/services/certificatePinning.ts)
-  correlates that rejection with the mismatch event and re-throws a
-  `CertificatePinningError` with a clear, user-facing security message instead
-  of a generic network error.
+- **Primary pin failure with a valid backup pin is allowed.** The first hash
+  in `EXPO_PUBLIC_CERT_PIN_HASHES` is the live certificate. Any later hash is
+  a backup. When the server presents a backup pin (routine rotation or an
+  expiring primary), native pinning accepts the handshake and
+  `acceptPresentedPin` records `certificate_pinning.backup_pin_accepted`.
+  Users stay online through a single rotation.
+- **No valid backup pin is a distinct error.** If the presented key matches
+  neither the primary nor a backup, the TLS handshake fails and
+  [`src/services/certificatePinning.ts`](src/services/certificatePinning.ts)
+  re-throws `CertificatePinningError` with code `NO_VALID_BACKUP_PIN`. The
+  message describes a certificate-rotation lockout and tells the user to
+  update the app. It is not a generic network failure and it is not the
+  attack-shaped `PIN_MISMATCH` message.
 - **Backup pins.** At least two `publicKeyHashes` must be configured per host
   — this is enforced both by our config validation and by TrustKit on iOS,
   which throws if fewer than two pins are provided. Always keep a backup pin
@@ -94,8 +102,9 @@ in advance rather than only added reactively.
 
 - [`src/__tests__/certificatePinning.test.ts`](src/__tests__/certificatePinning.test.ts)
   covers hostname parsing, local-backend detection, initialization
-  skip/enable paths, and the pin-mismatch-to-`CertificatePinningError`
-  correlation.
+  skip/enable paths, a simulated primary-pin failure that still succeeds
+  because a backup pin matches, and the exhausted-pin
+  `NO_VALID_BACKUP_PIN` error (distinct from a generic network failure).
 - To manually verify pinning is active on a build, temporarily set
   `EXPO_PUBLIC_CERT_PIN_HASHES` to two incorrect hashes — requests to the API
   should fail immediately. Restore the correct hashes afterward.
