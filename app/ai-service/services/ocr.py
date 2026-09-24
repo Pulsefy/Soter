@@ -14,6 +14,7 @@ from exceptions import ProviderExhaustedError
 from services.circuit_breaker import CircuitBreaker
 from services.preprocessing import ImagePreprocessor
 from services.providers import ProviderRegistry, OCRField, OCRResponse
+from services.structured_redaction import StructuredRedactionService
 
 
 @dataclass
@@ -86,8 +87,24 @@ class OCRService:
     def __init__(self, registry: Optional[ProviderRegistry] = None):
         self.preprocessor = ImagePreprocessor()
         self.field_detector = FieldDetector()
+        self.structured_redaction = StructuredRedactionService()
         self.registry = registry or ProviderRegistry()
         self.breakers: Dict[str, CircuitBreaker] = {}
+
+    def redact_fields(self, fields: Dict[str, FieldMatch]) -> Dict[str, FieldMatch]:
+        """Return ``fields`` with sensitive values masked by known field type.
+
+        Each field is masked according to the type its name indicates (e.g.
+        ``national_id`` -> ``[ID_NUMBER]``, ``full_name`` ->
+        ``[RECIPIENT_NAME]``), leaving unrecognized field names untouched.
+        """
+        return {
+            name: FieldMatch(
+                value=self.structured_redaction.mask_value(name, field.value),
+                confidence=field.confidence,
+            )
+            for name, field in fields.items()
+        }
 
     def _get_breaker(self, provider_name: str) -> CircuitBreaker:
         if provider_name not in self.breakers:
