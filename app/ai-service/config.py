@@ -124,6 +124,17 @@ class Settings(BaseSettings):
     )
     rate_limit_enabled: bool = True
 
+    # Per-organization rate limiting (issue #1200)
+    # Organization IDs mapped to rate limit tiers (e.g., "org-123": "100/minute")
+    # Typically loaded from a database or configuration service at startup.
+    # Organizations not in this mapping have no org-level rate limit ceiling.
+    org_rate_limit_tiers: Dict[str, str] = Field(default_factory=dict)
+    # API key to organization ID mappings (e.g., "key-abc": "org-123")
+    # Typically loaded from a database or configuration service at startup.
+    api_key_to_org_mapping: Dict[str, str] = Field(default_factory=dict)
+    # Enable/disable organization-level rate limiting independently
+    org_rate_limit_enabled: bool = True
+
     # Circuit Breaker settings
     circuit_breaker_failure_threshold: int = 3
     circuit_breaker_recovery_timeout_seconds: float = 30.0
