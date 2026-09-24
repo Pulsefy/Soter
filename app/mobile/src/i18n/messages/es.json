@@ -143,7 +143,11 @@
     "packageId": "ID de paquete: {id}",
     "due": "Vence",
     "cachedData": "Mostrando datos en caché. Desliza para actualizar.",
-    "cachedDataHint": "Mostrando datos en caché. Desliza hacia abajo para actualizar."
+    "cachedDataHint": "Mostrando datos en caché. Desliza hacia abajo para actualizar.",
+    "unavailable": "No se pudieron cargar las tareas. Backend inaccesible y no hay datos en caché.",
+    "unavailableHint": "Lista de tareas no disponible. Backend inaccesible y no hay datos en caché.",
+    "unavailableBadge": "NO DISPONIBLE",
+    "retry": "Reintentar conexión"
   },
   "scanner": {
     "title": "Escáner",

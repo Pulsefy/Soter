@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
-import { TaskItem, fetchTaskList, getMockTaskList } from '../services/taskApi';
+import { TaskItem, fetchTaskList } from '../services/taskApi';
 import { cacheTaskList, loadCachedTaskList, getTaskCacheTimestamp } from '../services/taskCache';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { OfflineBanner } from '../components/OfflineBanner';
@@ -58,6 +58,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
   const [isCached, setIsCached] = useState(false);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [isUnavailable, setIsUnavailable] = useState(false);
 
   const loadData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -68,6 +69,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
       if (isRefresh) setRefreshMessage(t('tasks.refreshed'));
       setTaskList(fresh);
       setIsCached(false);
+      setIsUnavailable(false);
       await cacheTaskList(fresh);
       setCachedAt(null);
     } catch {
@@ -76,14 +78,16 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
       if (cached && cached.length > 0) {
         setTaskList(cached);
         setIsCached(true);
+        setIsUnavailable(false);
         const ts = await getTaskCacheTimestamp();
         setCachedAt(ts);
       } else {
-        // Fallback to mock data if no cache exists
-        const mock = getMockTaskList();
-        setTaskList(mock);
-        setIsCached(true);
+        // Retire silent mock fallback: never fabricate tasks when cache+network fail.
+        // Match HealthScreen — show an explicit unavailable state instead.
+        setTaskList([]);
+        setIsCached(false);
         setCachedAt(null);
+        setIsUnavailable(true);
       }
     } finally {
       setLoading(false);
@@ -92,9 +96,9 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
   }, [t]);
 
   const handleReconnect = useCallback(async () => {
-    if (!isCached) return;
+    if (!isCached && !isUnavailable) return;
     await loadData(false);
-  }, [isCached, loadData]);
+  }, [isCached, isUnavailable, loadData]);
 
   const { isConnected } = useNetworkStatus(handleReconnect);
 
@@ -188,6 +192,30 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
       <OfflineBanner visible={!isConnected} cachedAt={cachedAt} pendingCount={0} />
       <DataFreshnessIndicator isCached={isCached} isConnected={isConnected} cachedAt={cachedAt} refreshing={refreshing} refreshMessage={refreshMessage} onRefresh={() => loadData(true)} />
 
+      {isUnavailable && (
+        <View
+          style={styles.unavailableBanner}
+          accessible
+          accessibilityRole="alert"
+          accessibilityLabel={t('tasks.unavailableHint')}
+          testID="task-list-unavailable"
+        >
+          <View style={styles.unavailableBadge}>
+            <Text style={styles.unavailableBadgeText}>{t('tasks.unavailableBadge')}</Text>
+          </View>
+          <Text style={styles.unavailableText}>{t('tasks.unavailable')}</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => loadData(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t('tasks.retry')}
+            testID="task-list-retry"
+          >
+            <Text style={styles.retryButtonText}>{t('tasks.retry')}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <FlatList
         data={taskList}
         keyExtractor={(item) => item.id}
@@ -216,8 +244,10 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
           ) : null
         }
         ListEmptyComponent={
-          <View style={styles.centered} accessible accessibilityLabel={t('tasks.noTasks')}>
-            <Text style={styles.emptyText}>{t('tasks.noTasks')}.</Text>
+          <View style={styles.centered} accessible accessibilityLabel={isUnavailable ? t('tasks.unavailableHint') : t('tasks.noTasks')}>
+            <Text style={styles.emptyText}>
+              {isUnavailable ? t('tasks.unavailable') : `${t('tasks.noTasks')}.`}
+            </Text>
           </View>
         }
       />
@@ -317,5 +347,43 @@ const makeStyles = (colors: AppColors) =>
     emptyText: {
       fontSize: 16,
       color: colors.textSecondary,
+    },
+    unavailableBanner: {
+      marginHorizontal: 16,
+      marginTop: 12,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: 'center',
+      gap: 10,
+    },
+    unavailableBadge: {
+      backgroundColor: '#DC2626',
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    unavailableBadgeText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    unavailableText: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      lineHeight: 20,
+    },
+    retryButton: {
+      backgroundColor: colors.brand.primary,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 8,
+      marginTop: 4,
+    },
+    retryButtonText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '600',
     },
   });

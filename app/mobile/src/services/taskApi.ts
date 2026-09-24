@@ -18,8 +18,16 @@ export const fetchTaskList = async (): Promise<TaskItem[]> => {
   return data;
 };
 
-/** Fallback mock data used when the backend is unreachable */
+/**
+ * Test-only mock task list.
+ * Not used by TaskListScreen (silent mock fallback retired).
+ * Reachable only from tests — throws in production builds.
+ */
 export const getMockTaskList = (): TaskItem[] => {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('getMockTaskList cannot be used in production builds');
+  }
+
   const now = new Date();
 
   const yesterday = new Date(now);
