@@ -34,8 +34,9 @@ pub mod ttl;
 // below so existing call sites keep compiling unchanged. The canonical
 // key-space reference lives in STORAGE_KEYS.md.
 pub use crate::keys::{
-    package_index_entry, package_key, KEY_ADMIN, KEY_CAMPAIGN_PAUSED, KEY_CONFIG, KEY_DELEGATES,
-    KEY_DELEGATE_EXPIRY, KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM,
+    package_index_entry, package_key, KEY_ADMIN, KEY_CAMPAIGN_PAUSED, KEY_CAMPAIGN_TOKEN_CLAIMED,
+    KEY_CAMPAIGN_TOKEN_LOCKED, KEY_CONFIG, KEY_DELEGATES, KEY_DELEGATE_EXPIRY,
+    KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_MAX_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM,
     KEY_PAUSE_CREATE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN, KEY_PKG_COUNTER,
     KEY_PKG_IDX, KEY_RECIPIENT_LAST_CLAIM, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
 };
@@ -48,6 +49,21 @@ pub const MAX_BATCH_CLAIM_SIZE: u32 = 25;
 /// a single call.  Enforcing this keeps the response within Soroban's read-entry
 /// resource budget even for recipients with large package histories.
 pub const MAX_PAGE_SIZE: u32 = 50;
+
+/// Default maximum number of addresses that may hold distributor privileges
+/// at once, used until an admin calls `set_max_distributors`. Bounds
+/// `add_distributor` and keeps `require_admin_or_distributor` and
+/// `list_distributors` iteration cheap regardless of how long the contract
+/// has been running.
+pub const DEFAULT_MAX_DISTRIBUTORS: u32 = 100;
+
+/// Maximum number of distributor addresses `list_distributors` may return in
+/// a single call.
+pub const MAX_DISTRIBUTOR_PAGE_SIZE: u32 = 50;
+
+/// Current event schema version. Increment this when event payloads change
+/// in a backward-incompatible way. See EVENTS.md for compatibility policy.
+pub const EVENT_SCHEMA_VERSION: u32 = 1;
 
 // --- Data Types ---
 
@@ -162,14 +178,25 @@ pub enum Error {
     BatchTooLarge = 21,
     /// The recipient has not yet completed the configured claim cooldown.
     ClaimCooldownActive = 22,
+    /// `add_distributor` was called for an address that already holds
+    /// distributor privileges.
+    DistributorAlreadyExists = 23,
+    /// `remove_distributor` was called for an address that does not
+    /// currently hold distributor privileges.
+    DistributorNotFound = 24,
+    /// `add_distributor` would exceed the configured maximum distributor
+    /// set size (see `get_max_distributors` / `set_max_distributors`).
+    DistributorSetFull = 25,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
 // Topic = struct name in snake_case (e.g. package_created). Do not rename without versioning.
+// All events include schema_version for compatibility detection by indexers.
 
 /// Emitted when the escrow pool is funded. Actor = funder.
 #[contractevent]
 pub struct EscrowFunded {
+    pub schema_version: u32,
     pub from: Address,
     pub token: Address,
     pub amount: i128,
@@ -178,6 +205,7 @@ pub struct EscrowFunded {
 
 #[contractevent]
 pub struct PackageCreated {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -187,6 +215,7 @@ pub struct PackageCreated {
 
 #[contractevent]
 pub struct PackageReassigned {
+    pub schema_version: u32,
     pub package_id: u64,
     pub previous_recipient: Address,
     pub new_recipient: Address,
@@ -196,6 +225,7 @@ pub struct PackageReassigned {
 
 #[contractevent]
 pub struct PackageClaimed {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -208,6 +238,7 @@ pub struct PackageClaimed {
 
 #[contractevent]
 pub struct PackageClaimedByRelayer {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub relayer: Address,
@@ -217,6 +248,7 @@ pub struct PackageClaimedByRelayer {
 
 #[contractevent]
 pub struct PackageDisbursed {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -229,6 +261,7 @@ pub struct PackageDisbursed {
 
 #[contractevent]
 pub struct PackageRevoked {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -238,6 +271,7 @@ pub struct PackageRevoked {
 
 #[contractevent]
 pub struct PackageRefunded {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -249,6 +283,7 @@ pub struct PackageRefunded {
 /// `Expired` state, releasing its funds from the locked total.
 #[contractevent]
 pub struct PackageSwept {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub amount: i128,
@@ -258,6 +293,7 @@ pub struct PackageSwept {
 
 #[contractevent]
 pub struct BatchCreatedEvent {
+    pub schema_version: u32,
     pub ids: Vec<u64>,
     pub admin: Address,
     pub total_amount: i128,
@@ -265,6 +301,7 @@ pub struct BatchCreatedEvent {
 
 #[contractevent]
 pub struct ExtendedEvent {
+    pub schema_version: u32,
     pub package_id: u64,
     pub admin: Address,
     pub old_expires_at: u64,
@@ -273,6 +310,7 @@ pub struct ExtendedEvent {
 
 #[contractevent]
 pub struct SurplusWithdrawnEvent {
+    pub schema_version: u32,
     pub to: Address,
     pub token: Address,
     pub amount: i128,
@@ -280,22 +318,26 @@ pub struct SurplusWithdrawnEvent {
 
 #[contractevent]
 pub struct ContractPausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
 }
 
 #[contractevent]
 pub struct ContractUnpausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
 }
 
 #[contractevent]
 pub struct ActionPausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
     pub action: Symbol,
 }
 
 #[contractevent]
 pub struct ActionUnpausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
     pub action: Symbol,
 }
@@ -304,6 +346,7 @@ pub struct ActionUnpausedEvent {
 /// `campaign_ref` metadata value shared by its packages.
 #[contractevent]
 pub struct CampaignPausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
     pub campaign_ref: String,
 }
@@ -311,6 +354,7 @@ pub struct CampaignPausedEvent {
 /// Emitted when an admin unpauses a single campaign.
 #[contractevent]
 pub struct CampaignUnpausedEvent {
+    pub schema_version: u32,
     pub admin: Address,
     pub campaign_ref: String,
 }
@@ -319,6 +363,7 @@ pub struct CampaignUnpausedEvent {
 /// Includes package context for indexer-friendly reconstruction.
 #[contractevent]
 pub struct DelegateAdded {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub delegate: Address,
@@ -331,6 +376,7 @@ pub struct DelegateAdded {
 /// Includes package context for indexer-friendly reconstruction.
 #[contractevent]
 pub struct DelegateRevoked {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub delegate: Address,
@@ -342,6 +388,7 @@ pub struct DelegateRevoked {
 /// Includes package context for indexer-friendly reconstruction.
 #[contractevent]
 pub struct DelegateClaimed {
+    pub schema_version: u32,
     pub package_id: u64,
     pub recipient: Address,
     pub delegate: Address,
@@ -353,6 +400,7 @@ pub struct DelegateClaimed {
 /// Emitted when the current admin nominates a pending admin.
 #[contractevent]
 pub struct AdminTransferInitiated {
+    pub schema_version: u32,
     pub admin: Address,
     pub pending_admin: Address,
     pub timestamp: u64,
@@ -361,6 +409,7 @@ pub struct AdminTransferInitiated {
 /// Emitted when the pending admin accepts the admin role.
 #[contractevent]
 pub struct AdminTransferAccepted {
+    pub schema_version: u32,
     pub admin: Address,
     pub timestamp: u64,
 }
@@ -368,6 +417,7 @@ pub struct AdminTransferAccepted {
 /// Emitted when the current admin cancels a pending admin transfer.
 #[contractevent]
 pub struct AdminTransferCancelled {
+    pub schema_version: u32,
     pub admin: Address,
     pub timestamp: u64,
 }
@@ -375,6 +425,7 @@ pub struct AdminTransferCancelled {
 /// Emitted when a token is added to the allowed tokens allowlist.
 #[contractevent]
 pub struct TokenAdded {
+    pub schema_version: u32,
     pub admin: Address,
     pub token: Address,
     pub timestamp: u64,
@@ -383,8 +434,32 @@ pub struct TokenAdded {
 /// Emitted when a token is removed from the allowed tokens allowlist.
 #[contractevent]
 pub struct TokenRemoved {
+    pub schema_version: u32,
     pub admin: Address,
     pub token: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when an address is granted distributor privileges.
+/// `total_distributors` is the resulting set size after the addition, so
+/// indexers/auditors can track set growth without a separate read.
+#[contractevent]
+pub struct DistributorAdded {
+    pub schema_version: u32,
+    pub admin: Address,
+    pub distributor: Address,
+    pub total_distributors: u32,
+    pub timestamp: u64,
+}
+
+/// Emitted when an address's distributor privileges are revoked.
+/// `total_distributors` is the resulting set size after the removal.
+#[contractevent]
+pub struct DistributorRemoved {
+    pub schema_version: u32,
+    pub admin: Address,
+    pub distributor: Address,
+    pub total_distributors: u32,
     pub timestamp: u64,
 }
 
@@ -392,6 +467,7 @@ pub struct TokenRemoved {
 /// Only admin can attach evidence hash, and it cannot overwrite an existing hash.
 #[contractevent]
 pub struct EvidenceAttached {
+    pub schema_version: u32,
     pub package_id: u64,
     pub admin: Address,
     pub evidence_hash: String,
@@ -468,6 +544,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         AdminTransferInitiated {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             pending_admin: new_admin,
             timestamp,
@@ -497,6 +574,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         AdminTransferAccepted {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin: pending_admin,
             timestamp,
         }
@@ -520,7 +598,12 @@ impl AidEscrow {
         env.storage().instance().remove(&KEY_PENDING_ADMIN);
 
         let timestamp = env.ledger().timestamp();
-        AdminTransferCancelled { admin, timestamp }.publish(&env);
+        AdminTransferCancelled {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+            timestamp,
+        }
+        .publish(&env);
 
         Ok(())
     }
@@ -552,7 +635,7 @@ impl AidEscrow {
         // Perform version-specific migrations
         match (current_version, new_version) {
             (1, 2) => {
-                // Future: Add migration logic for v1 -> v2
+                Self::backfill_campaign_token_totals(&env);
             }
             _ => {
                 // No-op for now, but structured for future use
@@ -563,11 +646,94 @@ impl AidEscrow {
         Ok(())
     }
 
+    /// v1 -> v2 migration step: backfills `KEY_CAMPAIGN_TOKEN_LOCKED` and
+    /// `KEY_CAMPAIGN_TOKEN_CLAIMED` from existing package records, so
+    /// campaigns created before this feature shipped immediately report
+    /// correct per-campaign, per-token totals instead of starting at zero.
+    ///
+    /// Re-scans every package id in `0..KEY_PKG_COUNTER` (the same upper
+    /// bound `get_campaign_package_count` uses) and, for each package that
+    /// carries a `campaign_ref`:
+    /// - `Created` packages add their amount to the locked backfill — this
+    ///   is exact, since status + campaign_ref + token + amount fully
+    ///   determine `get_total_locked`'s equivalent per-campaign value.
+    /// - `Claimed` packages add their amount to the claimed backfill. This
+    ///   is a **best-effort approximation**: a stored `Package` does not
+    ///   record whether it was claimed by its recipient or force-disbursed
+    ///   by the admin (`disburse` also sets `status = Claimed`), so a
+    ///   campaign with a pre-migration `disburse` may show a backfilled
+    ///   total that slightly overcounts relative to `KEY_TOTAL_CLAIMED`'s
+    ///   stricter (claim-paths-only) definition for that one historical
+    ///   slice. Every claim/disburse from the migration onward is exact,
+    ///   because `increment_claimed` and `decrement_locked` write both the
+    ///   global and per-campaign totals together from that point on.
+    ///
+    /// Idempotent: re-running it (e.g. a retried `migrate(2)` call) simply
+    /// recomputes the same totals from the same persisted records and
+    /// overwrites both maps, rather than double-counting.
+    fn backfill_campaign_token_totals(env: &Env) {
+        let counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        let campaign_key = Symbol::new(env, keys::META_CAMPAIGN_REF);
+
+        let mut locked_map: Map<String, Map<Address, i128>> = Map::new(env);
+        let mut claimed_map: Map<String, Map<Address, i128>> = Map::new(env);
+
+        for id in 0..counter {
+            let key = crate::keys::package_key(id);
+            let package: Package = match env.storage().persistent().get(&key) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            let campaign_ref = match package.metadata.get(campaign_key.clone()) {
+                Some(r) => r,
+                None => continue,
+            };
+
+            match package.status {
+                PackageStatus::Created => {
+                    Self::apply_nested_delta(
+                        env,
+                        &mut locked_map,
+                        campaign_ref,
+                        &package.token,
+                        package.amount,
+                    );
+                }
+                PackageStatus::Claimed => {
+                    Self::apply_nested_delta(
+                        env,
+                        &mut claimed_map,
+                        campaign_ref,
+                        &package.token,
+                        package.amount,
+                    );
+                }
+                PackageStatus::Expired | PackageStatus::Cancelled | PackageStatus::Refunded => {}
+            }
+        }
+
+        env.storage()
+            .instance()
+            .set(&KEY_CAMPAIGN_TOKEN_LOCKED, &locked_map);
+        env.storage()
+            .instance()
+            .set(&KEY_CAMPAIGN_TOKEN_CLAIMED, &claimed_map);
+    }
+
     /// Admin-only. Grants distributor privileges to `addr`.
     /// Distributors can create packages but cannot pause, config, or disburse.
+    /// Enforces the configured maximum distributor set size (see
+    /// [`Self::get_max_distributors`] / [`Self::set_max_distributors`]) and
+    /// emits a `DistributorAdded` event carrying the resulting set size.
     ///
     /// # Errors
     /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::DistributorAlreadyExists` if `addr` already holds
+    /// distributor privileges — adding a duplicate is an explicit error, not
+    /// a silent no-op.
+    /// Returns `Error::DistributorSetFull` if the set is already at its
+    /// configured cap.
     pub fn add_distributor(env: Env, addr: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -577,18 +743,42 @@ impl AidEscrow {
             .instance()
             .get(&KEY_DISTRIBUTORS)
             .unwrap_or(Map::new(&env));
-        distributors.set(addr, true);
+
+        if distributors.get(addr.clone()).unwrap_or(false) {
+            return Err(Error::DistributorAlreadyExists);
+        }
+
+        let max_distributors = Self::get_max_distributors(env.clone());
+        if distributors.len() >= max_distributors {
+            return Err(Error::DistributorSetFull);
+        }
+
+        distributors.set(addr.clone(), true);
+        let total_distributors = distributors.len();
         env.storage()
             .instance()
             .set(&KEY_DISTRIBUTORS, &distributors);
 
+        let timestamp = env.ledger().timestamp();
+        DistributorAdded {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+            distributor: addr,
+            total_distributors,
+            timestamp,
+        }
+        .publish(&env);
+
         Ok(())
     }
 
-    /// Admin-only. Revokes distributor privileges from `addr`.
+    /// Admin-only. Revokes distributor privileges from `addr`. Emits a
+    /// `DistributorRemoved` event carrying the resulting set size.
     ///
     /// # Errors
     /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::DistributorNotFound` if `addr` does not currently hold
+    /// distributor privileges.
     pub fn remove_distributor(env: Env, addr: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
@@ -598,11 +788,112 @@ impl AidEscrow {
             .instance()
             .get(&KEY_DISTRIBUTORS)
             .unwrap_or(Map::new(&env));
-        distributors.remove(addr);
+
+        if !distributors.get(addr.clone()).unwrap_or(false) {
+            return Err(Error::DistributorNotFound);
+        }
+
+        distributors.remove(addr.clone());
+        let total_distributors = distributors.len();
         env.storage()
             .instance()
             .set(&KEY_DISTRIBUTORS, &distributors);
 
+        let timestamp = env.ledger().timestamp();
+        DistributorRemoved {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+            distributor: addr,
+            total_distributors,
+            timestamp,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Returns the current number of addresses holding distributor
+    /// privileges. Cheap O(1) audit helper; pair with
+    /// [`Self::list_distributors`] to enumerate the full set.
+    pub fn get_distributor_count(env: Env) -> u32 {
+        let distributors: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_DISTRIBUTORS)
+            .unwrap_or(Map::new(&env));
+        distributors.len()
+    }
+
+    /// Returns whether `addr` currently holds distributor privileges.
+    pub fn is_distributor(env: Env, addr: Address) -> bool {
+        let distributors: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_DISTRIBUTORS)
+            .unwrap_or(Map::new(&env));
+        distributors.get(addr).unwrap_or(false)
+    }
+
+    /// Returns up to `limit` distributor addresses starting at the 0-based
+    /// `cursor` index into the current set, for admin auditing. `limit` is
+    /// capped at [`MAX_DISTRIBUTOR_PAGE_SIZE`] regardless of the value
+    /// passed in. An out-of-range `cursor` (>= the current distributor
+    /// count) returns an empty result rather than an error.
+    ///
+    /// The set has no guaranteed ordering beyond "stable between writes":
+    /// like [`Self::list_recipient_packages`], a cursor obtained before an
+    /// intervening `add_distributor` / `remove_distributor` call may skip or
+    /// repeat an entry on the next page.
+    pub fn list_distributors(env: Env, cursor: u32, limit: u32) -> Vec<Address> {
+        let distributors: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&KEY_DISTRIBUTORS)
+            .unwrap_or(Map::new(&env));
+        let keys = distributors.keys();
+        let total = keys.len();
+
+        let mut result: Vec<Address> = Vec::new(&env);
+        if cursor >= total {
+            return result;
+        }
+
+        let effective_limit = limit.min(MAX_DISTRIBUTOR_PAGE_SIZE);
+        let end = cursor.saturating_add(effective_limit).min(total);
+        for i in cursor..end {
+            result.push_back(keys.get(i).unwrap());
+        }
+        result
+    }
+
+    /// Returns the configured maximum distributor set size. Defaults to
+    /// [`DEFAULT_MAX_DISTRIBUTORS`] until an admin calls
+    /// [`Self::set_max_distributors`].
+    pub fn get_max_distributors(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&KEY_MAX_DISTRIBUTORS)
+            .unwrap_or(DEFAULT_MAX_DISTRIBUTORS)
+    }
+
+    /// Admin-only. Sets the maximum number of addresses that may hold
+    /// distributor privileges at once. Lowering this below the current
+    /// distributor count does not remove any existing distributor; it only
+    /// blocks further `add_distributor` calls until the count drops back
+    /// under the new cap.
+    ///
+    /// # Errors
+    /// Returns `Error::NotAuthorized` if caller is not the admin.
+    /// Returns `Error::InvalidAmount` if `max` is zero.
+    pub fn set_max_distributors(env: Env, max: u32) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        if max == 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        env.storage().instance().set(&KEY_MAX_DISTRIBUTORS, &max);
         Ok(())
     }
 
@@ -643,7 +934,11 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &true);
-        ContractPausedEvent { admin }.publish(&env);
+        ContractPausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -656,7 +951,11 @@ impl AidEscrow {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         env.storage().instance().set(&KEY_PAUSED, &false);
-        ContractUnpausedEvent { admin }.publish(&env);
+        ContractUnpausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -669,7 +968,12 @@ impl AidEscrow {
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &true);
 
-        ActionPausedEvent { admin, action }.publish(&env);
+        ActionPausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+            action,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -682,7 +986,12 @@ impl AidEscrow {
         let key = Self::get_pause_key(action.clone())?;
         env.storage().instance().set(&key, &false);
 
-        ActionUnpausedEvent { admin, action }.publish(&env);
+        ActionUnpausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
+            admin,
+            action,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -726,6 +1035,7 @@ impl AidEscrow {
         env.storage().instance().set(&KEY_CAMPAIGN_PAUSED, &paused);
 
         CampaignPausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             campaign_ref,
         }
@@ -751,6 +1061,7 @@ impl AidEscrow {
         env.storage().instance().set(&KEY_CAMPAIGN_PAUSED, &paused);
 
         CampaignUnpausedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             campaign_ref,
         }
@@ -824,6 +1135,7 @@ impl AidEscrow {
         // 6. Events
         let timestamp = env.ledger().timestamp();
         EscrowFunded {
+            schema_version: EVENT_SCHEMA_VERSION,
             from,
             token,
             amount,
@@ -900,7 +1212,7 @@ impl AidEscrow {
         // --- SOLVENCY CHECK ---
         let contract_balance = Self::token_balance(&env, &token, &env.current_contract_address())?;
 
-        let mut locked_map: Map<Address, i128> = env
+        let locked_map: Map<Address, i128> = env
             .storage()
             .instance()
             .get(&KEY_TOTAL_LOCKED)
@@ -913,8 +1225,9 @@ impl AidEscrow {
         }
 
         // --- STATE UPDATES ---
-        locked_map.set(token.clone(), current_locked + amount);
-        env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+        // Updates both the global (token-only) and per-campaign (campaign +
+        // token) locked totals; see `increment_locked`.
+        Self::increment_locked(&env, &token, &metadata, amount);
 
         let created_at = env.ledger().timestamp();
         let claim_starts_at = Self::resolve_claim_starts_at(&env, &metadata, created_at)?;
@@ -951,6 +1264,7 @@ impl AidEscrow {
         env.storage().instance().set(&KEY_PKG_IDX, &(idx + 1));
 
         PackageCreated {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             recipient: recipient.clone(),
             amount,
@@ -1020,6 +1334,11 @@ impl AidEscrow {
 
         let mut created_ids: Vec<u64> = Vec::new(&env);
         let mut total_amount: i128 = 0;
+        // Per-campaign locked deltas for `token`, accumulated in memory and
+        // applied to KEY_CAMPAIGN_TOKEN_LOCKED once after the loop so a
+        // large batch costs one read-modify-write of that map, not one per
+        // package (mirrors how the global `locked_map` is committed once).
+        let mut campaign_locked_deltas: Map<String, i128> = Map::new(&env);
 
         for i in 0..recipients.len() {
             let recipient = recipients.get(i).unwrap();
@@ -1076,7 +1395,15 @@ impl AidEscrow {
             current_locked += amount;
             total_amount += amount;
 
+            if let Some(campaign_ref) = Self::campaign_ref_from_metadata(&env, &metadata) {
+                let existing = campaign_locked_deltas
+                    .get(campaign_ref.clone())
+                    .unwrap_or(0);
+                campaign_locked_deltas.set(campaign_ref, existing + amount);
+            }
+
             PackageCreated {
+                schema_version: EVENT_SCHEMA_VERSION,
                 package_id: id,
                 recipient: recipient.clone(),
                 amount,
@@ -1091,11 +1418,13 @@ impl AidEscrow {
         // Persist updated locked map, counter, and aggregation index
         locked_map.set(token.clone(), current_locked);
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+        Self::apply_campaign_locked_batch_deltas(&env, &token, &campaign_locked_deltas);
         env.storage().instance().set(&KEY_PKG_COUNTER, &counter);
         env.storage().instance().set(&KEY_PKG_IDX, &idx);
 
         // Emit batch event
         BatchCreatedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
             ids: created_ids.clone(),
             admin: operator,
             total_amount,
@@ -1276,21 +1605,12 @@ impl AidEscrow {
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&key, &package);
 
-        Self::decrement_locked(&env, &package.token, package.amount);
-
-        let mut claimed_map: Map<Address, i128> = env
-            .storage()
-            .instance()
-            .get(&KEY_TOTAL_CLAIMED)
-            .unwrap_or(Map::new(&env));
-        let current_total = claimed_map.get(package.token.clone()).unwrap_or(0);
-        claimed_map.set(package.token.clone(), current_total + package.amount);
-        env.storage()
-            .instance()
-            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
+        Self::increment_claimed(&env, &package.token, &package.metadata, package.amount);
         Self::record_recipient_claim(&env, &package.recipient, now);
 
         PackageClaimedByRelayer {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             recipient: claimant.clone(),
             relayer,
@@ -1429,12 +1749,17 @@ impl AidEscrow {
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(&key, &package);
 
-        // Update Locked
-        Self::decrement_locked(&env, &package.token, package.amount);
+        // Update Locked. Intentionally does NOT touch KEY_TOTAL_CLAIMED /
+        // KEY_CAMPAIGN_TOKEN_CLAIMED: an admin-forced disbursement has never
+        // counted as a "claim" for that accounting (see get_total_claimed's
+        // doc comment); the per-campaign counter preserves that behaviour so
+        // it stays summable to the token-level total.
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
         let timestamp = env.ledger().timestamp();
         let receipt_hash = Self::receipt_hash_from_metadata(&env, &package.metadata);
         PackageDisbursed {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
@@ -1477,6 +1802,7 @@ impl AidEscrow {
         env.storage().persistent().set(&key, &package);
 
         PackageReassigned {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             previous_recipient,
             new_recipient,
@@ -1509,10 +1835,11 @@ impl AidEscrow {
         env.storage().persistent().set(&key, &package);
 
         // Unlock funds (return to pool)
-        Self::decrement_locked(&env, &package.token, package.amount);
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
         let timestamp = env.ledger().timestamp();
         PackageRevoked {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
@@ -1570,7 +1897,7 @@ impl AidEscrow {
         )?;
 
         if should_unlock_locked {
-            Self::decrement_locked(&env, &package.token, package.amount);
+            Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
         }
 
         // State Transition
@@ -1579,6 +1906,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         PackageRefunded {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             recipient: package.recipient.clone(),
             amount: package.amount,
@@ -1619,11 +1947,12 @@ impl AidEscrow {
         package.status = PackageStatus::Cancelled;
         env.storage().persistent().set(&key, &package);
 
-        // 5. Unlock funds (Decrement the global locked amount so funds return to the pool)
-        Self::decrement_locked(&env, &package.token, package.amount);
+        // 5. Unlock funds (Decrement the global and per-campaign locked amounts so funds return to the pool)
+        Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
         let timestamp = env.ledger().timestamp();
         PackageRevoked {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             recipient: package.recipient.clone(),
             amount: package.amount,
@@ -1680,6 +2009,7 @@ impl AidEscrow {
 
         let timestamp = env.ledger().timestamp();
         EvidenceAttached {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             admin,
             evidence_hash,
@@ -1756,6 +2086,7 @@ impl AidEscrow {
         env.storage().persistent().set(&key, &package);
 
         ExtendedEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id: id,
             admin,
             old_expires_at,
@@ -1808,6 +2139,7 @@ impl AidEscrow {
 
         // 7. Emit event
         SurplusWithdrawnEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
             to: to.clone(),
             token: token.clone(),
             amount,
@@ -1879,7 +2211,37 @@ impl AidEscrow {
         Ok(())
     }
 
-    fn decrement_locked(env: &Env, token: &Address, amount: i128) {
+    /// Increments the global (`KEY_TOTAL_LOCKED`) and, if `metadata` carries a
+    /// `campaign_ref`, the matching per-campaign (`KEY_CAMPAIGN_TOKEN_LOCKED`)
+    /// locked total for `token` by `amount`. The single call site for both
+    /// updates guarantees they can never drift apart. Used by `create_package`;
+    /// `batch_create_packages` uses its own batched variant,
+    /// `apply_campaign_locked_batch_deltas`, for the per-campaign half so a
+    /// large batch does not pay one read-modify-write per package.
+    fn increment_locked(env: &Env, token: &Address, metadata: &Map<Symbol, String>, amount: i128) {
+        let mut locked_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_LOCKED)
+            .unwrap_or(Map::new(env));
+
+        let current = locked_map.get(token.clone()).unwrap_or(0);
+        locked_map.set(token.clone(), current + amount);
+        env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+
+        Self::adjust_campaign_token_amount(
+            env,
+            &KEY_CAMPAIGN_TOKEN_LOCKED,
+            metadata,
+            token,
+            amount,
+        );
+    }
+
+    /// Decrements (floored at zero) the global and, if applicable, the
+    /// per-campaign locked total for `token` by `amount`. See
+    /// [`Self::increment_locked`] for why both updates are made in one place.
+    fn decrement_locked(env: &Env, token: &Address, metadata: &Map<Symbol, String>, amount: i128) {
         let mut locked_map: Map<Address, i128> = env
             .storage()
             .instance()
@@ -1895,6 +2257,122 @@ impl AidEscrow {
 
         locked_map.set(token.clone(), new_locked);
         env.storage().instance().set(&KEY_TOTAL_LOCKED, &locked_map);
+
+        Self::adjust_campaign_token_amount(
+            env,
+            &KEY_CAMPAIGN_TOKEN_LOCKED,
+            metadata,
+            token,
+            -amount,
+        );
+    }
+
+    /// Increments the global (`KEY_TOTAL_CLAIMED`) and, if applicable, the
+    /// per-campaign (`KEY_CAMPAIGN_TOKEN_CLAIMED`) claimed total for `token`
+    /// by `amount`. Called only from recipient-initiated claim paths
+    /// (`finalize_claim`, `claim_with_relayer`) — never from `disburse` — so
+    /// both totals keep `KEY_TOTAL_CLAIMED`'s existing, admin-disbursement-
+    /// excluded semantics.
+    fn increment_claimed(env: &Env, token: &Address, metadata: &Map<Symbol, String>, amount: i128) {
+        let mut claimed_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_CLAIMED)
+            .unwrap_or(Map::new(env));
+        let current_total = claimed_map.get(token.clone()).unwrap_or(0);
+        claimed_map.set(token.clone(), current_total + amount);
+        env.storage()
+            .instance()
+            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+
+        Self::adjust_campaign_token_amount(
+            env,
+            &KEY_CAMPAIGN_TOKEN_CLAIMED,
+            metadata,
+            token,
+            amount,
+        );
+    }
+
+    /// Applies `delta` (positive to increment, negative to decrement, floored
+    /// at zero) to the entry for `(campaign_ref, token)` inside the nested map
+    /// stored at `storage_key`. A no-op if `metadata` carries no
+    /// `campaign_ref` — packages not tagged to a campaign are never
+    /// attributed to one.
+    fn adjust_campaign_token_amount(
+        env: &Env,
+        storage_key: &Symbol,
+        metadata: &Map<Symbol, String>,
+        token: &Address,
+        delta: i128,
+    ) {
+        let campaign_ref = match Self::campaign_ref_from_metadata(env, metadata) {
+            Some(r) => r,
+            None => return,
+        };
+
+        let mut campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(storage_key)
+            .unwrap_or(Map::new(env));
+        Self::apply_nested_delta(env, &mut campaign_map, campaign_ref, token, delta);
+        env.storage().instance().set(storage_key, &campaign_map);
+    }
+
+    /// Applies a batch of per-campaign locked deltas for a single `token` to
+    /// `KEY_CAMPAIGN_TOKEN_LOCKED` in one read-modify-write, regardless of how
+    /// many distinct campaigns appear in `deltas`. Used by
+    /// `batch_create_packages` so a large batch is not O(packages) instance
+    /// storage writes.
+    fn apply_campaign_locked_batch_deltas(env: &Env, token: &Address, deltas: &Map<String, i128>) {
+        if deltas.is_empty() {
+            return;
+        }
+
+        let mut campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_TOKEN_LOCKED)
+            .unwrap_or(Map::new(env));
+
+        for campaign_ref in deltas.keys() {
+            let delta = deltas.get(campaign_ref.clone()).unwrap_or(0);
+            Self::apply_nested_delta(env, &mut campaign_map, campaign_ref, token, delta);
+        }
+
+        env.storage()
+            .instance()
+            .set(&KEY_CAMPAIGN_TOKEN_LOCKED, &campaign_map);
+    }
+
+    /// Applies `delta` to `campaign_map[campaign_ref][token]` in memory
+    /// (floored at zero on the way down), inserting empty inner maps as
+    /// needed. Shared by the single-entry and batched adjustment helpers so
+    /// the clamping logic lives in exactly one place.
+    fn apply_nested_delta(
+        env: &Env,
+        campaign_map: &mut Map<String, Map<Address, i128>>,
+        campaign_ref: String,
+        token: &Address,
+        delta: i128,
+    ) {
+        let mut token_map = campaign_map
+            .get(campaign_ref.clone())
+            .unwrap_or(Map::new(env));
+        let current = token_map.get(token.clone()).unwrap_or(0);
+        let updated = if delta >= 0 {
+            current + delta
+        } else {
+            let decrease = -delta;
+            if current > decrease {
+                current - decrease
+            } else {
+                0
+            }
+        };
+        token_map.set(token.clone(), updated);
+        campaign_map.set(campaign_ref, token_map);
     }
 
     fn validate_token(env: &Env, token: &Address) -> Result<u32, Error> {
@@ -1988,19 +2466,9 @@ impl AidEscrow {
         package.status = PackageStatus::Claimed;
         env.storage().persistent().set(key, package);
 
-        // Update Global Locked (Bookkeeping)
-        Self::decrement_locked(env, &package.token, package.amount);
-
-        let mut claimed_map: Map<Address, i128> = env
-            .storage()
-            .instance()
-            .get(&KEY_TOTAL_CLAIMED)
-            .unwrap_or(Map::new(env));
-        let current_total = claimed_map.get(package.token.clone()).unwrap_or(0);
-        claimed_map.set(package.token.clone(), current_total + package.amount);
-        env.storage()
-            .instance()
-            .set(&KEY_TOTAL_CLAIMED, &claimed_map);
+        // Update Global + Per-Campaign Locked and Claimed (Bookkeeping)
+        Self::decrement_locked(env, &package.token, &package.metadata, package.amount);
+        Self::increment_claimed(env, &package.token, &package.metadata, package.amount);
         Self::record_recipient_claim(env, &package.recipient, now);
 
         // Check if claimant is a delegate (not the recipient)
@@ -2009,6 +2477,7 @@ impl AidEscrow {
         let receipt_hash = Self::receipt_hash_from_metadata(env, &package.metadata);
 
         PackageClaimed {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             recipient: payout_recipient.clone(),
             amount: package.amount,
@@ -2026,6 +2495,7 @@ impl AidEscrow {
         if is_delegate {
             // Emit DelegateClaimed event
             DelegateClaimed {
+                schema_version: EVENT_SCHEMA_VERSION,
                 package_id,
                 recipient: package.recipient.clone(),
                 delegate: claimant.clone(),
@@ -2037,6 +2507,7 @@ impl AidEscrow {
 
             // Emit DelegateRevoked with claimant as actor (system-initiated on claim)
             DelegateRevoked {
+                schema_version: EVENT_SCHEMA_VERSION,
                 package_id,
                 recipient: package.recipient.clone(),
                 delegate: claimant.clone(),
@@ -2223,6 +2694,50 @@ impl AidEscrow {
             .get(&KEY_TOTAL_CLAIMED)
             .unwrap_or(Map::new(&env));
         claimed_map.get(token).unwrap_or(0)
+    }
+
+    /// Returns the amount currently locked for `campaign_ref` in `token`.
+    ///
+    /// Scoped, per-campaign counterpart to [`Self::get_total_locked`]:
+    /// summing this value across every campaign that has ever held `token`
+    /// equals `get_total_locked(token)`, minus whatever is locked in
+    /// packages that carry no `campaign_ref` at all (those are never
+    /// attributed to a campaign). Updated at exactly the same points as
+    /// `get_total_locked`: package creation increments it; claim, disburse,
+    /// refund, revoke, cancellation, and expiry sweep decrement it. Zero for
+    /// an unknown campaign or a campaign that has never held `token`.
+    pub fn get_campaign_token_locked(env: Env, campaign_ref: String, token: Address) -> i128 {
+        let campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_TOKEN_LOCKED)
+            .unwrap_or(Map::new(&env));
+        campaign_map
+            .get(campaign_ref)
+            .and_then(|token_map| token_map.get(token))
+            .unwrap_or(0)
+    }
+
+    /// Returns the cumulative amount claimed for `campaign_ref` in `token`.
+    ///
+    /// Scoped, per-campaign counterpart to [`Self::get_total_claimed`].
+    /// Mirrors its semantics exactly, including only recipient-initiated
+    /// claim paths (`claim`, `claim_with_proof`, `claim_with_relayer`,
+    /// `batch_claim`); an admin-forced `disburse` does not increment either
+    /// total. Summing this value across every campaign that has ever held
+    /// `token` equals `get_total_claimed(token)`, minus claims from packages
+    /// with no `campaign_ref`. Zero for an unknown campaign or a campaign
+    /// that has never had a claim in `token`.
+    pub fn get_campaign_token_claimed(env: Env, campaign_ref: String, token: Address) -> i128 {
+        let campaign_map: Map<String, Map<Address, i128>> = env
+            .storage()
+            .instance()
+            .get(&KEY_CAMPAIGN_TOKEN_CLAIMED)
+            .unwrap_or(Map::new(&env));
+        campaign_map
+            .get(campaign_ref)
+            .and_then(|token_map| token_map.get(token))
+            .unwrap_or(0)
     }
 
     fn require_admin_or_distributor(env: &Env, operator: &Address) -> Result<(), Error> {
@@ -2495,6 +3010,7 @@ impl AidEscrow {
         let expires_at = expiry_map.get(package_id).unwrap_or(0);
 
         DelegateAdded {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             recipient: package.recipient.clone(),
             delegate: delegate.clone(),
@@ -2560,6 +3076,7 @@ impl AidEscrow {
         let timestamp = env.ledger().timestamp();
 
         DelegateAdded {
+            schema_version: EVENT_SCHEMA_VERSION,
             package_id,
             recipient: package.recipient.clone(),
             delegate: delegate.clone(),
@@ -2603,6 +3120,7 @@ impl AidEscrow {
             let timestamp = env.ledger().timestamp();
 
             DelegateRevoked {
+                schema_version: EVENT_SCHEMA_VERSION,
                 package_id,
                 recipient: package.recipient.clone(),
                 delegate: delegate.clone(),
@@ -2668,6 +3186,7 @@ impl AidEscrow {
         // Emit event
         let timestamp = env.ledger().timestamp();
         TokenAdded {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             token,
             timestamp,
@@ -2716,6 +3235,7 @@ impl AidEscrow {
         // Emit event
         let timestamp = env.ledger().timestamp();
         TokenRemoved {
+            schema_version: EVENT_SCHEMA_VERSION,
             admin,
             token,
             timestamp,
@@ -2791,9 +3311,10 @@ impl AidEscrow {
             package.status = PackageStatus::Expired;
             env.storage().persistent().set(&pkg_key, &package);
 
-            Self::decrement_locked(&env, &package.token, package.amount);
+            Self::decrement_locked(&env, &package.token, &package.metadata, package.amount);
 
             PackageSwept {
+                schema_version: EVENT_SCHEMA_VERSION,
                 package_id: pkg_id,
                 recipient: package.recipient.clone(),
                 amount: package.amount,

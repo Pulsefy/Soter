@@ -2,13 +2,15 @@ import { ErrorCategory } from '@/types/error';
 
 export class ApiError extends Error {
   status?: number;
+  code?: string;
   correlationId?: string;
   details?: any;
 
-  constructor(message: string, status?: number, correlationId?: string, details?: any) {
+  constructor(message: string, status?: number, code?: string, correlationId?: string, details?: any) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
     this.correlationId = correlationId;
     this.details = details;
   }
@@ -17,6 +19,7 @@ export class ApiError extends Error {
 export interface NormalizedError {
   message: string;
   category: ErrorCategory;
+  code?: string;
   correlationId?: string;
   status?: number;
   details?: any;
@@ -75,6 +78,7 @@ export async function extractApiError(response: Response): Promise<ApiError> {
     undefined;
 
   let message = `API request failed with status ${status}`;
+  let code: string | undefined;
   let details: any = null;
   let bodyCorrelationId: string | undefined;
 
@@ -89,6 +93,7 @@ export async function extractApiError(response: Response): Promise<ApiError> {
         message = body.message.join(', ');
       }
       
+      code = body.code || body.errorCode || undefined;
       bodyCorrelationId = body.traceId || body.correlationId || undefined;
       details = body.details || body;
     }
@@ -105,7 +110,7 @@ export async function extractApiError(response: Response): Promise<ApiError> {
   }
 
   const correlationId = bodyCorrelationId || headerCorrelationId;
-  return new ApiError(message, status, correlationId, details);
+  return new ApiError(message, status, code, correlationId, details);
 }
 
 export function normalizeError(error: unknown): NormalizedError {
@@ -113,6 +118,7 @@ export function normalizeError(error: unknown): NormalizedError {
     return {
       message: error.message,
       category: categorizeError(error),
+      code: error.code,
       correlationId: error.correlationId,
       status: error.status,
       details: error.details,
@@ -120,11 +126,13 @@ export function normalizeError(error: unknown): NormalizedError {
   }
 
   if (error instanceof Error) {
-    const status = (error as any).status || (error as any).code || (error as any).statusCode;
+    const status = (error as any).status || (error as any).statusCode;
+    const code = (error as any).code || (error as any).errorCode;
     const correlationId = (error as any).correlationId || (error as any).traceId;
     return {
       message: error.message,
       category: categorizeError(error),
+      code: typeof code === 'string' ? code : undefined,
       status: typeof status === 'number' ? status : undefined,
       correlationId: typeof correlationId === 'string' ? correlationId : undefined,
       details: (error as any).details,
@@ -141,11 +149,13 @@ export function normalizeError(error: unknown): NormalizedError {
   if (error && typeof error === 'object') {
     const candidate = error as Record<string, any>;
     const message = typeof candidate.message === 'string' ? candidate.message : 'An unexpected error occurred.';
-    const status = candidate.status || candidate.code;
+    const status = candidate.status;
+    const code = candidate.code || candidate.errorCode;
     const correlationId = candidate.correlationId || candidate.traceId;
     return {
       message,
       category: categorizeError(message),
+      code: typeof code === 'string' ? code : undefined,
       status: typeof status === 'number' ? status : undefined,
       correlationId: typeof correlationId === 'string' ? correlationId : undefined,
       details: candidate.details,

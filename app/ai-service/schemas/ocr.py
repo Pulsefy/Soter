@@ -1,19 +1,86 @@
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from schemas.common import AnchorMetadata
 
+# Per-document outcome reported by the batch OCR API.
+#   pending    - queued, not yet picked up by a worker
+#   processing - a worker has started (or is retrying) the job
+#   succeeded  - the job finished; its result is on ``status_url``
+#   failed     - terminal failure; ``error`` carries the reason
+BatchOCRDocumentState = Literal["pending", "processing", "succeeded", "failed"]
+
+# Roll-up state for a whole batch, so a partially failed batch is
+# distinguishable from a fully failed or fully succeeded one.
+#   processing        - at least one document is still pending/processing
+#   succeeded         - every document succeeded
+#   failed            - every document failed
+#   partially_failed  - some succeeded, some failed, none still running
+BatchOCRBatchState = Literal["processing", "succeeded", "failed", "partially_failed"]
+
 
 class BatchOCRDocumentStatus(BaseModel):
+    document_id: str | None = Field(
+        None,
+        description=(
+            "Stable id of this document within the batch; address retries with "
+            "it so duplicate filenames stay unambiguous."
+        ),
+    )
     filename: str | None = None
-    status: str
+    status: BatchOCRDocumentState = Field(
+        description="Outcome for this document: pending, processing, succeeded or failed."
+    )
     task_id: str | None = None
-    status_url: str | None = None
-    error: dict[str, str] | None = None
+    status_url: str | None = Field(
+        None, description="Poll URL for this document's queued OCR job."
+    )
+    retry_url: str | None = Field(
+        None,
+        description=(
+            "Present only while the document is failed and its upload is still "
+            "retained; POST here to requeue just this document."
+        ),
+    )
+    error: dict[str, str] | None = Field(
+        None, description="Failure reason when status is failed."
+    )
+
+
+class BatchOCRSummary(BaseModel):
+    """Per-state document counts for a batch."""
+
+    total: int = Field(examples=[10])
+    pending: int = 0
+    processing: int = 0
+    succeeded: int = 0
+    failed: int = 0
+
+
+class BatchOCRStatusResponse(BaseModel):
+    """Pollable per-document breakdown of a batch."""
+
+    batch_id: str
+    status: BatchOCRBatchState = Field(
+        description=(
+            "processing while documents are still running, then succeeded, "
+            "failed, or partially_failed once every document reached a "
+            "terminal state."
+        )
+    )
+    status_url: str
+    summary: BatchOCRSummary
+    documents: list[BatchOCRDocumentStatus]
 
 
 class BatchOCRResponse(BaseModel):
     success: bool = Field(examples=[True])
+    batch_id: str
+    status: BatchOCRBatchState
+    status_url: str = Field(
+        description="Poll for the per-document outcome breakdown of this batch."
+    )
+    summary: BatchOCRSummary
     documents: list[BatchOCRDocumentStatus]
 
 

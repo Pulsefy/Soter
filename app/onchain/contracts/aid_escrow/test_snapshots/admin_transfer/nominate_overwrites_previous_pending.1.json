@@ -47,6 +47,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "claim_cooldown"
+                      },
+                      "val": {
+                        "u64": "0"
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "max_expires_in"
                       },
                       "val": {
@@ -340,6 +348,14 @@
                               },
                               "val": {
                                 "vec": []
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "claim_cooldown"
+                              },
+                              "val": {
+                                "u64": "0"
                               }
                             },
                             {

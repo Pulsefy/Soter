@@ -2,10 +2,30 @@
 Tests for the cache service
 """
 
+import json
 import pytest
 from unittest.mock import Mock, patch
-from services.cache import CacheService, cached_response
+from services.cache import (
+    CacheService,
+    cached_response,
+    _inflight_computations,
+    _inflight_results,
+    _inflight_errors,
+)
 from config import Settings
+
+
+@pytest.fixture(autouse=True)
+def _clear_inflight_state():
+    """Keep module-level single-flight bookkeeping from leaking keys/results
+    between tests (mirrors tests/test_cache_stampede.py)."""
+    _inflight_computations.clear()
+    _inflight_results.clear()
+    _inflight_errors.clear()
+    yield
+    _inflight_computations.clear()
+    _inflight_results.clear()
+    _inflight_errors.clear()
 
 
 @pytest.fixture
@@ -28,6 +48,38 @@ def cache_service_with_mock_redis(mock_settings):
 
         cache = CacheService(mock_settings)
         cache.client = mock_client
+        return cache
+
+
+@pytest.fixture
+def cache_service_in_memory(mock_settings):
+    """A real CacheService whose Mock Redis actually round-trips JSON values.
+
+    Unlike ``cache_service_with_mock_redis``, get/set hit an in-process dict so
+    the production ``_generate_key`` implementation can be exercised end-to-end.
+    """
+    with patch("services.cache.redis") as mock_redis:
+        mock_client = Mock()
+        mock_client.ping.return_value = True
+        mock_redis.from_url.return_value = mock_client
+
+        store = {}
+
+        def _fake_get(key):
+            # CacheService.get expects client.get to return the raw JSON string
+            # (it parses it itself).
+            return store.get(key)
+
+        def _fake_setex(key, ttl, value):
+            store[key] = value
+            return True
+
+        mock_client.get.side_effect = _fake_get
+        mock_client.setex.side_effect = _fake_setex
+
+        cache = CacheService(mock_settings)
+        cache.client = mock_client
+        cache._store = store
         return cache
 
 
@@ -373,3 +425,159 @@ class TestCachedResponseDecorator:
 
         _, call_kwargs = mock_cache._generate_key.call_args
         assert call_kwargs["tags"] is None
+
+    @pytest.mark.asyncio
+    async def test_content_hash_reuses_result_across_artifact_ids(
+        self, cache_service_in_memory
+    ):
+        """Issue #1203: identical evidence under two artifact IDs must hit the
+        content-hash key and skip the wrapped (provider) call."""
+        cache = cache_service_in_memory
+
+        call_count = 0
+
+        @cached_response(
+            prefix="humanitarian_verification",
+            ttl_seconds=60,
+            key_tags=["model_version", "artifact_tag", "org_id", "prompt_version"],
+            content_hash_arg="content_hash",
+        )
+        async def verify(
+            aid_claim,
+            supporting_evidence,
+            artifact_tag,
+            content_hash,
+            model_version="openai:gpt-4o-mini",
+            org_id="org-1",
+            prompt_version="v1",
+        ):
+            nonlocal call_count
+            call_count += 1
+            return {"provider": "test", "verification": {"eligible": True}}
+
+        with patch("main.app") as mock_app:
+            mock_app.state.cache = cache
+
+            result_a = await verify(
+                "claim",
+                ["evidence"],
+                artifact_tag="artifact-A",
+                content_hash="abc123",
+            )
+            result_b = await verify(
+                "claim",
+                ["evidence"],
+                artifact_tag="artifact-B",  # same content, new artifact id
+                content_hash="abc123",
+            )
+
+        assert result_a == result_b
+        assert call_count == 1, (
+            "identical evidence under a new artifact id must reuse the "
+            "content-hash cache entry without another provider call"
+        )
+
+    @pytest.mark.asyncio
+    async def test_content_hash_keys_share_content_tag_not_artifact_tag(
+        self, cache_service_in_memory
+    ):
+        """The content-hash key must embed content_hash= (for invalidation) and
+        must NOT embed artifact_tag= (so identical content, different ids
+        collide)."""
+        cache = cache_service_in_memory
+
+        @cached_response(
+            prefix="humanitarian_verification",
+            ttl_seconds=60,
+            key_tags=["model_version", "artifact_tag", "org_id"],
+            content_hash_arg="content_hash",
+        )
+        async def verify(
+            artifact_tag,
+            content_hash,
+            model_version="openai:gpt-4o-mini",
+            org_id="org-1",
+        ):
+            return {"provider": "test"}
+
+        with patch("main.app") as mock_app:
+            mock_app.state.cache = cache
+            await verify(artifact_tag="artifact-A", content_hash="abc123")
+            await verify(artifact_tag="artifact-B", content_hash="abc123")
+
+        # Three SETs total: primary(A), content, primary(B) backfill.
+        primary_keys = set()
+        content_keys = set()
+        for call in cache.client.setex.call_args_list:
+            key = call.args[0]
+            if "content_hash=" in key:
+                content_keys.add(key)
+            else:
+                primary_keys.add(key)
+
+        assert (
+            len(primary_keys) == 2
+        ), "artifact-keyed entries must stay distinct per artifact id"
+        assert (
+            len(content_keys) == 1
+        ), "identical content must share exactly one content-hash entry"
+        shared_content_key = next(iter(content_keys))
+        assert "content_hash=abc123" in shared_content_key
+        assert "artifact_tag=" not in shared_content_key
+
+    @pytest.mark.asyncio
+    async def test_content_hash_different_content_does_not_share_cache(
+        self, cache_service_in_memory
+    ):
+        """Different evidence content must NOT be served each other's result."""
+        cache = cache_service_in_memory
+
+        call_count = 0
+
+        @cached_response(
+            prefix="humanitarian_verification",
+            ttl_seconds=60,
+            key_tags=["artifact_tag"],
+            content_hash_arg="content_hash",
+        )
+        async def verify(artifact_tag, content_hash):
+            nonlocal call_count
+            call_count += 1
+            return {"verification": {"eligible": call_count == 1}}
+
+        with patch("main.app") as mock_app:
+            mock_app.state.cache = cache
+
+            r1 = await verify(artifact_tag="artifact-A", content_hash="abc123")
+            r2 = await verify(artifact_tag="artifact-B", content_hash="def456")
+
+        assert r1 != r2
+        assert (
+            call_count == 2
+        ), "different evidence content must trigger a fresh computation"
+
+    def test_content_hash_sync_function_reuses_result(self, cache_service_in_memory):
+        """Sync-wrapped functions get the same content-hash reuse behaviour."""
+        cache = cache_service_in_memory
+
+        call_count = 0
+
+        @cached_response(
+            prefix="humanitarian_verification",
+            ttl_seconds=60,
+            key_tags=["artifact_tag"],
+            content_hash_arg="content_hash",
+        )
+        def verify(artifact_tag, content_hash):
+            nonlocal call_count
+            call_count += 1
+            return {"provider": "test", "n": call_count}
+
+        with patch("main.app") as mock_app:
+            mock_app.state.cache = cache
+
+            result_a = verify(artifact_tag="artifact-A", content_hash="abc123")
+            result_b = verify(artifact_tag="artifact-B", content_hash="abc123")
+
+        assert result_a == result_b
+        assert call_count == 1

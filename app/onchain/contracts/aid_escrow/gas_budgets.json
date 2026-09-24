@@ -5,17 +5,17 @@
     "memory_bytes_pct": 15
   },
   "budgets": {
-    "create_package": { "cpu_instructions": 95252, "memory_bytes": 18915 },
+    "create_package": { "cpu_instructions": 110844, "memory_bytes": 21617 },
     "claim": { "cpu_instructions": 122082, "memory_bytes": 19760 },
     "refund": { "cpu_instructions": 83260, "memory_bytes": 9995 },
     "claim_with_proof": { "cpu_instructions": 214434, "memory_bytes": 29171 },
     "fund": { "cpu_instructions": 114631, "memory_bytes": 16791 },
     "get_package": { "cpu_instructions": 256, "memory_bytes": 1024 },
     "get_aggregates": { "cpu_instructions": 256, "memory_bytes": 1024 },
-    "batch_create_packages_10": { "cpu_instructions": 658368, "memory_bytes": 133314 },
-    "batch_create_packages_25": { "cpu_instructions": 2084932, "memory_bytes": 458679 },
-    "batch_create_packages_50": { "cpu_instructions": 5774523, "memory_bytes": 1376954 },
-    "batch_create_packages_100": { "cpu_instructions": 17965494, "memory_bytes": 4623504 },
-    "batch_create_packages_200": { "cpu_instructions": 61378004, "memory_bytes": 16756604 }
+    "batch_create_packages_10": { "cpu_instructions": 686211, "memory_bytes": 135948 },
+    "batch_create_packages_25": { "cpu_instructions": 2151640, "memory_bytes": 464943 },
+    "batch_create_packages_50": { "cpu_instructions": 5906006, "memory_bytes": 1389268 },
+    "batch_create_packages_100": { "cpu_instructions": 18226527, "memory_bytes": 4647918 },
+    "batch_create_packages_200": { "cpu_instructions": 61898137, "memory_bytes": 16805218 }
   }
 }

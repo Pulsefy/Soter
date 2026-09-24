@@ -5,9 +5,27 @@ T = TypeVar("T")
 
 
 class AnchorMetadata(BaseModel):
-    campaign_ref: Optional[str] = Field(None, examples=["campaign-2024-001"])
-    claim_id: Optional[str] = Field(None, examples=["claim-abc123"])
-    package_id: Optional[str] = Field(None, examples=["package-x7y8z9"])
+    campaign_ref: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        examples=["campaign-2024-001"],
+    )
+    claim_id: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        examples=["claim-abc123"],
+    )
+    package_id: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        examples=["package-x7y8z9"],
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -31,6 +49,7 @@ class ResultEnvelope(BaseModel, Generic[T]):
     trace_id        Request-scoped correlation ID echoed from the
                     X-Correlation-Id / X-Request-Id header for distributed
                     tracing.
+    prompt_version  Version of the prompt template used for verification/inference.
     """
 
     result: T
@@ -51,4 +70,9 @@ class ResultEnvelope(BaseModel, Generic[T]):
         None,
         description="Request-scoped correlation ID for distributed tracing.",
         examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
+    )
+    prompt_version: Optional[str] = Field(
+        None,
+        description="Version of the prompt template used for verification.",
+        examples=["v1"],
     )

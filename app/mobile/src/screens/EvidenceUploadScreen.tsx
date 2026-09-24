@@ -16,6 +16,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
+import { useTranslation } from '../i18n/useTranslation';
 import { useSync } from '../contexts/SyncContext';
 import {
   buildEvidenceUploadPayload,
@@ -34,6 +35,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
 }) => {
   const { aidId } = route.params;
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { isConnected, queueEvidenceUpload, getActionsForAid, retryAction } =
     useSync();
@@ -219,7 +221,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Step 1: Choose a photo</Text>
+        <Text style={styles.sectionTitle}>{t('evidence.step1')}</Text>
         <Text style={styles.helpText}>
           Use your camera or photo library to capture a document, receipt, or
           other proof.
@@ -232,7 +234,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
             accessibilityLabel="Take a photo of evidence"
             activeOpacity={0.8}
           >
-            <Text style={styles.buttonText}>Take Photo</Text>
+            <Text style={styles.buttonText}>{t('evidence.takePhoto')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.button, styles.secondaryButton]}
@@ -241,14 +243,14 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
             accessibilityLabel="Select an evidence photo from your library"
             activeOpacity={0.8}
           >
-            <Text style={styles.secondaryButtonText}>Select Photo</Text>
+            <Text style={styles.secondaryButtonText}>{t('evidence.selectPhoto')}</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       {selectedImageUri ? (
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Step 2: Preview</Text>
+          <Text style={styles.sectionTitle}>{t('evidence.step2')}</Text>
           <Image
             source={{ uri: selectedImageUri }}
             style={styles.previewImage}
@@ -262,14 +264,14 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
               accessibilityLabel="Choose a different photo"
               activeOpacity={0.8}
             >
-              <Text style={styles.secondaryButtonText}>Choose Again</Text>
+              <Text style={styles.secondaryButtonText}>{t('evidence.chooseAgain')}</Text>
             </TouchableOpacity>
           </View>
         </View>
       ) : null}
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Step 3: Upload</Text>
+        <Text style={styles.sectionTitle}>{t('evidence.step3')}</Text>
         <Text style={styles.helpText}>
           Compressed image upload saves data on low-bandwidth connections.
         </Text>
@@ -290,7 +292,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
           {uploading ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.buttonText}>Upload Evidence</Text>
+            <Text style={styles.buttonText}>{t('aidDetails.uploadEvidence')}</Text>
           )}
         </TouchableOpacity>
         {statusMessage ? (
@@ -343,7 +345,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
                   accessibilityRole="button"
                   accessibilityLabel="Retry failed upload"
                 >
-                  <Text style={styles.retryButtonText}>Retry</Text>
+                  <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
                 </TouchableOpacity>
               )}
             </View>

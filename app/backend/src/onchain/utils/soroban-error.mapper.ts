@@ -105,6 +105,26 @@ export class SorobanErrorMapper {
       message: 'Token transfer failed',
       errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_TOKEN_TRANSFER_FAILED,
     },
+    19: {
+      code: 400,
+      message: 'No pending admin transfer in progress',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_CONTRACT_ERROR,
+    },
+    20: {
+      code: 403,
+      message: 'Invalid pending admin address',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_NOT_AUTHORIZED,
+    },
+    21: {
+      code: 400,
+      message: 'Batch operation exceeds the maximum allowed size',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_CONTRACT_ERROR,
+    },
+    22: {
+      code: 400,
+      message: 'Claim cooldown is still active',
+      errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_INVALID_STATE,
+    },
   };
 
   /**
@@ -180,7 +200,11 @@ export class SorobanErrorMapper {
         message.includes('InvalidAmount') ||
         message.includes('InvalidProof') ||
         message.includes('InvalidToken') ||
-        message.includes('TokenTransferFailed'))
+        message.includes('TokenTransferFailed') ||
+        message.includes('NoPendingTransfer') ||
+        message.includes('InvalidPendingAdmin') ||
+        message.includes('BatchTooLarge') ||
+        message.includes('ClaimCooldownActive'))
     ) {
       return this.mapContractErrorMessage(message);
     }
@@ -390,6 +414,26 @@ export class SorobanErrorMapper {
         code: 502,
         message: 'Token transfer failed',
         errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_TOKEN_TRANSFER_FAILED,
+      },
+      NoPendingTransfer: {
+        code: 400,
+        message: 'No pending admin transfer in progress',
+        errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_CONTRACT_ERROR,
+      },
+      InvalidPendingAdmin: {
+        code: 403,
+        message: 'Invalid pending admin address',
+        errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_NOT_AUTHORIZED,
+      },
+      BatchTooLarge: {
+        code: 400,
+        message: 'Batch operation exceeds the maximum allowed size',
+        errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_CONTRACT_ERROR,
+      },
+      ClaimCooldownActive: {
+        code: 400,
+        message: 'Claim cooldown is still active',
+        errorCode: INTEGRATION_ERROR_CODES.ONCHAIN_INVALID_STATE,
       },
     };
 

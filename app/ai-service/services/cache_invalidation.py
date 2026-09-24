@@ -81,14 +81,23 @@ class CacheInvalidationHelper:
         part of the hashed inputs, so it can be matched without knowing the
         exact hash of every request that referenced it.
 
+        Content-hash-keyed entries (issue #1203) never embed artifact ids by
+        design, so an artifact update must also wipe the whole content-hash
+        namespace -- the old content hash is unknowable once the file changed,
+        but every such entry could have been keyed on the changed bytes.
+
         Args:
             artifact_id: The evidence artifact ID that changed
 
         Returns:
-            Number of keys deleted
+            Total number of keys deleted across both patterns
         """
-        pattern = f"cache:ai:humanitarian_verification:*artifact_tag=*{artifact_id}*"
-        deleted = self.cache.delete_pattern(pattern)
+        artifact_pattern = (
+            f"cache:ai:humanitarian_verification:*artifact_tag=*{artifact_id}*"
+        )
+        content_pattern = "cache:ai:humanitarian_verification:*content_hash=*"
+        deleted = self.cache.delete_pattern(artifact_pattern)
+        deleted += self.cache.delete_pattern(content_pattern)
         metrics.CACHE_INVALIDATION_TOTAL.labels(reason="artifact_updated").inc()
         if deleted > 0:
             logger.info(
@@ -117,6 +126,27 @@ class CacheInvalidationHelper:
         if deleted > 0:
             logger.info(
                 f"Invalidated {deleted} verification cache entries for model version {provider}:{model}"
+            )
+        return deleted
+
+    def invalidate_verification_by_prompt_version(self, prompt_version: str) -> int:
+        """
+        Invalidate cached AI verification responses produced by a specific
+        prompt version, e.g. after updating the active prompt template version.
+
+        Args:
+            prompt_version: The prompt version string (e.g. "v1", "v2")
+
+        Returns:
+            Number of keys deleted
+        """
+        sanitized = CacheService._sanitize_tag_value(prompt_version)
+        pattern = f"cache:ai:humanitarian_verification:*prompt_version={sanitized}*"
+        deleted = self.cache.delete_pattern(pattern)
+        metrics.CACHE_INVALIDATION_TOTAL.labels(reason="prompt_version_changed").inc()
+        if deleted > 0:
+            logger.info(
+                f"Invalidated {deleted} verification cache entries for prompt version {prompt_version}"
             )
         return deleted
 

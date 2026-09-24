@@ -65,10 +65,13 @@ class Settings(BaseSettings):
         HOST: Server host (default: 0.0.0.0)
         PORT: Server port (default: 8000)
         REDIS_URL: Redis connection URL for task broker (default: redis://localhost:6379/0)
+        ASYNC_JOB_IDLE_TIMEOUT_SECONDS: Queued jobs not started by a worker within this window are marked timed out (default: 600)
         BACKEND_WEBHOOK_URL: Webhook URL to notify NestJS backend when tasks complete
         PROOF_OF_LIFE_CONFIDENCE_THRESHOLD: Default threshold for liveness verification
         PROOF_OF_LIFE_MIN_FACE_SIZE: Minimum detected face size in pixels
         CACHE_TTL_VERIFICATION: TTL for cached AI verification responses (artifact + model-version keyed)
+        FRAUD_PASS_MAX_SCORE: Claims scoring below this are banded 'pass'
+        FRAUD_REVIEW_MAX_SCORE: Claims scoring below this (and above pass) are 'review'; at/above it is 'reject'
     """
 
     # API Keys
@@ -79,6 +82,24 @@ class Settings(BaseSettings):
     ai_deterministic_mode: bool = False
     test_provider_mode: bool = False
     llm_timeout_seconds: int = 30
+    humanitarian_primary_prompt_version: str = "v1"
+    humanitarian_fallback_prompt_version: str = "v1"
+
+    # Per-model USD cost per 1,000 tokens (issue #981), keyed by the exact
+    # model string passed to the provider (e.g. OPENAI_MODEL/GROQ_MODEL).
+    # Used to derive an estimated cost metric from captured token counts;
+    # a model missing from this table simply has no cost estimated for it
+    # (not a fabricated 0) — see metrics.estimate_llm_cost_usd. Defaults are
+    # illustrative list-price approximations as of this writing, not a
+    # billing guarantee; operators should override via
+    # LLM_MODEL_COST_PER_1K_TOKENS (a JSON object) to match their actual
+    # negotiated/current provider pricing.
+    llm_model_cost_per_1k_tokens: Dict[str, Dict[str, float]] = Field(
+        default_factory=lambda: {
+            "gpt-4o-mini": {"prompt": 0.00015, "completion": 0.0006},
+            "llama-3.3-70b-versatile": {"prompt": 0.00059, "completion": 0.00079},
+        }
+    )
 
     # Request safety limits
     max_request_body_bytes: int = 10 * 1024 * 1024
@@ -108,6 +129,23 @@ class Settings(BaseSettings):
     circuit_breaker_failure_threshold: int = 3
     circuit_breaker_recovery_timeout_seconds: float = 30.0
 
+    # Circuit breaker alerting (issue #1205).
+    # When a breaker transitions to OPEN (a provider is failing) or back to
+    # CLOSED (the provider recovered), a signed webhook alert is POSTed to
+    # CIRCUIT_BREAKER_ALERT_WEBHOOK_URL so operators hear about an outage
+    # without polling the admin endpoint. The payload is HMAC-SHA256 signed
+    # with AI_WEBHOOK_SECRET using the same ``X-Signature-256`` scheme as the
+    # existing task-callback webhook. See CIRCUIT_BREAKER_ALERTS.md.
+    circuit_breaker_alerts_enabled: bool = True
+    # Dedicated alert sink. Leave unset to disable alert delivery entirely
+    # (the breaker still logs every transition).
+    circuit_breaker_alert_webhook_url: Optional[HttpUrl] = None
+    # Per-(provider, transition-event) de-duplication window in seconds.
+    # Repeated open/close flapping inside this window collapses to a single
+    # alert per transition direction, so a flapping provider cannot spam the
+    # channel. Set to 0 to disable de-duplication.
+    circuit_breaker_alert_dedup_seconds: float = 300.0
+
     # Provider fallback ordering.
     # Explicit, operator-controlled ordering used when a request must fall back
     # across providers (e.g. under ``provider_preference="auto"``). Comma-
@@ -127,12 +165,34 @@ class Settings(BaseSettings):
     dead_letter_replay_cooldown_seconds: float = 10.0
     dead_letter_replay_rate_limit: str = "10/minute"
 
+    # Decision audit settings (issue #990)
+    # Every verification/fraud decision is written to a durable, redacted
+    # audit record so a disbursement decision can be reconstructed later.
+    # See DECISION_AUDIT.md for the record shape and retention guidance.
+    decision_audit_enabled: bool = True
+    decision_audit_path: str = "./audit/decision_audit.jsonl"
+    # Records older than this are dropped by the retention sweep. Set to 0 to
+    # keep audit records forever (the compliance-archive configuration).
+    decision_audit_retention_days: float = 90.0
+
     # Cache TTL settings (in seconds)
     cache_ttl_task_status: int = 30  # Short TTL for responsive polling
     cache_ttl_artifact_access: int = 60  # 1 minute for artifact metadata
     cache_ttl_verification: int = (
         120  # AI verification responses, keyed by claim/artifact/model version
     )
+
+    # Fraud detection decision thresholds.
+    # A claim's normalised fraud_risk_score (0 = lowest risk, 1 = highest
+    # risk) is banded into pass / review / reject. Defaults below were
+    # chosen from the calibration report at
+    # reports/fraud_threshold_calibration.md, which ran the current model
+    # against the fixture set in tests/fixtures/fraud_claims.json:
+    # 27/30 fixtures landed in PASS, 1/30 in REVIEW, 2/30 in REJECT.
+    # Operators can retune sensitivity via environment variables without a
+    # code change; see validate_configuration() for the accepted range.
+    fraud_pass_max_score: float = 0.40
+    fraud_review_max_score: float = 0.75
 
     # Application settings
     app_env: Literal["development", "staging", "production", "test"] = "development"
@@ -145,6 +205,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     task_max_retries: int = 3
     task_retry_delay_seconds: int = 30
+    # A job still waiting for a worker after this many seconds is marked
+    # timed_out on its next status poll instead of sitting queued forever
+    # (issue #1208). Only applies to jobs that have not started processing.
+    async_job_idle_timeout_seconds: float = 600.0
 
     # Backend webhook URL for notifications
     backend_webhook_url: HttpUrl = (
@@ -289,6 +353,7 @@ class Settings(BaseSettings):
             ("CACHE_TTL_ARTIFACT_ACCESS", self.cache_ttl_artifact_access),
             ("CACHE_TTL_VERIFICATION", self.cache_ttl_verification),
             ("TASK_RETRY_DELAY_SECONDS", self.task_retry_delay_seconds),
+            ("ASYNC_JOB_IDLE_TIMEOUT_SECONDS", self.async_job_idle_timeout_seconds),
             (
                 "VERIFICATION_ARTIFACT_URL_TTL_SECONDS",
                 self.verification_artifact_url_ttl_seconds,
@@ -299,6 +364,28 @@ class Settings(BaseSettings):
             if value <= 0:
                 _add(key, f"must be a positive number (got {value})")
 
+        # --- Decision audit retention (issue #990) -----------------------
+        # 0 is a valid, documented value meaning "retain forever", so this
+        # setting is checked for non-negativity rather than positivity.
+        if self.decision_audit_retention_days < 0:
+            _add(
+                "DECISION_AUDIT_RETENTION_DAYS",
+                "must be 0 (retain forever) or a positive number of days "
+                f"(got {self.decision_audit_retention_days})",
+            )
+        if self.decision_audit_enabled and not str(self.decision_audit_path).strip():
+            _add("DECISION_AUDIT_PATH", "must not be blank when auditing is enabled")
+
+        # --- Circuit breaker alert de-duplication window (issue #1205) ----
+        # 0 is a valid, documented value meaning "no de-duplication", so this
+        # is a non-negativity check rather than a positivity check.
+        if self.circuit_breaker_alert_dedup_seconds < 0:
+            _add(
+                "CIRCUIT_BREAKER_ALERT_DEDUP_SECONDS",
+                "must be 0 (no de-duplication) or a positive number of seconds "
+                f"(got {self.circuit_breaker_alert_dedup_seconds})",
+            )
+
         # --- Bounded numeric settings ------------------------------------
         if not 0.0 <= self.proof_of_life_confidence_threshold <= 1.0:
             _add(
@@ -307,6 +394,25 @@ class Settings(BaseSettings):
             )
         if not 1 <= int(self.port) <= 65535:
             _add("PORT", f"must be between 1 and 65535 (got {self.port})")
+
+        # --- Fraud detection thresholds -----------------------------------
+        if not 0.0 <= self.fraud_pass_max_score <= 1.0:
+            _add(
+                "FRAUD_PASS_MAX_SCORE",
+                f"must be between 0.0 and 1.0 (got {self.fraud_pass_max_score})",
+            )
+        if not 0.0 <= self.fraud_review_max_score <= 1.0:
+            _add(
+                "FRAUD_REVIEW_MAX_SCORE",
+                f"must be between 0.0 and 1.0 (got {self.fraud_review_max_score})",
+            )
+        if self.fraud_pass_max_score >= self.fraud_review_max_score:
+            _add(
+                "FRAUD_PASS_MAX_SCORE / FRAUD_REVIEW_MAX_SCORE",
+                "FRAUD_PASS_MAX_SCORE must be strictly less than "
+                f"FRAUD_REVIEW_MAX_SCORE (got {self.fraud_pass_max_score} >= "
+                f"{self.fraud_review_max_score})",
+            )
 
         # --- CORS origins: entries must be absolute origins --------------
         for key, raw in (
@@ -335,6 +441,21 @@ class Settings(BaseSettings):
                 validate_fallback_order(key, order)
             except ValueError as exc:
                 _add(key, str(exc))
+
+        # --- Per-model LLM cost rates --------------------------------------
+        for model_name, rates in self.llm_model_cost_per_1k_tokens.items():
+            for direction in ("prompt", "completion"):
+                rate = rates.get(direction)
+                if rate is None:
+                    _add(
+                        "LLM_MODEL_COST_PER_1K_TOKENS",
+                        f"model '{model_name}' is missing a '{direction}' rate",
+                    )
+                elif rate < 0:
+                    _add(
+                        "LLM_MODEL_COST_PER_1K_TOKENS",
+                        f"model '{model_name}' has a negative '{direction}' rate",
+                    )
 
         # --- Production requirements (defense in depth) ------------------
         # apply_environment_defaults already rejects this at construction

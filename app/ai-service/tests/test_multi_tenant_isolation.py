@@ -610,6 +610,112 @@ class TestCacheKeyTenantScope:
 
 
 # ---------------------------------------------------------------------------
+# Content-hash cache reuse across artifact IDs (issue #1203)
+# ---------------------------------------------------------------------------
+
+
+class TestContentHashCacheReuse:
+    """Re-uploading the same evidence document under a new artifact ID must
+    reuse the cached verification result keyed by evidence content hash."""
+
+    def _enabled_cache(self):
+        mock_cache = Mock()
+        mock_cache.enabled = True
+
+        store = {}
+
+        def _get(key):
+            raw = store.get(key)
+            return None if raw is None else json.loads(raw)
+
+        def _set(key, value, ttl=0):
+            store[key] = json.dumps(value, default=str)
+            return True
+
+        mock_cache.get.side_effect = _get
+        mock_cache.set.side_effect = _set
+
+        def _realistic_key(prefix, *args, tags=None, **kwargs):
+            from hashlib import sha256
+
+            sorted_kwargs = sorted(kwargs.items())
+            key_data = {"args": args, "kwargs": sorted_kwargs}
+            h = sha256(
+                json.dumps(key_data, sort_keys=True, default=str).encode()
+            ).hexdigest()[:12]
+            tag_seg = ""
+            if tags:
+                parts = sorted(
+                    f"{n}={v}" for n, v in tags.items() if v not in (None, "")
+                )
+                if parts:
+                    tag_seg = ":" + ":".join(parts)
+            return f"cache:ai:{prefix}{tag_seg}:{h}"
+
+        mock_cache._generate_key.side_effect = _realistic_key
+        return mock_cache
+
+    def test_identical_content_two_artifact_ids_produces_cache_hit(
+        self, client, artifacts_env
+    ):
+        """The same evidence bytes uploaded under two artifact IDs must produce
+        one provider call: the second request hits the content-hash cache key."""
+        artifacts_env["write"]("evidence-v1.bin", ORG_A, b"identical-document")
+        artifacts_env["write"]("evidence-v2.bin", ORG_A, b"identical-document")
+
+        svc = client.app.state.humanitarian_verification_service
+        svc.verify_claim.reset_mock()
+
+        mock_cache = self._enabled_cache()
+        with patch.object(main.app.state, "cache", mock_cache, create=True):
+            first = client.post(
+                "/v1/ai/humanitarian/verify",
+                headers=_verify_headers(org=ORG_A),
+                json=_verify_payload(["evidence-v1.bin"]),
+            )
+            assert first.status_code == 200
+
+            svc.verify_claim.reset_mock()
+
+            second = client.post(
+                "/v1/ai/humanitarian/verify",
+                headers=_verify_headers(org=ORG_A),
+                json=_verify_payload(["evidence-v2.bin"]),
+            )
+            assert second.status_code == 200
+
+        assert (
+            first.json() == second.json()
+        ), "identical evidence content must produce the same verification result"
+        svc.verify_claim.assert_not_called(), (
+            "re-uploaded identical evidence must hit the content-hash cache "
+            "without a second provider call"
+        )
+
+    def test_different_content_does_not_produce_cache_hit(self, client, artifacts_env):
+        """Different evidence bytes must NOT reuse each other's result."""
+        artifacts_env["write"]("evidence-v1.bin", ORG_A, b"document-one")
+        artifacts_env["write"]("evidence-v2.bin", ORG_A, b"document-two")
+
+        svc = client.app.state.humanitarian_verification_service
+        svc.verify_claim.reset_mock()
+
+        mock_cache = self._enabled_cache()
+        with patch.object(main.app.state, "cache", mock_cache, create=True):
+            for artifact_id in ("evidence-v1.bin", "evidence-v2.bin"):
+                response = client.post(
+                    "/v1/ai/humanitarian/verify",
+                    headers=_verify_headers(org=ORG_A),
+                    json=_verify_payload([artifact_id]),
+                )
+                assert response.status_code == 200
+
+        assert (
+            svc.verify_claim.call_count == 2
+        ), "different evidence content must trigger its own provider call"
+
+
+# ---------------------------------------------------------------------------
 # Cache invalidation surface
 # ---------------------------------------------------------------------------
 

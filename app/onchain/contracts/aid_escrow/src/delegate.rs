@@ -401,6 +401,7 @@ pub fn sweep_expired_delegates(env: &Env, limit: u32) -> Result<u32, Error> {
 
             // Emit DelegateRevoked event
             crate::DelegateRevoked {
+                schema_version: crate::EVENT_SCHEMA_VERSION,
                 package_id,
                 recipient,
                 delegate,

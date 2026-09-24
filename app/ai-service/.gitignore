@@ -45,3 +45,7 @@ Thumbs.db
 logs/
 # Benchmark results (generated, not committed)
 benchmark-results/
+
+# Decision audit records (issue #990) - durable runtime data, never committed
+audit/
+decision_audit*.jsonl

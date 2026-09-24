@@ -411,32 +411,32 @@ A change to either prompt method can cause:
   different cache keys after a prompt change.  Old entries simply age out
   via TTL (default 120 s) — there is no explicit "prompt version" tag.
 
-### 3.2 Prompt versioning
+### 3.2 Prompt versioning and registry
 
-The engine currently has **no explicit prompt_version string**.  Versioning
-is implicit in:
+Verification prompts are managed through `PromptRegistry` in `services/prompt_registry.py`
+and declared in `services/humanitarian_prompt.py`.
 
-1. **Git history** of `humanitarian_prompt.py` — each release commit is a
-   version.
-2. **The `model_version` cache tag** (format `<provider>:<model>`) — because
-   the decorator also hashes all function args, and the prompt text is
-   compiled from static constants at class definition time, two builds with
-   different prompt sources produce disjoint cache keys *for the same
-   `model_version`*.  This is safe but not observable at runtime — there is
-   no way to tell "this cached response came from prompt v2" without
-   cross-referencing the deploy SHA.
-
-If you need explicit, runtime-observable versioning (recommended for any
-regression harness work), add a class constant or property:
+Prompt versions are:
+1. **Explicitly addressed by name and version**: e.g., `registry.get("humanitarian_primary", "v1")`.
+2. **Immutable**: Registered prompt versions cannot be overwritten in place. Modifying a prompt requires creating and registering a new version (e.g., `v2`).
+3. **Configurable**: The active version per prompt is configurable via environment variables (`HUMANITARIAN_PRIMARY_PROMPT_VERSION`, `HUMANITARIAN_FALLBACK_PROMPT_VERSION`) or dynamically via `registry.set_active_version(name, version)`.
+4. **Recorded on every result**: Every verification result envelope includes `prompt_version`, and the result dictionary contains `prompt_name`, `prompt_version`, and `prompt_variant`.
+5. **Keyed in response caching**: The cache key embeds `prompt_version` in `key_tags`, guaranteeing disjoint cache entries when active prompt versions change.
 
 ```python
-class HumanitarianPromptEngine:
-    PROMPT_VERSION = "v3"  # bump on any change to build_* or SPHERE_*
-```
+from services.prompt_registry import VerificationPrompt, default_prompt_registry
 
-and include it in either (a) the cache key via `key_tags`, or (b) a field in
-the returned `verification` dict so downstream evaluators can segment
-results.
+class HumanitarianPrimaryPromptV3(VerificationPrompt):
+    name = "humanitarian_primary"
+    version = "v3"
+
+    def build_prompt(self, aid_claim, supporting_evidence, context_factors):
+        ...
+        return {"system": system_prompt, "user": user_prompt}
+
+# Register new version
+default_prompt_registry.register(HumanitarianPrimaryPromptV3(), set_active=True)
+```
 
 ### 3.3 Change process — recommended steps
 
@@ -545,7 +545,7 @@ Currently cached endpoints via `@cached_response`:
 |-------------------------------|-----------------|------------------------------|-----------------------------------------------------|
 | `task_status`                 | 30              | —                            | cache_decorator pattern; used in tasks/status paths |
 | `artifact_access`             | 60              | —                            | evidence/artifact access wrappers                   |
-| `humanitarian_verification`   | 120             | `model_version`, `artifact_tag` | [api/v1/humanitarian.py](file:///C:/Users/H/Desktop/Soter/app/ai-service/api/v1/humanitarian.py#L28-L32) |
+| `humanitarian_verification`   | 120             | `model_version`, `artifact_tag` (plus a secondary key embedding `content_hash`) | [api/v1/humanitarian.py](file:///C:/Users/H/Desktop/Soter/app/ai-service/api/v1/humanitarian.py#L28-L32) |
 
 What is intentionally **NOT cached**:
 
@@ -590,6 +590,23 @@ time via `humanitarian_verification_service.get_model_version(preference)`
 or `""` when absent.  If either tag is `""`/`None` it is omitted from the
 key (see `_generate_key` — tags with empty values are filtered).
 
+**Content-hash secondary keying** (`cached_response(..., content_hash_arg=...)`):
+
+- In addition to the artifact-keyed entry, a second entry is written whose
+  key embeds `content_hash=<sha256>` and **omits** `artifact_tag`
+  (`content_key_exclude_tags=("artifact_tag",)`).  Both entries share the
+  same `humanitarian_verification` prefix, so model/prompt/global
+  invalidation patterns match both.
+- The content hash is SHA-256 over the length-prefixed raw bytes of the
+  evidence artifacts sorted by artifact id (see `_compute_evidence_content_hash`
+  in [api/v1/humanitarian.py](file:///C:/Users/H/Desktop/Soter/app/ai-service/api/v1/humanitarian.py)).
+  Identical bytes re-uploaded under a new artifact id therefore collide on
+  the same content key, so a repeated-verification request returns the
+  cached result without a new provider call.
+- On a content-key hit the primary artifact key is backfilled; single-flight
+  coalescing is keyed on the content hash when present so concurrent
+  identical-content requests share one computation.
+
 ### 4.3 Safe vs. unsafe caching rules
 
 **Safe to cache:**
@@ -626,7 +643,7 @@ O(N) in key count) and then issues one bulk `DEL` for matching keys.
 |--------------------------------------------|---------------------------------------------------------------|--------------------------------------------------------------------------------------------|
 | Task status changed externally             | `invalidate_task_status(task_id)`                             | `cache:ai:task_status:*<task_id>*`                                                         |
 | Artifact metadata update                   | `invalidate_artifact_access(artifact_id)`                     | `cache:ai:artifact_access:*<artifact_id>*`                                                 |
-| Evidence artifact was re-uploaded / edited | `invalidate_verification_by_artifact(artifact_id)`            | `cache:ai:humanitarian_verification:*artifact_tag=*<artifact_id>*`                         |
+| Evidence artifact was re-uploaded / edited | `invalidate_verification_by_artifact(artifact_id)`            | `cache:ai:humanitarian_verification:*artifact_tag=*<artifact_id>*` **plus** `cache:ai:humanitarian_verification:*content_hash=*` (the old content hash is unknowable, so the whole content namespace is cleared) |
 | Configured model for a provider changed    | `invalidate_verification_by_model_version(provider, model)`   | `cache:ai:humanitarian_verification:*model_version=<sanitized(provider:model)>*`           |
 | Deploy with breaking prompt / major change | `invalidate_all()`                                            | `cache:ai:*`  (nuclear — only use during maintenance windows)                               |
 

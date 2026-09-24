@@ -2,6 +2,7 @@
 v1 humanitarian verification endpoint.
 """
 
+import hashlib
 import logging
 import time
 from typing import Any, Dict, List, Optional
@@ -15,6 +16,8 @@ from schemas.humanitarian import (
 )
 from services.cache import cached_response
 from services.artifact_access import ArtifactAccessError
+from services.decision_audit import get_store as get_decision_audit_store
+from services.humanitarian_prompt import HUMANITARIAN_PROMPT_VERSION
 from services.evidence_access_control import (
     EvidenceAccessControl,
     EvidenceAccessControlError,
@@ -25,11 +28,137 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["humanitarian"])
 
+#: Value written to ``decision_type`` on every audit record from this endpoint.
+DECISION_TYPE = "humanitarian_verification"
+
+
+def _compute_evidence_content_hash(
+    artifact_ids: List[str], artifact_access_control: Any
+) -> str:
+    """Compute a content hash over the raw bytes of every evidence artifact.
+
+    The hash uses only artifact *content* (each blob length-prefixed, in sorted
+    artifact-ID order) so that re-uploading the same document under a new
+    artifact ID yields the *same* hash. The endpoint uses it as a cache key that
+    is independent of artifact identity (see ``content_hash_arg`` on
+    ``@cached_response``), so a resubmitted claim referencing a re-uploaded
+    evidence document reuses the previously computed verification result instead
+    of triggering another paid provider call.
+
+    Returns ``""`` when there are no artifacts or any artifact cannot be read;
+    the caller then falls back to artifact-ID-keyed caching alone. Cache keying
+    is best-effort and must never fail the request.
+    """
+    if not artifact_ids:
+        return ""
+    access_service = getattr(artifact_access_control, "artifact_access_service", None)
+    if access_service is None:
+        access_service = artifact_access_control
+
+    hasher = hashlib.sha256()
+    for artifact_id in sorted(artifact_ids):
+        try:
+            artifact_path, _metadata = access_service.resolve_artifact(artifact_id)
+            with open(artifact_path, "rb") as f:
+                data = f.read()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "evidence_content_hash_skipped",
+                extra={
+                    "event": "evidence_content_hash_skipped",
+                    "artifact_id": artifact_id,
+                    "error": str(exc),
+                },
+            )
+            return ""
+        hasher.update(len(data).to_bytes(8, "big"))
+        hasher.update(data)
+    return hasher.hexdigest()
+
+
+def _resolve_audit_store(http_request: Request):
+    """Resolve the decision audit store (issue #990).
+
+    Prefers ``app.state`` - matching how the other collaborators on this
+    endpoint are wired and how tests inject fakes - and falls back to the
+    process-wide store published by ``main``.
+    """
+    store = getattr(http_request.app.state, "decision_audit_store", None)
+    return store if store is not None else get_decision_audit_store()
+
+
+def _audit_inputs(request: HumanitarianVerificationRequest) -> Dict[str, Any]:
+    """Build the ``inputs`` half of the audit record.
+
+    Everything a reviewer needs to re-run the decision by hand. The values are
+    redacted by the store per ``logging_redaction.py`` before they are written,
+    so the claim text and evidence can be captured verbatim here.
+    """
+    return {
+        "aid_claim": request.aid_claim,
+        "supporting_evidence": list(request.supporting_evidence),
+        "context_factors": dict(request.context_factors),
+        "artifact_ids": list(request.artifact_ids),
+        "provider_preference": request.provider_preference,
+        "requested_timeout": request.timeout,
+    }
+
+
+def _write_audit_record(
+    http_request: Request,
+    request: HumanitarianVerificationRequest,
+    *,
+    outcome: str,
+    correlation_id: str,
+    org_id: str,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    prompt_variant: Optional[str] = None,
+    confidence: Optional[float] = None,
+    reasons: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Durably record one verification decision (issue #990).
+
+    Best-effort by design: ``DecisionAuditStore.record`` swallows its own
+    storage errors, and this wrapper guards the lookup as well, so an audit
+    problem can never turn a completed verification into a 500.
+    """
+    store = _resolve_audit_store(http_request)
+    if store is None:
+        logger.warning(
+            "decision_audit_store_unavailable",
+            extra={"event": "decision_audit_skipped", "correlation_id": correlation_id},
+        )
+        return
+    anchor = request.anchor_metadata
+    try:
+        store.record(
+            DECISION_TYPE,
+            outcome,
+            trace_id=correlation_id,
+            claim_id=getattr(anchor, "claim_id", None),
+            campaign_ref=getattr(anchor, "campaign_ref", None),
+            package_id=getattr(anchor, "package_id", None),
+            org_id=org_id,
+            provider=provider,
+            model=model,
+            prompt_version=HUMANITARIAN_PROMPT_VERSION,
+            prompt_variant=prompt_variant,
+            confidence=confidence,
+            reasons=reasons or [],
+            inputs=_audit_inputs(request),
+            metadata=metadata or {},
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("decision_audit_record_failed: %s", exc)
+
 
 @cached_response(
     prefix="humanitarian_verification",
     ttl_seconds=settings.cache_ttl_verification,
-    key_tags=["model_version", "artifact_tag", "org_id"],
+    key_tags=["model_version", "artifact_tag", "org_id", "prompt_version"],
+    content_hash_arg="content_hash",
 )
 async def _verify_claim_cached(
     humanitarian_verification_service,
@@ -41,6 +170,8 @@ async def _verify_claim_cached(
     model_version: str,
     artifact_tag: str,
     org_id: str,
+    prompt_version: str = "",
+    content_hash: str = "",
 ) -> Dict[str, Any]:
     """
     Cacheable wrapper around HumanitarianVerificationService.verify_claim.
@@ -50,14 +181,22 @@ async def _verify_claim_cached(
     so tests can inject a Mock and the cache decorator's args do not need
     to know about module globals.
 
-    `model_version`, `artifact_tag`, and `org_id` don't affect the underlying
-    provider call, but embedding them in the cache key ensures a stale
-    response isn't served after the configured model/provider changes, after
-    an evidence artifact referenced by the claim is updated (see
-    CacheInvalidationHelper.invalidate_verification_by_artifact/_model_version),
+    `model_version`, `artifact_tag`, `org_id`, and `prompt_version` don't
+    affect the underlying provider call, but embedding them in the cache key
+    ensures a stale response isn't served after the configured model/provider
+    changes, the prompt version changes, after an evidence artifact referenced
+    by the claim is updated (see
+    CacheInvalidationHelper.invalidate_verification_by_artifact/_model_version/_prompt_version),
     or across tenants: including ``org_id`` scopes every cache entry to the
     requesting organization so one tenant can never be served a response that
     was computed for another tenant's request.
+
+    `content_hash` is a SHA-256 of the evidence artifact content (see
+    ``_compute_evidence_content_hash``). It does NOT affect the provider call,
+    but the decorator uses it as an additional cache key that is independent of
+    artifact identity: an identical document re-uploaded under a new artifact ID
+    (a common occurrence when a claim is resubmitted) reuses the cached result
+    instead of triggering a fresh, paid provider call.
     """
     try:
         return humanitarian_verification_service.verify_claim(
@@ -66,15 +205,25 @@ async def _verify_claim_cached(
             context_factors=context_factors,
             provider_preference=provider_preference,
             timeout=timeout,
+            prompt_version=prompt_version or None,
         )
     except TypeError as exc:
-        if "timeout" in str(exc):
-            return humanitarian_verification_service.verify_claim(
-                aid_claim=aid_claim,
-                supporting_evidence=supporting_evidence,
-                context_factors=context_factors,
-                provider_preference=provider_preference,
-            )
+        if "prompt_version" in str(exc) or "timeout" in str(exc):
+            try:
+                return humanitarian_verification_service.verify_claim(
+                    aid_claim=aid_claim,
+                    supporting_evidence=supporting_evidence,
+                    context_factors=context_factors,
+                    provider_preference=provider_preference,
+                    timeout=timeout,
+                )
+            except TypeError:
+                return humanitarian_verification_service.verify_claim(
+                    aid_claim=aid_claim,
+                    supporting_evidence=supporting_evidence,
+                    context_factors=context_factors,
+                    provider_preference=provider_preference,
+                )
         raise
 
 
@@ -227,11 +376,30 @@ async def verify_humanitarian_claim(
                 )
                 raise HTTPException(status_code=403, detail="Access denied")
 
+        prompt_version = request.prompt_version
+        if not prompt_version:
+            if hasattr(humanitarian_verification_service, "get_prompt_version"):
+                try:
+                    pv = humanitarian_verification_service.get_prompt_version(
+                        "humanitarian_primary"
+                    )
+                    prompt_version = pv if isinstance(pv, str) else "v1"
+                except Exception:
+                    prompt_version = "v1"
+            else:
+                prompt_version = "v1"
+
         model_version = humanitarian_verification_service.get_model_version(
             request.provider_preference
         )
+        if not isinstance(model_version, str):
+            model_version = "test:fixture"
+
         artifact_tag = (
             ",".join(sorted(request.artifact_ids)) if request.artifact_ids else ""
+        )
+        content_hash = _compute_evidence_content_hash(
+            request.artifact_ids, artifact_access_control
         )
 
         raw = await _verify_claim_cached(
@@ -244,9 +412,15 @@ async def verify_humanitarian_claim(
             model_version=model_version,
             artifact_tag=artifact_tag,
             org_id=x_org_id,
+            prompt_version=prompt_version,
+            content_hash=content_hash,
         )
 
-        verification: Dict[str, Any] = raw.get("verification") or {}
+        verification: Dict[str, Any] = (
+            raw.get("verification") if isinstance(raw, dict) else {}
+        )
+        if not isinstance(verification, dict):
+            verification = {}
 
         # Extract confidence and reasons from the LLM-produced verification dict.
         confidence: Optional[float] = None
@@ -264,14 +438,82 @@ async def verify_humanitarian_claim(
                 reasons = [str(r) for r in raw_reason]
                 break
 
+        # Issue #990: durably record the decision *before* it is returned,
+        # capturing the inputs, provider, model, prompt version, and outcome
+        # that produced it. ``eligible`` is the disbursement-relevant outcome
+        # when the model supplied it; otherwise the record still proves a
+        # completed decision.
+        eligible = verification.get("eligible")
+        if isinstance(eligible, bool):
+            outcome = "eligible" if eligible else "ineligible"
+        else:
+            outcome = "completed"
+        _write_audit_record(
+            http_request,
+            request,
+            outcome=outcome,
+            correlation_id=correlation_id,
+            org_id=x_org_id,
+            provider=raw.get("provider"),
+            model=raw.get("model"),
+            prompt_variant=raw.get("prompt_variant"),
+            confidence=confidence,
+            reasons=reasons,
+            metadata={
+                "verification": verification,
+                "model_version": model_version,
+                "artifact_tag": artifact_tag,
+                "user_id": x_user_id,
+                "user_role": x_user_role,
+            },
+        )
+
+        envelope_prompt_version: Optional[str] = None
+        if isinstance(raw, dict) and isinstance(raw.get("prompt_version"), str):
+            envelope_prompt_version = raw["prompt_version"]
+        elif isinstance(prompt_version, str):
+            envelope_prompt_version = prompt_version
+
         return ResultEnvelope[Dict[str, Any]](
             result=raw,
             confidence=confidence,
             reasons=reasons,
             anchor_metadata=request.anchor_metadata,
             trace_id=correlation_id or None,
+            prompt_version=envelope_prompt_version,
         )
+    except HTTPException as http_exc:
+        # Access-control denials and misconfiguration are decisions too: they
+        # determine that no verification happened, which is exactly what an
+        # investigator needs to see weeks later.
+        _write_audit_record(
+            http_request,
+            request,
+            outcome="denied" if http_exc.status_code in (400, 403) else "error",
+            correlation_id=correlation_id,
+            org_id=x_org_id,
+            reasons=[str(http_exc.detail)],
+            metadata={
+                "status_code": http_exc.status_code,
+                "user_id": x_user_id,
+                "user_role": x_user_role,
+            },
+        )
+        raise
     except Exception as e:
         logger.error("Humanitarian verification failed: %s", str(e), exc_info=True)
+        _write_audit_record(
+            http_request,
+            request,
+            outcome="error",
+            correlation_id=correlation_id,
+            org_id=x_org_id,
+            reasons=[str(e)],
+            metadata={
+                "error_type": type(e).__name__,
+                "user_id": x_user_id,
+                "user_role": x_user_role,
+            },
+        )
         # Re-raise so the global exception handler formats the error envelope
         raise

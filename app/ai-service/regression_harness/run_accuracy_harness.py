@@ -169,9 +169,9 @@ def compare_with_baseline(
     baseline: Dict[str, Any],
     tolerance: float = BASELINE_TOLERANCE,
 ) -> List[Dict[str, Any]]:
-    """Return the list of metrics that moved past the tolerance from the baseline."""
+    """Return metrics that dropped past the tolerance from the baseline."""
     diffs = []
-    if abs(current["accuracy"] - baseline["accuracy"]) > tolerance:
+    if current["accuracy"] < baseline["accuracy"] - tolerance:
         diffs.append(
             {
                 "metric": "accuracy",
@@ -185,7 +185,7 @@ def compare_with_baseline(
         for metric in ("precision", "recall", "f1"):
             base_value = base.get(metric, 0.0)
             curr_value = curr.get(metric, 0.0)
-            if abs(curr_value - base_value) > tolerance:
+            if curr_value < base_value - tolerance:
                 diffs.append(
                     {
                         "metric": f"{label}.{metric}",
@@ -252,6 +252,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     result = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "provider": "deterministic-fixture",
+        "configuration": {
+            "prompt_execution": "current HumanitarianPromptEngine code",
+            "model_execution": "FixtureProvider (offline deterministic mode)",
+        },
         "fixture_count": len(cases),
         "metrics": metrics,
         "cases": outcomes,
@@ -259,12 +263,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print_summary(metrics, outcomes)
 
+    baseline = load_baseline(baseline_path)
+    diffs = compare_with_baseline(metrics, baseline) if baseline else []
+    result["baseline"] = baseline
+    result["regressions"] = diffs
+    result["status"] = "regression" if diffs else "passed"
+
     if args.output:
         with open(args.output, "w") as f:
             json.dump(result, f, indent=2)
         print(f"Report written to {args.output}")
-
-    baseline = load_baseline(baseline_path)
 
     if args.update_baseline:
         with open(baseline_path, "w") as f:
@@ -279,7 +287,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 0
 
-    diffs = compare_with_baseline(metrics, baseline)
     if diffs:
         print("METRIC REGRESSION DETECTED - current run differs from baseline:")
         for diff in diffs:

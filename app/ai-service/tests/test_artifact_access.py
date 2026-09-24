@@ -349,7 +349,8 @@ def test_invalidate_cache_allows_operator_role(
 def test_invalidate_cache_calls_invalidation_helper_when_cache_enabled(
     client: TestClient, artifact_fixture: str
 ):
-    """Test that a live cache is actually queried for both artifact-access and verification entries."""
+    """Test that a live cache is actually queried for artifact-access, artifact-tagged
+    verification, and content-hash verification entries."""
     from unittest.mock import Mock, patch
 
     import main
@@ -365,5 +366,6 @@ def test_invalidate_cache_calls_invalidation_helper_when_cache_enabled(
         )
 
     assert response.status_code == 200
-    assert response.json()["invalidated_entries"] == 2
-    assert mock_cache.delete_pattern.call_count == 2
+    # artifact-access pattern + artifact_tag verification pattern + content_hash pattern
+    assert response.json()["invalidated_entries"] == 3
+    assert mock_cache.delete_pattern.call_count == 3

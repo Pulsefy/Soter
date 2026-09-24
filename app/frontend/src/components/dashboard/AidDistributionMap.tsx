@@ -2,14 +2,21 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { MapContainer, Marker, Popup, TileLayer, useMapEvents } from 'react-leaflet';
+import { MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { fetchClient } from '@/lib/mock-api/client';
 import { getAppUserRole, isOperationsRole } from '@/lib/app-role';
+import {
+  clusterPoints,
+  type AidPackagePoint,
+  type Cluster,
+  type Viewport,
+} from './map-clustering';
 
 const DEFAULT_CENTER: [number, number] = [20, 0];
 const DEFAULT_ZOOM = 2;
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+const VIEWPORT_PADDING = 0.15;
 
 const STATUS_STYLES: Record<string, string> = {
   delivered: 'aid-marker--delivered',
@@ -19,77 +26,6 @@ const STATUS_STYLES: Record<string, string> = {
   failed: 'aid-marker--failed',
   cancelled: 'aid-marker--failed',
 };
-
-type AidPackagePoint = {
-  id: string;
-  lat: number;
-  lng: number;
-  amount: number | string;
-  token: string;
-  status: string;
-};
-
-type Cluster = {
-  id: string;
-  lat: number;
-  lng: number;
-  points: AidPackagePoint[];
-};
-
-function normalizePoint(input: unknown, index: number): AidPackagePoint | null {
-  if (!input || typeof input !== 'object') {
-    return null;
-  }
-
-  const point = input as Record<string, unknown>;
-  const lat = Number(point.lat ?? point.latitude);
-  const lng = Number(point.lng ?? point.longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-
-  return {
-    id: String(point.id ?? point.packageId ?? `pkg-${index}`),
-    lat,
-    lng,
-    amount:
-      typeof point.amount === 'number' || typeof point.amount === 'string'
-        ? point.amount
-        : typeof point.value === 'number' || typeof point.value === 'string'
-          ? point.value
-          : '—',
-    token: String(point.token ?? point.asset ?? 'N/A'),
-    status: String(point.status ?? 'Unknown'),
-  };
-}
-
-function clusterPoints(points: AidPackagePoint[], zoom: number): Cluster[] {
-  if (points.length === 0) return [];
-
-  const gridSize = zoom >= 7 ? 0.6 : zoom >= 5 ? 1.2 : zoom >= 3 ? 2.5 : 4.5;
-  const buckets = new Map<string, AidPackagePoint[]>();
-
-  points.forEach(point => {
-    const keyLat = Math.round(point.lat / gridSize);
-    const keyLng = Math.round(point.lng / gridSize);
-    const key = `${keyLat}|${keyLng}`;
-    const bucket = buckets.get(key);
-    if (bucket) {
-      bucket.push(point);
-    } else {
-      buckets.set(key, [point]);
-    }
-  });
-
-  return Array.from(buckets.entries()).map(([key, group]) => {
-    const lat = group.reduce((sum, item) => sum + item.lat, 0) / group.length;
-    const lng = group.reduce((sum, item) => sum + item.lng, 0) / group.length;
-    return {
-      id: `cluster-${key}`,
-      lat,
-      lng,
-      points: group,
-    };
-  });
-}
 
 function formatStatus(status: string) {
   return status
@@ -130,12 +66,82 @@ function ZoomWatcher({ onZoom }: { onZoom: (zoom: number) => void }) {
   return null;
 }
 
-const AidDistributionMap = React.memo(function AidDistributionMap() {
+function ViewportWatcher({ onViewport }: { onViewport: (viewport: Viewport) => void }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const updateViewport = () => {
+      const bounds = map.getBounds();
+      const latPadding = (bounds.getNorth() - bounds.getSouth()) * VIEWPORT_PADDING;
+      const lngPadding = (bounds.getEast() - bounds.getWest()) * VIEWPORT_PADDING;
+      onViewport({
+        north: Math.min(90, bounds.getNorth() + latPadding),
+        south: Math.max(-90, bounds.getSouth() - latPadding),
+        east: bounds.getEast() + lngPadding,
+        west: bounds.getWest() - lngPadding,
+      });
+    };
+
+    updateViewport();
+    map.on('moveend', updateViewport);
+    return () => {
+      map.off('moveend', updateViewport);
+    };
+  }, [map, onViewport]);
+
+  return null;
+}
+
+const ClusterMarker = React.memo(function ClusterMarker({ cluster }: { cluster: Cluster }) {
+  const icon = useMemo(
+    () => createMarkerIcon({ count: cluster.points.length, status: cluster.points[0]?.status }),
+    [cluster.points],
+  );
+
+  return (
+    <Marker position={[cluster.lat, cluster.lng]} icon={icon}>
+      <Popup className="aid-popup">
+        {cluster.points.length > 1 ? (
+          <div className="space-y-3">
+            <p className="text-sm font-semibold">{cluster.points.length} packages</p>
+            <div className="space-y-2">
+              {cluster.points.slice(0, 5).map(point => (
+                <div key={point.id} className="text-xs">
+                  <p className="font-medium">
+                    {point.amount} {point.token}
+                  </p>
+                  <p className="text-gray-600">{formatStatus(point.status)}</p>
+                </div>
+              ))}
+              {cluster.points.length > 5 && (
+                <p className="text-xs text-gray-500">+{cluster.points.length - 5} more packages</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-sm font-semibold">Package Details</p>
+            <div className="text-xs space-y-1">
+              <p><span className="font-medium">Amount:</span> {cluster.points[0].amount}</p>
+              <p><span className="font-medium">Token:</span> {cluster.points[0].token}</p>
+              <p><span className="font-medium">Status:</span> {formatStatus(cluster.points[0].status)}</p>
+            </div>
+          </div>
+        )}
+      </Popup>
+    </Marker>
+  );
+});
+
+const AidDistributionMap = React.memo(function AidDistributionMap({
+  filters = {},
+}: { filters?: DistributionMapFilters }) {
   const role = getAppUserRole();
   const [points, setPoints] = useState<AidPackagePoint[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [viewport, setViewport] = useState<Viewport>();
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
@@ -199,7 +205,21 @@ const AidDistributionMap = React.memo(function AidDistributionMap() {
     };
   }, []);
 
-  const clusters = useMemo(() => clusterPoints(points, zoom), [points, zoom]);
+  const filteredPoints = useMemo(() => {
+    const search = filters.search?.trim().toLowerCase() ?? '';
+    const status = filters.status?.trim().toLowerCase() ?? '';
+    const token = filters.token?.trim().toLowerCase() ?? '';
+    return points.filter(point => {
+      const matchesSearch = !search || `${point.id} ${point.token}`.toLowerCase().includes(search);
+      const matchesStatus = !status || point.status.toLowerCase() === status;
+      const matchesToken = !token || point.token.toLowerCase() === token;
+      return matchesSearch && matchesStatus && matchesToken;
+    });
+  }, [filters.search, filters.status, filters.token, points]);
+  const clusters = useMemo(
+    () => (viewport ? clusterPoints(filteredPoints, zoom, viewport) : []),
+    [filteredPoints, viewport, zoom],
+  );
   const tileConfig = useMemo(
     () =>
       isDark
@@ -233,55 +253,8 @@ const AidDistributionMap = React.memo(function AidDistributionMap() {
         >
           <TileLayer url={tileConfig.url} attribution={tileConfig.attribution} />
           <ZoomWatcher onZoom={setZoom} />
-          {clusters.map(cluster => {
-            const icon = createMarkerIcon({
-              count: cluster.points.length,
-              status: cluster.points[0]?.status,
-            });
-
-            return (
-              <Marker key={cluster.id} position={[cluster.lat, cluster.lng]} icon={icon}>
-                <Popup className="aid-popup">
-                  {cluster.points.length > 1 ? (
-                    <div className="space-y-3">
-                      <p className="text-sm font-semibold">{cluster.points.length} packages</p>
-                      <div className="space-y-2">
-                        {cluster.points.slice(0, 5).map(point => (
-                          <div key={point.id} className="text-xs">
-                            <p className="font-medium">
-                              {point.amount} {point.token}
-                            </p>
-                            <p className="text-gray-600">{formatStatus(point.status)}</p>
-                          </div>
-                        ))}
-                        {cluster.points.length > 5 && (
-                          <p className="text-xs text-gray-500">
-                            +{cluster.points.length - 5} more packages
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold">Package Details</p>
-                      <div className="text-xs space-y-1">
-                        <p>
-                          <span className="font-medium">Amount:</span> {cluster.points[0].amount}
-                        </p>
-                        <p>
-                          <span className="font-medium">Token:</span> {cluster.points[0].token}
-                        </p>
-                        <p>
-                          <span className="font-medium">Status:</span>{' '}
-                          {formatStatus(cluster.points[0].status)}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </Popup>
-              </Marker>
-            );
-          })}
+          <ViewportWatcher onViewport={setViewport} />
+          {clusters.map(cluster => <ClusterMarker key={cluster.id} cluster={cluster} />)}
         </MapContainer>
 
         {loading && (

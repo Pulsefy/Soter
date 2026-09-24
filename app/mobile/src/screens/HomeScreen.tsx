@@ -13,6 +13,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { useWallet } from '../contexts/WalletContext';
 import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
+import { useTranslation } from '../i18n/useTranslation';
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -36,25 +37,26 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
     status,
     walletName,
   } = useWallet();
+  const { t } = useTranslation();
 
   const isConnected = status === 'connected';
   const isBusy = status === 'connecting';
   const isAwaitingApproval = status === 'awaiting-approval';
 
   const walletButtonLabel = (() => {
-    if (isConnected) return 'Disconnect Wallet';
-    if (isBusy) return 'Preparing WalletConnect…';
-    if (isAwaitingApproval) return 'Waiting for Wallet Approval';
-    return 'Connect Wallet';
+    if (isConnected) return t('home.disconnectWallet');
+    if (isBusy) return t('home.preparingWallet');
+    if (isAwaitingApproval) return t('home.waitingApproval');
+    return t('home.connectWallet');
   })();
 
   const walletStatusLabel = (() => {
     switch (status) {
-      case 'connected':        return 'Connected';
-      case 'connecting':       return 'Preparing';
-      case 'awaiting-approval': return 'Approve in Wallet';
-      case 'error':            return 'Needs Attention';
-      default:                 return 'Not Connected';
+      case 'connected':        return t('home.connected');
+      case 'connecting':       return t('home.preparing');
+      case 'awaiting-approval': return t('home.approveInWallet');
+      case 'error':            return t('home.needsAttention');
+      default:                 return t('home.notConnected');
     }
   })();
 
@@ -71,8 +73,8 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.header}>
           <TouchableOpacity
             accessibilityRole="button"
-            accessibilityLabel="Open Settings"
-            accessibilityHint="Navigates to the Settings screen"
+            accessibilityLabel={t('home.openSettings')}
+            accessibilityHint={t('home.openSettingsHint')}
             style={styles.settingsButton}
             onPress={() => navigation.navigate('Settings')}
             activeOpacity={0.7}
@@ -87,10 +89,10 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           <View
             style={styles.badge}
             accessible
-            accessibilityLabel="Powered by Stellar"
+            accessibilityLabel={t('common.poweredByStellar')}
           >
             <Text style={styles.badgeText} importantForAccessibility="no-hide-descendants">
-              Powered by Stellar
+              {t('common.poweredByStellar')}
             </Text>
           </View>
         </View>
@@ -98,20 +100,17 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         {/* ── Hero ───────────────────────────────────────────────────────── */}
         <View style={styles.heroSection}>
           <Text style={styles.heroTitle}>
-            Transparent aid, directly delivered.
+            {t('home.heroTitle')}
           </Text>
           <Text style={styles.description}>
-            Soter utilizes the Stellar network and Soroban smart contracts to
-            ensure aid reaches those in need with 100% transparency. Our
-            automated escrow system guarantees that every donation is tracked
-            and verified on-chain.
+            {t('home.heroDescription')}
           </Text>
         </View>
 
         {/* ── Wallet Card ────────────────────────────────────────────────── */}
         <View style={styles.walletCard}>
           <View style={styles.walletHeaderRow}>
-            <Text style={styles.walletTitle}>Mobile Wallet</Text>
+            <Text style={styles.walletTitle}>{t('home.mobileWallet')}</Text>
             {/* Status badge — announced as a live region so VoiceOver/TalkBack
                 reads it when the wallet status changes */}
             <View
@@ -124,7 +123,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
                     : styles.walletStatusIdle,
               ]}
               accessible
-              accessibilityLabel={`Wallet status: ${walletStatusLabel}`}
+              accessibilityLabel={t('home.walletStatusLabel', { status: walletStatusLabel })}
               accessibilityLiveRegion="polite"
             >
               <Text style={styles.walletStatusText} importantForAccessibility="no-hide-descendants">
@@ -134,19 +133,20 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           </View>
 
           <Text style={styles.walletDescription}>
-            Connect a compatible Stellar wallet with WalletConnect v2. Soter
-            also listens for deep links so the app can support wallet handoff
-            and transaction signing flows on mobile.
+            {t('home.walletDescription')}
           </Text>
 
           {publicKey ? (
             <View
               style={styles.walletKeyCard}
               accessible
-              accessibilityLabel={`Connected public key: ${publicKey}. Active wallet: ${walletName ?? 'WalletConnect session'}`}
+              accessibilityLabel={t('home.connectedKeyLabel', {
+                publicKey,
+                walletName: walletName ?? t('home.walletConnectDefault'),
+              })}
             >
               <Text style={styles.walletKeyLabel} importantForAccessibility="no-hide-descendants">
-                Connected Public Key
+                {t('home.connectedPublicKey')}
               </Text>
               <Text
                 style={styles.walletKeyValue}
@@ -156,13 +156,14 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
                 {publicKey}
               </Text>
               <Text style={styles.walletHint} importantForAccessibility="no-hide-descendants">
-                Active wallet: {walletName || 'WalletConnect session'}
+                {t('home.activeWallet', {
+                  walletName: walletName || t('home.walletConnectDefault'),
+                })}
               </Text>
             </View>
           ) : (
             <Text style={styles.walletHint}>
-              Use Lobstr, Beans, Freighter, or any compatible wallet that can
-              accept WalletConnect links on your device.
+              {t('home.walletHint')}
             </Text>
           )}
 
@@ -178,13 +179,13 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
 
           {!publicKey && pairingUri ? (
             <Text style={styles.walletMeta} numberOfLines={1}>
-              Pairing URI ready: {pairingUri}
+              {t('home.pairingUriReady', { uri: pairingUri })}
             </Text>
           ) : null}
 
           {lastDeepLinkUrl ? (
             <Text style={styles.walletMeta} numberOfLines={1}>
-              Last wallet link: {lastDeepLinkUrl}
+              {t('home.lastWalletLink', { url: lastDeepLinkUrl })}
             </Text>
           ) : null}
 
@@ -193,8 +194,8 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityLabel={walletButtonLabel}
             accessibilityHint={
               isConnected
-                ? 'Disconnects the currently connected wallet'
-                : 'Opens WalletConnect to pair a Stellar wallet'
+                ? t('home.disconnectHint')
+                : t('home.connectHint')
             }
             accessibilityState={{ disabled: isBusy, busy: isBusy }}
             style={[
@@ -219,14 +220,14 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           {isAwaitingApproval && pairingUri ? (
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel="Reopen Wallet App"
-              accessibilityHint="Switches back to your wallet app to approve the connection"
+              accessibilityLabel={t('home.reopenWallet')}
+              accessibilityHint={t('home.reopenWalletHint')}
               style={styles.walletSecondaryButton}
               onPress={reopenWallet}
               activeOpacity={0.7}
             >
               <Text style={styles.walletSecondaryButtonText}>
-                Reopen Wallet App
+                {t('home.reopenWallet')}
               </Text>
             </TouchableOpacity>
           ) : null}
@@ -237,62 +238,62 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           <TouchableOpacity
             style={styles.primaryButton}
             accessibilityRole="button"
-            accessibilityLabel="Check Backend Health"
-            accessibilityHint="Navigates to the System Health screen"
+            accessibilityLabel={t('home.checkBackendHealth')}
+            accessibilityHint={t('home.healthHint')}
             onPress={() => navigation.navigate('Health')}
             activeOpacity={0.8}
           >
-            <Text style={styles.primaryButtonText}>Check Backend Health</Text>
+            <Text style={styles.primaryButtonText}>{t('home.checkBackendHealth')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.secondaryButton}
             accessibilityRole="button"
-            accessibilityLabel="View Operator Task List"
-            accessibilityHint="Navigates to the Operator Task List screen"
+            accessibilityLabel={t('home.operatorTaskList')}
+            accessibilityHint={t('home.taskListHint')}
             onPress={() => navigation.navigate('TaskList')}
             activeOpacity={0.7}
           >
             <Text style={styles.secondaryButtonText}>
-              Operator Task List
+              {t('home.operatorTaskList')}
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.secondaryButton}
             accessibilityRole="button"
-            accessibilityLabel="View Submission Queue"
-            accessibilityHint="Navigates to the Submission Queue screen"
+            accessibilityLabel={t('home.submissionQueue')}
+            accessibilityHint={t('home.queueHint')}
             onPress={() => navigation.navigate('SubmissionQueue')}
             activeOpacity={0.7}
           >
             <Text style={styles.secondaryButtonText}>
-              Submission Queue
+              {t('home.submissionQueue')}
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.secondaryButton}
             accessibilityRole="button"
-            accessibilityLabel="View Aid Details"
-            accessibilityHint="Navigates to the Aid Details screen"
+            accessibilityLabel={t('home.viewAidDetails')}
+            accessibilityHint={t('home.aidDetailsHint')}
             onPress={() => navigation.navigate('AidDetails', { aidId: '1' })}
             activeOpacity={0.7}
           >
             <Text style={styles.secondaryButtonText}>
-              View Aid Details
+              {t('home.viewAidDetails')}
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.primaryButton, { backgroundColor: colors.info }]}
             accessibilityRole="button"
-            accessibilityLabel="NGO Bulk Scan Mode"
-            accessibilityHint="Opens the bulk scanner for repeated package processing"
+            accessibilityLabel={t('home.ngoBulkScanMode')}
+            accessibilityHint={t('home.bulkScanHint')}
             onPress={() => navigation.navigate('BulkScanner')}
             activeOpacity={0.8}
           >
-            <Text style={styles.primaryButtonText}>NGO Bulk Scan Mode</Text>
+            <Text style={styles.primaryButtonText}>{t('home.ngoBulkScanMode')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -303,8 +304,8 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         onPress={() => navigation.navigate('Scanner')}
         activeOpacity={0.8}
         accessibilityRole="button"
-        accessibilityLabel="Scan QR Code"
-        accessibilityHint="Opens the camera to scan a Soter QR code"
+        accessibilityLabel={t('home.scanQrCode')}
+        accessibilityHint={t('home.scanQrHint')}
       >
         <Text style={styles.scannerFabIcon} accessibilityElementsHidden>📷</Text>
       </TouchableOpacity>

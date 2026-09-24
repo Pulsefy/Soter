@@ -21,6 +21,7 @@ _ISOLATED_ENV_KEYS = (
     "PROOF_OF_LIFE_MIN_FACE_SIZE",
     "LLM_TIMEOUT_SECONDS",
     "CACHE_TTL_TASK_STATUS",
+    "ASYNC_JOB_IDLE_TIMEOUT_SECONDS",
     "PORT",
 )
 
@@ -131,6 +132,26 @@ def test_validate_configuration_passes_with_all_defaults():
     settings = Settings(_env_file=None)
 
     settings.validate_configuration()
+
+
+def test_async_job_idle_timeout_defaults_to_configurable_window(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+
+    assert settings.async_job_idle_timeout_seconds == 600.0
+    settings.validate_configuration()
+
+
+def test_non_positive_async_job_idle_timeout_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    monkeypatch.setenv("ASYNC_JOB_IDLE_TIMEOUT_SECONDS", "0")
+
+    settings = Settings(_env_file=None)
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        settings.validate_configuration()
+
+    assert "ASYNC_JOB_IDLE_TIMEOUT_SECONDS" in str(excinfo.value)
 
 
 def test_missing_and_malformed_keys_reported_together(monkeypatch):
@@ -251,6 +272,56 @@ def test_empty_llm_fallback_order_rejected(monkeypatch):
         settings.validate_configuration()
 
     assert "LLM_PROVIDER_FALLBACK_ORDER" in str(excinfo.value)
+
+
+def test_default_llm_model_cost_rates_validate(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.validate_configuration()
+    assert "gpt-4o-mini" in settings.llm_model_cost_per_1k_tokens
+    assert "llama-3.3-70b-versatile" in settings.llm_model_cost_per_1k_tokens
+
+
+def test_negative_llm_model_cost_rate_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.llm_model_cost_per_1k_tokens = {
+        "some-model": {"prompt": -0.001, "completion": 0.002},
+    }
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        settings.validate_configuration()
+
+    message = str(excinfo.value)
+    assert "LLM_MODEL_COST_PER_1K_TOKENS" in message
+    assert "some-model" in message
+    assert "prompt" in message
+
+
+def test_llm_model_cost_rate_missing_direction_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.llm_model_cost_per_1k_tokens = {
+        "partial-model": {"prompt": 0.001},
+    }
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        settings.validate_configuration()
+
+    message = str(excinfo.value)
+    assert "LLM_MODEL_COST_PER_1K_TOKENS" in message
+    assert "partial-model" in message
+    assert "completion" in message
+
+
+def test_empty_llm_model_cost_rates_still_validates(monkeypatch):
+    """An empty rate table is valid - it just means no model has a known
+    cost yet, not a configuration error (issue #981: an unrated model
+    results in no cost estimate, not a validation failure)."""
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    settings.llm_model_cost_per_1k_tokens = {}
+    settings.validate_configuration()
 
 
 def test_boot_report_logs_defaults_at_debug_level(monkeypatch, caplog):

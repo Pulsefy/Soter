@@ -39,8 +39,13 @@ pub const KEY_VERSION: Symbol = symbol_short!("version");
 /// Global configuration struct (`Config`: min_amount, max_expires_in,
 /// allowed_tokens). Written by `init`, `set_config`, token allowlist ops.
 pub const KEY_CONFIG: Symbol = symbol_short!("config");
-/// Distributor allowlist (`Map<Address, bool>`). Admin-managed.
+/// Distributor allowlist (`Map<Address, bool>`). Admin-managed. Bounded by
+/// [`KEY_MAX_DISTRIBUTORS`]; enumerable via `list_distributors`.
 pub const KEY_DISTRIBUTORS: Symbol = symbol_short!("dstrbtrs");
+/// Maximum number of addresses `KEY_DISTRIBUTORS` may hold at once (`u32`).
+/// Enforced by `add_distributor`; configurable via `set_max_distributors`.
+/// Falls back to `DEFAULT_MAX_DISTRIBUTORS` when absent.
+pub const KEY_MAX_DISTRIBUTORS: Symbol = symbol_short!("max_dist");
 /// Global pause flag (`bool`).
 pub const KEY_PAUSED: Symbol = symbol_short!("paused");
 /// Per-action pause flag for `create_package` / `batch_create_packages` (`bool`).
@@ -59,6 +64,26 @@ pub const KEY_TOTAL_LOCKED: Symbol = symbol_short!("locked");
 /// Per-token cumulative amount ever claimed (`Map<Address, i128>`).
 /// Monotonic; never decreases.
 pub const KEY_TOTAL_CLAIMED: Symbol = symbol_short!("claimed");
+/// Per-campaign, per-token amount currently escrowed
+/// (`Map<String, Map<Address, i128>>`, campaign_ref -> token -> locked).
+/// Scoped counterpart to [`KEY_TOTAL_LOCKED`]: updated at exactly the same
+/// call sites (package creation increments it; claim, disburse, refund,
+/// revoke, cancellation, and expiry sweep decrement it), so summing this
+/// map's values for a token across every campaign equals
+/// `KEY_TOTAL_LOCKED`'s value for that
+/// token, minus whatever is locked in packages with no `campaign_ref` at
+/// all. A package without a `campaign_ref` never appears here.
+pub const KEY_CAMPAIGN_TOKEN_LOCKED: Symbol = symbol_short!("cmp_lock");
+/// Per-campaign, per-token cumulative amount claimed
+/// (`Map<String, Map<Address, i128>>`, campaign_ref -> token -> claimed).
+/// Scoped counterpart to [`KEY_TOTAL_CLAIMED`]: incremented at exactly the
+/// same call sites (`claim`, `claim_with_proof`, `claim_with_relayer`,
+/// `batch_claim`) and, like `KEY_TOTAL_CLAIMED`, deliberately NOT on
+/// `disburse` — an admin-forced disbursement does not add to either total.
+/// Summing this map's values for a token across every campaign equals
+/// `KEY_TOTAL_CLAIMED`'s value for that token, minus claims from packages
+/// with no `campaign_ref`.
+pub const KEY_CAMPAIGN_TOKEN_CLAIMED: Symbol = symbol_short!("cmp_clmd");
 /// Timestamp of each recipient's most recent successful claim (`Map<Address, u64>`).
 /// Used to enforce the optional per-recipient claim cooldown.
 pub const KEY_RECIPIENT_LAST_CLAIM: Symbol = symbol_short!("lastclaim");
@@ -121,13 +146,14 @@ mod tests {
     use super::*;
 
     /// Every singleton key, both storage families.
-    fn singleton_keys() -> [Symbol; 19] {
+    fn singleton_keys() -> [Symbol; 22] {
         [
             KEY_ADMIN,
             KEY_PENDING_ADMIN,
             KEY_VERSION,
             KEY_CONFIG,
             KEY_DISTRIBUTORS,
+            KEY_MAX_DISTRIBUTORS,
             KEY_PAUSED,
             KEY_PAUSE_CREATE,
             KEY_PAUSE_CLAIM,
@@ -136,6 +162,8 @@ mod tests {
             KEY_CAMPAIGN_PAUSED,
             KEY_TOTAL_LOCKED,
             KEY_TOTAL_CLAIMED,
+            KEY_CAMPAIGN_TOKEN_LOCKED,
+            KEY_CAMPAIGN_TOKEN_CLAIMED,
             KEY_RECIPIENT_LAST_CLAIM,
             KEY_PKG_COUNTER,
             KEY_PKG_IDX,

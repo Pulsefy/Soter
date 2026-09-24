@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { SaverModeSource } from '../contexts/SaverModeContext';
 import { useAppTheme } from '../theme/useAppTheme';
+import { useTranslation } from '../i18n/useTranslation';
 
 interface Props {
   visible: boolean;
@@ -15,28 +16,29 @@ interface Props {
  */
 export const SaverModeBanner: React.FC<Props> = ({ visible, source }) => {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
 
   if (!visible) return null;
 
   const reason =
     source === 'auto'
-      ? 'Slow or metered connection detected'
-      : 'Manually enabled';
+      ? t('saverBanner.reasonAuto')
+      : t('saverBanner.reasonManual');
 
   return (
     <View
       style={[styles.banner, { backgroundColor: colors.infoBg, borderBottomColor: colors.info }]}
       accessible
       accessibilityRole="alert"
-      accessibilityLabel={`Saver mode is active. ${reason}. Refresh, media, and background sync are reduced.`}
+      accessibilityLabel={t('saverBanner.accessible', { reason })}
     >
       <Text style={styles.icon} accessibilityElementsHidden>
         &#x1F4A1;
       </Text>
       <View style={styles.textContainer}>
-        <Text style={[styles.title, { color: colors.info }]} maxFontSizeMultiplier={2}>Saver Mode</Text>
+        <Text style={[styles.title, { color: colors.info }]} maxFontSizeMultiplier={2}>{t('saverBanner.saverMode')}</Text>
         <Text style={[styles.subtitle, { color: colors.info }]} maxFontSizeMultiplier={2}>
-          {reason}. Refresh, media &amp; background sync reduced.
+          {reason}. {t('saverBanner.subtitle')}
         </Text>
       </View>
     </View>

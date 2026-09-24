@@ -31,9 +31,10 @@ function makeResponse(
 
 describe('ApiError', () => {
   it('stores all fields', () => {
-    const err = new ApiError('bad request', 400, 'corr-abc', { field: 'x' });
+    const err = new ApiError('bad request', 400, 'ERR_CODE', 'corr-abc', { field: 'x' });
     expect(err.message).toBe('bad request');
     expect(err.status).toBe(400);
+    expect(err.code).toBe('ERR_CODE');
     expect(err.correlationId).toBe('corr-abc');
     expect(err.details).toEqual({ field: 'x' });
     expect(err.name).toBe('ApiError');
@@ -51,11 +52,12 @@ describe('ApiError', () => {
 /* ─── extractApiError ─────────────────────────────────────────────────── */
 
 describe('extractApiError', () => {
-  it('extracts message from JSON body', async () => {
-    const res = makeResponse(422, { message: 'Validation failed' });
+  it('extracts message and code from JSON body', async () => {
+    const res = makeResponse(422, { message: 'Validation failed', code: 'VALIDATION_ERR' });
     const err = await extractApiError(res);
     expect(err.message).toBe('Validation failed');
     expect(err.status).toBe(422);
+    expect(err.code).toBe('VALIDATION_ERR');
   });
 
   it('joins array messages from NestJS validation', async () => {
@@ -107,10 +109,11 @@ describe('extractApiError', () => {
 
 describe('normalizeError', () => {
   it('handles ApiError with all fields', () => {
-    const apiErr = new ApiError('Upstream error', 503, 'cid-789', { detail: true });
+    const apiErr = new ApiError('Upstream error', 503, 'ERR_503', 'cid-789', { detail: true });
     const norm = normalizeError(apiErr);
     expect(norm.message).toBe('Upstream error');
     expect(norm.status).toBe(503);
+    expect(norm.code).toBe('ERR_503');
     expect(norm.correlationId).toBe('cid-789');
     expect(norm.details).toEqual({ detail: true });
   });
@@ -122,11 +125,12 @@ describe('normalizeError', () => {
     expect(norm.correlationId).toBeUndefined();
   });
 
-  it('extracts correlationId from a plain Error with extra fields', () => {
-    const err = Object.assign(new Error('Network error'), { correlationId: 'extra-cid', status: 404 });
+  it('extracts correlationId and code from a plain Error with extra fields', () => {
+    const err = Object.assign(new Error('Network error'), { correlationId: 'extra-cid', status: 404, code: 'E_NOT_FOUND' });
     const norm = normalizeError(err);
     expect(norm.correlationId).toBe('extra-cid');
     expect(norm.status).toBe(404);
+    expect(norm.code).toBe('E_NOT_FOUND');
   });
 
   it('handles a string error', () => {
@@ -136,9 +140,10 @@ describe('normalizeError', () => {
   });
 
   it('handles a plain object with message', () => {
-    const norm = normalizeError({ message: 'Object error', status: 400, correlationId: 'obj-cid' });
+    const norm = normalizeError({ message: 'Object error', status: 400, correlationId: 'obj-cid', code: 'OBJ_ERR' });
     expect(norm.message).toBe('Object error');
     expect(norm.status).toBe(400);
+    expect(norm.code).toBe('OBJ_ERR');
     expect(norm.correlationId).toBe('obj-cid');
   });
 

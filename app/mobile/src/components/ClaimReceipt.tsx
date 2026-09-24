@@ -13,6 +13,7 @@ import * as Clipboard from 'expo-clipboard';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { config } from '../config';
 import { useBiometric } from '../contexts/BiometricContext';
+import { useTranslation } from '../i18n/useTranslation';
 
 export interface ClaimReceiptData {
   claimId: string;
@@ -99,6 +100,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const { confirmValueAction } = useBiometric();
+  const { t } = useTranslation();
 
   // We should ideally use theme colors here but it's okay to map statuses to some semantic tokens
   // if available, but for now we'll stick to semantic hex overrides that are readable.
@@ -511,7 +513,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
               </TouchableOpacity>
               <FieldCopyButton
                 value={claim.tokenAddress}
-                label="token address"
+                label={t('claimReceipt.tokenAddress')}
                 colors={colors}
               />
             </View>
@@ -545,7 +547,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
               </TouchableOpacity>
               <FieldCopyButton
                 value={claim.transactionHash}
-                label="transaction hash"
+                label={t('claimReceipt.transactionHash')}
                 colors={colors}
               />
             </View>
@@ -579,7 +581,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
               </TouchableOpacity>
               <FieldCopyButton
                 value={claim.contractId}
-                label="contract ID"
+                label={t('claimReceipt.contractId')}
                 colors={colors}
               />
             </View>

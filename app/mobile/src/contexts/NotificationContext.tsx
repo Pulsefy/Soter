@@ -17,6 +17,11 @@ import {
   resolveDeepLink,
 } from '../services/notificationService';
 import { structuredLogger } from '../services/logger';
+import {
+  registerDeviceToken,
+  revokeDeviceToken,
+  DeviceTokenResponse,
+} from '../services/deviceTokenApi';
 
 // ---------------------------------------------------------------------------
 // Context value
@@ -33,6 +38,10 @@ interface NotificationContextValue {
   consumeDeepLink: () => void;
   /** Manually request notification permission (e.g. from Settings) */
   requestPermission: () => Promise<boolean>;
+  /** Whether the device token is registered with the backend */
+  tokenRegistered: boolean;
+  /** Revoke the device token (typically called on sign-out) */
+  revokeToken: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextValue>({
@@ -41,10 +50,13 @@ const NotificationContext = createContext<NotificationContextValue>({
   pendingDeepLink: null,
   consumeDeepLink: () => {},
   requestPermission: async () => false,
+  tokenRegistered: false,
+  revokeToken: async () => {},
 });
 
 const PROCESSED_IDS_KEY = 'SOTER_PROCESSED_NOTIFICATION_IDS';
 const MAX_PROCESSED_IDS_LIMIT = 50;
+const DEVICE_TOKEN_KEY = 'SOTER_DEVICE_TOKEN_ID';
 
 async function markNotificationAsProcessed(id: string): Promise<boolean> {
   try {
@@ -73,7 +85,7 @@ async function markNotificationAsProcessed(id: string): Promise<boolean> {
 // Provider
 // ---------------------------------------------------------------------------
 
-export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
+export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [permissionGranted, setPermissionGranted] = useState(false);
@@ -81,6 +93,7 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
   const [pendingDeepLink, setPendingDeepLink] = useState<DeepLinkTarget | null>(
     null,
   );
+  const [deviceTokenId, setDeviceTokenId] = useState<string | null>(null);
 
   // Keep refs so listeners always see the latest navigation ref
   const navigationRef = useRef<any>(null);
@@ -102,7 +115,12 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
           { tokenPreview: token.slice(0, 12) },
           'notifications',
         );
-        // TODO: send token to backend for per-user push targeting
+        // Register token with backend
+        const deviceToken = await registerDeviceToken(token);
+        if (deviceToken) {
+          setDeviceTokenId(deviceToken.id);
+          await AsyncStorage.setItem(DEVICE_TOKEN_KEY, deviceToken.id);
+        }
       }
     }
   }, []);
@@ -184,6 +202,32 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
     return () => subscription.remove();
   }, []);
 
+  // -----------------------------------------------------------------------
+  // Token refresh handler
+  // -----------------------------------------------------------------------
+  // Expo may rotate the push token. When this happens, we need to re-register
+  // with the backend to ensure push notifications continue to work.
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    const subscription = Notifications.addPushTokenListener(async event => {
+      const newToken = event.data;
+      structuredLogger.info(
+        'notifications.push_token.refreshed',
+        { tokenPreview: newToken.slice(0, 12) },
+        'notifications',
+      );
+      setExpoPushToken(newToken);
+      // Re-register with backend
+      const deviceToken = await registerDeviceToken(newToken);
+      if (deviceToken) {
+        setDeviceTokenId(deviceToken.id);
+        await AsyncStorage.setItem(DEVICE_TOKEN_KEY, deviceToken.id);
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+
   // Background notification response on Android is already handled by the
   // `addNotificationResponseReceivedListener` above. When the app is
   // launched from a terminated state via notification tap,
@@ -213,9 +257,27 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
     if (granted) {
       const token = await getExpoPushToken();
       setExpoPushToken(token);
+      if (token) {
+        const deviceToken = await registerDeviceToken(token);
+        if (deviceToken) {
+          setDeviceTokenId(deviceToken.id);
+          await AsyncStorage.setItem(DEVICE_TOKEN_KEY, deviceToken.id);
+        }
+      }
     }
     return granted;
   }, []);
+
+  const revokeToken = useCallback(async () => {
+    const tokenId = deviceTokenId || (await AsyncStorage.getItem(DEVICE_TOKEN_KEY));
+    if (tokenId) {
+      const success = await revokeDeviceToken(tokenId, 'User signed out');
+      if (success) {
+        setDeviceTokenId(null);
+        await AsyncStorage.removeItem(DEVICE_TOKEN_KEY);
+      }
+    }
+  }, [deviceTokenId]);
 
   const value = useMemo<NotificationContextValue>(
     () => ({
@@ -224,6 +286,8 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
       pendingDeepLink,
       consumeDeepLink,
       requestPermission,
+      tokenRegistered: !!deviceTokenId,
+      revokeToken,
     }),
     [
       permissionGranted,
@@ -231,6 +295,8 @@ export const NotificationProvider: React.FC<React.PropsWithChildren> = ({
       pendingDeepLink,
       consumeDeepLink,
       requestPermission,
+      deviceTokenId,
+      revokeToken,
     ],
   );
 

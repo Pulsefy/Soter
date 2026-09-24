@@ -179,6 +179,28 @@ export class SorobanTransactionScheduler {
   }
 
   /**
+   * Detect stuck Soroban transactions - every minute
+   */
+  @Cron(CronExpression.EVERY_MINUTE, {
+    name: 'detect-stuck-soroban-transactions',
+    timeZone: 'UTC',
+  })
+  async detectStuckTransactions() {
+    try {
+      await this.sorobanTransactionService.detectStuckTransactions();
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Failed to detect stuck Soroban transactions: ${errorMessage}`,
+      );
+      this.metricsService.incrementCounter('soroban_stuck_detection_failed', {
+        error: errorMessage.substring(0, 100),
+      });
+    }
+  }
+
+  /**
    * Queue health check and metrics - every minute
    */
   @Cron(CronExpression.EVERY_MINUTE, {

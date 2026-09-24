@@ -176,12 +176,22 @@ export class StructuredLogger {
     if (!this.shouldLog(level)) return;
 
     const payload = redactValue(data);
+    // A caller may pass `correlationId` inside the data payload to scope a
+    // log line to a narrower correlation context (e.g. a sync queue item)
+    // than the current session-wide correlation id.
+    const dataCorrelationId =
+      typeof payload === 'object' &&
+      payload !== null &&
+      !Array.isArray(payload) &&
+      typeof (payload as Record<string, unknown>).correlationId === 'string'
+        ? ((payload as Record<string, unknown>).correlationId as string)
+        : undefined;
     const entry: StructuredLogEntry = {
       timestamp: new Date().toISOString(),
       level,
       message,
       scope,
-      correlationId: this.correlationId ?? this.getCurrentCorrelationId(),
+      correlationId: dataCorrelationId ?? this.correlationId ?? this.getCurrentCorrelationId(),
       data: payload,
     };
 

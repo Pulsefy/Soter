@@ -104,6 +104,11 @@ class TestCompareBaseline:
         diffs = compare_with_baseline(current, baseline)
         assert any(d["metric"] == "reject.recall" for d in diffs)
 
+    def test_metric_improvement_does_not_alert(self):
+        baseline = self._base(0.8, 0.8)
+        current = self._base(0.9, 0.9)
+        assert compare_with_baseline(current, baseline) == []
+
 
 class TestValidateFixtures:
     """Tests for the golden set validation rules."""

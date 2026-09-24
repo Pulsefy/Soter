@@ -1,6 +1,4 @@
-import { config } from '../config';
-
-const API_URL = config.apiUrl;
+import { apiGet, apiPost } from './requestLayer';
 
 export interface AidItem {
   id: string;
@@ -51,20 +49,14 @@ export interface AidDetails {
 
 /** Fetch aid overview list from the backend */
 export const fetchAidList = async (): Promise<AidItem[]> => {
-  const response = await fetch(`${API_URL}/aid`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  const { data } = await apiGet<AidItem[]>('/aid');
+  return data;
 };
 
 /** Fetch detailed aid package info from the backend */
-export const fetchAidDetails = async (aidId: string): Promise<AidDetails> => {
-  const response = await fetch(`${API_URL}/aid/${aidId}`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+export const fetchAidDetails = async (aidId: string, correlationId?: string): Promise<AidDetails> => {
+  const { data } = await apiGet<AidDetails>(`/aid/${aidId}`, { correlationId });
+  return data;
 };
 
 /** Fallback mock data used when the backend is unreachable */
@@ -96,18 +88,12 @@ export const getMockAidList = (): AidItem[] => [
 ];
 
 /** Submit a claim to the backend with an idempotency key */
-export const submitClaim = async (claimId: string, idempotencyKey: string): Promise<unknown> => {
-  const response = await fetch(`${API_URL}/claims/${claimId}/submit`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Idempotency-Key': idempotencyKey,
-    },
+export const submitClaim = async (claimId: string, idempotencyKey: string, correlationId?: string): Promise<unknown> => {
+  const { data } = await apiPost(`/claims/${claimId}/submit`, undefined, {
+    idempotencyKey,
+    correlationId,
   });
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return data;
 };
 
 /** Fallback mock detail data */

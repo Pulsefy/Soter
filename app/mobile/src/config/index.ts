@@ -44,6 +44,8 @@ export interface AppConfig {
   certPinIncludeSubdomains: boolean;
   /** Lowest log level that should be persisted for support diagnostics */
   logLevel: LogLevel;
+  /** API key for backend authentication */
+  apiKey?: string;
 }
 
 /**
@@ -117,6 +119,7 @@ const buildConfig = (): AppConfig => {
     certPinHashes,
     certPinIncludeSubdomains: process.env.EXPO_PUBLIC_CERT_PIN_INCLUDE_SUBDOMAINS === 'true',
     logLevel: (process.env.EXPO_PUBLIC_LOG_LEVEL as LogLevel) || 'warn',
+    apiKey: process.env.EXPO_PUBLIC_API_KEY,
     isValid: errors.length === 0,
     errors,
   };

@@ -451,6 +451,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -569,6 +577,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -683,6 +699,14 @@
                       },
                       "val": {
                         "u64": "0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
                       }
                     },
                     {

@@ -28,6 +28,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "claim_cooldown"
+                      },
+                      "val": {
+                        "u64": "0"
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "max_expires_in"
                       },
                       "val": {
@@ -1402,7 +1410,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -1447,7 +1455,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -1492,7 +1500,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -1537,7 +1545,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -1582,7 +1590,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -1627,7 +1635,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -1672,7 +1680,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -1717,7 +1725,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -1783,6 +1791,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -1835,7 +1851,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -1901,6 +1917,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -1953,7 +1977,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -2019,6 +2043,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -2071,7 +2103,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -2137,6 +2169,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -2189,7 +2229,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -2255,6 +2295,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -2307,7 +2355,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -2373,6 +2421,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -2425,7 +2481,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -2491,6 +2547,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -2543,7 +2607,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -2609,6 +2673,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "evidence_hash"
+                      },
+                      "val": {
+                        "string": ""
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -2661,7 +2733,7 @@
             },
             "ext": "v0"
           },
-          109
+          1555300
         ]
       ],
       [
@@ -2728,6 +2800,14 @@
                             },
                             {
                               "key": {
+                                "symbol": "claim_cooldown"
+                              },
+                              "val": {
+                                "u64": "0"
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "max_expires_in"
                               },
                               "val": {
@@ -2740,6 +2820,39 @@
                               },
                               "val": {
                                 "i128": "1"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "lastclaim"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                              },
+                              "val": {
+                                "u64": "1000000"
+                              }
+                            },
+                            {
+                              "key": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                              },
+                              "val": {
+                                "u64": "1005516"
+                              }
+                            },
+                            {
+                              "key": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVAX5"
+                              },
+                              "val": {
+                                "u64": "1005516"
                               }
                             }
                           ]

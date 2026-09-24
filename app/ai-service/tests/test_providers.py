@@ -285,6 +285,11 @@ class TestOpenAIProvider:
             resp = OpenAIProvider().llm_chat("sys", "usr", model="gpt-4")
             assert resp.provider == "openai"
             assert "credible" in resp.content
+            # Deterministic mode never reports real token usage (issue #981):
+            # the fields must stay None (unavailable), never a fabricated 0.
+            assert resp.prompt_tokens is None
+            assert resp.completion_tokens is None
+            assert resp.total_tokens is None
 
     def test_llm_chat_success(self):
         mock_response = MagicMock()
@@ -311,6 +316,43 @@ class TestOpenAIProvider:
                 resp = OpenAIProvider().llm_chat("sys", "usr", model="gpt-4")
                 assert resp.content == "test content"
                 assert resp.provider == "openai"
+                # No "usage" key in the mocked response: unavailable, not 0
+                # (issue #981).
+                assert resp.prompt_tokens is None
+                assert resp.completion_tokens is None
+                assert resp.total_tokens is None
+
+    def test_llm_chat_success_extracts_usage(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "test content"}}],
+            "usage": {
+                "prompt_tokens": 42,
+                "completion_tokens": 17,
+                "total_tokens": 59,
+            },
+        }
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.post.return_value = mock_response
+
+        with patch("services.providers.settings") as mock_settings:
+            mock_settings.openai_api_key = "test-key"
+            mock_settings.ai_deterministic_mode = False
+            mock_settings.llm_timeout_seconds = 30
+
+            with patch("httpx.Client") as MockClient:
+                MockClient.return_value.__enter__ = MagicMock(
+                    return_value=mock_client_instance
+                )
+                MockClient.return_value.__exit__ = MagicMock(return_value=False)
+
+                resp = OpenAIProvider().llm_chat("sys", "usr", model="gpt-4")
+                assert resp.prompt_tokens == 42
+                assert resp.completion_tokens == 17
+                assert resp.total_tokens == 59
 
 
 class TestGroqProvider:

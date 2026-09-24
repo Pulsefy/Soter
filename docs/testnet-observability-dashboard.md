@@ -26,6 +26,9 @@ Use the backend `/metrics`, `/health`, `/api/v1/health`, and `/jobs/health` endp
 | Claims cancelled | `claims_cancelled_total{campaign_id,from_status}` | Cumulative count of claims cancelled, labelled by the status they were in when cancelled. |
 | Claims in funnel | `claims_in_funnel{status}` | Current gauge of claims at each funnel stage (requested, verified, approved, disbursed, archived, cancelled). |
 | Claim stage duration | `claim_funnel_duration_seconds{from_status,to_status}` | Time (seconds) spent in a given funnel stage before transitioning to the next. Useful for identifying bottlenecks. |
+| Evidence queue depth | `evidence_queue_depth{status}` | Current number of evidence queue items per `EvidenceStatus` (`pending`, `uploading`, `completed`, `failed`). Rising `pending`/`uploading` means review/upload is falling behind intake. Refreshed once per minute. |
+| Oldest pending evidence | `evidence_queue_oldest_pending_age_seconds` | Age (seconds) of the oldest evidence item still `pending`. A steadily climbing value is the clearest SLA-breach signal for the evidence backlog. `0` when nothing is pending. |
+| Evidence intake→decision | `evidence_intake_to_decision_duration_seconds{status}` | Histogram of time from evidence intake to a terminal decision (`completed` or `failed`). Watch p95/p99 to see how long items take to clear the pipeline. |
 
 ## Incident Checklist
 
