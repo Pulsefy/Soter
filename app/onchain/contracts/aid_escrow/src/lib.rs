@@ -44,6 +44,7 @@ pub use crate::keys::{
 /// Upper bound on the number of package ids accepted by `batch_claim` in a
 /// single invocation, keeping the call within Soroban resource limits.
 pub const MAX_BATCH_CLAIM_SIZE: u32 = 25;
+pub const MAX_BATCH_REVOKE_REFUND_SIZE: u32 = 25;
 
 /// Maximum number of package IDs that `list_recipient_packages` may return in
 /// a single call.  Enforcing this keeps the response within Soroban's read-entry
@@ -148,6 +149,28 @@ pub struct BatchClaimResult {
     pub package_id: u64,
     pub status: ClaimStatus,
     /// Amount transferred to the claimant; zero unless `status` is `Success`.
+    pub amount: i128,
+}
+
+/// Outcome of one package revoke or refund attempt in a batch.
+#[contracttype]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u32)]
+pub enum BatchAdminActionStatus {
+    Success = 0,
+    NotFound = 1,
+    InvalidState = 2,
+    Expired = 3,
+    NotExpired = 4,
+    CampaignPaused = 5,
+    TransferFailed = 6,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BatchAdminActionResult {
+    pub package_id: u64,
+    pub status: BatchAdminActionStatus,
     pub amount: i128,
 }
 
@@ -1815,6 +1838,147 @@ impl AidEscrow {
     }
 
     /// Admin revokes a package (Cancels it). Funds are effectively unlocked but remain in contract pool.
+    ///
+    /// Each id is evaluated independently. A failed item does not prevent
+    /// other items from being revoked, and retrying a successful item returns
+    /// `InvalidState` without changing accounting.
+    pub fn batch_revoke(env: Env, ids: Vec<u64>) -> Result<Vec<BatchAdminActionResult>, Error> {
+        if ids.len() > MAX_BATCH_REVOKE_REFUND_SIZE {
+            return Err(Error::BatchTooLarge);
+        }
+
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let mut results = Vec::new(&env);
+        for id in ids.iter() {
+            results.push_back(Self::revoke_one_for_batch(&env, &admin, id));
+        }
+        Ok(results)
+    }
+
+    /// Admin refunds multiple expired or cancelled packages. Each id is
+    /// evaluated independently and successful transfers update accounting
+    /// before the next id is processed.
+    pub fn batch_refund(env: Env, ids: Vec<u64>) -> Result<Vec<BatchAdminActionResult>, Error> {
+        Self::check_action_paused(&env, symbol_short!("refund"))?;
+        if ids.len() > MAX_BATCH_REVOKE_REFUND_SIZE {
+            return Err(Error::BatchTooLarge);
+        }
+
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let now = env.ledger().timestamp();
+        let mut results = Vec::new(&env);
+        for id in ids.iter() {
+            results.push_back(Self::refund_one_for_batch(&env, &admin, id, now));
+        }
+        Ok(results)
+    }
+
+    fn revoke_one_for_batch(env: &Env, admin: &Address, id: u64) -> BatchAdminActionResult {
+        let key = crate::keys::package_key(id);
+        let mut package: Package = match env.storage().persistent().get(&key) {
+            Some(package) => package,
+            None => return Self::batch_action_result(id, BatchAdminActionStatus::NotFound, 0),
+        };
+
+        if package.status != PackageStatus::Created {
+            return Self::batch_action_result(id, BatchAdminActionStatus::InvalidState, 0);
+        }
+
+        let amount = package.amount;
+        package.status = PackageStatus::Cancelled;
+        env.storage().persistent().set(&key, &package);
+        Self::decrement_locked(env, &package.token, &package.metadata, amount);
+
+        PackageRevoked {
+            schema_version: EVENT_SCHEMA_VERSION,
+            package_id: id,
+            recipient: package.recipient,
+            amount,
+            actor: admin.clone(),
+            timestamp: env.ledger().timestamp(),
+        }
+        .publish(env);
+
+        Self::batch_action_result(id, BatchAdminActionStatus::Success, amount)
+    }
+
+    fn refund_one_for_batch(
+        env: &Env,
+        admin: &Address,
+        id: u64,
+        now: u64,
+    ) -> BatchAdminActionResult {
+        let key = crate::keys::package_key(id);
+        let mut package: Package = match env.storage().persistent().get(&key) {
+            Some(package) => package,
+            None => return Self::batch_action_result(id, BatchAdminActionStatus::NotFound, 0),
+        };
+
+        if Self::check_campaign_paused(env, &package.metadata).is_err() {
+            return Self::batch_action_result(id, BatchAdminActionStatus::CampaignPaused, 0);
+        }
+
+        let should_unlock_locked =
+            package.status == PackageStatus::Created || package.status == PackageStatus::Expired;
+
+        if package.status == PackageStatus::Created {
+            if package.expires_at == 0 || now <= package.expires_at {
+                return Self::batch_action_result(id, BatchAdminActionStatus::NotExpired, 0);
+            }
+        } else if package.status != PackageStatus::Expired
+            && package.status != PackageStatus::Cancelled
+        {
+            return Self::batch_action_result(id, BatchAdminActionStatus::InvalidState, 0);
+        }
+
+        if Self::transfer_token(
+            env,
+            &package.token,
+            &env.current_contract_address(),
+            admin,
+            &package.amount,
+        )
+        .is_err()
+        {
+            return Self::batch_action_result(id, BatchAdminActionStatus::TransferFailed, 0);
+        }
+
+        let amount = package.amount;
+        if should_unlock_locked {
+            Self::decrement_locked(env, &package.token, &package.metadata, amount);
+        }
+        package.status = PackageStatus::Refunded;
+        env.storage().persistent().set(&key, &package);
+
+        PackageRefunded {
+            schema_version: EVENT_SCHEMA_VERSION,
+            package_id: id,
+            recipient: package.recipient,
+            amount,
+            actor: admin.clone(),
+            timestamp: now,
+        }
+        .publish(env);
+
+        Self::batch_action_result(id, BatchAdminActionStatus::Success, amount)
+    }
+
+    fn batch_action_result(
+        package_id: u64,
+        status: BatchAdminActionStatus,
+        amount: i128,
+    ) -> BatchAdminActionResult {
+        BatchAdminActionResult {
+            package_id,
+            status,
+            amount,
+        }
+    }
+
     pub fn revoke(env: Env, id: u64) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
