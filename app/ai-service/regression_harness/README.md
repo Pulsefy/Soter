@@ -137,3 +137,14 @@ python regression_harness/run_accuracy_harness.py --update-baseline
 ```
 
 Then commit the updated `baseline_metrics.json` together with the change that caused the metrics to move.
+
+## Scheduled Regression Runs
+
+`.github/workflows/ai-regression.yml` runs the harness daily at 06:00 UTC and also supports manual dispatch.
+It executes the current `HumanitarianPromptEngine` code with the deterministic fixture provider, so scheduled runs are offline and reproducible while still exercising the active prompt-building implementation.
+
+Each run writes `regression-report.json`, compares it with the committed baseline, adds the result to the GitHub Actions job summary, and uploads the report as a 90-day artifact named `ai-regression-<run-id>`.
+The retained artifacts provide a historical accuracy trend across scheduled runs.
+
+The job fails and triggers the repository's normal GitHub Actions failure notifications only when accuracy or a per-class precision, recall, or F1 metric drops below the baseline beyond the tolerance.
+Metric improvements do not trigger an alert.
