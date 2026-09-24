@@ -166,3 +166,56 @@ describe('convenience wrappers', () => {
     expect(mockFetch.mock.calls[0][1].method).toBe('POST');
   });
 });
+
+describe('apiRequest rate-limit Retry-After', () => {
+  it('waits Retry-After seconds before retrying a 429', async () => {
+    jest.useFakeTimers();
+
+    const headers429 = {
+      get: (name: string) => (name.toLowerCase() === 'retry-after' ? '2' : null),
+    };
+
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: headers429,
+        json: async () => ({}),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+      });
+
+    const promise = apiRequest({ method: 'GET', path: '/test', maxRetries: 2 });
+
+    // Retry-After is 2s; advance just under then over
+    jest.advanceTimersByTime(1500);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(1000);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    expect(result.retries).toBe(1);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws RateLimitedError after exhausting 429 retries', async () => {
+    jest.useFakeTimers();
+
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: { get: () => null },
+      json: async () => ({}),
+    });
+
+    const { RateLimitedError } = require('../services/requestLayer');
+    const promise = apiRequest({ method: 'GET', path: '/test', maxRetries: 1 });
+    const assertion = expect(promise).rejects.toBeInstanceOf(RateLimitedError);
+
+    jest.advanceTimersByTime(30_000);
+    await assertion;
+  });
+});

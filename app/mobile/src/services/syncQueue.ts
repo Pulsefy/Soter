@@ -1,5 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AidDetails, fetchAidDetails, submitClaim } from './aidApi';
+import {
+  isRateLimitedError,
+  parseRetryAfterMs,
+  RateLimitedError,
+} from './requestLayer';
 
 import { config } from '../config';
 
@@ -137,6 +142,8 @@ export interface QueuedSyncAction<TPayload = SyncActionPayload> {
   lastError: string | null;
   deferralReason?: DeferralReason;
   deferralLog?: string[];
+  /** Consecutive HTTP 429 responses for this action; drives extended rate-limit backoff. */
+  rateLimitCount?: number;
 }
 
 export interface SyncQueueState {
@@ -216,12 +223,64 @@ const makeActionId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 
 const backoffDelayMs = (retryCount: number) =>
   Math.min(BASE_RETRY_DELAY_MS * 2 ** retryCount, MAX_RETRY_DELAY_MS);
 
+/**
+ * Rate-limit backoff for the sync queue.
+ *
+ * - Honours `Retry-After` when the server sends one.
+ * - On repeated 429s, extends the delay via a streak floor so a short
+ *   Retry-After cannot reset the schedule back to the default.
+ * - Independent of battery/metered deferral (those only gate *when* flush
+ *   considers an item; this only sets `nextRetryAt`).
+ */
+export const computeRateLimitBackoffMs = (
+  consecutiveRateLimits: number,
+  retryAfterMs: number | null,
+  options?: { saverMode?: boolean },
+): number => {
+  const streak = Math.max(1, consecutiveRateLimits);
+  const streakFloor = Math.min(BASE_RETRY_DELAY_MS * 2 ** streak, MAX_RETRY_DELAY_MS);
+
+  let delay: number;
+  if (retryAfterMs != null && retryAfterMs >= 0) {
+    // First 429: respect Retry-After as-is. Repeated 429s: never shrink below streak floor.
+    delay = streak > 1 ? Math.max(retryAfterMs, streakFloor) : retryAfterMs;
+  } else {
+    delay = streakFloor;
+  }
+
+  if (options?.saverMode) {
+    delay *= SAVER_BACKOFF_MULTIPLIER;
+  }
+
+  return Math.min(Math.max(delay, 0), MAX_RETRY_DELAY_MS);
+};
+
+export { parseRetryAfterMs, RateLimitedError, isRateLimitedError };
+
 const toErrorMessage = (error: unknown) => {
   if (error instanceof Error) {
     return error.message;
   }
 
   return 'Unexpected sync failure';
+};
+
+/** Throw RateLimitedError (with Retry-After) on 429; otherwise a generic HTTP error. */
+const throwHttpError = (response: Response, prefix?: string): never => {
+  if (response.status === 429) {
+    const retryAfterMs = parseRetryAfterMs(
+      typeof response.headers?.get === 'function'
+        ? response.headers.get('Retry-After')
+        : null,
+    );
+    const message = prefix
+      ? `${prefix}: HTTP error! status: 429`
+      : 'HTTP error! status: 429';
+    throw new RateLimitedError(retryAfterMs, message);
+  }
+
+  const statusMsg = `HTTP error! status: ${response.status}`;
+  throw new Error(prefix ? `${prefix}: ${statusMsg}` : statusMsg);
 };
 
 export const isConflictError = (error: unknown): boolean => {
@@ -401,7 +460,7 @@ const runAction = async (action: QueuedSyncAction) => {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throwHttpError(response);
       }
 
       return response.json();
@@ -446,6 +505,9 @@ const runAction = async (action: QueuedSyncAction) => {
             const errData = await createSessionRes.json();
             if (errData?.message) errorMsg = errData.message;
           } catch {}
+          if (createSessionRes.status === 429) {
+            throwHttpError(createSessionRes, 'Failed to create upload session');
+          }
           throw new Error(`Failed to create upload session: ${errorMsg}`);
         }
 
@@ -468,7 +530,7 @@ const runAction = async (action: QueuedSyncAction) => {
           return runAction(action);
         }
         if (!statusRes.ok) {
-          throw new Error(`Failed to query session status: ${statusRes.status}`);
+          throwHttpError(statusRes, 'Failed to query session status');
         }
         const statusData = await statusRes.json();
         payload.uploadedChunks = statusData.receivedChunks || [];
@@ -509,6 +571,9 @@ const runAction = async (action: QueuedSyncAction) => {
             const errData = await uploadChunkRes.json();
             if (errData?.message) errorMsg = errData.message;
           } catch {}
+          if (uploadChunkRes.status === 429) {
+            throwHttpError(uploadChunkRes, `Chunk ${index} upload failed`);
+          }
           throw new Error(`Chunk ${index} upload failed: ${errorMsg}`);
         }
 
@@ -532,6 +597,9 @@ const runAction = async (action: QueuedSyncAction) => {
           const errData = await finalizeRes.json();
           if (errData?.message) errorMsg = errData.message;
         } catch {}
+        if (finalizeRes.status === 429) {
+          throwHttpError(finalizeRes, 'Failed to finalize upload');
+        }
         throw new Error(`Failed to finalize upload: ${errorMsg}`);
       }
 
@@ -768,6 +836,7 @@ export const flushPendingNetworkActions = async (options?: {
         );
       } catch (error) {
         const isConflict = isConflictError(error);
+        const rateLimited = isRateLimitedError(error);
         const retryCount = action.retryCount + 1;
         const nextState: SyncActionState = isConflict
           ? 'conflict'
@@ -778,15 +847,26 @@ export const flushPendingNetworkActions = async (options?: {
         // In saver mode, use a longer backoff to reduce network usage
         const backoffMultiplier = isSaverMode ? SAVER_BACKOFF_MULTIPLIER : 1;
 
+        // Rate-limit backoff is distinct from battery/metered deferral:
+        // deferral only skips items during flush; this only advances nextRetryAt.
+        const rateLimitCount = rateLimited ? (action.rateLimitCount ?? 0) + 1 : 0;
+        const retryAfterMs =
+          error instanceof RateLimitedError ? error.retryAfterMs : null;
+
+        const delayMs = rateLimited
+          ? computeRateLimitBackoffMs(rateLimitCount, retryAfterMs, {
+              saverMode: isSaverMode,
+            })
+          : backoffDelayMs(retryCount) * backoffMultiplier;
+
         items = items.map((item) =>
           item.id === action.id
             ? {
                 ...item,
                 state: nextState,
                 retryCount,
-                nextRetryAt: new Date(
-                  Date.now() + backoffDelayMs(retryCount) * backoffMultiplier,
-                ).toISOString(),
+                rateLimitCount,
+                nextRetryAt: new Date(Date.now() + delayMs).toISOString(),
                 updatedAt: new Date().toISOString(),
                 lastError: toErrorMessage(error),
               }
@@ -826,7 +906,15 @@ export const requeueAction = async (actionId: string) => {
   const now = new Date().toISOString();
   const items = queueState.items.map((item) =>
     item.id === actionId
-      ? { ...item, state: 'pending' as SyncActionState, retryCount: 0, nextRetryAt: now, lastError: null, updatedAt: now }
+      ? {
+          ...item,
+          state: 'pending' as SyncActionState,
+          retryCount: 0,
+          rateLimitCount: 0,
+          nextRetryAt: now,
+          lastError: null,
+          updatedAt: now,
+        }
       : item,
   );
   await replaceQueueItems(items);

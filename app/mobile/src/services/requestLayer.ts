@@ -74,6 +74,83 @@ function isRetryable(status: number): boolean {
   return status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
+/**
+ * Parse a `Retry-After` header value into milliseconds.
+ * Supports delay-seconds and HTTP-date forms. Returns null when absent/invalid.
+ */
+export function parseRetryAfterMs(header: string | null | undefined): number | null {
+  if (header == null) {
+    return null;
+  }
+  const trimmed = String(header).trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      return null;
+    }
+    return Math.floor(seconds * 1000);
+  }
+
+  const dateMs = Date.parse(trimmed);
+  if (Number.isNaN(dateMs)) {
+    return null;
+  }
+  const delta = dateMs - Date.now();
+  return delta > 0 ? delta : 0;
+}
+
+/**
+ * Error thrown when the server responds with HTTP 429.
+ * Carries an optional Retry-After delay so callers (e.g. the sync queue)
+ * can schedule a respectful backoff instead of a generic retry.
+ */
+export class RateLimitedError extends Error {
+  readonly status = 429;
+  readonly retryAfterMs: number | null;
+
+  constructor(retryAfterMs: number | null = null, message = 'HTTP error! status: 429') {
+    super(message);
+    this.name = 'RateLimitedError';
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+export function isRateLimitedError(error: unknown): error is RateLimitedError {
+  if (error instanceof RateLimitedError) {
+    return true;
+  }
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    return msg.includes('429') || msg.includes('rate limit') || msg.includes('too many requests');
+  }
+  return false;
+}
+
+/**
+ * Delay for a rate-limited attempt inside the request layer.
+ * Respects Retry-After when present; extends on consecutive 429s so the
+ * schedule does not reset back to the short jittered default.
+ */
+function rateLimitDelayMs(
+  consecutiveRateLimits: number,
+  retryAfterMs: number | null,
+  attempt: number,
+): number {
+  const streak = Math.max(1, consecutiveRateLimits);
+  const jittered = backoffMs(attempt);
+  // Floor grows with consecutive 429s so repeated limits extend backoff.
+  const streakFloor = Math.min(200 * 2 ** streak, 10_000) * (streak > 1 ? streak : 1);
+
+  if (retryAfterMs != null) {
+    return Math.max(retryAfterMs, streak > 1 ? streakFloor : 0, streak > 1 ? jittered : 0);
+  }
+  return Math.max(jittered, streakFloor);
+}
+
 // ── Core request function ────────────────────────────────────────────────
 
 export interface ApiResponse<T> {
@@ -122,6 +199,8 @@ export async function apiRequest<T = unknown>(
 
   let lastError: Error | null = null;
   let retries = 0;
+  let consecutiveRateLimits = 0;
+  let lastRetryAfterMs: number | null = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const controller = new AbortController();
@@ -151,20 +230,47 @@ export async function apiRequest<T = unknown>(
           'api',
         );
 
+        if (response.status === 429) {
+          consecutiveRateLimits += 1;
+          lastRetryAfterMs = parseRetryAfterMs(response.headers?.get?.('Retry-After'));
+        } else {
+          consecutiveRateLimits = 0;
+          lastRetryAfterMs = null;
+        }
+
         if (isRetryable(response.status) && attempt < maxRetries) {
           retries++;
-          const delay = backoffMs(attempt);
+          const delay =
+            response.status === 429
+              ? rateLimitDelayMs(consecutiveRateLimits, lastRetryAfterMs, attempt)
+              : backoffMs(attempt);
           structuredLogger.info(
             'api.request.retry_scheduled',
-            { url, method, attempt, delayMs: delay, status: response.status, correlationId },
+            {
+              url,
+              method,
+              attempt,
+              delayMs: delay,
+              status: response.status,
+              retryAfterMs: lastRetryAfterMs,
+              consecutiveRateLimits,
+              correlationId,
+            },
             'api',
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
 
+        if (response.status === 429) {
+          throw new RateLimitedError(lastRetryAfterMs, errText);
+        }
+
         throw new Error(errText);
       }
+
+      consecutiveRateLimits = 0;
+      lastRetryAfterMs = null;
 
       const data: T = await response.json();
 
@@ -179,6 +285,10 @@ export async function apiRequest<T = unknown>(
       return { ok: true, status: response.status, data, retries };
     } catch (error) {
       clearTimeout(deadlineTimer);
+      if (error instanceof RateLimitedError) {
+        lastError = error;
+        break;
+      }
       lastError = error instanceof Error ? error : new Error(String(error));
 
       structuredLogger.warn(
