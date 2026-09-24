@@ -373,6 +373,10 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
                     <Text style={styles.modalValue}>{selectedAction.id}</Text>
                   </View>
                   <View style={styles.modalRow}>
+                    <Text style={styles.modalLabel}>{t('submissionQueue.correlationId')}</Text>
+                    <Text style={styles.modalValue}>{selectedAction.correlationId ?? '—'}</Text>
+                  </View>
+                  <View style={styles.modalRow}>
                     <Text style={styles.modalLabel}>{t('submissionQueue.type')}</Text>
                     <Text style={styles.modalValue}>
                       {ACTION_LABELS[selectedAction.type] ?? selectedAction.type}

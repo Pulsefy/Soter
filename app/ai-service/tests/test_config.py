@@ -21,6 +21,7 @@ _ISOLATED_ENV_KEYS = (
     "PROOF_OF_LIFE_MIN_FACE_SIZE",
     "LLM_TIMEOUT_SECONDS",
     "CACHE_TTL_TASK_STATUS",
+    "ASYNC_JOB_IDLE_TIMEOUT_SECONDS",
     "PORT",
 )
 
@@ -131,6 +132,26 @@ def test_validate_configuration_passes_with_all_defaults():
     settings = Settings(_env_file=None)
 
     settings.validate_configuration()
+
+
+def test_async_job_idle_timeout_defaults_to_configurable_window(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+
+    assert settings.async_job_idle_timeout_seconds == 600.0
+    settings.validate_configuration()
+
+
+def test_non_positive_async_job_idle_timeout_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    monkeypatch.setenv("ASYNC_JOB_IDLE_TIMEOUT_SECONDS", "0")
+
+    settings = Settings(_env_file=None)
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        settings.validate_configuration()
+
+    assert "ASYNC_JOB_IDLE_TIMEOUT_SECONDS" in str(excinfo.value)
 
 
 def test_missing_and_malformed_keys_reported_together(monkeypatch):

@@ -137,3 +137,35 @@ python regression_harness/run_accuracy_harness.py --update-baseline
 ```
 
 Then commit the updated `baseline_metrics.json` together with the change that caused the metrics to move.
+
+## Confidence Calibration Report
+
+Accuracy alone does not say whether the service *knows* when it is right. The same harness run also produces a **confidence calibration report**: every golden case is bucketed by the confidence the service reported for its predicted verdict, and each bucket's mean stated confidence is compared against its measured accuracy.
+
+- A band whose accuracy is far from its stated confidence is **flagged** as miscalibrated (overconfident or underconfident), not merely tabulated.
+- The report is written automatically on every harness run to `reports/confidence_calibration.md` (repo root), alongside the existing `reports/fraud_threshold_calibration.md`, and the full calibration JSON is embedded in the `--output` report under the `calibration` key.
+- The case-weighted expected calibration error and the maximum band error are reported as aggregate numbers; a band is flagged when `abs(mean_confidence - accuracy)` exceeds the tolerance (default `0.2`).
+
+```bash
+# Regenerate the committed reference report
+python regression_harness/run_accuracy_harness.py
+
+# Fail the run (exit code 3) when a band is miscalibrated, for stricter gates
+python regression_harness/run_accuracy_harness.py --fail-on-miscalibration
+
+# Write the Markdown reference report somewhere else
+python regression_harness/run_accuracy_harness.py --calibration-report /tmp/calibration.md
+```
+
+Re-run the harness after any change to the verification logic or the golden set, and commit the regenerated `reports/confidence_calibration.md` with the change. By default miscalibration is reported and flagged but does not change the exit code, so the scheduled regression job keeps failing only on accuracy regressions; pass `--fail-on-miscalibration` where a hard gate is wanted.
+
+## Scheduled Regression Runs
+
+`.github/workflows/ai-regression.yml` runs the harness daily at 06:00 UTC and also supports manual dispatch.
+It executes the current `HumanitarianPromptEngine` code with the deterministic fixture provider, so scheduled runs are offline and reproducible while still exercising the active prompt-building implementation.
+
+Each run writes `regression-report.json`, compares it with the committed baseline, adds the result to the GitHub Actions job summary, and uploads the report as a 90-day artifact named `ai-regression-<run-id>`.
+The retained artifacts provide a historical accuracy trend across scheduled runs.
+
+The job fails and triggers the repository's normal GitHub Actions failure notifications only when accuracy or a per-class precision, recall, or F1 metric drops below the baseline beyond the tolerance.
+Metric improvements do not trigger an alert.

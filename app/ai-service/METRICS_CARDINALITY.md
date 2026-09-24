@@ -57,6 +57,7 @@ for the tests that enforce it.
 | `pipeline_step_latency_seconds` | Histogram | `step_name` | Fixed literals: `preprocess`, `ocr`, `scrub`, `verify` | One call site each, all hardcoded. |
 | `job_cancelled_total` | Counter | `task_type` | Fixed enum (2): `unknown`, `inference` | Computed as a local variable in `api/v1/inference.py`, not read from the client payload — different from `INFERENCE_LATENCY`'s bug above. |
 | `job_expired_total` | Counter | `task_type` | Same as above | |
+| `job_idle_timeout_total` (`JOB_IDLE_TIMEOUT_TOTAL`, issue #1208) | Counter | `task_type` | **Bounded via `bounded_task_type`** | Read from the `task_type` recorded on the task at creation (`tasks.create_task`); for inference tasks that value originates from the client-supplied `InferenceRequest.type`, so it is routed through `bounded_task_type` before reaching `.labels()` (anything outside the known set collapses to `"other"`). |
 | `cache_invalidation_total` | Counter | `reason` | Fixed literals: `task_status`, `artifact_access`, `artifact_updated`, `model_version_changed`, `all` | |
 | `upload_purge_items_total` | Counter | `kind` | Fixed literals: `session`, `artifact` | |
 | `upload_purge_bytes_reclaimed_total` | Counter | `kind` | Same as above | |

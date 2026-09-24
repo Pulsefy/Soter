@@ -136,6 +136,11 @@ JOB_CANCELLED_TOTAL = Counter(
     "job_cancelled_total", "Total jobs cancelled", ["task_type"]
 )
 JOB_EXPIRED_TOTAL = Counter("job_expired_total", "Total jobs expired", ["task_type"])
+JOB_IDLE_TIMEOUT_TOTAL = Counter(
+    "job_idle_timeout_total",
+    "Total jobs marked timed out after waiting for a worker past the idle window",
+    ["task_type"],
+)
 
 # Cache invalidation metrics
 CACHE_INVALIDATION_TOTAL = Counter(

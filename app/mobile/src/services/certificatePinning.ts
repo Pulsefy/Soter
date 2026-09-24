@@ -12,27 +12,89 @@ import { structuredLogger } from './logger';
  * Error codes for certificate pinning failures.
  */
 export enum CertificatePinningErrorCode {
+  /** Presented key matched none of the configured pins, including backups. */
+  NO_VALID_BACKUP_PIN = 'NO_VALID_BACKUP_PIN',
+  /** Pin mismatch reported without a configured backup set to exhaust. */
   PIN_MISMATCH = 'PIN_MISMATCH',
 }
 
+const ERROR_MESSAGES: Record<CertificatePinningErrorCode, (hostname: string) => string> = {
+  [CertificatePinningErrorCode.NO_VALID_BACKUP_PIN]: (hostname) =>
+    `Secure connection to ${hostname} was refused because neither the current certificate pin nor a backup pin matched the server. This is a certificate rotation lockout, not a general network failure. Update the app to a build that includes the new pin before trying again.`,
+  [CertificatePinningErrorCode.PIN_MISMATCH]: (hostname) =>
+    `Secure connection to ${hostname} could not be verified: the server's certificate does not match Soter's pinned keys. This may indicate a network attack. Please try again on a trusted network.`,
+};
+
 /**
  * Thrown in place of a generic network error when a request failed because
- * the server's certificate did not match one of our pinned public keys.
+ * the server's certificate did not match a pinned public key.
+ *
+ * `NO_VALID_BACKUP_PIN` is the rotation/expiry case: every shipped pin,
+ * including backups, was rejected. `PIN_MISMATCH` is the attack-shaped
+ * failure used when a backup set was not part of the decision.
  */
 export class CertificatePinningError extends Error {
   public readonly code: CertificatePinningErrorCode;
   public readonly hostname: string;
 
-  constructor(hostname: string) {
-    super(
-      `Secure connection to ${hostname} could not be verified: the server's certificate does not match Soter's pinned keys. This may indicate a network attack. Please try again on a trusted network.`,
-    );
+  constructor(hostname: string, code: CertificatePinningErrorCode = CertificatePinningErrorCode.PIN_MISMATCH) {
+    super(ERROR_MESSAGES[code](hostname));
     this.name = 'CertificatePinningError';
-    this.code = CertificatePinningErrorCode.PIN_MISMATCH;
+    this.code = code;
     this.hostname = hostname;
     Object.setPrototypeOf(this, CertificatePinningError.prototype);
   }
 }
+
+/** First configured hash is the live certificate; the rest are backups. */
+export type PinEvaluation =
+  | { outcome: 'primary' }
+  | { outcome: 'backup'; backupIndex: number }
+  | { outcome: 'no_valid_pin' };
+
+/**
+ * Compare a presented SPKI hash to the configured pin set.
+ * A match on any backup pin is success: one rotation must not lock users out.
+ * A match on none of the pins is `no_valid_pin`.
+ */
+export const evaluatePresentedPin = (presentedHash: string, hashes: readonly string[]): PinEvaluation => {
+  if (hashes.length > 0 && hashes[0] === presentedHash) {
+    return { outcome: 'primary' };
+  }
+
+  const backupIndex = hashes.slice(1).findIndex((hash) => hash === presentedHash);
+  if (backupIndex >= 0) {
+    return { outcome: 'backup', backupIndex };
+  }
+
+  return { outcome: 'no_valid_pin' };
+};
+
+/**
+ * Accept a presented certificate when the primary pin or a backup pin matches.
+ * Throws `CertificatePinningError` with `NO_VALID_BACKUP_PIN` when nothing matches.
+ */
+export const acceptPresentedPin = (
+  hostname: string,
+  presentedHash: string,
+  hashes: readonly string[],
+): PinEvaluation => {
+  const evaluation = evaluatePresentedPin(presentedHash, hashes);
+
+  if (evaluation.outcome === 'backup') {
+    structuredLogger.warn(
+      'certificate_pinning.backup_pin_accepted',
+      { hostname, backupIndex: evaluation.backupIndex },
+      'certificatePinning',
+    );
+  }
+
+  if (evaluation.outcome === 'no_valid_pin') {
+    throw new CertificatePinningError(hostname, CertificatePinningErrorCode.NO_VALID_BACKUP_PIN);
+  }
+
+  return evaluation;
+};
 
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '10.0.2.2', '::1']);
 
@@ -45,6 +107,9 @@ const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '10.0.2.2', '::1']
 const PIN_ERROR_ATTRIBUTION_WINDOW_MS = 5000;
 
 const recentPinErrorsByHostname = new Map<string, number>();
+
+/** Pin set from the last successful initialization, keyed by hostname. */
+const activePinsByHostname = new Map<string, readonly string[]>();
 
 /**
  * Extract the hostname from a URL, returning null if the URL is malformed.
@@ -128,6 +193,7 @@ export const initializeCertificatePinning = async (appConfig: AppConfig = config
 
   try {
     await initializeSslPinning(options);
+    activePinsByHostname.set(hostname, appConfig.certPinHashes);
   } catch (error) {
     structuredLogger.error(
       'certificate_pinning.initialize_failed',
@@ -149,7 +215,14 @@ export const guardAgainstPinningFailure = (url: string, error: unknown): never =
     const reportedAt = recentPinErrorsByHostname.get(hostname);
     if (reportedAt != null && Date.now() - reportedAt <= PIN_ERROR_ATTRIBUTION_WINDOW_MS) {
       recentPinErrorsByHostname.delete(hostname);
-      throw new CertificatePinningError(hostname);
+      const pins = activePinsByHostname.get(hostname) ?? [];
+      // Native pinning already accepts any configured hash. An error event
+      // means the primary pin and every backup pin were rejected.
+      const code =
+        pins.length >= 2
+          ? CertificatePinningErrorCode.NO_VALID_BACKUP_PIN
+          : CertificatePinningErrorCode.PIN_MISMATCH;
+      throw new CertificatePinningError(hostname, code);
     }
   }
 

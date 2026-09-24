@@ -6,7 +6,7 @@ export type RootStackParamList = {
   AidOverview: undefined;
   AidDetails: { aidId: string };
   EvidenceUpload: { aidId: string };
-  ClaimReceipt: { claimId: string };
+  ClaimReceipt: { claimId?: string; packageId?: string };
   Settings: undefined;
   Scanner: undefined;
   BulkScanner: undefined;

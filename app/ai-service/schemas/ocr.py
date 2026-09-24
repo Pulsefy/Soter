@@ -97,6 +97,14 @@ class LanguageHint(str, Enum):
     jpn = "jpn"
 
 
+class OCRConfidenceBand(str, Enum):
+    """Reliability band derived from the configured OCR thresholds."""
+
+    high = "high"
+    medium = "medium"
+    low = "low"
+
+
 class OCRFieldResult(BaseModel):
     value: str = Field(examples=["John Doe"])
     confidence: float = Field(0.0, examples=[0.95])
@@ -117,6 +125,45 @@ class OCRData(BaseModel):
     )
     raw_text: str = Field(examples=["John Doe\nID: 123456789"])
     processing_time_ms: int = Field(examples=[1500])
+    # Confidence banding / manual-review routing (issue #984). A result whose
+    # aggregate confidence is below the active review threshold (or that
+    # carries no confidence at all) is flagged with ``needs_review=True`` so
+    # the backend can send it to a human instead of trusting it blindly.
+    confidence: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Mean confidence across the detected fields, or null when no "
+            "field carried a confidence value."
+        ),
+        examples=[0.91],
+    )
+    confidence_band: Optional[OCRConfidenceBand] = Field(
+        None,
+        description="high/medium/low band derived from the configured thresholds.",
+        examples=["high"],
+    )
+    needs_review: bool = Field(
+        False,
+        description=(
+            "True when the extraction is missing confidence or falls below "
+            "the review threshold; a human should verify the document."
+        ),
+        examples=[False],
+    )
+    review_threshold: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Review threshold in force for this document type.",
+        examples=[0.75],
+    )
+    document_type: Optional[str] = Field(
+        None,
+        description="Document type used to select the review threshold, when supplied.",
+        examples=["id_card"],
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -128,6 +175,11 @@ class OCRData(BaseModel):
                     },
                     "raw_text": "John Doe\nID: 123456789",
                     "processing_time_ms": 1500,
+                    "confidence": 0.925,
+                    "confidence_band": "high",
+                    "needs_review": False,
+                    "review_threshold": 0.75,
+                    "document_type": "id_card",
                 }
             ]
         }

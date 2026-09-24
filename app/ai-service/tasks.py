@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 from celery import Celery
 from celery.result import AsyncResult
 from celery.schedules import crontab
+from celery.states import PENDING as STATE_PENDING
 import httpx
 
 import metrics
@@ -175,7 +176,11 @@ humanitarian_verification_service = HumanitarianVerificationService()
 
 
 def update_task_status(
-    task_id: str, status: str, result: Optional[Any] = None, error: Optional[str] = None
+    task_id: str,
+    status: str,
+    result: Optional[Any] = None,
+    error: Optional[str] = None,
+    task_type: Optional[str] = None,
 ) -> None:
     """
     Update the status of a background task
@@ -185,12 +190,14 @@ def update_task_status(
         status: Current status (pending, processing, completed, failed)
         result: Task result data (if completed)
         error: Error message (if failed)
+        task_type: Task type recorded at creation, kept for idle-timeout metrics
     """
     task_results[task_id] = {
         "status": status,
         "result": result,
         "error": error,
         "updated_at": time.time(),
+        **({"task_type": task_type} if task_type is not None else {}),
     }
 
 
@@ -407,6 +414,7 @@ def _process_ocr(payload: Dict[str, Any]) -> Dict[str, Any]:
             image_base64,
             payload.get("anchor_metadata"),
             language_hint=payload.get("language_hint"),
+            document_type=payload.get("document_type"),
         ),
     }
 
@@ -553,6 +561,13 @@ def get_task_status(task_id: str) -> Dict[str, Any]:
     """
     Get the status of a background task
 
+    A task that is still queued when the broker reports it as never started
+    and has waited longer than ``settings.async_job_idle_timeout_seconds``
+    is transitioned to the terminal ``timed_out`` state here, so callers see
+    why the job will never run instead of polling ``pending`` forever
+    (issue #1208). Tasks a worker has already started are never idle-timed-
+    out, no matter how long they run.
+
     Args:
         task_id: Unique identifier for the task
 
@@ -566,6 +581,7 @@ def get_task_status(task_id: str) -> Dict[str, Any]:
         "retrying",
         "cancelled",
         "expired",
+        "timed_out",
     }:
         return {
             "task_id": task_id,
@@ -588,6 +604,17 @@ def get_task_status(task_id: str) -> Dict[str, Any]:
                 "status": "processing",
             }
         else:
+            # The broker has not handed this task to a worker. Celery reports
+            # PENDING only for a message no worker has received yet; a task
+            # between retry attempts reports RETRY and one a worker holds
+            # reports STARTED - neither is idle, so only PENDING may time out.
+            if celery_result.state == STATE_PENDING and _mark_idle_timeout_if_expired(
+                task_id, local_status
+            ):
+                return {
+                    "task_id": task_id,
+                    **task_results[task_id],
+                }
             return {
                 "task_id": task_id,
                 "status": "pending",
@@ -600,6 +627,64 @@ def get_task_status(task_id: str) -> Dict[str, Any]:
         return {"task_id": task_id, **local_status}
 
     return {"task_id": task_id, "status": "not_found"}
+
+
+def _mark_idle_timeout_if_expired(
+    task_id: str, local_status: Optional[Dict[str, Any]]
+) -> bool:
+    """
+    Transition a still-queued task to ``timed_out`` once it has waited past
+    the configured idle window without a worker picking it up.
+
+    Only tasks whose local status is still ``pending`` qualify: a job that
+    is actively processing (or waiting out a retry) never reaches this
+    check, so a slow job is distinct from an idle one. The Celery task is
+    revoked best-effort so a worker cannot pick it up after the caller has
+    been told it timed out, and ``metrics.JOB_IDLE_TIMEOUT_TOTAL`` records
+    the occurrence separately from completion, cancellation and expiry.
+
+    Returns:
+        bool: True when this call transitioned the task to ``timed_out``.
+    """
+    if not local_status or local_status.get("status") != "pending":
+        return False
+
+    queued_at = local_status.get("updated_at")
+    if queued_at is None:
+        return False
+
+    idle_window = settings.async_job_idle_timeout_seconds
+    idle_seconds = time.time() - queued_at
+    if idle_seconds < idle_window:
+        return False
+
+    logger.warning(
+        "Task %s idle-timed-out after %.1fs queued without a worker "
+        "(idle window %.1fs)",
+        task_id,
+        idle_seconds,
+        idle_window,
+    )
+
+    try:
+        AsyncResult(task_id, app=get_celery_app()).revoke(terminate=True)
+    except Exception as exc:
+        logger.warning(f"Failed to revoke idle-timed-out task {task_id}: {exc}")
+
+    update_task_status(
+        task_id,
+        "timed_out",
+        error=(
+            "Job was not picked up by a worker within "
+            f"{idle_window:g} seconds and was abandoned"
+        ),
+    )
+    metrics.JOB_IDLE_TIMEOUT_TOTAL.labels(
+        task_type=metrics.bounded_task_type(
+            local_status.get("task_type") or metrics.OTHER_TASK_TYPE_LABEL
+        )
+    ).inc()
+    return True
 
 
 def create_task(task_type: str, payload: Dict[str, Any]) -> str:
@@ -616,7 +701,7 @@ def create_task(task_type: str, payload: Dict[str, Any]) -> str:
     task_id = str(uuid.uuid4())
 
     # Initialize task status
-    update_task_status(task_id, "pending")
+    update_task_status(task_id, "pending", task_type=task_type)
 
     ensure_queue_capacity()
 

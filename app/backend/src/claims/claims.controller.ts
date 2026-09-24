@@ -258,7 +258,7 @@ export class ClaimsController {
     @Param('id') id: string,
     @Request() req: ExpressRequest,
   ): Promise<ClaimReceiptDto> {
-    const claim = await this.claimsService.findOne(id);
+    const claim = await this.claimsService.resolveClaimByIdentifier(id);
     this.ensureOrgAccess(req.user, claim);
     return this.claimsService.getReceipt(id);
   }

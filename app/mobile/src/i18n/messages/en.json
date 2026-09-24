@@ -267,6 +267,7 @@
     "inspectItem": "Inspect Submission Item",
     "actionDetails": "Action Details",
     "actionId": "Action ID:",
+    "correlationId": "Correlation ID:",
     "type": "Type:",
     "created": "Created:",
     "lastUpdated": "Last Updated:",

@@ -65,6 +65,16 @@ cd app/frontend
 pnpm install
 ```
 
+### Distribution map performance
+
+The map targets at most 250 rendered markers, including clusters, for a 10,000-point dataset. It only clusters points in the padded Leaflet viewport and keeps marker components keyed and memoized across filter changes. Override the target with `NEXT_PUBLIC_MAP_TARGET_MARKERS`; tune the zoom thresholds with `NEXT_PUBLIC_MAP_GRID_WORLD`, `NEXT_PUBLIC_MAP_GRID_REGIONAL`, `NEXT_PUBLIC_MAP_GRID_LOCAL`, and `NEXT_PUBLIC_MAP_GRID_DETAIL`.
+
+Run the large-fixture regression check with:
+
+```bash
+pnpm test -- --runInBand src/components/dashboard/__tests__/AidDistributionMap.performance.test.ts
+```
+
 ### Environment Setup
 
 1. Copy the example environment file:

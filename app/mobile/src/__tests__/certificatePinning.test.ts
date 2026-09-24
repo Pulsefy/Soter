@@ -1,6 +1,8 @@
 import type { AppConfig } from '../config';
 import {
   CertificatePinningError,
+  CertificatePinningErrorCode,
+  acceptPresentedPin,
   getHostnameFromUrl,
   isLocalBackendHostname,
   initializeCertificatePinning,
@@ -128,6 +130,31 @@ describe('certificatePinning', () => {
       expect(() => guardAgainstPinningFailure('https://api.soter.org/health', original)).toThrow(
         CertificatePinningError,
       );
+      try {
+        guardAgainstPinningFailure('https://api.soter.org/health', original);
+      } catch (error) {
+        expect(error).toBe(original);
+      }
+    });
+
+    it('uses NO_VALID_BACKUP_PIN when primary and backup pins were both rejected', async () => {
+      await initializeCertificatePinning(baseConfig);
+      const errorListener = mockAddSslPinningErrorListener.mock.calls[0][0] as (error: {
+        serverHostname: string;
+      }) => void;
+
+      errorListener({ serverHostname: 'api.soter.org' });
+
+      try {
+        guardAgainstPinningFailure('https://api.soter.org/health', new Error('Network request failed'));
+        throw new Error('expected pin failure');
+      } catch (error) {
+        expect(error).toBeInstanceOf(CertificatePinningError);
+        const pinningError = error as CertificatePinningError;
+        expect(pinningError.code).toBe(CertificatePinningErrorCode.NO_VALID_BACKUP_PIN);
+        expect(pinningError.message).toContain('backup pin');
+        expect(pinningError.message).not.toContain('Network request failed');
+      }
     });
 
     it('does not attribute a pin mismatch on a different host', async () => {
@@ -154,6 +181,30 @@ describe('certificatePinning', () => {
 
       const original = new Error('Network request failed');
       expect(() => guardAgainstPinningFailure('https://api.soter.org/health', original)).toThrow(original);
+    });
+  });
+
+  describe('acceptPresentedPin', () => {
+    it('accepts a backup pin when the primary pin does not match', () => {
+      const evaluation = acceptPresentedPin('api.soter.org', 'backup-hash==', [
+        'primary-hash==',
+        'backup-hash==',
+      ]);
+
+      expect(evaluation).toEqual({ outcome: 'backup', backupIndex: 0 });
+    });
+
+    it('throws NO_VALID_BACKUP_PIN when the presented key matches no pin', () => {
+      expect(() => acceptPresentedPin('api.soter.org', 'rotated-unknown==', ['primary-hash==', 'backup-hash=='])).toThrow(
+        CertificatePinningError,
+      );
+
+      try {
+        acceptPresentedPin('api.soter.org', 'rotated-unknown==', ['primary-hash==', 'backup-hash==']);
+      } catch (error) {
+        expect(error).toBeInstanceOf(CertificatePinningError);
+        expect((error as CertificatePinningError).code).toBe(CertificatePinningErrorCode.NO_VALID_BACKUP_PIN);
+      }
     });
   });
 });

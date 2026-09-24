@@ -28,6 +28,7 @@ from schemas.ocr import (
     LanguageHint,
 )
 from schemas.common import ResultEnvelope
+from services.ocr_confidence import assess_confidence
 from services.ocr_job import run_ocr_from_bytes
 from services.ocr_batch_store import (
     BatchOCRError,
@@ -69,6 +70,15 @@ async def process_ocr(
     language_hint: Annotated[
         Optional[LanguageHint], Form(description="Language hint for OCR")
     ] = None,
+    document_type: Annotated[
+        Optional[str],
+        Form(
+            description=(
+                "Optional document type (e.g. id_card, passport) used to pick "
+                "a per-document-type review threshold"
+            )
+        ),
+    ] = None,
 ) -> ResultEnvelope[OCRData]:
     """Extract text fields from an uploaded document image."""
     start_time = time.time()
@@ -102,6 +112,7 @@ async def process_ocr(
             contents,
             anchor_metadata,
             language_hint=language_hint.value if language_hint else None,
+            document_type=document_type,
         )
 
         from main import correlation_id_var
@@ -109,17 +120,32 @@ async def process_ocr(
         ocr_data = (
             OCRData(**raw["data"]) if isinstance(raw["data"], dict) else raw["data"]
         )
-        fields = ocr_data.fields
-        avg_confidence: Optional[float] = (
-            round(sum(f.confidence for f in fields.values()) / len(fields), 4)
-            if fields
-            else None
-        )
+
+        confidence = raw.get("confidence")
+        if confidence is None:
+            fields = ocr_data.fields
+            confidence = (
+                round(sum(f.confidence for f in fields.values()) / len(fields), 4)
+                if fields
+                else None
+            )
+        needs_review = raw.get("needs_review")
+        review_reasons = raw.get("review_reasons")
+        if needs_review is None:
+            # Defensive fallback for callers that still hand back a bare
+            # result dict: derive the banding from the field confidences.
+            assessment = assess_confidence(
+                [field.confidence for field in ocr_data.fields.values()],
+                document_type=document_type,
+            )
+            needs_review = assessment.needs_review
+            review_reasons = assessment.reasons
+        reasons = list(review_reasons) if needs_review and review_reasons else None
 
         return ResultEnvelope[OCRData](
             result=ocr_data,
-            confidence=avg_confidence,
-            reasons=None,
+            confidence=confidence,
+            reasons=reasons,
             anchor_metadata=raw.get("anchor_metadata"),
             trace_id=correlation_id_var.get() or None,
         )
@@ -337,6 +363,15 @@ async def queue_ocr_job(
     language_hint: Annotated[
         Optional[LanguageHint], Form(description="Language hint for OCR")
     ] = None,
+    document_type: Annotated[
+        Optional[str],
+        Form(
+            description=(
+                "Optional document type (e.g. id_card, passport) used to pick "
+                "a per-document-type review threshold"
+            )
+        ),
+    ] = None,
 ) -> QueuedOCRResponse:
     """Queue OCR processing and return immediately with a pollable job URL."""
     if image.content_type not in ALLOWED_CONTENT_TYPES:
@@ -371,6 +406,7 @@ async def queue_ocr_job(
             "filename": image.filename,
             "anchor_metadata": anchor_metadata,
             "language_hint": language_hint.value if language_hint else None,
+            "document_type": document_type,
         },
     )
 
@@ -525,12 +561,15 @@ def _refresh_document(batch_id: str, document: OCRBatchDocument) -> None:
                 "message": str(info.get("error") or "OCR job failed"),
             },
         )
-    elif task_state in ("cancelled", "expired"):
+    elif task_state in ("cancelled", "expired", "timed_out"):
         ocr_batch_store.update_document(
             batch_id,
             document.document_id,
             status="failed",
-            error={"code": f"job_{task_state}", "message": f"OCR job {task_state}"},
+            error={
+                "code": f"job_{task_state}",
+                "message": f"OCR job {task_state.replace('_', ' ')}",
+            },
         )
     elif task_state in ("processing", "retrying"):
         ocr_batch_store.update_document(

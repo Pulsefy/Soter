@@ -8,7 +8,7 @@
  */
 
 import { config } from '../config';
-import { structuredLogger } from './logger';
+import { buildCorrelationHeaders, structuredLogger } from './logger';
 
 const API_URL = config.apiUrl;
 const API_KEY = config.apiKey;
@@ -33,6 +33,13 @@ export interface RequestConfig {
    * method is not GET/DELETE, a UUID-v4 is generated automatically.
    */
   idempotencyKey?: string;
+  /**
+   * Explicit correlation id for this request (e.g. a sync queue item's
+   * correlation id).  When omitted, the session-wide logger correlation
+   * id is used.  The id is sent as `x-correlation-id` / `x-request-id`
+   * request headers and stamped on every log line for this request.
+   */
+  correlationId?: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -179,16 +186,18 @@ export async function apiRequest<T = unknown>(
     maxRetries = 3,
     deadlineMs = 30_000,
     idempotencyKey,
+    correlationId: explicitCorrelationId,
   } = cfg;
 
   const url = `${API_URL}${path}`;
-  const correlationId = structuredLogger.getCurrentCorrelationId();
+  const correlationId = explicitCorrelationId ?? structuredLogger.getCurrentCorrelationId();
   const isIdempotent = IDEMPOTENT_METHODS.has(method);
   const effectiveIdempotencyKey = isIdempotent ? undefined : (idempotencyKey ?? uuidV4());
 
   const baseHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     ...extraHeaders,
+    ...buildCorrelationHeaders(correlationId),
   };
   if (effectiveIdempotencyKey) {
     baseHeaders['Idempotency-Key'] = effectiveIdempotencyKey;

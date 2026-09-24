@@ -182,7 +182,9 @@ async def get_task_status(task_id: str):
     Get the current status of a background inference task.
 
     Poll this endpoint after creating a task. Possible status values:
-    ``pending``, ``processing``, ``completed``, ``failed``.
+    ``pending``, ``processing``, ``completed``, ``failed``, ``cancelled``,
+    ``expired``, ``timed_out``. A job still queued past the configured
+    idle window reports ``timed_out`` rather than ``pending`` forever.
 
     When completed, the result will include contract-aware metadata
     that can be anchored to on-chain events.
@@ -197,7 +199,9 @@ async def get_job_status(task_id: str):
 
     This is the canonical poll endpoint for backend clients. Possible
     status values: ``pending``, ``processing``, ``retrying``, ``completed``,
-    ``failed``, ``cancelled``.
+    ``failed``, ``cancelled``, ``expired``, ``timed_out``. A job that never
+    received a worker within the configured idle window reports
+    ``timed_out`` with an explanatory ``error``.
     """
     return await _get_task_status(task_id)
 

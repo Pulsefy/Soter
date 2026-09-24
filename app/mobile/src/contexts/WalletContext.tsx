@@ -8,6 +8,7 @@ import {
   openWalletConnectPairingUri,
   restoreWalletSession,
 } from '../services/walletConnect';
+import { confirmValueMovingAction } from '../services/valueActionConfirmation';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { detectWalletNetwork, WalletNetworkInfo } from '../services/networkGuard';
 
@@ -203,6 +204,16 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
 
   const disconnectWallet = async () => {
     const activeTopic = topic;
+
+    const confirmationResult = await confirmValueMovingAction('Confirm wallet disconnect');
+    if (!confirmationResult.ok) {
+      if (confirmationResult.reason === 'cancelled') {
+        return;
+      }
+      setError('Biometric confirmation failed. Please try again.');
+      return;
+    }
+
     resetWalletState();
 
     if (!activeTopic) return;
