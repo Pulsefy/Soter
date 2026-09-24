@@ -42,7 +42,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      # v4: Google stopped serving the deprecated `tools` SDK package, which
+      # v3's default install list still requested ("Failed to find package
+      # 'tools'" / sdkmanager exit 1 on newer runner images). v4 defaults to
+      # platform-tools only; emulator + system images are installed by the
+      # emulator-runner step below.
+      - uses: android-actions/setup-android@v4
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
