@@ -20,6 +20,24 @@ Or using uvicorn directly:
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+## API Reference
+
+The service exposes an interactive Swagger UI at `/docs` and serves its raw
+OpenAPI document at `/openapi.json`. A generated, browsable snapshot of that
+document is checked in at [`openapi.json`](openapi.json) so contributors and
+backend integrators can read request/response shapes without running the
+service.
+
+**Regenerating the snapshot** (do this whenever routes or schemas change):
+
+```bash
+python scripts/generate_openapi.py
+```
+
+CI (`openapi-drift` in the AI Service workflow) regenerates the document from
+the live app and fails if the committed `openapi.json` drifts, so keep the
+regenerated file in the same PR as the route change.
+
 ## API
 
 ### Health Check
