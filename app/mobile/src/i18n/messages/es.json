@@ -267,6 +267,7 @@
     "inspectItem": "Inspeccionar elemento de envío",
     "actionDetails": "Detalles de la acción",
     "actionId": "ID de acción:",
+    "correlationId": "ID de correlación:",
     "type": "Tipo:",
     "created": "Creado:",
     "lastUpdated": "Última actualización:",

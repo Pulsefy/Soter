@@ -25,6 +25,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
 import { config } from '../config';
 import { structuredLogger } from '../services/logger';
+import { getSyncQueueState } from '../services/syncQueue';
 import { useTranslation } from '../i18n/useTranslation';
 
 // Derive environment label from config
@@ -184,6 +185,23 @@ export const HealthScreen = () => {
           : 'Checking...';
 
     const recentLogs = structuredLogger.getDiagnosticsText(8);
+    let syncQueueSection = 'Sync Queue: none';
+    try {
+      const queueState = await getSyncQueueState();
+      if (queueState.items.length > 0) {
+        const queueLines = queueState.items
+          .map((item) => `- ${item.type} ${item.id} state=${item.state} correlationId=${item.correlationId ?? 'n/a'}`)
+          .join('\n');
+        syncQueueSection = `Sync Queue (${queueState.items.length} item${queueState.items.length === 1 ? '' : 's'}):\n${queueLines}`;
+      }
+    } catch (err) {
+      structuredLogger.warn(
+        'health.screen.diagnostics.queue_failed',
+        { error: err instanceof Error ? err.message : String(err) },
+        'HealthScreen',
+      );
+    }
+
     const diagnosticsText = `Soter App Diagnostics
 ---------------------
 App Version: ${appVersion}
@@ -197,6 +215,8 @@ Internet Reachable: ${formattedInternetReachable}
 Contract ID: ${config.sorobanContractId || 'None'}
 Correlation ID: ${structuredLogger.getCurrentCorrelationId()}
 Timestamp: ${new Date().toISOString()}
+
+${syncQueueSection}
 
 Structured logs:
 ${recentLogs}`;

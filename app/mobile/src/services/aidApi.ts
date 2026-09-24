@@ -54,8 +54,8 @@ export const fetchAidList = async (): Promise<AidItem[]> => {
 };
 
 /** Fetch detailed aid package info from the backend */
-export const fetchAidDetails = async (aidId: string): Promise<AidDetails> => {
-  const { data } = await apiGet<AidDetails>(`/aid/${aidId}`);
+export const fetchAidDetails = async (aidId: string, correlationId?: string): Promise<AidDetails> => {
+  const { data } = await apiGet<AidDetails>(`/aid/${aidId}`, { correlationId });
   return data;
 };
 
@@ -88,9 +88,10 @@ export const getMockAidList = (): AidItem[] => [
 ];
 
 /** Submit a claim to the backend with an idempotency key */
-export const submitClaim = async (claimId: string, idempotencyKey: string): Promise<unknown> => {
+export const submitClaim = async (claimId: string, idempotencyKey: string, correlationId?: string): Promise<unknown> => {
   const { data } = await apiPost(`/claims/${claimId}/submit`, undefined, {
     idempotencyKey,
+    correlationId,
   });
   return data;
 };
