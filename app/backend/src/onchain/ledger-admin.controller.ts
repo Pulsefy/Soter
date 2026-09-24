@@ -260,7 +260,7 @@ export class LedgerAdminController {
   @ApiOperation({
     summary: 'List stuck Soroban transactions',
     description:
-      'Returns Soroban transactions that have been in a non-terminal state (pending or submitted) longer than the configured threshold.',
+      'Returns Soroban transactions that have been in a non-terminal state (pending or submitted) longer than the configured threshold (STUCK_TRANSACTION_THRESHOLD_MS). Each transaction is classified as `retryable` (expected to self-heal on a future retry) or `terminal` (non-retryable / retries exhausted, requiring operator intervention).',
   })
   @ApiOkResponse({
     description: 'Stuck transactions retrieved successfully.',
@@ -269,7 +269,14 @@ export class LedgerAdminController {
         success: true,
         data: {
           stuckCount: 2,
+          retryableCount: 1,
+          terminalCount: 1,
           thresholdMs: 300000,
+          byOperation: {
+            create_claim: 1,
+            disburse_claim: 1,
+            init_escrow: 0,
+          },
           transactions: [
             {
               id: 'tx_123',
@@ -278,10 +285,30 @@ export class LedgerAdminController {
               errorType: 'network_timeout',
               lastError: 'timeout waiting for response',
               isRetryable: true,
+              attemptCount: 2,
+              maxAttempts: 5,
+              classification: 'retryable',
+              stuckAgeMs: 600000,
               updatedAt: '2026-08-25T20:00:00.000Z',
               createdAt: '2026-08-25T19:50:00.000Z',
               claimId: 'claim_456',
               correlationId: 'corr_789',
+            },
+            {
+              id: 'tx_456',
+              operation: 'disburse_claim',
+              status: 'submitted',
+              errorType: null,
+              lastError: 'NotAuthorized',
+              isRetryable: false,
+              attemptCount: 5,
+              maxAttempts: 5,
+              classification: 'terminal',
+              stuckAgeMs: 900000,
+              updatedAt: '2026-08-25T19:45:00.000Z',
+              createdAt: '2026-08-25T19:30:00.000Z',
+              claimId: 'claim_789',
+              correlationId: 'corr_790',
             },
           ],
         },

@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
 import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
 import { ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
 import { PrismaService } from '../prisma/prisma.service';
@@ -33,22 +34,25 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
     recordHistogram: jest.fn(),
   };
 
-  const mockConfigService = {
-    get: jest.fn((key: string, defaultValue?: string) => {
-      if (key === 'STUCK_TRANSACTION_THRESHOLD_MS') {
-        return '300000';
-      }
-      return defaultValue;
-    }),
-  };
-
   const mockOnchainAdapter = {
     createClaim: jest.fn(),
     disburse: jest.fn(),
     initEscrow: jest.fn(),
   };
 
-  beforeEach(async () => {
+  /**
+   * Builds the service with a specific STUCK_TRANSACTION_THRESHOLD_MS value so
+   * config parsing and fallback can be exercised.
+   */
+  const buildService = async (
+    threshold?: string,
+  ): Promise<SorobanTransactionLifecycleService> => {
+    const mockConfigService = {
+      get: jest.fn((key: string) =>
+        key === 'STUCK_TRANSACTION_THRESHOLD_MS' ? threshold : undefined,
+      ),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SorobanTransactionLifecycleService,
@@ -62,9 +66,31 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
       ],
     }).compile();
 
-    service = module.get<SorobanTransactionLifecycleService>(
+    return module.get<SorobanTransactionLifecycleService>(
       SorobanTransactionLifecycleService,
     );
+  };
+
+  const makeStuckTransaction = (
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> => ({
+    id: 'tx-1',
+    operation: SorobanOperationType.create_claim,
+    status: SorobanTransactionStatus.pending,
+    errorType: null,
+    lastError: null,
+    isRetryable: true,
+    attemptCount: 1,
+    maxAttempts: 5,
+    updatedAt: new Date(Date.now() - 310000),
+    createdAt: new Date(Date.now() - 400000),
+    claimId: 'claim-1',
+    correlationId: 'corr-1',
+    ...overrides,
+  });
+
+  beforeEach(async () => {
+    service = await buildService('300000');
   });
 
   afterEach(() => {
@@ -72,143 +98,158 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
   });
 
   describe('detectStuckTransactions', () => {
-    it('should detect transactions stuck in pending state past threshold', async () => {
-      const stuckTransaction = {
-        id: 'tx-1',
-        operation: SorobanOperationType.create_claim,
-        status: SorobanTransactionStatus.pending,
-        errorType: null,
-        lastError: null,
-        isRetryable: true,
-        updatedAt: new Date(Date.now() - 310000),
-        createdAt: new Date(Date.now() - 310000),
-        claimId: 'claim-1',
-        correlationId: 'corr-1',
-      };
+    it('scans only non-terminal transactions older than the configured threshold', async () => {
+      mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([]);
 
+      await service.detectStuckTransactions();
+
+      expect(
+        mockPrismaService.sorobanTransaction.findMany,
+      ).toHaveBeenCalledWith({
+        where: {
+          status: {
+            in: [
+              SorobanTransactionStatus.pending,
+              SorobanTransactionStatus.submitted,
+            ],
+          },
+          updatedAt: {
+            lt: expect.any(Date),
+          },
+        },
+        orderBy: {
+          updatedAt: 'asc',
+        },
+      });
+
+      // The cutoff must actually be `threshold` in the past, not "now".
+      const cutoff: Date =
+        mockPrismaService.sorobanTransaction.findMany.mock.calls[0][0].where
+          .updatedAt.lt;
+      const cutoffAgeMs = Date.now() - cutoff.getTime();
+      expect(cutoffAgeMs).toBeGreaterThanOrEqual(299000);
+      expect(cutoffAgeMs).toBeLessThanOrEqual(302000);
+    });
+
+    it('flags a pending transaction past the threshold and reports its age', async () => {
       mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([
-        stuckTransaction,
+        makeStuckTransaction(),
       ]);
 
       const result = await service.detectStuckTransactions();
 
       expect(result.stuckCount).toBe(1);
+      expect(result.thresholdMs).toBe(300000);
       expect(result.transactions).toHaveLength(1);
-      expect(result.transactions[0].id).toBe('tx-1');
+      expect(result.transactions[0]).toMatchObject({
+        id: 'tx-1',
+        status: SorobanTransactionStatus.pending,
+        classification: 'retryable',
+      });
+      expect(result.transactions[0].stuckAgeMs).toBeGreaterThanOrEqual(300000);
       expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
         'soroban_transaction_stuck_total',
         1,
       );
-      expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
-        'soroban_transaction_stuck_by_operation',
-        1,
-        { operation: 'create_claim' },
-      );
     });
 
-    it('should detect transactions stuck in submitted state past threshold', async () => {
-      const stuckTransaction = {
-        id: 'tx-2',
-        operation: SorobanOperationType.disburse_claim,
-        status: SorobanTransactionStatus.submitted,
-        errorType: RetryableErrorType.network_timeout,
-        lastError: 'timeout waiting for response',
-        isRetryable: true,
-        updatedAt: new Date(Date.now() - 400000),
-        createdAt: new Date(Date.now() - 400000),
-        claimId: 'claim-2',
-        correlationId: 'corr-2',
-      };
-
+    it('flags a submitted transaction carrying a retryable error', async () => {
       mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([
-        stuckTransaction,
+        makeStuckTransaction({
+          id: 'tx-2',
+          operation: SorobanOperationType.disburse_claim,
+          status: SorobanTransactionStatus.submitted,
+          errorType: RetryableErrorType.network_timeout,
+          lastError: 'timeout waiting for response',
+          claimId: 'claim-2',
+          correlationId: 'corr-2',
+        }),
       ]);
 
       const result = await service.detectStuckTransactions();
 
       expect(result.stuckCount).toBe(1);
-      expect(result.transactions[0].status).toBe('submitted');
-      expect(result.transactions[0].errorType).toBe('network_timeout');
+      expect(result.transactions[0].status).toBe(
+        SorobanTransactionStatus.submitted,
+      );
+      expect(result.transactions[0].errorType).toBe(
+        RetryableErrorType.network_timeout,
+      );
+      expect(result.transactions[0].classification).toBe('retryable');
+      expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
+        'soroban_transaction_stuck_by_class',
+        1,
+        { classification: 'retryable' },
+      );
     });
 
-    it('should not flag transactions in terminal states', async () => {
-      mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([]);
+    it('classifies a non-retryable transaction as terminal and escalates it', async () => {
+      const serviceLogger = (service as unknown as { logger: Logger }).logger;
+      const loggerErrorSpy = jest
+        .spyOn(serviceLogger, 'error')
+        .mockImplementation(() => undefined);
 
-      const result = await service.detectStuckTransactions();
-
-      expect(result.stuckCount).toBe(0);
-      expect(result.transactions).toHaveLength(0);
-    });
-
-    it('should not flag recently updated non-terminal transactions', async () => {
-      mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([]);
-
-      const result = await service.detectStuckTransactions();
-
-      expect(result.stuckCount).toBe(0);
-    });
-
-    it('should return empty result when no transactions are stuck', async () => {
-      mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([]);
-
-      const result = await service.detectStuckTransactions();
-
-      expect(result.stuckCount).toBe(0);
-      expect(result.transactions).toHaveLength(0);
-      expect(mockMetricsService.setGauge).not.toHaveBeenCalled();
-    });
-
-    it('should aggregate stuck counts by operation type', async () => {
-      const stuckTransactions = [
-        {
-          id: 'tx-1',
-          operation: SorobanOperationType.create_claim,
-          status: SorobanTransactionStatus.pending,
+      mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([
+        makeStuckTransaction({
+          isRetryable: false,
+          lastError: 'NotAuthorized',
           errorType: null,
-          lastError: null,
-          isRetryable: true,
-          updatedAt: new Date(Date.now() - 310000),
-          createdAt: new Date(Date.now() - 310000),
-          claimId: 'claim-1',
-          correlationId: 'corr-1',
-        },
-        {
+        }),
+      ]);
+
+      const result = await service.detectStuckTransactions();
+
+      expect(result.stuckCount).toBe(1);
+      expect(result.terminalCount).toBe(1);
+      expect(result.retryableCount).toBe(0);
+      expect(result.transactions[0].classification).toBe('terminal');
+      expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
+        'soroban_transaction_stuck_by_class',
+        1,
+        { classification: 'terminal' },
+      );
+      // Terminal transactions get an explicit operator escalation.
+      expect(loggerErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('operator intervention'),
+        expect.objectContaining({ transactionIds: ['tx-1'] }),
+      );
+
+      loggerErrorSpy.mockRestore();
+    });
+
+    it('classifies a transaction whose retries are exhausted as terminal', async () => {
+      mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([
+        makeStuckTransaction({ isRetryable: true, attemptCount: 5 }),
+      ]);
+
+      const result = await service.detectStuckTransactions();
+
+      expect(result.transactions[0].classification).toBe('terminal');
+      expect(result.terminalCount).toBe(1);
+    });
+
+    it('aggregates stuck counts per operation type, including zero-valued ones', async () => {
+      mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([
+        makeStuckTransaction({ id: 'tx-1' }),
+        makeStuckTransaction({
           id: 'tx-2',
           operation: SorobanOperationType.create_claim,
           status: SorobanTransactionStatus.submitted,
-          errorType: RetryableErrorType.congestion,
-          lastError: 'network congestion',
-          isRetryable: true,
-          updatedAt: new Date(Date.now() - 320000),
-          createdAt: new Date(Date.now() - 320000),
-          claimId: 'claim-2',
-          correlationId: 'corr-2',
-        },
-        {
+        }),
+        makeStuckTransaction({
           id: 'tx-3',
           operation: SorobanOperationType.disburse_claim,
-          status: SorobanTransactionStatus.pending,
-          errorType: null,
-          lastError: null,
-          isRetryable: true,
-          updatedAt: new Date(Date.now() - 330000),
-          createdAt: new Date(Date.now() - 330000),
-          claimId: 'claim-3',
-          correlationId: 'corr-3',
-        },
-      ];
-
-      mockPrismaService.sorobanTransaction.findMany.mockResolvedValue(
-        stuckTransactions,
-      );
+        }),
+      ]);
 
       const result = await service.detectStuckTransactions();
 
       expect(result.stuckCount).toBe(3);
-      expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
-        'soroban_transaction_stuck_total',
-        3,
-      );
+      expect(result.byOperation).toEqual({
+        create_claim: 2,
+        disburse_claim: 1,
+        init_escrow: 0,
+      });
       expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
         'soroban_transaction_stuck_by_operation',
         2,
@@ -219,34 +260,67 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
         1,
         { operation: 'disburse_claim' },
       );
+      expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
+        'soroban_transaction_stuck_by_operation',
+        0,
+        { operation: 'init_escrow' },
+      );
     });
 
-    it('should include retryable error classification in result', async () => {
-      const stuckTransaction = {
-        id: 'tx-1',
-        operation: SorobanOperationType.init_escrow,
-        status: SorobanTransactionStatus.submitted,
-        errorType: RetryableErrorType.insufficient_fee,
-        lastError: 'fee too low',
-        isRetryable: true,
-        updatedAt: new Date(Date.now() - 310000),
-        createdAt: new Date(Date.now() - 310000),
-        claimId: null,
-        correlationId: 'corr-1',
-      };
-
-      mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([
-        stuckTransaction,
-      ]);
+    it('publishes zero-valued gauges when nothing is stuck so stale alerts clear', async () => {
+      mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([]);
 
       const result = await service.detectStuckTransactions();
 
-      expect(result.stuckCount).toBe(1);
-      expect(result.transactions[0].errorType).toBe('insufficient_fee');
-      expect(result.transactions[0].lastError).toBe('fee too low');
-      expect(result.transactions[0].isRetryable).toBe(true);
-      expect(result.transactions[0].claimId).toBeNull();
+      expect(result.stuckCount).toBe(0);
+      expect(result.transactions).toHaveLength(0);
+      expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
+        'soroban_transaction_stuck_total',
+        0,
+      );
+      expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
+        'soroban_transaction_stuck_by_operation',
+        0,
+        { operation: 'create_claim' },
+      );
+      expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
+        'soroban_transaction_stuck_by_class',
+        0,
+        { classification: 'retryable' },
+      );
+      expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
+        'soroban_transaction_stuck_by_class',
+        0,
+        { classification: 'terminal' },
+      );
     });
+  });
+
+  describe('configurable threshold', () => {
+    it('honours a custom STUCK_TRANSACTION_THRESHOLD_MS', async () => {
+      const customService = await buildService('60000');
+      mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([]);
+
+      const result = await customService.detectStuckTransactions();
+
+      expect(result.thresholdMs).toBe(60000);
+      const cutoff: Date =
+        mockPrismaService.sorobanTransaction.findMany.mock.calls[0][0].where
+          .updatedAt.lt;
+      expect(Date.now() - cutoff.getTime()).toBeLessThanOrEqual(61000);
+    });
+
+    it.each([undefined, '', 'not-a-number', '0', '-1000'])(
+      'falls back to the 5 minute default for invalid threshold %p',
+      async threshold => {
+        const fallbackService = await buildService(threshold);
+        mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([]);
+
+        const result = await fallbackService.detectStuckTransactions();
+
+        expect(result.thresholdMs).toBe(300000);
+      },
+    );
   });
 
   describe('terminal transitions', () => {
@@ -335,21 +409,20 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
 
       await service.executeTransaction('tx-recover');
 
-      expect(mockPrismaService.sorobanTransaction.update).toHaveBeenNthCalledWith(
-        2,
-        {
-          where: { id: 'tx-recover' },
-          data: {
-            status: SorobanTransactionStatus.confirmed,
-            txHash: 'tx-hash-success',
-            confirmedAt: expect.any(Date),
-            attemptCount: 2,
-            lastRetryAt: expect.any(Date),
-            lastError: null,
-            errorType: null,
-          },
+      expect(
+        mockPrismaService.sorobanTransaction.update,
+      ).toHaveBeenNthCalledWith(2, {
+        where: { id: 'tx-recover' },
+        data: {
+          status: SorobanTransactionStatus.confirmed,
+          txHash: 'tx-hash-success',
+          confirmedAt: expect.any(Date),
+          attemptCount: 2,
+          lastRetryAt: expect.any(Date),
+          lastError: null,
+          errorType: null,
         },
-      );
+      });
     });
 
     it('should transition from submitted to confirmed without stuck detection', async () => {
@@ -372,20 +445,43 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
 
       await service.executeTransaction('tx-submitted');
 
-      expect(mockPrismaService.sorobanTransaction.update).toHaveBeenNthCalledWith(
-        2,
-        {
-          where: { id: 'tx-submitted' },
-          data: {
-            status: SorobanTransactionStatus.confirmed,
-            txHash: 'tx-hash-disburse',
-            confirmedAt: expect.any(Date),
-            attemptCount: 2,
-            lastRetryAt: expect.any(Date),
-            lastError: null,
-            errorType: null,
-          },
+      expect(
+        mockPrismaService.sorobanTransaction.update,
+      ).toHaveBeenNthCalledWith(2, {
+        where: { id: 'tx-submitted' },
+        data: {
+          status: SorobanTransactionStatus.confirmed,
+          txHash: 'tx-hash-disburse',
+          confirmedAt: expect.any(Date),
+          attemptCount: 2,
+          lastRetryAt: expect.any(Date),
+          lastError: null,
+          errorType: null,
         },
+      });
+    });
+
+    it('drops recovered transactions from detection and resets the stuck gauge', async () => {
+      // Scan 1: one stuck transaction is detected.
+      mockPrismaService.sorobanTransaction.findMany.mockResolvedValueOnce([
+        makeStuckTransaction(),
+      ]);
+      const first = await service.detectStuckTransactions();
+      expect(first.stuckCount).toBe(1);
+
+      // Scan 2: it recovered, so the DB predicate no longer matches it.
+      mockPrismaService.sorobanTransaction.findMany.mockResolvedValueOnce([]);
+      const second = await service.detectStuckTransactions();
+
+      expect(second.stuckCount).toBe(0);
+      expect(mockMetricsService.setGauge).toHaveBeenLastCalledWith(
+        'soroban_transaction_stuck_by_class',
+        0,
+        { classification: 'terminal' },
+      );
+      expect(mockMetricsService.setGauge).toHaveBeenCalledWith(
+        'soroban_transaction_stuck_total',
+        0,
       );
     });
   });

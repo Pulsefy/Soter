@@ -35,6 +35,40 @@ export interface ExecuteTransactionParams {
   forceRetry?: boolean;
 }
 
+/**
+ * Whether a stuck transaction is expected to self-heal on a future retry
+ * (`retryable`) or can never progress without operator intervention
+ * (`terminal`).
+ */
+export type StuckTransactionClassification = 'retryable' | 'terminal';
+
+export interface StuckTransactionSummary {
+  id: string;
+  operation: SorobanOperationType;
+  status: SorobanTransactionStatus;
+  claimId: string | null;
+  correlationId: string | null;
+  errorType: RetryableErrorType | null;
+  lastError: string | null;
+  isRetryable: boolean;
+  attemptCount: number;
+  maxAttempts: number;
+  /** How long the transaction has been without progress, in milliseconds. */
+  stuckAgeMs: number;
+  classification: StuckTransactionClassification;
+  updatedAt: Date;
+  createdAt: Date;
+}
+
+export interface StuckTransactionDetectionResult {
+  stuckCount: number;
+  retryableCount: number;
+  terminalCount: number;
+  thresholdMs: number;
+  byOperation: Record<string, number>;
+  transactions: StuckTransactionSummary[];
+}
+
 @Injectable()
 export class SorobanTransactionLifecycleService {
   private readonly logger = new Logger(SorobanTransactionLifecycleService.name);
@@ -49,6 +83,7 @@ export class SorobanTransactionLifecycleService {
   private readonly TRANSACTION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
   // Stuck transaction detection threshold (configurable)
+  private readonly DEFAULT_STUCK_TRANSACTION_THRESHOLD_MS = 300000; // 5 minutes
   private readonly STUCK_TRANSACTION_THRESHOLD_MS: number;
 
   constructor(
@@ -58,11 +93,26 @@ export class SorobanTransactionLifecycleService {
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
   ) {
-    this.STUCK_TRANSACTION_THRESHOLD_MS = parseInt(
-      this.configService.get<string>('STUCK_TRANSACTION_THRESHOLD_MS') ||
-        '300000',
-      10,
-    ); // 5 minutes default
+    this.STUCK_TRANSACTION_THRESHOLD_MS = this.resolveStuckThresholdMs();
+  }
+
+  /**
+   * Resolve the stuck-transaction threshold from config, falling back to the
+   * default when the value is missing, non-numeric, or non-positive. A bogus
+   * value must never silently disable detection (e.g. NaN comparisons are
+   * always false, which would flag nothing).
+   */
+  private resolveStuckThresholdMs(): number {
+    const raw = this.configService.get<string>(
+      'STUCK_TRANSACTION_THRESHOLD_MS',
+    );
+    const parsed = raw ? parseInt(raw, 10) : NaN;
+
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return this.DEFAULT_STUCK_TRANSACTION_THRESHOLD_MS;
+    }
+
+    return parsed;
   }
 
   /**
@@ -468,14 +518,35 @@ export class SorobanTransactionLifecycleService {
   }
 
   /**
-   * Detect transactions stuck in a non-terminal state past the configured threshold.
-   * A transaction is considered stuck if it is in `pending` or `submitted` status
-   * and has not progressed within the allowed ledger window.
+   * Classify a stuck transaction as `retryable` (last error was classified as
+   * retryable and retry budget remains, so the scheduler will pick it up) or
+   * `terminal` (non-retryable, or attempts exhausted — it can never
+   * self-heal and needs an operator to take over).
    */
-  async detectStuckTransactions() {
-    const stuckThreshold = new Date(
-      Date.now() - this.STUCK_TRANSACTION_THRESHOLD_MS,
-    );
+  private classifyStuckTransaction(
+    transaction: Pick<
+      SorobanTransaction,
+      'isRetryable' | 'attemptCount' | 'maxAttempts'
+    >,
+  ): StuckTransactionClassification {
+    const hasRetryBudget = transaction.attemptCount < transaction.maxAttempts;
+    return transaction.isRetryable && hasRetryBudget ? 'retryable' : 'terminal';
+  }
+
+  /**
+   * Detect transactions stuck in a non-terminal state past the configured
+   * threshold.
+   *
+   * A transaction is considered stuck if it is in `pending` or `submitted`
+   * status and has not progressed within `STUCK_TRANSACTION_THRESHOLD_MS`.
+   * Each stuck transaction is additionally classified as `retryable` (expected
+   * to self-heal) or `terminal` (requires operator escalation), see
+   * {@link classifyStuckTransaction}. Gauges are re-published on every scan —
+   * including zero values — so alerting clears once a backlog recovers.
+   */
+  async detectStuckTransactions(): Promise<StuckTransactionDetectionResult> {
+    const now = Date.now();
+    const stuckThreshold = new Date(now - this.STUCK_TRANSACTION_THRESHOLD_MS);
 
     const stuckTransactions = await this.prisma.sorobanTransaction.findMany({
       where: {
@@ -494,53 +565,110 @@ export class SorobanTransactionLifecycleService {
       },
     });
 
-    const stuckCount = stuckTransactions.length;
+    // Seed every label so recovered series fall back to zero instead of
+    // leaving a stale non-zero gauge (and a never-clearing alert) behind.
+    const byOperation: Record<string, number> = {};
+    for (const operation of Object.values(SorobanOperationType)) {
+      byOperation[operation] = 0;
+    }
+    const byClassification: Record<StuckTransactionClassification, number> = {
+      retryable: 0,
+      terminal: 0,
+    };
+
+    const transactions: StuckTransactionSummary[] = stuckTransactions.map(
+      tx => {
+        const classification = this.classifyStuckTransaction(tx);
+        byOperation[tx.operation] += 1;
+        byClassification[classification] += 1;
+
+        return {
+          id: tx.id,
+          operation: tx.operation,
+          status: tx.status,
+          claimId: tx.claimId,
+          correlationId: tx.correlationId,
+          errorType: tx.errorType,
+          lastError: tx.lastError,
+          isRetryable: tx.isRetryable,
+          attemptCount: tx.attemptCount,
+          maxAttempts: tx.maxAttempts,
+          classification,
+          stuckAgeMs: now - tx.updatedAt.getTime(),
+          updatedAt: tx.updatedAt,
+          createdAt: tx.createdAt,
+        };
+      },
+    );
+
+    const stuckCount = transactions.length;
+    const retryableCount = byClassification.retryable;
+    const terminalCount = byClassification.terminal;
 
     if (stuckCount > 0) {
       this.logger.warn(`Detected ${stuckCount} stuck Soroban transactions`, {
         thresholdMs: this.STUCK_TRANSACTION_THRESHOLD_MS,
-        operations: stuckTransactions.map(t => t.operation),
+        retryableCount,
+        terminalCount,
+        operations: transactions.map(tx => tx.operation),
       });
-
-      this.metricsService.setGauge(
-        'soroban_transaction_stuck_total',
-        stuckCount,
-      );
-
-      const countsByOperation = stuckTransactions.reduce<
-        Record<string, number>
-      >((acc, tx) => {
-        acc[tx.operation] = (acc[tx.operation] || 0) + 1;
-        return acc;
-      }, {});
-
-      for (const [operation, count] of Object.entries(countsByOperation)) {
-        this.metricsService.setGauge(
-          'soroban_transaction_stuck_by_operation',
-          count,
-          {
-            operation,
-          },
-        );
-      }
     }
+
+    if (terminalCount > 0) {
+      // Unlike retryable ones, these can never recover on their own.
+      this.logger.error(
+        `Detected ${terminalCount} unrecoverable stuck Soroban transaction(s) requiring operator intervention`,
+        {
+          transactionIds: transactions
+            .filter(tx => tx.classification === 'terminal')
+            .map(tx => tx.id),
+        },
+      );
+    }
+
+    this.publishStuckMetrics(stuckCount, byOperation, byClassification);
 
     return {
       stuckCount,
+      retryableCount,
+      terminalCount,
       thresholdMs: this.STUCK_TRANSACTION_THRESHOLD_MS,
-      transactions: stuckTransactions.map(tx => ({
-        id: tx.id,
-        operation: tx.operation,
-        status: tx.status,
-        errorType: tx.errorType,
-        lastError: tx.lastError,
-        isRetryable: tx.isRetryable,
-        updatedAt: tx.updatedAt,
-        createdAt: tx.createdAt,
-        claimId: tx.claimId,
-        correlationId: tx.correlationId,
-      })),
+      byOperation,
+      transactions,
     };
+  }
+
+  /**
+   * Publish the stuck-transaction gauges for every operation type and
+   * classification, including zero values, so a cleared backlog resets the
+   * previously exported series instead of leaving a stale alert behind.
+   */
+  private publishStuckMetrics(
+    stuckCount: number,
+    byOperation: Record<string, number>,
+    byClassification: Record<StuckTransactionClassification, number>,
+  ): void {
+    this.metricsService.setGauge('soroban_transaction_stuck_total', stuckCount);
+
+    for (const [operation, count] of Object.entries(byOperation)) {
+      this.metricsService.setGauge(
+        'soroban_transaction_stuck_by_operation',
+        count,
+        {
+          operation,
+        },
+      );
+    }
+
+    for (const [classification, count] of Object.entries(byClassification)) {
+      this.metricsService.setGauge(
+        'soroban_transaction_stuck_by_class',
+        count,
+        {
+          classification,
+        },
+      );
+    }
   }
 
   /**
