@@ -160,3 +160,123 @@ class RedactionPreviewResult(BaseModel):
             ]
         }
     }
+
+
+class StructuredRedactionRequest(BaseModel):
+    """Request for structured redaction/preview of named fields.
+
+    Structured OCR output is handed in as the field-name -> value map the
+    OCR pipeline produced; redaction is driven by each field's known type.
+    """
+
+    fields: Dict[str, str] = Field(
+        ...,
+        description=(
+            "Structured OCR fields keyed by their field name, e.g. "
+            "{\"full_name\": \"Aisha Bello\", \"national_id\": \"12345678901\"}"
+        ),
+        examples=[
+            {
+                "full_name": "Aisha Bello",
+                "national_id": "12345678901",
+                "date_of_birth": "1990-01-15",
+            }
+        ],
+    )
+    anchor_metadata: Optional[AnchorMetadata] = None
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "fields": {
+                        "full_name": "Aisha Bello",
+                        "national_id": "12345678901",
+                        "date_of_birth": "1990-01-15",
+                    },
+                    "anchor_metadata": {
+                        "campaign_ref": "campaign-2024-001",
+                        "claim_id": "claim-abc123",
+                    },
+                }
+            ]
+        }
+    }
+
+
+class StructuredFieldStatus(BaseModel):
+    """Preview status for one structured field."""
+
+    field_name: str = Field(examples=["national_id"])
+    category: Optional[str] = Field(
+        None,
+        description="PII category inferred from the field name, when known",
+        examples=["ID"],
+    )
+    redacted: bool = Field(False, examples=[True])
+    masked_value: Optional[str] = Field(
+        None,
+        description="Token the field would be replaced with when redacted",
+        examples=["[ID_NUMBER]"],
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "field_name": "national_id",
+                    "category": "ID",
+                    "redacted": True,
+                    "masked_value": "[ID_NUMBER]",
+                }
+            ]
+        }
+    }
+
+
+class StructuredRedactionResult(BaseModel):
+    """Payload nested inside the ResultEnvelope for structured redaction preview."""
+
+    total_fields: int = Field(examples=[3])
+    redacted_fields: int = Field(examples=[3])
+    fields: Dict[str, StructuredFieldStatus] = Field(
+        default_factory=dict,
+        description="Per-field preview status, keyed by field name",
+    )
+    pii_summary: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-category counts of fields that would be redacted",
+        examples=[{"PERSON": 1, "ID": 1, "DATE": 1}],
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "total_fields": 3,
+                    "redacted_fields": 3,
+                    "fields": {
+                        "full_name": {
+                            "field_name": "full_name",
+                            "category": "PERSON",
+                            "redacted": True,
+                            "masked_value": "[RECIPIENT_NAME]",
+                        },
+                        "national_id": {
+                            "field_name": "national_id",
+                            "category": "ID",
+                            "redacted": True,
+                            "masked_value": "[ID_NUMBER]",
+                        },
+                        "date_of_birth": {
+                            "field_name": "date_of_birth",
+                            "category": "DATE",
+                            "redacted": True,
+                            "masked_value": "[EVENT_DATE]",
+                        },
+                    },
+                    "pii_summary": {"PERSON": 1, "ID": 1, "DATE": 1},
+                }
+            ]
+        }
+    }

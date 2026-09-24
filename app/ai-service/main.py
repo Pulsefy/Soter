@@ -40,6 +40,7 @@ import tasks
 from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
 from schemas.anonymization import AnonymizeRequest, AnonymizeResponse
 from services.pii_scrubber import PIIScrubberService
+from services.structured_redaction import StructuredRedactionService
 from schemas.humanitarian import (
     HumanitarianVerificationRequest,
     HumanitarianVerificationResponse,
@@ -203,6 +204,7 @@ proof_of_life_analyzer = ProofOfLifeAnalyzer(
     )
 )
 pii_scrubber_service = PIIScrubberService()
+structured_redaction_service = StructuredRedactionService()
 humanitarian_verification_service = HumanitarianVerificationService()
 
 # Initialize evidence access control service

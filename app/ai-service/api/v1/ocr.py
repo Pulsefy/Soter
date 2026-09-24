@@ -69,6 +69,15 @@ async def process_ocr(
     language_hint: Annotated[
         Optional[LanguageHint], Form(description="Language hint for OCR")
     ] = None,
+    redact_fields: Annotated[
+        bool,
+        Form(
+            description=(
+                "When true, extracted field values are redacted by the field's "
+                "known type (e.g. national_id -> [ID_NUMBER])"
+            )
+        ),
+    ] = False,
 ) -> ResultEnvelope[OCRData]:
     """Extract text fields from an uploaded document image."""
     start_time = time.time()
@@ -102,6 +111,7 @@ async def process_ocr(
             contents,
             anchor_metadata,
             language_hint=language_hint.value if language_hint else None,
+            redact_fields=redact_fields,
         )
 
         from main import correlation_id_var
@@ -116,10 +126,16 @@ async def process_ocr(
             else None
         )
 
+        reasons = (
+            ["Extracted fields were redacted by their known field type."]
+            if redact_fields and fields
+            else None
+        )
+
         return ResultEnvelope[OCRData](
             result=ocr_data,
             confidence=avg_confidence,
-            reasons=None,
+            reasons=reasons,
             anchor_metadata=raw.get("anchor_metadata"),
             trace_id=correlation_id_var.get() or None,
         )

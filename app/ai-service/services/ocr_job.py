@@ -8,15 +8,18 @@ from PIL import Image
 import metrics
 from schemas.common import AnchorMetadata
 from schemas.ocr import OCRData, OCRFieldResult
-from services.ocr import OCRService
+from services.ocr import FieldMatch, OCRService
+from services.structured_redaction import StructuredRedactionService
 
 ocr_service = OCRService()
+structured_redaction_service = StructuredRedactionService()
 
 
 def run_ocr_from_bytes(
     contents: bytes,
     anchor_metadata: Optional[str] = None,
     language_hint: Optional[str] = None,
+    redact_fields: bool = False,
 ) -> dict:
     start_time = time.time()
     img = Image.open(io.BytesIO(contents))
@@ -31,12 +34,22 @@ def run_ocr_from_bytes(
     processing_time_ms = int((time.time() - start_time) * 1000)
     parsed_metadata = _parse_anchor_metadata(anchor_metadata)
 
+    fields = result.fields
+    if redact_fields:
+        fields = {
+            name: FieldMatch(
+                value=structured_redaction_service.mask_value(name, field.value),
+                confidence=field.confidence,
+            )
+            for name, field in fields.items()
+        }
+
     response = {
         "success": True,
         "data": OCRData(
             fields={
                 name: OCRFieldResult(value=field.value, confidence=field.confidence)
-                for name, field in result.fields.items()
+                for name, field in fields.items()
             },
             raw_text=result.raw_text,
             processing_time_ms=processing_time_ms,
@@ -53,9 +66,13 @@ def run_ocr_from_base64(
     image_base64: str,
     anchor_metadata: Optional[str] = None,
     language_hint: Optional[str] = None,
+    redact_fields: bool = False,
 ) -> dict:
     return run_ocr_from_bytes(
-        base64.b64decode(image_base64), anchor_metadata, language_hint=language_hint
+        base64.b64decode(image_base64),
+        anchor_metadata,
+        language_hint=language_hint,
+        redact_fields=redact_fields,
     )
 
 
