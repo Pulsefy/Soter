@@ -37,8 +37,9 @@ pub use crate::keys::{
     package_index_entry, package_key, KEY_ADMIN, KEY_CAMPAIGN_PAUSED, KEY_CAMPAIGN_TOKEN_CLAIMED,
     KEY_CAMPAIGN_TOKEN_LOCKED, KEY_CONFIG, KEY_DELEGATES, KEY_DELEGATE_EXPIRY,
     KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_MAX_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM,
-    KEY_PAUSE_CREATE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN, KEY_PKG_COUNTER,
-    KEY_PKG_IDX, KEY_RECIPIENT_LAST_CLAIM, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
+    KEY_PAUSE_CREATE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN,
+    KEY_PENDING_WITHDRAWAL, KEY_PKG_COUNTER, KEY_PKG_IDX, KEY_RECIPIENT_LAST_CLAIM,
+    KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
 };
 
 /// Upper bound on the number of package ids accepted by `batch_claim` in a
@@ -111,6 +112,26 @@ pub struct Aggregates {
     pub total_committed: i128,
     pub total_claimed: i128,
     pub total_expired_cancelled: i128,
+}
+
+/// Minimum delay (in seconds) that must elapse between proposing a surplus
+/// withdrawal and executing it.  Set to 24 hours (86 400 s) to give
+/// observers a meaningful observation window.
+pub const SURPLUS_WITHDRAWAL_DELAY_SECS: u64 = 86_400;
+
+/// A proposed but not-yet-executed surplus withdrawal, stored under
+/// `KEY_PENDING_WITHDRAWAL` in instance storage.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingWithdrawal {
+    /// Destination address for the transfer.
+    pub to: Address,
+    /// Token address for the withdrawal.
+    pub token: Address,
+    /// Amount (in smallest token units) to withdraw.
+    pub amount: i128,
+    /// Earliest ledger timestamp at which `execute_surplus_withdrawal` may be called.
+    pub executable_at: u64,
 }
 
 /// Outcome of a single package claim attempt made as part of a `batch_claim`
@@ -210,6 +231,15 @@ pub enum Error {
     /// `add_distributor` would exceed the configured maximum distributor
     /// set size (see `get_max_distributors` / `set_max_distributors`).
     DistributorSetFull = 25,
+    /// `propose_surplus_withdrawal` was called while a withdrawal proposal
+    /// is already pending.  Cancel the existing proposal first.
+    SurplusWithdrawalPending = 26,
+    /// `cancel_surplus_withdrawal` or `execute_surplus_withdrawal` was called
+    /// when no withdrawal proposal is currently pending.
+    SurplusWithdrawalNotPending = 27,
+    /// `execute_surplus_withdrawal` was called before the timelock delay has
+    /// elapsed.  Wait until `executable_at` and try again.
+    SurplusWithdrawalTimelockActive = 28,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -337,6 +367,28 @@ pub struct SurplusWithdrawnEvent {
     pub to: Address,
     pub token: Address,
     pub amount: i128,
+}
+
+/// Emitted when an admin proposes a surplus withdrawal (starts the timelock).
+#[contractevent]
+pub struct SurplusWithdrawalProposed {
+    pub schema_version: u32,
+    pub to: Address,
+    pub token: Address,
+    pub amount: i128,
+    /// Earliest timestamp at which the proposal may be executed.
+    pub executable_at: u64,
+    pub timestamp: u64,
+}
+
+/// Emitted when an admin cancels a pending surplus withdrawal proposal.
+#[contractevent]
+pub struct SurplusWithdrawalCancelled {
+    pub schema_version: u32,
+    pub to: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub timestamp: u64,
 }
 
 #[contractevent]
@@ -2261,56 +2313,184 @@ impl AidEscrow {
         Ok(())
     }
 
-    /// Admin-only function to withdraw surplus (unallocated) funds from the contract.
-    /// Requirements: Admin auth, valid amount, sufficient surplus available.
-    /// Behavior: Transfers amount of token from contract to the specified address.
-    pub fn withdraw_surplus(
+    /// Admin-only. Proposes a surplus withdrawal and starts the timelock.
+    ///
+    /// The proposal is stored in instance storage.  Only one proposal may be
+    /// live at a time; call `cancel_surplus_withdrawal` to replace it.
+    /// After `SURPLUS_WITHDRAWAL_DELAY_SECS` seconds have elapsed the admin
+    /// may call `execute_surplus_withdrawal` to complete the transfer.
+    ///
+    /// # Arguments
+    /// * `to`     — Destination address for the funds.
+    /// * `amount` — Amount in smallest token units (must be > 0).
+    /// * `token`  — Token contract address (must be on the allowlist).
+    ///
+    /// # Errors
+    /// * `ContractPaused`           — contract or withdraw action is paused.
+    /// * `InvalidAmount`            — `amount` ≤ 0.
+    /// * `InvalidToken`             — token not on the allowlist.
+    /// * `InsufficientSurplus`      — requested amount exceeds available surplus.
+    /// * `SurplusWithdrawalPending` — a proposal already exists.
+    pub fn propose_surplus_withdrawal(
         env: Env,
         to: Address,
         amount: i128,
         token: Address,
     ) -> Result<(), Error> {
         Self::check_action_paused(&env, symbol_short!("withdraw"))?;
-        // 1. Only the admin can withdraw surplus
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
 
-        // 2. Validate amount
+        // Validate amount
         if amount <= 0 {
             return Err(Error::InvalidAmount);
         }
 
-        // 3. Get contract's current balance for the token
-        Self::validate_token(&env, &token)?;
-        let contract_balance = Self::token_balance(&env, &token, &env.current_contract_address())?;
+        // Reject if a proposal is already pending
+        if env.storage().instance().has(&KEY_PENDING_WITHDRAWAL) {
+            return Err(Error::SurplusWithdrawalPending);
+        }
 
-        // 4. Get total locked amount for the token
+        // Validate token and verify sufficient surplus exists right now
+        Self::validate_token(&env, &token)?;
+        let contract_balance =
+            Self::token_balance(&env, &token, &env.current_contract_address())?;
         let locked_map: Map<Address, i128> = env
             .storage()
             .instance()
             .get(&KEY_TOTAL_LOCKED)
             .unwrap_or(Map::new(&env));
         let total_locked = locked_map.get(token.clone()).unwrap_or(0);
-
-        // 5. Calculate available surplus and validate
         let available_surplus = contract_balance - total_locked;
         if amount > available_surplus {
             return Err(Error::InsufficientSurplus);
         }
 
-        // 6. Transfer funds from contract to recipient
-        Self::transfer_token(&env, &token, &env.current_contract_address(), &to, &amount)?;
+        let now = env.ledger().timestamp();
+        let executable_at = now + SURPLUS_WITHDRAWAL_DELAY_SECS;
 
-        // 7. Emit event
-        SurplusWithdrawnEvent {
-            schema_version: EVENT_SCHEMA_VERSION,
+        let proposal = PendingWithdrawal {
             to: to.clone(),
             token: token.clone(),
             amount,
+            executable_at,
+        };
+        env.storage()
+            .instance()
+            .set(&KEY_PENDING_WITHDRAWAL, &proposal);
+
+        SurplusWithdrawalProposed {
+            schema_version: EVENT_SCHEMA_VERSION,
+            to,
+            token,
+            amount,
+            executable_at,
+            timestamp: now,
         }
         .publish(&env);
 
         Ok(())
+    }
+
+    /// Admin-only. Cancels a pending surplus withdrawal proposal.
+    ///
+    /// # Errors
+    /// * `SurplusWithdrawalNotPending` — no proposal currently exists.
+    pub fn cancel_surplus_withdrawal(env: Env) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let proposal: PendingWithdrawal = env
+            .storage()
+            .instance()
+            .get(&KEY_PENDING_WITHDRAWAL)
+            .ok_or(Error::SurplusWithdrawalNotPending)?;
+
+        env.storage().instance().remove(&KEY_PENDING_WITHDRAWAL);
+
+        SurplusWithdrawalCancelled {
+            schema_version: EVENT_SCHEMA_VERSION,
+            to: proposal.to,
+            token: proposal.token,
+            amount: proposal.amount,
+            timestamp: env.ledger().timestamp(),
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Admin-only. Executes a pending surplus withdrawal after the timelock
+    /// delay has elapsed.
+    ///
+    /// Validates that surplus is still sufficient at execution time (token
+    /// balance may have changed since the proposal was made), then transfers
+    /// the funds and removes the proposal.
+    ///
+    /// # Errors
+    /// * `ContractPaused`                — contract or withdraw action is paused.
+    /// * `SurplusWithdrawalNotPending`   — no proposal currently exists.
+    /// * `SurplusWithdrawalTimelockActive` — delay has not yet elapsed.
+    /// * `InsufficientSurplus`           — surplus shrank below requested amount.
+    /// * `InvalidToken`                  — token is no longer on the allowlist.
+    pub fn execute_surplus_withdrawal(env: Env) -> Result<(), Error> {
+        Self::check_action_paused(&env, symbol_short!("withdraw"))?;
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        let proposal: PendingWithdrawal = env
+            .storage()
+            .instance()
+            .get(&KEY_PENDING_WITHDRAWAL)
+            .ok_or(Error::SurplusWithdrawalNotPending)?;
+
+        // Enforce the timelock delay
+        let now = env.ledger().timestamp();
+        if now < proposal.executable_at {
+            return Err(Error::SurplusWithdrawalTimelockActive);
+        }
+
+        // Re-validate surplus at execution time
+        Self::validate_token(&env, &proposal.token)?;
+        let contract_balance =
+            Self::token_balance(&env, &proposal.token, &env.current_contract_address())?;
+        let locked_map: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&KEY_TOTAL_LOCKED)
+            .unwrap_or(Map::new(&env));
+        let total_locked = locked_map.get(proposal.token.clone()).unwrap_or(0);
+        let available_surplus = contract_balance - total_locked;
+        if proposal.amount > available_surplus {
+            return Err(Error::InsufficientSurplus);
+        }
+
+        // Remove the proposal before transferring (checks-effects-interactions)
+        env.storage().instance().remove(&KEY_PENDING_WITHDRAWAL);
+
+        // Transfer funds
+        Self::transfer_token(
+            &env,
+            &proposal.token,
+            &env.current_contract_address(),
+            &proposal.to,
+            &proposal.amount,
+        )?;
+
+        SurplusWithdrawnEvent {
+            schema_version: EVENT_SCHEMA_VERSION,
+            to: proposal.to,
+            token: proposal.token,
+            amount: proposal.amount,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Returns the pending surplus withdrawal proposal, if one exists.
+    pub fn get_pending_withdrawal(env: Env) -> Option<PendingWithdrawal> {
+        env.storage().instance().get(&KEY_PENDING_WITHDRAWAL)
     }
 
     // --- Helpers ---

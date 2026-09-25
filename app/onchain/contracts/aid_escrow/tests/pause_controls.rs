@@ -197,7 +197,7 @@ fn test_pause_blocks_withdraw() {
 
     let result = f
         .client
-        .try_withdraw_surplus(&f.recipient, &UNIT, &f.token.address);
+        .try_propose_surplus_withdrawal(&f.recipient, &UNIT, &f.token.address);
     assert!(result.is_err());
 
     assert!(f.client.is_action_paused(&sym(&f.env, "withdraw")));
@@ -211,7 +211,7 @@ fn test_unpause_resumes_withdraw() {
 
     let result = f
         .client
-        .try_withdraw_surplus(&f.recipient, &UNIT, &f.token.address);
+        .try_propose_surplus_withdrawal(&f.recipient, &UNIT, &f.token.address);
     assert!(result.is_ok());
 }
 
@@ -247,7 +247,7 @@ fn test_global_pause_blocks_actions() {
     assert!(f.client.try_claim(&0u64).is_err());
     assert!(f
         .client
-        .try_withdraw_surplus(&f.recipient, &UNIT, &f.token.address)
+        .try_propose_surplus_withdrawal(&f.recipient, &UNIT, &f.token.address)
         .is_err());
 
     f.client.unpause();
