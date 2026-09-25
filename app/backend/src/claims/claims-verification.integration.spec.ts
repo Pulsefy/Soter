@@ -33,7 +33,8 @@ type ClaimRow = {
   updatedAt: Date;
 };
 
-const TOKEN_ADDRESS = 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
+const TOKEN_ADDRESS =
+  'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
 
 /**
  * Claims <-> verification integration.
@@ -70,7 +71,7 @@ describe('Claims -> verification pipeline integration', () => {
     $transaction: jest.fn(),
   };
 
-  const defaultQueueAdd = async (_name: string, data: VerificationJobData) => {
+  const defaultQueueAdd = (_name: string, data: VerificationJobData) => {
     queuedJobs.push(data);
     return { id: `job-${queuedJobs.length}` };
   };
@@ -99,7 +100,7 @@ describe('Claims -> verification pipeline integration', () => {
         {
           provide: VerificationMetadataService,
           useValue: {
-            enhanceWithMetadata: jest.fn(async (dto: Record<string, unknown>) => ({
+            enhanceWithMetadata: jest.fn((dto: Record<string, unknown>) => ({
               ...dto,
               warnings: [],
               validationErrors: [],
@@ -171,7 +172,7 @@ describe('Claims -> verification pipeline integration', () => {
     prismaMock.campaign.findUnique.mockResolvedValue(campaign);
 
     prismaMock.claim.create.mockImplementation(
-      async ({ data }: { data: Partial<ClaimRow> }) => {
+      ({ data }: { data: Partial<ClaimRow> }) => {
         const row: ClaimRow = {
           id: 'claim-1',
           status: ClaimStatus.requested,
@@ -185,12 +186,12 @@ describe('Claims -> verification pipeline integration', () => {
     );
 
     prismaMock.claim.findUnique.mockImplementation(
-      async ({ where }: { where: { id: string } }) =>
+      ({ where }: { where: { id: string } }) =>
         storedClaims.get(where.id) ?? null,
     );
 
     prismaMock.claim.update.mockImplementation(
-      async ({ where, data }: { where: { id: string }; data: object }) => {
+      ({ where, data }: { where: { id: string }; data: object }) => {
         const row = {
           ...(storedClaims.get(where.id) as ClaimRow),
           ...data,
@@ -216,9 +217,11 @@ describe('Claims -> verification pipeline integration', () => {
     });
 
   const readVerification = (claimId: string) =>
-    (storedClaims.get(claimId) as ClaimRow & {
-      anchorMetadata?: { verification?: Record<string, unknown> };
-    }).anchorMetadata?.verification;
+    (
+      storedClaims.get(claimId) as ClaimRow & {
+        anchorMetadata?: { verification?: Record<string, unknown> };
+      }
+    ).anchorMetadata?.verification;
 
   it('queues a verification job on create and reflects the result on the claim', async () => {
     const moduleRef = await buildModule();
