@@ -5,6 +5,8 @@ import { Share2, Download, Copy, Check, ExternalLink } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { format } from 'date-fns';
 import { buildExplorerUrl } from '../lib/explorer';
+import { getActiveContractConfig } from '../lib/contractMetadata';
+import { NetworkContractBadge } from './NetworkContractBadge';
 
 export interface ClaimReceiptData {
   claimId: string;
@@ -91,6 +93,8 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
   }, [claim.timestamp]);
 
   const receiptText = useMemo(() => {
+    const { networkLabel } = getActiveContractConfig();
+
     const lines = [
       'Claim Receipt',
       `Claim ID: ${claim.claimId}`,
@@ -99,6 +103,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
       `Amount: ${claim.amount} tokens`,
       `Date: ${formattedDate}`,
     ];
+    if (networkLabel) lines.push(`Network: ${networkLabel}`);
     if (claim.tokenAddress) {
       lines.push(`Token Address: ${claim.tokenAddress}`);
     }
@@ -208,6 +213,9 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
         <div className="col-span-2">
           <p className="text-xs font-semibold opacity-75 mb-1">TIMESTAMP</p>
           <p className="text-sm">{formattedDate}</p>
+        </div>
+        <div className="col-span-2">
+          <NetworkContractBadge contractId={claim.contractAddress} />
         </div>
         {claim.tokenAddress && (
           <div className="col-span-2">

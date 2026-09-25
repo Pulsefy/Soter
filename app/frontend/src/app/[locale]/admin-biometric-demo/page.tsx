@@ -1,5 +1,6 @@
 import React from 'react';
 import { AdminApiKeyManager } from '@/components/AdminApiKeyManager';
+import { AdminContractRegistry } from '@/components/AdminContractRegistry';
 import { Shield, Fingerprint, AlertTriangle } from 'lucide-react';
 
 export default function AdminBiometricDemoPage() {
@@ -60,6 +61,11 @@ export default function AdminBiometricDemoPage() {
             and approving sensitive requests. Mock implementation ready for production.
           </p>
         </div>
+      </div>
+
+      {/* Contract Registry */}
+      <div className="mb-8">
+        <AdminContractRegistry />
       </div>
 
       {/* Demo section */}
