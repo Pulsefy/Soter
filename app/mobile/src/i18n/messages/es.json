@@ -275,7 +275,16 @@
     "payloadParameters": "Parámetros del payload",
     "deferralInformation": "Información del aplazamiento",
     "deferralLog": "Registro de aplazamiento:",
-    "retriesLabel": "Reintentos:"
+    "retriesLabel": "Reintentos:",
+    "discardConfirmTitle": "¿Descartar elemento en cola?",
+    "discardConfirmMessage": "Esto descartará permanentemente 1 elemento de tipo {type}. Cualquier trabajo de campo sin sincronizar que contenga se perderá.",
+    "discardConfirmOk": "Descartar",
+    "discardConfirmCancel": "Cancelar",
+    "clearAllButton": "Borrar todo",
+    "clearAllConfirmTitle": "¿Borrar todos los elementos en cola?",
+    "clearAllConfirmMessage": "Esto descartará permanentemente los {count} elemento(s) en cola ({types}). Cualquier trabajo de campo sin sincronizar que contengan se perderá.",
+    "clearAllConfirmOk": "Borrar todo",
+    "clearAllConfirmCancel": "Cancelar"
   },
   "health": {
     "checking": "Comprobando el estado del sistema...",

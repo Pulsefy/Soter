@@ -275,7 +275,16 @@
     "payloadParameters": "Paramètres du payload",
     "deferralInformation": "Informations de report",
     "deferralLog": "Journal de report :",
-    "retriesLabel": "Nouvelles tentatives :"
+    "retriesLabel": "Nouvelles tentatives :",
+    "discardConfirmTitle": "Rejeter l'élément en file ?",
+    "discardConfirmMessage": "Cela rejettera définitivement 1 élément de type {type}. Tout travail de terrain non synchronisé qu'il contient sera perdu.",
+    "discardConfirmOk": "Rejeter",
+    "discardConfirmCancel": "Annuler",
+    "clearAllButton": "Tout effacer",
+    "clearAllConfirmTitle": "Effacer tous les éléments en file ?",
+    "clearAllConfirmMessage": "Cela rejettera définitivement les {count} élément(s) en file ({types}). Tout travail de terrain non synchronisé qu'ils contiennent sera perdu.",
+    "clearAllConfirmOk": "Tout effacer",
+    "clearAllConfirmCancel": "Annuler"
   },
   "health": {
     "checking": "Vérification de l'état du système...",

@@ -13,6 +13,7 @@ import {
   QueuedSyncAction,
   SyncActionSuccessEvent,
   SyncQueueState,
+  clearSyncQueue as clearSyncQueueService,
   discardAction as discardQueueAction,
   dispatchNetworkAction,
   flushPendingNetworkActions,
@@ -58,6 +59,7 @@ interface SyncContextValue extends SyncQueueState {
   retryAction: (actionId: string) => Promise<void>;
   requeueAction: (actionId: string) => Promise<void>;
   discardAction: (actionId: string) => Promise<void>;
+  clearQueue: () => Promise<void>;
   getActionsForAid: (aidId: string) => QueuedSyncAction[];
   forceSync: () => Promise<void>;
   deferralExplanation: string;
@@ -81,6 +83,7 @@ const defaultValue: SyncContextValue = {
   retryAction: async () => {},
   requeueAction: async () => {},
   discardAction: async () => {},
+  clearQueue: async () => {},
   getActionsForAid: () => [],
   forceSync: async () => {},
   deferralExplanation: '',
@@ -238,6 +241,9 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
       },
       discardAction: async (actionId: string) => {
         await discardQueueAction(actionId);
+      },
+      clearQueue: async () => {
+        await clearSyncQueueService();
       },
       getActionsForAid: (aidId: string) =>
         syncState.items.filter((item) => {

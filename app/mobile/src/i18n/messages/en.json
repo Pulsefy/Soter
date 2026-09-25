@@ -275,7 +275,16 @@
     "payloadParameters": "Payload Parameters",
     "deferralInformation": "Deferral Information",
     "deferralLog": "Deferral Log:",
-    "retriesLabel": "Retries:"
+    "retriesLabel": "Retries:",
+    "discardConfirmTitle": "Discard Queued Item?",
+    "discardConfirmMessage": "This will permanently discard 1 {type} item. Any unsynced field work it contains will be lost.",
+    "discardConfirmOk": "Discard",
+    "discardConfirmCancel": "Cancel",
+    "clearAllButton": "Clear All",
+    "clearAllConfirmTitle": "Clear All Queued Items?",
+    "clearAllConfirmMessage": "This will permanently discard all {count} queued item(s) ({types}). Any unsynced field work they contain will be lost.",
+    "clearAllConfirmOk": "Clear All",
+    "clearAllConfirmCancel": "Cancel"
   },
   "health": {
     "checking": "Checking system health...",
