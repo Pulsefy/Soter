@@ -31,6 +31,10 @@ import * as crypto from 'crypto';
 import { CircuitBreaker } from '../common/utils/circuit-breaker.util';
 import { VerificationMetadataService } from './metadata.service';
 import { VerificationResultDto } from './dto/verification-result.dto';
+import {
+  mergeClaimAnchorMetadata,
+  toPersistedVerificationResult,
+} from './verification-result.persistence';
 import { CorrelationPropagationUtil } from '../common/utils/correlation-propagation.util';
 import { MetricsService } from '../observability/metrics/metrics.service';
 
@@ -330,7 +334,7 @@ export class VerificationService {
     const shouldVerify = enhancedResult.score >= this.verificationThreshold;
 
     // Build anchor metadata to persist
-    const anchorMetadataToPersist = anchorMetadata
+    const anchorMetadataToPersist: Prisma.InputJsonObject | null = anchorMetadata
       ? {
           campaignRef: anchorMetadata.campaignRef ?? null,
           claimId: anchorMetadata.claimId ?? null,
@@ -339,15 +343,25 @@ export class VerificationService {
         }
       : null;
 
-    // Update claim with verification result including metadata
+    // Persist the outcome on the claim itself. The claim row - not the queue,
+    // and not an in-flight job - is what operators read and what
+    // ClaimsService.verify() gates on, so a completed verification is only
+    // durable once it lands here. The write merges, so it can neither erase
+    // the anchor metadata the AI service wrote nor an earlier outcome.
+    const persistedVerification = toPersistedVerificationResult(
+      enhancedResult,
+      this.verificationThreshold,
+    );
+
     await this.prisma.claim.update({
       where: { id: claimId },
       data: {
         status: shouldVerify ? 'verified' : 'requested',
-        anchorMetadata:
-          anchorMetadataToPersist === null
-            ? Prisma.JsonNull
-            : (anchorMetadataToPersist as Prisma.InputJsonValue),
+        anchorMetadata: mergeClaimAnchorMetadata(
+          claim.anchorMetadata,
+          anchorMetadataToPersist,
+          persistedVerification,
+        ),
       },
     });
 
@@ -1230,3 +1244,4 @@ the JSON verdict.
     }
   }
 }
+

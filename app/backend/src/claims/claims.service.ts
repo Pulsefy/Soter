@@ -33,6 +33,8 @@ import { SorobanTransactionLifecycleService } from '../onchain/soroban-transacti
 import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
 import { escapeCsvField, toCsvRow } from '../common/csv/csv.util';
 import { streamCursorPaginated } from '../common/streaming/cursor-paginate';
+import { VerificationService } from '../verification/verification.service';
+import { readPersistedVerificationResult } from '../verification/verification-result.persistence';
 
 export interface ClaimExportRow {
   id: string;
@@ -112,6 +114,7 @@ export class ClaimsService {
     private readonly budgetService: BudgetService,
     private readonly sorobanTransactionService: SorobanTransactionLifecycleService,
     private readonly sorobanTransactionScheduler: SorobanTransactionScheduler,
+    private readonly verificationService: VerificationService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
@@ -161,7 +164,27 @@ export class ClaimsService {
     this.metricsService.incrementClaimsCreated(campaign.id);
     this.metricsService.adjustClaimsInFunnel('requested', 1);
 
+    await this.enqueueVerificationForClaim(claim.id);
+
     return claim;
+  }
+
+  /**
+   * Hand a freshly created claim to the AI verification pipeline.
+   *
+   * The claim is already durable by the time this runs, so a queue outage must
+   * not fail the request: the claim stays in `requested` without a
+   * verification record, which is exactly the state reconciliation reports on.
+   */
+  private async enqueueVerificationForClaim(claimId: string): Promise<void> {
+    try {
+      await this.verificationService.enqueueVerification(claimId);
+    } catch (error) {
+      this.loggerService.error(
+        `Failed to enqueue verification for claim ${claimId}`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 
   async findAll() {
@@ -174,6 +197,7 @@ export class ClaimsService {
     return claims.map(claim => ({
       ...claim,
       recipientRef: this.encryptionService.decrypt(claim.recipientRef),
+      verification: readPersistedVerificationResult(claim.anchorMetadata),
     }));
   }
 
@@ -191,10 +215,44 @@ export class ClaimsService {
     return {
       ...claim,
       recipientRef: this.encryptionService.decrypt(claim.recipientRef),
+      verification: readPersistedVerificationResult(claim.anchorMetadata),
     };
   }
 
+  /**
+   * Transition a claim to `verified`.
+   *
+   * This is no longer a standalone status flip. The verification pipeline
+   * writes its outcome onto the claim, and this method only applies that
+   * outcome, so a claim with no completed verification record - or one whose
+   * score did not clear the threshold - cannot be marked verified.
+   */
   async verify(id: string) {
+    const claim = await this.prisma.claim.findUnique({ where: { id } });
+    if (!claim) {
+      throw new NotFoundException('Claim not found');
+    }
+
+    const verification = readPersistedVerificationResult(claim.anchorMetadata);
+
+    if (!verification) {
+      throw new BadRequestException(
+        `Claim ${id} has no completed verification record. Verification is queued automatically when a claim is created; wait for it to complete before verifying.`,
+      );
+    }
+
+    if (!verification.passed) {
+      throw new BadRequestException(
+        `Claim ${id} did not pass verification (score ${verification.score} below threshold ${verification.threshold}) and cannot be marked verified.`,
+      );
+    }
+
+    if (claim.status === ClaimStatus.verified) {
+      // The pipeline already applied the same outcome - keep the call
+      // idempotent instead of failing on a no-op transition.
+      return this.findOne(id);
+    }
+
     return this.transitionStatus(
       id,
       ClaimStatus.requested,
@@ -925,3 +983,4 @@ export class ClaimsService {
     }
   }
 }
+

@@ -15,6 +15,7 @@ import { EncryptionService } from '../common/encryption/encryption.service';
 import { ClaimStatus, Prisma, SorobanOperationType } from '@prisma/client';
 import { SorobanTransactionLifecycleService } from '../onchain/soroban-transaction-lifecycle.service';
 import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
+import { VerificationService } from '../verification/verification.service';
 
 describe('ClaimsService', () => {
   let service: ClaimsService;
@@ -92,6 +93,12 @@ describe('ClaimsService', () => {
 
   const mockAuditService = {
     record: jest.fn().mockResolvedValue({ id: 'audit-1' }),
+  };
+
+  const mockVerificationService = {
+    enqueueVerification: jest
+      .fn()
+      .mockResolvedValue({ jobId: 'job-1', priority: 0 }),
   };
 
   beforeEach(async () => {
@@ -173,6 +180,10 @@ describe('ClaimsService', () => {
         {
           provide: SorobanTransactionScheduler,
           useValue: mockSorobanTxScheduler,
+        },
+        {
+          provide: VerificationService,
+          useValue: mockVerificationService,
         },
       ],
     }).compile();
@@ -649,3 +660,4 @@ describe('ClaimsService', () => {
     });
   });
 });
+
