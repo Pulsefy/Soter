@@ -5,10 +5,18 @@ on:
     branches: [ main, develop ]
     paths:
       - 'app/onchain/**'
+      - 'app/backend/scripts/**'
+      - 'app/backend/src/onchain/generated/**'
+      - 'app/backend/package.json'
+      - '.github/workflows/contract-ci.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'app/onchain/**'
+      - 'app/backend/scripts/**'
+      - 'app/backend/src/onchain/generated/**'
+      - 'app/backend/package.json'
+      - '.github/workflows/contract-ci.yml'
 
 jobs:
   test:
@@ -55,3 +63,49 @@ jobs:
         with:
           name: gas-metrics
           path: target/gas_metrics
+
+  contract-spec-drift:
+    name: Contract Interface Spec — drift check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32v1-none
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "app/onchain"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install Node dependencies
+        run: pnpm install --filter backend --frozen-lockfile --ignore-scripts
+
+      # The WASM embeds the contract interface spec. Rebuilding it here means
+      # any change to the contract surface is caught, even if the committed
+      # artifact was forgotten.
+      - name: Build contract WASM
+        working-directory: app/onchain
+        run: cargo build --release --target wasm32v1-none -p aid_escrow
+
+      - name: Check contract interface spec drift
+        run: pnpm --dir app/backend run contract:check:wasm
+
+      - name: Check contract bindings drift
+        run: pnpm --dir app/backend run contract:check

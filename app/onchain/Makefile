@@ -1,4 +1,4 @@
-.PHONY: all build test fmt clippy clean deploy registry help
+.PHONY: all build test fmt clippy clean deploy registry spec help
 
 all: test build
 
@@ -63,6 +63,14 @@ registry:
 	@echo "📋 Generating contract registry..."
 	@python3 scripts/generate-registry.py
 
+spec:
+	@echo "📤 Exporting contract interface spec..."
+	@./scripts/export-contract-spec.sh --build
+
+spec-check:
+	@echo "🔍 Checking contract interface spec drift..."
+	@./scripts/export-contract-spec.sh --check
+
 docs:
 	@echo "📚 Generating documentation..."
 	@cargo doc --open
@@ -78,6 +86,8 @@ help:
 	@echo "  invoke    - Invoke contract function (set FUNCTION and ARGS)"
 	@echo "  audit     - Security audit of dependencies"
 	@echo "  registry  - Generate contract registry JSON for backend/frontend consumption"
+	@echo "  spec      - Export contract interface spec to contracts/aid_escrow/interface.xdr"
+	@echo "  spec-check - Fail if the committed contract interface spec is out of date"
 	@echo "  docs      - Generate and open documentation"
 	@echo ""
 	@echo "Examples:"

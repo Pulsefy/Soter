@@ -14,7 +14,11 @@
     "generate:api": "npx ts-node -r tsconfig-paths/register -P app/backend/tsconfig.json tools/generate-openapi.cjs && npx openapi-typescript openapi.json -o app/mobile/src/types/generated/api.d.ts",
     "spec:generate": "pnpm --dir app/backend run spec:generate",
     "spec:check": "pnpm --dir app/backend run spec:check",
-    "spec:lint": "pnpm --dir app/backend run spec:lint"
+    "spec:lint": "pnpm --dir app/backend run spec:lint",
+    "contract:export": "pnpm --dir app/backend run contract:export",
+    "contract:generate": "pnpm --dir app/backend run contract:generate",
+    "contract:check": "pnpm --dir app/backend run contract:check",
+    "contract:check:wasm": "pnpm --dir app/backend run contract:check:wasm"
   },
   "devDependencies": {
     "@prisma/client": "^7.4.1",

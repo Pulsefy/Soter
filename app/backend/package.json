@@ -29,7 +29,11 @@
     "test:e2e:ci": "prisma migrate deploy && jest --config ./test/jest-e2e.json --runInBand",
     "spec:generate": "ts-node -r tsconfig-paths/register src/generate-spec.ts",
     "spec:check": "ts-node -r tsconfig-paths/register scripts/check-spec-drift.ts",
-    "spec:lint": "redocly lint openapi/openapi.json"
+    "spec:lint": "redocly lint openapi/openapi.json",
+    "contract:export": "bash ../onchain/scripts/export-contract-spec.sh --build",
+    "contract:generate": "ts-node -r tsconfig-paths/register scripts/generate-contract-bindings.ts",
+    "contract:check": "ts-node -r tsconfig-paths/register scripts/generate-contract-bindings.ts --check",
+    "contract:check:wasm": "ts-node -r tsconfig-paths/register scripts/check-contract-spec-drift.ts"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",
