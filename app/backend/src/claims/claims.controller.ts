@@ -37,6 +37,7 @@ import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
 import { DisburseClaimDto } from './dto/disburse-claim.dto';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
+import { ClaimStatusHistoryResponseDto } from './dto/claim-status-history.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
@@ -120,6 +121,54 @@ export class ClaimsController {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
     return claim;
+  }
+
+  @Get(':id/status-history')
+  @ApiOperation({
+    summary: 'Get claim status history',
+    description:
+      'Retrieves the ordered status transition history for a specific claim with timestamps and trigger details. Access is scoped to the claim organization.',
+  })
+  @ApiOkResponse({
+    description: 'Claim status history retrieved successfully.',
+    type: ClaimStatusHistoryResponseDto,
+  })
+  @ApiNotFoundResponse({
+    description: 'The specified claim was not found.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - resource belongs to a different organization.',
+  })
+  async getStatusHistory(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ): Promise<ClaimStatusHistoryResponseDto> {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
+    return this.claimsService.getStatusHistory(id);
+  }
+
+  @Get(':id/history')
+  @ApiOperation({
+    summary: 'Get claim status history (alias)',
+    description:
+      'Alias for GET /claims/:id/status-history. Retrieves the ordered status transition history for a claim.',
+  })
+  @ApiOkResponse({
+    description: 'Claim status history retrieved successfully.',
+    type: ClaimStatusHistoryResponseDto,
+  })
+  @ApiNotFoundResponse({
+    description: 'The specified claim was not found.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - resource belongs to a different organization.',
+  })
+  async getHistoryAlias(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ): Promise<ClaimStatusHistoryResponseDto> {
+    return this.getStatusHistory(id, req);
   }
 
   @Post(':id/verify')

@@ -102,4 +102,49 @@ describe('ClaimsController', () => {
       expect(roles).toEqual([AppRole.operator, AppRole.admin]);
     });
   });
+
+  describe('getStatusHistory', () => {
+    it('returns claim status history for authorized user', async () => {
+      const mockHistory = {
+        claimId: 'claim-1',
+        currentStatus: 'verified',
+        history: [
+          {
+            id: 'csh-1',
+            claimId: 'claim-1',
+            fromStatus: null,
+            toStatus: 'requested',
+            triggeredBy: 'system',
+            triggerType: 'system',
+            timestamp: new Date(),
+          },
+        ],
+        historyStartsFromDeployment: false,
+      };
+
+      (claimsService as any).findOne = jest
+        .fn()
+        .mockResolvedValue({ id: 'claim-1', campaign: { orgId: 'org-1' } });
+      (claimsService as any).getStatusHistory = jest
+        .fn()
+        .mockResolvedValue(mockHistory);
+
+      const req = { user: { role: AppRole.admin } } as any;
+      const result = await controller.getStatusHistory('claim-1', req);
+
+      expect(result).toEqual(mockHistory);
+      expect((claimsService as any).getStatusHistory).toHaveBeenCalledWith('claim-1');
+    });
+
+    it('denies access if user belongs to a different organization', async () => {
+      (claimsService as any).findOne = jest
+        .fn()
+        .mockResolvedValue({ id: 'claim-1', campaign: { orgId: 'org-2' } });
+
+      const req = { user: { role: AppRole.ngo, ngoId: 'org-1' } } as any;
+      await expect(controller.getStatusHistory('claim-1', req)).rejects.toThrow(
+        'Access denied: resource belongs to a different organization',
+      );
+    });
+  });
 });

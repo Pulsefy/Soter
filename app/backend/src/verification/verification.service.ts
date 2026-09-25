@@ -365,6 +365,19 @@ export class VerificationService {
       },
     });
 
+    if (shouldVerify && claim.status !== 'verified') {
+      await this.prisma.claimStatusHistory.create({
+        data: {
+          claimId,
+          fromStatus: 'requested',
+          toStatus: 'verified',
+          triggeredBy: 'verification_pipeline',
+          triggerType: 'verification_result',
+          reason: `Verification completed with score ${enhancedResult.score}`,
+        },
+      });
+    }
+
     this.logger.log(
       `Claim ${claimId} verification completed – score ${enhancedResult.score} ` +
         `(threshold: ${this.verificationThreshold}, packageId: ${enhancedResult.metadata?.packageId})`,

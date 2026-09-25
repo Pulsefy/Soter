@@ -251,6 +251,7 @@ model Claim {
   balanceLedger     BalanceLedger[]
   sorobanTransactions SorobanTransaction[]
   sorobanEventCorrelations SorobanEventCorrelation[]
+  statusHistory     ClaimStatusHistory[]
 
   @@index([status])
   @@index([campaignId])
@@ -261,6 +262,23 @@ model Claim {
   @@index([expiresAt])
   @@unique([importJobId, importRowNumber])
 }
+
+model ClaimStatusHistory {
+  id          String       @id @default(cuid())
+  claimId     String
+  claim       Claim        @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  fromStatus  ClaimStatus?
+  toStatus    ClaimStatus
+  triggeredBy String       @default("system")
+  triggerType String       @default("system")
+  reason      String?
+  metadata    Json?
+  timestamp   DateTime     @default(now())
+
+  @@index([claimId])
+  @@index([timestamp])
+}
+
 
 enum SorobanTransactionStatus {
   pending

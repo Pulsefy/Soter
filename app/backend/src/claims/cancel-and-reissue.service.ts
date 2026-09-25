@@ -96,6 +96,18 @@ export class CancelAndReissueService {
         },
       });
 
+      await tx.claimStatusHistory.create({
+        data: {
+          claimId: id,
+          fromStatus: claim.status,
+          toStatus: ClaimStatus.cancelled,
+          triggeredBy: dto.operatorId,
+          triggerType: 'operator',
+          reason: dto.reason ?? 'Claim cancelled',
+          timestamp: now,
+        },
+      });
+
       return updated;
     });
 
@@ -198,6 +210,18 @@ export class CancelAndReissueService {
           },
         });
 
+        await tx.claimStatusHistory.create({
+          data: {
+            claimId: originalId,
+            fromStatus: original.status,
+            toStatus: ClaimStatus.cancelled,
+            triggeredBy: dto.operatorId,
+            triggerType: 'operator',
+            reason: dto.reason ?? 'Reissued as new claim',
+            timestamp: now,
+          },
+        });
+
         // 3. Create the replacement claim, linked to the original
         const newClaim = await tx.claim.create({
           data: {
@@ -219,6 +243,18 @@ export class CancelAndReissueService {
             eventType: 'lock',
             amount: newAmount,
             note: `Replacement claim ${newClaim.id} issued by ${dto.operatorId} (replaces ${originalId})`,
+          },
+        });
+
+        await tx.claimStatusHistory.create({
+          data: {
+            claimId: newClaim.id,
+            fromStatus: null,
+            toStatus: ClaimStatus.requested,
+            triggeredBy: dto.operatorId,
+            triggerType: 'operator',
+            reason: `Reissued from claim ${originalId}`,
+            timestamp: now,
           },
         });
 
