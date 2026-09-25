@@ -2,7 +2,7 @@
 
 #![cfg(test)]
 
-use aid_escrow::{AidEscrow, AidEscrowClient};
+use aid_escrow::{AidEscrow, AidEscrowClient, SURPLUS_WITHDRAWAL_DELAY_SECS};
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
     token::{StellarAssetClient, TokenClient},
@@ -457,7 +457,11 @@ fn test_surplus_withdrawn_event() {
     token_admin_client.mint(&admin, &(10 * UNIT));
     client.fund(&token_client.address, &admin, &(5 * UNIT));
 
-    client.withdraw_surplus(&recipient, &UNIT, &token_client.address);
+    // Timelock flow: propose, wait the delay, then execute.
+    client.propose_surplus_withdrawal(&recipient, &UNIT, &token_client.address);
+    let new_time = env.ledger().timestamp() + SURPLUS_WITHDRAWAL_DELAY_SECS;
+    env.ledger().set_timestamp(new_time);
+    client.execute_surplus_withdrawal();
 
     let data = last_event_data(&env, &contract_id, "surplus_withdrawn_event");
     assert_schema_version(&env, &data, 1);
