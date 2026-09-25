@@ -624,6 +624,12 @@ describe('VerificationService', () => {
             claimId: 'claim-ref-123',
             packageId: 'PKG-456',
             contractId: null,
+            verification: expect.objectContaining({
+              passed: true,
+              score: expect.any(Number),
+              threshold: expect.any(Number),
+              completedAt: expect.any(String),
+            }),
           },
         },
       });
@@ -744,6 +750,12 @@ describe('VerificationService', () => {
             claimId: null,
             packageId: null,
             contractId: null,
+            verification: expect.objectContaining({
+              passed: true,
+              score: expect.any(Number),
+              threshold: expect.any(Number),
+              completedAt: expect.any(String),
+            }),
           },
         },
       });
