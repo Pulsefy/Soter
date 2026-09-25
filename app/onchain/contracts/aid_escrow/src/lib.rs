@@ -3446,13 +3446,13 @@ impl AidEscrow {
                 break;
             }
 
-            let idx_key = (symbol_short!("pidx"), i);
+            let idx_key = package_index_entry(i);
             let pkg_id: u64 = match env.storage().persistent().get(&idx_key) {
                 Some(id) => id,
                 None => continue,
             };
 
-            let pkg_key = (symbol_short!("pkg"), pkg_id);
+            let pkg_key = package_key(pkg_id);
             let mut package: Package = match env.storage().persistent().get(&pkg_key) {
                 Some(package) => package,
                 None => continue,
