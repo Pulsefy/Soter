@@ -157,8 +157,16 @@ def handle_task_retries_exhausted(
     failed, notify the backend, and dead-letter it so an operator can
     replay it later without waiting on another transient-failure window.
     """
-    update_task_status(task_id, "failed", error=error_msg)
-    send_webhook_notification(task_id, "failed", error=error_msg)
+    task_type = payload.get("type") if isinstance(payload, dict) else None
+    webhook_url = get_task_webhook_url(task_id)
+    update_task_status(task_id, "failed", error=error_msg, task_type=task_type, webhook_url=webhook_url)
+    send_webhook_notification(
+        task_id,
+        "failed",
+        error=error_msg,
+        webhook_url=webhook_url,
+        task_type=task_type,
+    )
     dead_letter_queue.add(
         kind="async_job",
         task_id=task_id,
@@ -181,6 +189,7 @@ def update_task_status(
     result: Optional[Any] = None,
     error: Optional[str] = None,
     task_type: Optional[str] = None,
+    webhook_url: Optional[str] = None,
 ) -> None:
     """
     Update the status of a background task
@@ -191,18 +200,46 @@ def update_task_status(
         result: Task result data (if completed)
         error: Error message (if failed)
         task_type: Task type recorded at creation, kept for idle-timeout metrics
+        webhook_url: Optional per-task callback sink for status updates
     """
+    existing = task_results.get(task_id, {})
+    resolved_webhook_url = webhook_url or existing.get("webhook_url")
     task_results[task_id] = {
+        **existing,
         "status": status,
         "result": result,
         "error": error,
         "updated_at": time.time(),
         **({"task_type": task_type} if task_type is not None else {}),
+        **({"webhook_url": resolved_webhook_url} if resolved_webhook_url else {}),
     }
+
+    if status in {"pending", "processing"} and resolved_webhook_url:
+        send_webhook_notification(
+            task_id,
+            status,
+            result=result,
+            error=error,
+            webhook_url=resolved_webhook_url,
+            task_type=task_type or existing.get("task_type"),
+        )
+
+
+def get_task_webhook_url(task_id: str) -> Optional[str]:
+    """Return the task-scoped webhook URL if one was registered."""
+    task = task_results.get(task_id)
+    if task is None:
+        return None
+    return task.get("webhook_url")
 
 
 def send_webhook_notification(
-    task_id: str, status: str, result: Any = None, error: str = None
+    task_id: str,
+    status: str,
+    result: Any = None,
+    error: str = None,
+    webhook_url: Optional[str] = None,
+    task_type: Optional[str] = None,
 ) -> None:
     """
     Send a signed webhook notification to the NestJS backend when a task
@@ -220,8 +257,13 @@ def send_webhook_notification(
         result:  Task output dict (required when status="completed").
         error:   Error message string (required when status="failed").
     """
-    if not settings.backend_webhook_url:
-        logger.warning("Backend webhook URL not configured, skipping notification")
+    target_url = webhook_url or settings.backend_webhook_url
+    if not target_url:
+        logger.warning(
+            "No webhook URL configured for task %s (status=%s), skipping notification",
+            task_id,
+            status,
+        )
         return
 
     try:
@@ -230,6 +272,7 @@ def send_webhook_notification(
             status=CallbackStatus(status),
             result=result,
             error=error,
+            task_type=task_type,
         )
     except Exception as exc:
         logger.error(f"Failed to build callback payload for task {task_id}: {exc}")
@@ -252,14 +295,19 @@ def send_webhook_notification(
 
         def send_notification() -> None:
             try:
-                deliver_webhook(body_bytes, headers)
+                deliver_webhook(body_bytes, headers, url=target_url)
                 logger.info(f"Webhook notification sent for task {task_id}")
             except Exception as exc:
                 logger.error(f"Failed to send webhook notification: {exc}")
                 dead_letter_queue.add(
                     kind="callback",
                     task_id=task_id,
-                    payload={"status": status, "result": result, "error": error},
+                    payload={
+                        "status": status,
+                        "result": result,
+                        "error": error,
+                        "webhook_url": target_url,
+                    },
                     error=str(exc),
                 )
                 metrics.DEAD_LETTER_ITEMS_TOTAL.labels(kind="callback").inc()
@@ -270,7 +318,9 @@ def send_webhook_notification(
         logger.error(f"Error setting up webhook notification thread: {exc}")
 
 
-def deliver_webhook(body_bytes: bytes, headers: Dict[str, str]) -> None:
+def deliver_webhook(
+    body_bytes: bytes, headers: Dict[str, str], url: Optional[str] = None
+) -> None:
     """
     Synchronously POST a webhook body to the configured backend URL.
 
@@ -278,9 +328,12 @@ def deliver_webhook(body_bytes: bytes, headers: Dict[str, str]) -> None:
     fire-and-forget notification path and dead-letter replay so both
     paths agree on what counts as a delivery failure.
     """
+    destination = url or settings.backend_webhook_url
+    if destination is None:
+        raise RuntimeError("Webhook URL not configured")
     with httpx.Client(timeout=10.0) as client:
         response = client.post(
-            str(settings.backend_webhook_url),
+            str(destination),
             content=body_bytes,
             headers=headers,
         )
@@ -302,14 +355,16 @@ def replay_callback_delivery(task_id: str, payload: Dict[str, Any]) -> None:
     Raises:
         RuntimeError: If the webhook URL is not configured or delivery fails.
     """
-    if not settings.backend_webhook_url:
-        raise RuntimeError("Backend webhook URL not configured, cannot replay callback")
+    target_url = payload.get("webhook_url") or settings.backend_webhook_url
+    if not target_url:
+        raise RuntimeError("Webhook URL not configured, cannot replay callback")
 
     callback_payload = AiCallbackPayload.build(
         task_id=task_id,
         status=CallbackStatus(payload.get("status")),
         result=payload.get("result"),
         error=payload.get("error"),
+        task_type=payload.get("task_type"),
     )
 
     body_bytes = callback_payload.to_json_bytes()
@@ -317,7 +372,7 @@ def replay_callback_delivery(task_id: str, payload: Dict[str, Any]) -> None:
     if settings.ai_webhook_secret:
         headers["X-Signature-256"] = callback_payload.sign(settings.ai_webhook_secret)
 
-    deliver_webhook(body_bytes, headers)
+    deliver_webhook(body_bytes, headers, url=target_url)
 
 
 def replay_async_job(task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -352,7 +407,7 @@ def process_heavy_inference_impl(
 
     try:
         # Update status to processing
-        update_task_status(task_id, "processing")
+        update_task_status(task_id, "processing", webhook_url=get_task_webhook_url(task_id))
 
         # Extract task type from payload
         task_type = payload.get("type", "inference")
@@ -379,10 +434,16 @@ def process_heavy_inference_impl(
             result = _process_default_inference(payload)
 
         # Update status to completed
-        update_task_status(task_id, "completed", result)
+        update_task_status(task_id, "completed", result, webhook_url=get_task_webhook_url(task_id))
 
         # Send webhook notification to backend
-        send_webhook_notification(task_id, "completed", result)
+        send_webhook_notification(
+            task_id,
+            "completed",
+            result,
+            webhook_url=get_task_webhook_url(task_id),
+            task_type=task_type,
+        )
 
         inference_latency = time.time() - start_inference
         # task_type originates from the client-supplied payload["type"]; bound
@@ -701,7 +762,13 @@ def create_task(task_type: str, payload: Dict[str, Any]) -> str:
     task_id = str(uuid.uuid4())
 
     # Initialize task status
-    update_task_status(task_id, "pending", task_type=task_type)
+    webhook_url = payload.get("webhook_url") or payload.get("callback_url")
+    update_task_status(
+        task_id,
+        "pending",
+        task_type=task_type,
+        webhook_url=webhook_url,
+    )
 
     ensure_queue_capacity()
 

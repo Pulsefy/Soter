@@ -190,6 +190,22 @@ class TestDeadLetterCapture:
 
         assert dead_letter_queue.get("callback:task-webhook-2") is None
 
+    def test_custom_webhook_delivery_failure_is_dead_lettered(self, monkeypatch):
+        _run_thread_synchronously(monkeypatch)
+        mock_response = MagicMock(status_code=500, text="upstream error")
+
+        with patch("httpx.Client.post", return_value=mock_response) as post_mock:
+            tasks.send_webhook_notification(
+                "task-custom-webhook",
+                "processing",
+                webhook_url="https://example.com/custom-hook",
+            )
+
+        assert post_mock.call_args.args[0] == "https://example.com/custom-hook"
+        entry = dead_letter_queue.get("callback:task-custom-webhook")
+        assert entry is not None
+        assert entry.payload["webhook_url"] == "https://example.com/custom-hook"
+
     def test_task_retry_exhaustion_is_dead_lettered(self, monkeypatch):
         monkeypatch.setattr(
             settings, "backend_webhook_url", None
