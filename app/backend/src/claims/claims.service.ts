@@ -11,6 +11,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { ClaimReceiptDto, SendReceiptShareDto } from './dto/claim-receipt.dto';
+import { ClaimStatusHistoryResponseDto } from './dto/claim-status-history.dto';
 import { explorerTxUrl } from '../common/utils/explorer-url.util';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
 import {
@@ -172,6 +173,17 @@ export class ClaimsService {
         },
       });
 
+      await tx.claimStatusHistory.create({
+        data: {
+          claimId: created.id,
+          fromStatus: null,
+          toStatus: ClaimStatus.requested,
+          triggeredBy: 'system',
+          triggerType: 'system',
+          reason: 'Claim requested',
+        },
+      });
+
       return created;
     });
 
@@ -278,6 +290,10 @@ export class ClaimsService {
       id,
       ClaimStatus.requested,
       ClaimStatus.verified,
+      null,
+      'operator',
+      'operator',
+      'Claim verified',
     );
   }
 
@@ -286,6 +302,10 @@ export class ClaimsService {
       id,
       ClaimStatus.verified,
       ClaimStatus.approved,
+      null,
+      'admin',
+      'admin',
+      'Claim approved by admin',
     );
   }
 
@@ -375,6 +395,10 @@ export class ClaimsService {
       id,
       ClaimStatus.approved,
       ClaimStatus.disbursed,
+      null,
+      'admin',
+      'admin',
+      'Claim disbursed',
     );
 
     this.logger.log(
@@ -577,6 +601,9 @@ export class ClaimsService {
     fromStatus: ClaimStatus,
     toStatus: ClaimStatus,
     onchainResult?: DisburseResult | null,
+    triggeredBy = 'system',
+    triggerType = 'system',
+    reason?: string,
   ) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
@@ -593,6 +620,17 @@ export class ClaimsService {
         where: { id },
         data: { status: toStatus },
         include: { campaign: true },
+      });
+
+      await tx.claimStatusHistory.create({
+        data: {
+          claimId: id,
+          fromStatus,
+          toStatus,
+          triggeredBy,
+          triggerType,
+          reason: reason ?? `Status changed to ${toStatus}`,
+        },
       });
 
       void this.auditLog('claim', id, `status_changed_to_${toStatus}`, {
@@ -1002,6 +1040,174 @@ export class ClaimsService {
         escapeCsvField(row.tokenAddress),
       ]);
     }
+  }
+
+  async getStatusHistory(id: string): Promise<ClaimStatusHistoryResponseDto> {
+    const claim = await this.prisma.claim.findUnique({
+      where: { id },
+      include: {
+        campaign: true,
+        balanceLedger: { orderBy: { createdAt: 'asc' } },
+        statusHistory: { orderBy: { timestamp: 'asc' } },
+      },
+    });
+
+    if (!claim || claim.deletedAt) {
+      throw new NotFoundException('Claim not found');
+    }
+
+    let historyRecords = claim.statusHistory;
+
+    if (historyRecords.length === 0) {
+      historyRecords = await this.backfillStatusHistory(claim);
+    }
+
+    return {
+      claimId: claim.id,
+      currentStatus: claim.status,
+      history: historyRecords.map(h => ({
+        id: h.id,
+        claimId: h.claimId,
+        fromStatus: h.fromStatus,
+        toStatus: h.toStatus,
+        triggeredBy: h.triggeredBy,
+        triggerType: h.triggerType,
+        reason: h.reason,
+        timestamp: h.timestamp,
+        metadata: (h.metadata as Record<string, any>) ?? null,
+      })),
+      historyStartsFromDeployment: false,
+    };
+  }
+
+  private async backfillStatusHistory(claim: any) {
+    const recordsToCreate: Array<{
+      claimId: string;
+      fromStatus: ClaimStatus | null;
+      toStatus: ClaimStatus;
+      triggeredBy: string;
+      triggerType: string;
+      reason: string;
+      timestamp: Date;
+    }> = [];
+
+    recordsToCreate.push({
+      claimId: claim.id,
+      fromStatus: null,
+      toStatus: ClaimStatus.requested,
+      triggeredBy: 'system',
+      triggerType: 'system',
+      reason: 'Claim requested',
+      timestamp: claim.createdAt,
+    });
+
+    let currentStatus: ClaimStatus = ClaimStatus.requested;
+
+    const verification = readPersistedVerificationResult(claim.anchorMetadata);
+    if (
+      verification?.passed ||
+      [
+        ClaimStatus.verified,
+        ClaimStatus.approved,
+        ClaimStatus.disbursed,
+        ClaimStatus.archived,
+      ].includes(claim.status)
+    ) {
+      if (claim.status !== ClaimStatus.requested) {
+        const verifiedTimestamp = verification?.completedAt
+          ? new Date(verification.completedAt)
+          : claim.createdAt;
+
+        recordsToCreate.push({
+          claimId: claim.id,
+          fromStatus: currentStatus,
+          toStatus: ClaimStatus.verified,
+          triggeredBy: verification ? 'verification_pipeline' : 'operator',
+          triggerType: verification ? 'verification_result' : 'operator',
+          reason: verification
+            ? `Verification passed (score: ${verification.score})`
+            : 'Claim verified',
+          timestamp:
+            verifiedTimestamp > claim.createdAt
+              ? verifiedTimestamp
+              : claim.createdAt,
+        });
+        currentStatus = ClaimStatus.verified;
+      }
+    }
+
+    if (
+      [ClaimStatus.approved, ClaimStatus.disbursed].includes(claim.status) ||
+      (claim.status === ClaimStatus.archived &&
+        currentStatus === ClaimStatus.verified)
+    ) {
+      const lockLedger = claim.balanceLedger?.find(
+        (l: any) => l.eventType === 'lock',
+      );
+      const approvedTimestamp = lockLedger?.createdAt ?? claim.updatedAt;
+
+      recordsToCreate.push({
+        claimId: claim.id,
+        fromStatus: currentStatus,
+        toStatus: ClaimStatus.approved,
+        triggeredBy: 'admin',
+        triggerType: 'admin',
+        reason: 'Claim approved by admin',
+        timestamp: approvedTimestamp,
+      });
+      currentStatus = ClaimStatus.approved;
+    }
+
+    if (claim.status === ClaimStatus.disbursed) {
+      const disburseLedger = claim.balanceLedger?.find(
+        (l: any) => l.eventType === 'disburse',
+      );
+      const disbursedTimestamp = disburseLedger?.createdAt ?? claim.updatedAt;
+
+      recordsToCreate.push({
+        claimId: claim.id,
+        fromStatus: currentStatus,
+        toStatus: ClaimStatus.disbursed,
+        triggeredBy: 'admin',
+        triggerType: 'admin',
+        reason: 'Claim disbursed',
+        timestamp: disbursedTimestamp,
+      });
+    }
+
+    if (claim.status === ClaimStatus.cancelled) {
+      recordsToCreate.push({
+        claimId: claim.id,
+        fromStatus: currentStatus,
+        toStatus: ClaimStatus.cancelled,
+        triggeredBy: claim.cancelledBy ?? 'operator',
+        triggerType: 'operator',
+        reason: claim.cancelReason ?? 'Claim cancelled',
+        timestamp: claim.cancelledAt ?? claim.updatedAt,
+      });
+    }
+
+    if (claim.status === ClaimStatus.archived) {
+      recordsToCreate.push({
+        claimId: claim.id,
+        fromStatus: currentStatus,
+        toStatus: ClaimStatus.archived,
+        triggeredBy: 'system',
+        triggerType: 'system',
+        reason: 'Claim archived',
+        timestamp: claim.updatedAt,
+      });
+    }
+
+    const createdRecords = [];
+    for (const record of recordsToCreate) {
+      const created = await this.prisma.claimStatusHistory.create({
+        data: record,
+      });
+      createdRecords.push(created);
+    }
+
+    return createdRecords;
   }
 }
 
