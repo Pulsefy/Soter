@@ -6,9 +6,9 @@
     "tools/*"
   ],
   "scripts": {
-    "dev": "pnpm run dev --filter=app/frontend",
-    "build": "pnpm run build --filter=app/frontend",
-    "start": "pnpm run start --filter=app/frontend",
+    "dev": "node api.js && pnpm run dev --filter=app/frontend",
+    "build": "node api.js && pnpm run build --filter=app/frontend",
+    "start": "node api.js && pnpm run start --filter=app/frontend",
     "lint": "pnpm run lint --filter=app/frontend",
     "test": "pnpm run test --filter=app/frontend",
     "generate:api": "npx ts-node -r tsconfig-paths/register -P app/backend/tsconfig.json tools/generate-openapi.cjs && npx openapi-typescript openapi.json -o app/mobile/src/types/generated/api.d.ts",
