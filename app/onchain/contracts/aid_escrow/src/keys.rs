@@ -34,6 +34,10 @@ pub const KEY_ADMIN: Symbol = symbol_short!("admin");
 /// Nominated administrator during a two-step transfer (`Option<Address>`).
 /// Present only while a transfer is pending; removed on accept/cancel.
 pub const KEY_PENDING_ADMIN: Symbol = symbol_short!("pend_adm");
+/// Pending surplus withdrawal proposal (`PendingWithdrawal`).
+/// Present only while a withdrawal is in the timelock window; removed on
+/// execution or cancellation.
+pub const KEY_PENDING_WITHDRAWAL: Symbol = symbol_short!("pend_wdr");
 /// Storage-schema version number (`u32`). Bumped by `migrate`.
 pub const KEY_VERSION: Symbol = symbol_short!("version");
 /// Global configuration struct (`Config`: min_amount, max_expires_in,
@@ -146,10 +150,11 @@ mod tests {
     use super::*;
 
     /// Every singleton key, both storage families.
-    fn singleton_keys() -> [Symbol; 22] {
+    fn singleton_keys() -> [Symbol; 23] {
         [
             KEY_ADMIN,
             KEY_PENDING_ADMIN,
+            KEY_PENDING_WITHDRAWAL,
             KEY_VERSION,
             KEY_CONFIG,
             KEY_DISTRIBUTORS,

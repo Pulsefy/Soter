@@ -2,7 +2,7 @@
 #![allow(clippy::all)]
 #![allow(dead_code)]
 
-use aid_escrow::{AidEscrow, AidEscrowClient, Config};
+use aid_escrow::{AidEscrow, AidEscrowClient, Config, Error, SURPLUS_WITHDRAWAL_DELAY_SECS};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use soroban_sdk::{
@@ -63,7 +63,48 @@ fn advance_time(env: &Env, seconds: u64) {
     env.ledger().set(info);
 }
 
-// --- Invariant assertion ---
+/// Compatibility shim: execute a surplus withdrawal via the timelock flow.
+///
+/// The property tests need a single-step "try withdraw" that returns the same
+/// success/failure shape as the old atomic `withdraw_surplus`.  This function:
+/// 1. Cancels any stale pending proposal (defensive clean-up).
+/// 2. Proposes the withdrawal.
+/// 3. Advances the ledger by `SURPLUS_WITHDRAWAL_DELAY_SECS` so the timelock
+///    expires immediately.
+/// 4. Executes the withdrawal.
+///
+/// Returns `Ok(Ok(()))` on success, `Ok(Err(Error))` on a contract error, or
+/// `Err(())` on a host-level failure, mirroring the `try_*` convention.
+#[allow(dead_code)]
+fn try_withdraw_surplus_via_timelock(
+    env: &Env,
+    client: &AidEscrowClient,
+    to: &Address,
+    amount: i128,
+    token: &Address,
+) -> Result<Result<(), Error>, ()> {
+    // Cancel any existing pending proposal so we can make a fresh one.
+    let _ = client.try_cancel_surplus_withdrawal();
+
+    // Propose — propagate any contract error immediately.
+    match client.try_propose_surplus_withdrawal(to, &amount, token) {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => return Err(()),
+        Err(Ok(e)) => return Ok(Err(e)),
+        Err(Err(_)) => return Err(()),
+    }
+
+    // Advance time past the delay so execute is unblocked.
+    advance_time(env, SURPLUS_WITHDRAWAL_DELAY_SECS);
+
+    // Execute.
+    match client.try_execute_surplus_withdrawal() {
+        Ok(Ok(())) => Ok(Ok(())),
+        Ok(Err(_)) => Err(()),
+        Err(Ok(e)) => Ok(Err(e)),
+        Err(Err(_)) => Err(()),
+    }
+}
 
 fn assert_invariants(
     client: &AidEscrowClient,
@@ -297,7 +338,7 @@ fn test_fund_accounting_invariants() {
                 // WITHDRAW_SURPLUS: try to pull surplus
                 let amount = UNIT * iter_rng.gen_range(1..=3) as i128;
                 let to = Address::generate(&env);
-                match client.try_withdraw_surplus(&to, &amount, &token) {
+                match try_withdraw_surplus_via_timelock(&env, &client, &to, amount, &token) {
                     Ok(Ok(())) => {
                         total_withdrawn += amount;
                         ops_log.push((
@@ -531,7 +572,7 @@ fn test_claim_revolve_invariants() {
                 // WITHDRAW_SURPLUS
                 let amount = UNIT * iter_rng.gen_range(1..=5) as i128;
                 let to = Address::generate(&env);
-                match client.try_withdraw_surplus(&to, &amount, &token) {
+                match try_withdraw_surplus_via_timelock(&env, &client, &to, amount, &token) {
                     Ok(Ok(())) => {
                         total_withdrawn += amount;
                         ops_log.push((
@@ -800,7 +841,7 @@ fn test_full_lifecycle_invariants() {
         let final_step = base_step + packages.len();
         let surplus_amount = UNIT * iter_rng.gen_range(1..=10) as i128;
         let to = Address::generate(&env);
-        match client.try_withdraw_surplus(&to, &surplus_amount, &token) {
+        match try_withdraw_surplus_via_timelock(&env, &client, &to, surplus_amount, &token) {
             Ok(Ok(())) => {
                 total_withdrawn += surplus_amount;
                 ops_log.push((
@@ -1025,7 +1066,7 @@ fn test_randomized_state_machine() {
                 // WITHDRAW_SURPLUS
                 let amount = UNIT * iter_rng.gen_range(1..=10) as i128;
                 let to = Address::generate(&env);
-                match client.try_withdraw_surplus(&to, &amount, &token) {
+                match try_withdraw_surplus_via_timelock(&env, &client, &to, amount, &token) {
                     Ok(Ok(())) => {
                         total_withdrawn += amount;
                         ops_log.push((
