@@ -69,6 +69,7 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
     retryAction,
     requeueAction,
     discardAction,
+    clearQueue,
     deferralStatus,
     forceSync,
   } = useSync();
@@ -109,11 +110,65 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
     await requeueAction(actionId);
   };
 
-  const handleDiscard = async (actionId: string) => {
-    if (selectedAction?.id === actionId) {
-      setSelectedAction(null);
-    }
-    await discardAction(actionId);
+  const handleDiscard = (item: QueuedSyncAction) => {
+    const actionLabel = ACTION_LABELS[item.type] ?? item.type;
+    Alert.alert(
+      t('submissionQueue.discardConfirmTitle'),
+      t('submissionQueue.discardConfirmMessage').replace('{type}', actionLabel),
+      [
+        {
+          text: t('submissionQueue.discardConfirmCancel'),
+          style: 'cancel',
+        },
+        {
+          text: t('submissionQueue.discardConfirmOk'),
+          style: 'destructive',
+          onPress: async () => {
+            if (selectedAction?.id === item.id) {
+              setSelectedAction(null);
+            }
+            await discardAction(item.id);
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  };
+
+  const handleClearAll = () => {
+    if (items.length === 0) return;
+
+    // Build a deduplicated, human-readable summary of affected types
+    const typeCounts = items.reduce<Record<string, number>>((acc, item) => {
+      const label = ACTION_LABELS[item.type] ?? item.type;
+      acc[label] = (acc[label] ?? 0) + 1;
+      return acc;
+    }, {});
+    const typeSummary = Object.entries(typeCounts)
+      .map(([label, count]) => `${count}× ${label}`)
+      .join(', ');
+
+    Alert.alert(
+      t('submissionQueue.clearAllConfirmTitle'),
+      t('submissionQueue.clearAllConfirmMessage')
+        .replace('{count}', String(items.length))
+        .replace('{types}', typeSummary),
+      [
+        {
+          text: t('submissionQueue.clearAllConfirmCancel'),
+          style: 'cancel',
+        },
+        {
+          text: t('submissionQueue.clearAllConfirmOk'),
+          style: 'destructive',
+          onPress: async () => {
+            setSelectedAction(null);
+            await clearQueue();
+          },
+        },
+      ],
+      { cancelable: true },
+    );
   };
 
   const handleForceSync = async () => {
@@ -213,7 +268,7 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
 
           <TouchableOpacity
             style={styles.discardButton}
-            onPress={() => handleDiscard(item.id)}
+            onPress={() => handleDiscard(item)}
             accessibilityRole="button"
             accessibilityLabel="Discard item"
             testID={`discard-button-${item.id}`}
@@ -273,6 +328,18 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
               <Text style={styles.forceSyncButtonText}>
                 Force Sync
               </Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {items.length > 0 ? (
+            <TouchableOpacity
+              style={styles.clearAllButton}
+              onPress={handleClearAll}
+              accessibilityRole="button"
+              accessibilityLabel={`Clear all ${items.length} queued items`}
+              testID="clear-all-button"
+            >
+              <Text style={styles.clearAllButtonText}>{t('submissionQueue.clearAllButton')}</Text>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -473,9 +540,10 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
 
                 <TouchableOpacity
                   style={styles.modalDiscardBtn}
-                  onPress={() => handleDiscard(selectedAction.id)}
+                  onPress={() => handleDiscard(selectedAction)}
                   accessibilityRole="button"
                   accessibilityLabel="Discard submission item"
+                  testID="modal-discard-button"
                 >
                   <Text style={styles.modalBtnText}>{t('submissionQueue.discard')}</Text>
                 </TouchableOpacity>
@@ -741,6 +809,20 @@ const makeStyles = (colors: AppColors) =>
       fontSize: 12,
       fontWeight: '600',
       color: '#991B1B',
+    },
+    clearAllButton: {
+      marginLeft: 'auto' as const,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: '#EF4444',
+      backgroundColor: '#FEF2F2',
+    },
+    clearAllButtonText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: '#B91C1C',
     },
     emptyState: {
       alignItems: 'center',
