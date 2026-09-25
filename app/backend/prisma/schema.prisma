@@ -367,6 +367,16 @@ model AuditLog {
   metadata  Json?
   deletedAt DateTime?
 
+  // Tamper-evident hash chain (see docs/audit-log-integrity.md).
+  // `sequence` orders the chain; `prevHash` links each entry to its
+  // predecessor; `entryHash` covers the entry content; `metadataCanonical`
+  // is the canonical JSON serialization of `metadata` covered by the hash.
+  // Legacy rows predating the chain keep all four fields null.
+  sequence          BigInt?  @unique
+  prevHash          String?
+  entryHash         String?
+  metadataCanonical String?
+
   @@index([entity, entityId])
   @@index([timestamp])
   @@index([deletedAt])
