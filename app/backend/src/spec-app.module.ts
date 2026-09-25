@@ -100,6 +100,8 @@ import { SandboxService } from '../src/sandbox/sandbox.service';
 
 import { AdminSearchController } from '../src/search/admin-search.controller';
 import { AdminSearchService } from '../src/search/admin-search.service';
+import { SearchIndexController } from '../src/search/search-index.controller';
+import { SearchIndexService } from '../src/search/search-index.service';
 
 import { SessionController } from '../src/session/session.controller';
 import { SessionService } from '../src/session/session.service';
@@ -158,6 +160,7 @@ const stub = <T>(value: T) => ({ useValue: value });
     RetentionPolicyController,
     SandboxController,
     AdminSearchController,
+    SearchIndexController,
     SessionController,
     TestErrorController,
     VerificationController,
@@ -201,6 +204,7 @@ const stub = <T>(value: T) => ({ useValue: value });
     { provide: RetentionPolicyService, ...stub({}) },
     { provide: SandboxService, ...stub({}) },
     { provide: AdminSearchService, ...stub({}) },
+    { provide: SearchIndexService, ...stub({}) },
     { provide: SessionService, ...stub({}) },
     { provide: VerificationService, ...stub({}) },
     { provide: VerificationFlowService, ...stub({}) },

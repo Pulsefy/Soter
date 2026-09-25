@@ -1059,3 +1059,70 @@ model DeviceNotificationToken {
   @@index([isActive])
   @@index([revokedAt])
 }
+
+// ============================================================================
+// SEARCH INDEX
+// ============================================================================
+
+/// Entities that can be materialized into the search index
+enum SearchIndexEntityType {
+  campaign
+  claim
+  recipient
+  verification
+}
+
+/// Lifecycle state of a search index (re)build run
+enum SearchIndexBuildStatus {
+  running
+  completed
+  failed
+}
+
+/// Denormalized, searchable document backing `AdminSearchService.search`.
+/// Populated by SearchIndexService; rebuilt by an admin-triggered rebuild so
+/// a schema change or a bad partial write can be recovered without manual
+/// intervention. `buildId` marks which build last wrote an entry so stale
+/// entries are purged at the end of a successful rebuild.
+model SearchIndexEntry {
+  id         String                @id @default(cuid())
+  entityType SearchIndexEntityType
+  entityId   String
+  orgId      String
+  label      String
+  status     String
+  searchText String
+  buildId    String
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+
+  @@unique([entityType, entityId, orgId])
+  @@index([orgId, entityType])
+  @@index([buildId])
+}
+
+/// Durable checkpoint for a search index (re)build run. Progress is persisted
+/// here so an interrupted rebuild can be resumed from its last batch instead
+/// of starting over. Only one `running` build is allowed at a time;
+/// concurrent requests are rejected by SearchIndexService.
+model SearchIndexBuild {
+  id                 String                @id @default(cuid())
+  status             SearchIndexBuildStatus @default(running)
+  mode               String                @default("rebuild") /// "rebuild" | "dry_run"
+  entityTypes        Json
+  batchSize          Int                   @default(100)
+  triggeredBy        String?
+  totalDocuments     Int                   @default(0)
+  processedDocuments Int                   @default(0)
+  checkpoint         Json?
+  statistics         Json?
+  error              String?
+  heartbeatAt        DateTime?
+  startedAt          DateTime              @default(now())
+  completedAt        DateTime?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
