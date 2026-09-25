@@ -100,6 +100,7 @@ class HumanitarianVerificationService:
         prompt_version: Optional[str] = None,
         primary_prompt_version: Optional[str] = None,
         fallback_prompt_version: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
         try:
@@ -115,6 +116,7 @@ class HumanitarianVerificationService:
                 aid_claim=aid_claim,
                 supporting_evidence=evidence,
                 context_factors=context,
+                language=language,
             )
 
             fb_ver = fallback_prompt_version
@@ -131,6 +133,7 @@ class HumanitarianVerificationService:
                 aid_claim=aid_claim,
                 supporting_evidence=evidence,
                 context_factors=context,
+                language=language,
             )
 
             providers = self.registry.resolve_llm(provider_preference)

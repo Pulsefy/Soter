@@ -1,6 +1,14 @@
+from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 from schemas.common import AnchorMetadata
+
+
+class SupportedLanguage(str, Enum):
+    en = "en"
+    fr = "fr"
+    ar = "ar"
+    es = "es"
 
 
 class LLMVerificationPayload(BaseModel):
@@ -56,6 +64,11 @@ class HumanitarianVerificationRequest(BaseModel):
         default=None,
         description="Explicit prompt version to use from registry (defaults to configured active version)",
         examples=["v1"],
+    )
+    language: Optional[SupportedLanguage] = Field(
+        default=None,
+        description="Language of the aid claim. Omit to use auto-detection.",
+        examples=["en"],
     )
     anchor_metadata: Optional[AnchorMetadata] = None
 

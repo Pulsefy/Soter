@@ -256,3 +256,128 @@ class TestHumanitarianPromptEngine:
         assert "Unterminated string" in repair["user"]
         assert '{"verdict": "credible"' in repair["user"]
         assert "Original request prompt text" in repair["user"]
+
+
+import json
+import os
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# Language support tests
+# ---------------------------------------------------------------------------
+
+class TestLanguageDetection:
+    def test_resolve_language_explicit_hint(self):
+        from services.humanitarian_prompt import _resolve_language
+        assert _resolve_language("fr", "some claim") == "fr"
+        assert _resolve_language("ar", "some claim") == "ar"
+        assert _resolve_language("es", "some claim") == "es"
+        assert _resolve_language("en", "some claim") == "en"
+
+    def test_resolve_language_unknown_hint_falls_back_to_detection(self):
+        from services.humanitarian_prompt import _resolve_language
+        # unknown code should run detection, defaulting to en for plain english text
+        result = _resolve_language("zz", "Family needs food and water")
+        assert result == "en"
+
+    def test_detect_arabic_by_unicode_density(self):
+        from services.humanitarian_prompt import _detect_language
+        arabic_text = "عائلة مكونة من خمسة أفراد نزحت بسبب الفيضانات وتحتاج إلى غذاء ومأوى"
+        assert _detect_language(arabic_text) == "ar"
+
+    def test_detect_english_default(self):
+        from services.humanitarian_prompt import _detect_language
+        assert _detect_language("Family displaced by conflict needs medical supplies") == "en"
+
+    def test_detect_language_empty_string(self):
+        from services.humanitarian_prompt import _detect_language
+        assert _detect_language("") == "en"
+
+
+@pytest.mark.parametrize("language,expected_instruction", [
+    ("en", "Respond in English."),
+    ("fr", "Répondez en français."),
+    ("ar", "أجب باللغة العربية."),
+    ("es", "Responde en español."),
+])
+class TestLanguagePromptVariants:
+    def test_primary_prompt_v1_contains_language_instruction(
+        self, language, expected_instruction
+    ):
+        engine = HumanitarianPromptEngine(registry=create_default_prompt_registry())
+        prompt = engine.build_primary_prompt(
+            aid_claim="Community water deliveries are insufficient.",
+            supporting_evidence=["Field report"],
+            context_factors={"region": "north"},
+            language=language,
+        )
+        assert expected_instruction in prompt["system"]
+
+    def test_fallback_prompt_v1_contains_language_instruction(
+        self, language, expected_instruction
+    ):
+        engine = HumanitarianPromptEngine(registry=create_default_prompt_registry())
+        prompt = engine.build_fallback_prompt(
+            aid_claim="Clinic stockout has been resolved.",
+            supporting_evidence=[],
+            context_factors={},
+            language=language,
+        )
+        assert expected_instruction in prompt["system"]
+
+    def test_primary_prompt_v2_contains_language_instruction(
+        self, language, expected_instruction
+    ):
+        engine = HumanitarianPromptEngine(registry=create_default_prompt_registry())
+        prompt = engine.build_primary_prompt(
+            aid_claim="Shelter distribution completed.",
+            supporting_evidence=[],
+            context_factors={},
+            version="v2",
+            language=language,
+        )
+        assert expected_instruction in prompt["system"]
+
+
+class TestLanguageGoldenFixtures:
+    """Regression tests: fixture files exist and contain expected language tags."""
+
+    FIXTURE_DIR = os.path.join(
+        os.path.dirname(__file__), "..", "fixtures"
+    )
+
+    @pytest.mark.parametrize("lang", ["fr", "es", "ar"])
+    def test_fixture_file_exists_for_language(self, lang):
+        path = os.path.join(self.FIXTURE_DIR, f"humanitarian_responses_{lang}.json")
+        assert os.path.exists(path), f"Missing fixture file for language '{lang}'"
+
+    @pytest.mark.parametrize("lang", ["fr", "es", "ar"])
+    def test_fixture_entries_have_correct_language_tag(self, lang):
+        path = os.path.join(self.FIXTURE_DIR, f"humanitarian_responses_{lang}.json")
+        with open(path, encoding="utf-8") as f:
+            entries = json.load(f)
+        assert len(entries) > 0
+        for entry in entries:
+            assert entry.get("language") == lang
+
+    @pytest.mark.parametrize("lang", ["fr", "es", "ar"])
+    def test_fixture_entries_have_valid_verdicts(self, lang):
+        valid_verdicts = {"credible", "partially_credible", "inconclusive", "not_credible"}
+        path = os.path.join(self.FIXTURE_DIR, f"humanitarian_responses_{lang}.json")
+        with open(path, encoding="utf-8") as f:
+            entries = json.load(f)
+        for entry in entries:
+            assert entry["verdict"] in valid_verdicts
+            assert 0.0 <= entry["confidence"] <= 1.0
+
+
+class TestLanguageNoHintDefaultsToEnglish:
+    def test_primary_prompt_without_language_uses_english(self):
+        engine = HumanitarianPromptEngine(registry=create_default_prompt_registry())
+        prompt = engine.build_primary_prompt(
+            aid_claim="Family needs shelter after flooding.",
+            supporting_evidence=[],
+            context_factors={},
+        )
+        assert "Respond in English." in prompt["system"]

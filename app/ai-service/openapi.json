@@ -1196,6 +1196,21 @@
             "title": "Context Factors",
             "type": "object"
           },
+          "language": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupportedLanguage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Language of the aid claim. Omit to use auto-detection.",
+            "examples": [
+              "en"
+            ]
+          },
           "prompt_version": {
             "anyOf": [
               {
@@ -2473,6 +2488,16 @@
         ],
         "title": "ResultEnvelope[RedactionPreviewResult]",
         "type": "object"
+      },
+      "SupportedLanguage": {
+        "enum": [
+          "en",
+          "fr",
+          "ar",
+          "es"
+        ],
+        "title": "SupportedLanguage",
+        "type": "string"
       },
       "TaskStatusResponse": {
         "description": "Response model for task status.",

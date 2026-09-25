@@ -1,0 +1,20 @@
+[
+  {
+    "verdict": "credible",
+    "confidence": 0.78,
+    "summary": "الطلب مدعوم بأدلة كافية ويتوافق مع معايير المساعدات الإنسانية.",
+    "language": "ar"
+  },
+  {
+    "verdict": "inconclusive",
+    "confidence": 0.38,
+    "summary": "الأدلة غير كافية للتحقق من الطلب أو دحضه. يلزم تقديم وثائق إضافية.",
+    "language": "ar"
+  },
+  {
+    "verdict": "not_credible",
+    "confidence": 0.68,
+    "summary": "يتعارض الطلب مع سجلات التوزيع الموثقة.",
+    "language": "ar"
+  }
+]

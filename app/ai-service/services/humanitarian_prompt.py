@@ -14,6 +14,51 @@ from services.prompt_registry import VerificationPrompt, PromptRegistry
 #: past decision to the exact prompt that produced it.
 HUMANITARIAN_PROMPT_VERSION = "humanitarian-sphere-v1"
 
+#: Languages we have registered prompt variants for.
+SUPPORTED_LANGUAGES = ("en", "fr", "ar", "es")
+
+#: Fallback when the caller doesn't supply a language and detection isn't possible.
+_DEFAULT_LANGUAGE = "en"
+
+#: Per-language instruction fragments injected into the system prompt.
+_LANGUAGE_INSTRUCTIONS: Dict[str, str] = {
+    "en": "Respond in English.",
+    "fr": "Répondez en français.",
+    "ar": "أجب باللغة العربية.",
+    "es": "Responde en español.",
+}
+
+
+def _detect_language(text: str) -> str:
+    """Best-effort language detection without a heavy dependency.
+
+    Checks for a few high-frequency Arabic and French/Spanish markers.
+    Falls back to English when uncertain -- the caller can always supply
+    an explicit language hint to override this.
+    """
+    if not text:
+        return _DEFAULT_LANGUAGE
+    arabic_chars = sum(1 for c in text if "\u0600" <= c <= "\u06ff")
+    if arabic_chars / max(len(text), 1) > 0.15:
+        return "ar"
+    lowered = text.lower()
+    fr_markers = ("le ", "la ", "les ", "de ", "du ", "est ", "et ", "en ", "un ", "une ")
+    es_markers = ("el ", "la ", "los ", "las ", "de ", "del ", "es ", "en ", "un ", "una ")
+    fr_score = sum(lowered.count(m) for m in fr_markers)
+    es_score = sum(lowered.count(m) for m in es_markers)
+    if fr_score > es_score and fr_score >= 3:
+        return "fr"
+    if es_score > fr_score and es_score >= 3:
+        return "es"
+    return _DEFAULT_LANGUAGE
+
+
+def _resolve_language(language: Optional[str], aid_claim: str) -> str:
+    """Return canonical language code from explicit hint or auto-detection."""
+    if language and language in _LANGUAGE_INSTRUCTIONS:
+        return language
+    return _detect_language(aid_claim)
+
 SPHERE_HANDBOOK_CRITERIA: Dict[str, List[str]] = {
     "water_supply_sanitation_hygiene": [
         "Minimum daily water access is sufficient and equitable.",
@@ -102,17 +147,20 @@ class HumanitarianPrimaryPromptV1(VerificationPrompt):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         criteria_text = format_sphere_criteria()
         evidence_text = format_evidence(supporting_evidence)
         context_text = format_context_factors(context_factors)
+        lang = _resolve_language(language, aid_claim)
+        lang_instruction = _LANGUAGE_INSTRUCTIONS.get(lang, _LANGUAGE_INSTRUCTIONS["en"])
 
         system_prompt = (
             "You are an objective humanitarian verification analyst. "
             "Evaluate aid claims only from provided evidence and context. "
             "Apply a Humanitarian Standard grounded in Sphere criteria. "
             "Do not infer facts that are not explicitly present. "
-            "Return valid JSON only."
+            f"Return valid JSON only. {lang_instruction}"
         )
 
         user_prompt = (
@@ -144,11 +192,13 @@ class HumanitarianPrimaryPromptV1(VerificationPrompt):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         return self.build_prompt(
             aid_claim=aid_claim,
             supporting_evidence=supporting_evidence,
             context_factors=context_factors,
+            language=language,
         )
 
 
@@ -172,13 +222,16 @@ class HumanitarianFallbackPromptV1(VerificationPrompt):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         evidence_text = format_evidence(supporting_evidence)
         context_text = format_context_factors(context_factors)
+        lang = _resolve_language(language, aid_claim)
+        lang_instruction = _LANGUAGE_INSTRUCTIONS.get(lang, _LANGUAGE_INSTRUCTIONS["en"])
 
         system_prompt = (
             "You verify humanitarian aid claims conservatively. "
-            "Use only supplied inputs. Return strict JSON only."
+            f"Use only supplied inputs. Return strict JSON only. {lang_instruction}"
         )
 
         user_prompt = (
@@ -220,17 +273,20 @@ class HumanitarianPrimaryPromptV2(VerificationPrompt):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         criteria_text = format_sphere_criteria()
         evidence_text = format_evidence(supporting_evidence)
         context_text = format_context_factors(context_factors)
+        lang = _resolve_language(language, aid_claim)
+        lang_instruction = _LANGUAGE_INSTRUCTIONS.get(lang, _LANGUAGE_INSTRUCTIONS["en"])
 
         system_prompt = (
             "You are an expert humanitarian verification auditor. "
             "Evaluate aid claims strictly from provided evidence and context. "
             "Apply the Core Humanitarian Standard and Sphere criteria. "
             "Maintain high scrutiny for unverified inferences. "
-            "Return valid JSON only."
+            f"Return valid JSON only. {lang_instruction}"
         )
 
         user_prompt = (
@@ -278,13 +334,16 @@ class HumanitarianFallbackPromptV2(VerificationPrompt):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         evidence_text = format_evidence(supporting_evidence)
         context_text = format_context_factors(context_factors)
+        lang = _resolve_language(language, aid_claim)
+        lang_instruction = _LANGUAGE_INSTRUCTIONS.get(lang, _LANGUAGE_INSTRUCTIONS["en"])
 
         system_prompt = (
             "You are a conservative humanitarian verification system (v2). "
-            "Evaluate strictly from supplied inputs. Return JSON only."
+            f"Evaluate strictly from supplied inputs. Return JSON only. {lang_instruction}"
         )
 
         user_prompt = (
@@ -342,12 +401,14 @@ class HumanitarianPromptEngine:
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
         version: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         prompt = self.registry.get("humanitarian_primary", version=version)
         return prompt.build_prompt(
             aid_claim=aid_claim,
             supporting_evidence=supporting_evidence,
             context_factors=context_factors,
+            language=language,
         )
 
     def build_fallback_prompt(
@@ -356,12 +417,14 @@ class HumanitarianPromptEngine:
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
         version: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         prompt = self.registry.get("humanitarian_fallback", version=version)
         return prompt.build_prompt(
             aid_claim=aid_claim,
             supporting_evidence=supporting_evidence,
             context_factors=context_factors,
+            language=language,
         )
 
     def build_repair_prompt(
