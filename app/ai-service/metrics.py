@@ -161,6 +161,22 @@ CIRCUIT_BREAKER_ALERTS_TOTAL = Counter(
     ["provider", "event", "outcome"],
 )
 
+# Synthetic canary health-check metrics.
+#
+# Labels are bounded: `provider` is a code-defined provider name, `outcome`
+# is a small fixed set ("success", "failure", "skipped"). Never label by
+# request content, correlation id, or any user-supplied string.
+CANARY_CHECKS_TOTAL = Counter(
+    "canary_checks_total",
+    "Synthetic canary health checks sent to each provider",
+    ["provider", "outcome"],
+)
+CANARY_LATENCY = Histogram(
+    "canary_latency_seconds",
+    "Latency of synthetic canary requests per provider",
+    ["provider"],
+)
+
 
 def check_system_resources(memory_threshold_percent: float = 90.0) -> bool:
     """
