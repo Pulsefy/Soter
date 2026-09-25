@@ -383,6 +383,10 @@ describe('ClaimsService', () => {
             provide: SorobanTransactionScheduler,
             useValue: mockSorobanTxScheduler,
           },
+          {
+            provide: VerificationService,
+            useValue: mockVerificationService,
+          },
         ],
       }).compile();
 
@@ -660,4 +664,3 @@ describe('ClaimsService', () => {
     });
   });
 });
-
