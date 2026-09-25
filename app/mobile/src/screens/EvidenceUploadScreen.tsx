@@ -210,17 +210,17 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
   }, []);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} testID="evidence-upload-screen">
       <View style={styles.header}>
-        <Text style={styles.title} accessibilityRole="header">
+        <Text style={styles.title} accessibilityRole="header" testID="evidence-upload-title">
           Upload Evidence
         </Text>
-        <Text style={styles.subtitle}>
+        <Text style={styles.subtitle} testID="evidence-upload-subtitle">
           Capture or select a document or photo to support your verification.
         </Text>
       </View>
 
-      <View style={styles.card}>
+      <View style={styles.card} testID="evidence-step1-card">
         <Text style={styles.sectionTitle}>{t('evidence.step1')}</Text>
         <Text style={styles.helpText}>
           Use your camera or photo library to capture a document, receipt, or
@@ -233,6 +233,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
             accessibilityRole="button"
             accessibilityLabel="Take a photo of evidence"
             activeOpacity={0.8}
+            testID="take-photo-button"
           >
             <Text style={styles.buttonText}>{t('evidence.takePhoto')}</Text>
           </TouchableOpacity>
@@ -242,6 +243,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
             accessibilityRole="button"
             accessibilityLabel="Select an evidence photo from your library"
             activeOpacity={0.8}
+            testID="select-photo-button"
           >
             <Text style={styles.secondaryButtonText}>{t('evidence.selectPhoto')}</Text>
           </TouchableOpacity>
@@ -249,13 +251,14 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
       </View>
 
       {selectedImageUri ? (
-        <View style={styles.card}>
+        <View style={styles.card} testID="evidence-preview-card">
           <Text style={styles.sectionTitle}>{t('evidence.step2')}</Text>
           <Image
             source={{ uri: selectedImageUri }}
             style={styles.previewImage}
+            testID="evidence-preview-image"
           />
-          <Text style={styles.previewLabel}>{filename}</Text>
+          <Text style={styles.previewLabel} testID="evidence-filename-label">{filename}</Text>
           <View style={styles.buttonGroup}>
             <TouchableOpacity
               style={[styles.button, styles.secondaryButton]}
@@ -263,6 +266,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
               accessibilityRole="button"
               accessibilityLabel="Choose a different photo"
               activeOpacity={0.8}
+              testID="choose-again-button"
             >
               <Text style={styles.secondaryButtonText}>{t('evidence.chooseAgain')}</Text>
             </TouchableOpacity>
@@ -270,7 +274,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
         </View>
       ) : null}
 
-      <View style={styles.card}>
+      <View style={styles.card} testID="evidence-step3-card">
         <Text style={styles.sectionTitle}>{t('evidence.step3')}</Text>
         <Text style={styles.helpText}>
           Compressed image upload saves data on low-bandwidth connections.
@@ -288,28 +292,29 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
             disabled: !compressedBase64 || uploading || !!activeUpload,
           }}
           activeOpacity={0.8}
+          testID="upload-evidence-button"
         >
           {uploading ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
+            <ActivityIndicator size="small" color="#FFFFFF" testID="upload-activity-indicator" />
           ) : (
             <Text style={styles.buttonText}>{t('aidDetails.uploadEvidence')}</Text>
           )}
         </TouchableOpacity>
         {statusMessage ? (
-          <Text style={styles.statusText}>{statusMessage}</Text>
+          <Text style={styles.statusText} testID="upload-status-message">{statusMessage}</Text>
         ) : null}
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {error ? <Text style={styles.errorText} testID="upload-error-message">{error}</Text> : null}
         {activeUpload ? (
-          <View style={styles.queueCard}>
+          <View style={styles.queueCard} testID={`upload-queue-card-${activeUpload.id}`}>
             <View style={styles.queueHeader}>
-              <Text style={styles.queueTitle}>
+              <Text style={styles.queueTitle} testID={`upload-queue-title-${activeUpload.id}`}>
                 {activeUpload.state === 'failed'
                   ? '⚠️ Upload Failed'
                   : activeUpload.state === 'retrying'
                     ? '🔄 Retrying Upload…'
                     : '📤 Uploading…'}
               </Text>
-              <Text style={styles.queueStatus}>
+              <Text style={styles.queueStatus} testID={`upload-queue-status-${activeUpload.id}`}>
                 {activeUpload.state === 'failed'
                   ? 'Unstable connection'
                   : activeUpload.state === 'retrying'
@@ -330,11 +335,12 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
                         : colors.brand.primary,
                   },
                 ]}
+                testID={`upload-progress-fill-${activeUpload.id}`}
               />
             </View>
 
             <View style={styles.progressRow}>
-              <Text style={styles.progressText}>
+              <Text style={styles.progressText} testID={`upload-progress-text-${activeUpload.id}`}>
                 {Math.round((activeUpload.payload.progress || 0) * 100)}%
                 Completed
               </Text>
@@ -344,6 +350,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
                   onPress={() => retryAction(activeUpload.id)}
                   accessibilityRole="button"
                   accessibilityLabel="Retry failed upload"
+                  testID={`retry-upload-button-${activeUpload.id}`}
                 >
                   <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
                 </TouchableOpacity>
@@ -351,14 +358,14 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
             </View>
 
             {activeUpload.lastError ? (
-              <Text style={styles.errorDetails}>
+              <Text style={styles.errorDetails} testID={`upload-error-details-${activeUpload.id}`}>
                 Reason: {activeUpload.lastError}
               </Text>
             ) : null}
           </View>
         ) : null}
         {!isConnected && !activeUpload ? (
-          <Text style={styles.offlineNotice}>
+          <Text style={styles.offlineNotice} testID="offline-notice-text">
             Offline mode: evidence upload will queue and resend when the device
             reconnects.
           </Text>

@@ -92,6 +92,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
         accessible
         accessibilityLabel="Requesting camera permission to scan QR codes"
         accessibilityLiveRegion="polite"
+        testID="scanner-permission-loading"
       >
         <ActivityIndicator size="large" color={colors.brand.primary} />
         <Text style={{ color: colors.textPrimary, marginTop: 16 }}>
@@ -118,7 +119,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
 
   // ── Scanner active ───────────────────────────────────────────────────────
   return (
-    <View style={styles.container}>
+    <View style={styles.container} testID="scanner-screen">
       <CameraView
         onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
@@ -127,6 +128,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
         // the overlay controls below provide all necessary actions.
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
+        testID="scanner-camera-view"
       />
 
       <View style={styles.overlay} pointerEvents="box-none">
@@ -140,6 +142,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
             style={styles.focusedView}
             accessible
             accessibilityLabel="QR code scan area. Align the QR code within this frame."
+            testID="scanner-viewfinder"
           />
           <View style={styles.unfocusedContainer} accessibilityElementsHidden />
         </View>
@@ -149,6 +152,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
           <Text
             style={styles.instructionText}
             accessibilityLiveRegion="polite"
+            testID="scanner-instruction-text"
           >
             {scanned ? 'QR code detected' : 'Align QR code within the frame'}
           </Text>
@@ -159,6 +163,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityLabel="Cancel scanning"
             accessibilityHint="Closes the scanner and returns to the previous screen"
             onPress={() => navigation.goBack()}
+            testID="scanner-cancel-button"
           >
             <Text style={styles.cancelText}>{t('common.cancel')}</Text>
           </TouchableOpacity>
@@ -169,6 +174,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityLabel="Switch to Bulk Mode"
             accessibilityHint="Switch to a continuous scanning mode for multiple packages"
             onPress={() => navigation.replace('BulkScanner')}
+            testID="scanner-bulk-mode-button"
           >
             <Text style={[styles.bulkModeText, { color: colors.brand.primary }]}>
               Switch to Bulk Mode
@@ -186,6 +192,7 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityLabel="Scan again"
             accessibilityHint="Resets the scanner so you can scan another QR code"
             onPress={() => setScanned(false)}
+            testID="scanner-rescan-button"
           >
             <Text style={styles.rescanButtonText}>{t('scanner.tapToScanAgain')}</Text>
           </TouchableOpacity>

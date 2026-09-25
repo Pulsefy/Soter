@@ -1,0 +1,114 @@
+name: Mobile E2E Harness
+
+# End-to-end test suite for the Soter mobile app (issue #932).
+# Validates scan -> evidence capture -> offline queue -> airplane mode toggle ->
+# reconnect sync against an Android emulator using Maestro.
+# Modeled directly on the build and emulator setup proven in
+# .github/workflows/mobile-cold-start-budget.yml.
+# See app/mobile/E2E_TESTING.md for local setup and testing instructions.
+
+on:
+  push:
+    paths:
+      - 'app/mobile/**'
+      - '.github/workflows/mobile-e2e.yml'
+    branches: [ main ]
+  pull_request:
+    paths:
+      - 'app/mobile/**'
+      - '.github/workflows/mobile-e2e.yml'
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  e2e-harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # v4: Defaults to platform-tools only; emulator and system images are
+      # provisioned by the reactivecircus/android-emulator-runner step below.
+      - uses: android-actions/setup-android@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Required for the Android emulator to use hardware acceleration on
+      # GitHub-hosted Linux runners; without this the emulator falls back
+      # to software rendering and runs far too slowly.
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Generate native Android project
+        working-directory: app/mobile
+        # CI=1 puts Expo CLI in non-interactive mode.
+        run: CI=1 npx expo prebuild --platform android
+        env:
+          CI: '1'
+
+      # Builds the release APK using the same flags and Sentry overrides as
+      # the cold-start budget workflow. Expo's default signing config uses
+      # the debug keystore for assembleRelease unless production credentials
+      # are provided, so the resulting APK is directly installable.
+      - name: Build release APK
+        working-directory: app/mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+        env:
+          SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+          SENTRY_DISABLE_NATIVE_DEBUG_UPLOAD: 'true'
+
+      # Install Maestro CLI for black-box UIAutomator/ADB testing.
+      - name: Install Maestro CLI
+        run: |
+          curl -FsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> $GITHUB_PATH
+
+      - name: Run E2E test harness in Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: default
+          arch: x86_64
+          profile: Nexus 6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 2048 -cores 2
+          disable-animations: true
+          working-directory: app/mobile
+          script: |
+            adb install -r android/app/build/outputs/apk/release/app-release.apk
+            # Pre-grant runtime permissions to avoid blocking OS permission popups
+            adb shell pm grant org.pulsefy.soter.mobile android.permission.CAMERA || true
+            adb shell pm grant org.pulsefy.soter.mobile android.permission.READ_EXTERNAL_STORAGE || true
+            adb shell pm grant org.pulsefy.soter.mobile android.permission.READ_MEDIA_IMAGES || true
+            export PATH="$HOME/.maestro/bin:$PATH"
+            maestro test --debug-output .maestro/debug .maestro/offline-sync-flow.yaml
+
+      # Failure screenshots, logcat, and view hierarchy dumps are automatically
+      # saved to app/mobile/.maestro/debug/ by Maestro and uploaded on failure.
+      - name: Upload E2E artifacts (screenshots, logs, hierarchy dumps)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-e2e-artifacts
+          path: |
+            app/mobile/.maestro/debug/
+          if-no-files-found: warn
