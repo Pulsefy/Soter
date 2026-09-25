@@ -101,6 +101,7 @@ def _audit_inputs(request: HumanitarianVerificationRequest) -> Dict[str, Any]:
         "artifact_ids": list(request.artifact_ids),
         "provider_preference": request.provider_preference,
         "requested_timeout": request.timeout,
+        "language": request.language.value if request.language else None,
     }
 
 
@@ -157,7 +158,7 @@ def _write_audit_record(
 @cached_response(
     prefix="humanitarian_verification",
     ttl_seconds=settings.cache_ttl_verification,
-    key_tags=["model_version", "artifact_tag", "org_id", "prompt_version"],
+    key_tags=["model_version", "artifact_tag", "org_id", "prompt_version", "language"],
     content_hash_arg="content_hash",
 )
 async def _verify_claim_cached(
@@ -172,6 +173,7 @@ async def _verify_claim_cached(
     org_id: str,
     prompt_version: str = "",
     content_hash: str = "",
+    language: str = "",
 ) -> Dict[str, Any]:
     """
     Cacheable wrapper around HumanitarianVerificationService.verify_claim.
@@ -206,9 +208,10 @@ async def _verify_claim_cached(
             provider_preference=provider_preference,
             timeout=timeout,
             prompt_version=prompt_version or None,
+            language=language or None,
         )
     except TypeError as exc:
-        if "prompt_version" in str(exc) or "timeout" in str(exc):
+        if "prompt_version" in str(exc) or "timeout" in str(exc) or "language" in str(exc):
             try:
                 return humanitarian_verification_service.verify_claim(
                     aid_claim=aid_claim,
@@ -414,6 +417,7 @@ async def verify_humanitarian_claim(
             org_id=x_org_id,
             prompt_version=prompt_version,
             content_hash=content_hash,
+            language=request.language.value if request.language else "",
         )
 
         verification: Dict[str, Any] = (

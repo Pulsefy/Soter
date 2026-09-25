@@ -38,6 +38,7 @@ class VerificationPrompt(ABC):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         """Build the system and user prompt dictionary.
 

@@ -1,0 +1,20 @@
+[
+  {
+    "verdict": "credible",
+    "confidence": 0.75,
+    "summary": "La reclamación está bien respaldada por la evidencia proporcionada y se alinea con los criterios humanitarios.",
+    "language": "es"
+  },
+  {
+    "verdict": "inconclusive",
+    "confidence": 0.43,
+    "summary": "Evidencia insuficiente para confirmar o refutar la reclamación. Se requiere documentación adicional.",
+    "language": "es"
+  },
+  {
+    "verdict": "not_credible",
+    "confidence": 0.71,
+    "summary": "La reclamación contradice los registros de distribución verificados.",
+    "language": "es"
+  }
+]

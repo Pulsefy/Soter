@@ -1,0 +1,20 @@
+[
+  {
+    "verdict": "credible",
+    "confidence": 0.76,
+    "summary": "La demande est bien étayée par les preuves fournies et correspond aux critères humanitaires.",
+    "language": "fr"
+  },
+  {
+    "verdict": "inconclusive",
+    "confidence": 0.41,
+    "summary": "Preuves insuffisantes pour confirmer ou réfuter la demande. Des documents supplémentaires sont requis.",
+    "language": "fr"
+  },
+  {
+    "verdict": "not_credible",
+    "confidence": 0.70,
+    "summary": "La demande contredit les registres de distribution vérifiés.",
+    "language": "fr"
+  }
+]
