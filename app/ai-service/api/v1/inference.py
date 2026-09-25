@@ -8,7 +8,7 @@ from datetime import datetime
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, model_validator, validator
 
 import tasks
 from exceptions import LoadShedError
@@ -64,6 +64,14 @@ class InferenceRequest(BaseModel):
     type: str = "inference"
     data: Optional[Dict[str, Any]] = None
     priority: Optional[str] = "normal"
+    webhook_url: Optional[str] = Field(
+        None,
+        description="Optional callback URL to receive status/progress updates for this task.",
+    )
+    callback_url: Optional[str] = Field(
+        None,
+        description="Deprecated alias for webhook_url retained for compatibility.",
+    )
 
     # Contract-aware metadata fields
     campaign_id: Optional[str] = None
@@ -72,6 +80,14 @@ class InferenceRequest(BaseModel):
     transaction_hash: Optional[str] = None
     contract_address: Optional[str] = None
     network: Optional[str] = "testnet"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_webhook_alias(cls, data):
+        if isinstance(data, dict):
+            if data.get("webhook_url") is None and data.get("callback_url"):
+                data["webhook_url"] = data["callback_url"]
+        return data
 
     class Config:
         json_schema_extra = {
@@ -82,6 +98,7 @@ class InferenceRequest(BaseModel):
                 "claim_id": "123e4567-e89b-12d3-a456-426614174001",
                 "package_id": "pkg_abc123def",
                 "network": "testnet",
+                "webhook_url": "https://example.com/api/webhooks/ai-progress",
             }
         }
 
@@ -93,6 +110,7 @@ class TaskStatusResponse(BaseModel):
     status: str
     result: Optional[Any] = None
     error: Optional[str] = None
+    webhook_url: Optional[str] = None
     metadata: Optional[ContractMetadata] = None
 
 
@@ -141,6 +159,8 @@ async def create_inference_task(
             "data": request.data or {},
             "priority": request.priority or "normal",
         }
+        if request.webhook_url:
+            payload["webhook_url"] = request.webhook_url
 
         # Add metadata if provided
         if request.campaign_id:
@@ -166,6 +186,7 @@ async def create_inference_task(
             "status": "pending",
             "message": "Task queued for processing",
             "status_url": f"/v1/ai/status/{task_id}",
+            "webhook_url": request.webhook_url,
             "metadata": payload.get("metadata"),
         }
 

@@ -55,6 +55,30 @@ def test_queue_ocr_job_returns_accepted_with_status_url(client, monkeypatch):
     assert captured["payload"]["content_type"] == "image/png"
 
 
+def test_create_inference_task_accepts_custom_webhook_url(client, monkeypatch):
+    captured = {}
+
+    def fake_create_task(task_type, payload):
+        captured["task_type"] = task_type
+        captured["payload"] = payload
+        return "inference-task-456"
+
+    monkeypatch.setattr(tasks, "create_task", fake_create_task)
+
+    response = client.post(
+        "/v1/ai/inference",
+        json={
+            "type": "batch_processing",
+            "data": {"batch_size": 2},
+            "webhook_url": "https://example.com/webhooks/inference",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["task_type"] == "batch_processing"
+    assert captured["payload"]["webhook_url"] == "https://example.com/webhooks/inference"
+
+
 def test_queued_ocr_job_rejects_invalid_image(client, monkeypatch):
     create_task = MagicMock()
     monkeypatch.setattr(tasks, "create_task", create_task)
