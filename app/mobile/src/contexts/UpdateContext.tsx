@@ -1,9 +1,16 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useState,
+  useEffect,
+} from 'react';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { VersionInfo, UpdateState } from '../types/update';
-import { fetchVersionInfo, compareVersions } from '../services/updateService';
+import { UpdateState } from '../types/update';
+import { resolveVersionInfo, compareVersions } from '../services/updateService';
 import { structuredLogger } from '../services/logger';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
 
 interface UpdateContextType extends UpdateState {
   markReleaseNotesSeen: () => Promise<void>;
@@ -28,10 +35,33 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const currentVersion = Constants.expoConfig?.version || '0.0.0';
 
-  const checkUpdates = async () => {
+  const checkUpdates = useCallback(async () => {
     try {
-      setIsLoading(true);
-      const versionInfo = await fetchVersionInfo();
+      const { versionInfo, source } = await resolveVersionInfo();
+
+      // No connectivity and no cached policy: fail open rather than blocking
+      // a field worker behind an update check that could not run.
+      if (!versionInfo) {
+        structuredLogger.warn(
+          'updates.version_check_offline_no_cache',
+          {},
+          'updates',
+        );
+        setState(prev => ({
+          ...prev,
+          isUpdateAvailable: false,
+          isForceUpgrade: false,
+        }));
+        return;
+      }
+
+      if (source === 'cache') {
+        structuredLogger.info(
+          'updates.version_check_offline_cached',
+          { minRequiredVersion: versionInfo.minRequiredVersion },
+          'updates',
+        );
+      }
 
       const updateAvailable =
         compareVersions(versionInfo.latestVersion, currentVersion) > 0;
@@ -61,7 +91,10 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentVersion]);
+
+  // Re-run the check as soon as connectivity is restored.
+  useNetworkStatus(checkUpdates);
 
   const markReleaseNotesSeen = async () => {
     if (state.versionInfo) {
@@ -75,7 +108,7 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
 
   useEffect(() => {
     checkUpdates();
-  }, []);
+  }, [checkUpdates]);
 
   return (
     <UpdateContext.Provider
