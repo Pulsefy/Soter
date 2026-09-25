@@ -129,6 +129,27 @@ class Settings(BaseSettings):
     circuit_breaker_failure_threshold: int = 3
     circuit_breaker_recovery_timeout_seconds: float = 30.0
 
+    # Synthetic canary health checks.
+    # A low-cost canary LLM request is sent to each configured provider on a
+    # schedule so that provider degradation is detected before real user traffic
+    # experiences failures. Canary failures count toward the circuit breaker's
+    # failure threshold exactly like real request failures.
+    #
+    # Set CANARY_ENABLED=false to disable globally, or list provider names in
+    # CANARY_DISABLED_PROVIDERS (comma-separated, e.g. "openai,groq") to skip
+    # individual providers while leaving the rest enabled.
+    canary_enabled: bool = True
+    # How often (in seconds) to probe each provider.
+    canary_interval_seconds: float = 60.0
+    # Providers to exclude from canary probing even when canary is enabled.
+    # Useful for silencing a known-unavailable provider without disabling
+    # canary globally.
+    canary_disabled_providers: str = ""
+    # The prompt sent to each provider during a canary check is deliberately
+    # minimal to minimise token cost. This string is the complete user prompt;
+    # operators can override it to match their provider's expected input shape.
+    canary_prompt: str = "Reply with the single word: ok"
+
     # Circuit breaker alerting (issue #1205).
     # When a breaker transitions to OPEN (a provider is failing) or back to
     # CLOSED (the provider recovered), a signed webhook alert is POSTed to
@@ -396,6 +417,13 @@ class Settings(BaseSettings):
         if self.decision_audit_enabled and not str(self.decision_audit_path).strip():
             _add("DECISION_AUDIT_PATH", "must not be blank when auditing is enabled")
 
+        # --- Canary health check settings --------------------------------
+        if self.canary_interval_seconds <= 0:
+            _add(
+                "CANARY_INTERVAL_SECONDS",
+                f"must be a positive number of seconds (got {self.canary_interval_seconds})",
+            )
+
         # --- Circuit breaker alert de-duplication window (issue #1205) ----
         # 0 is a valid, documented value meaning "no de-duplication", so this
         # is a non-negativity check rather than a positivity check.
@@ -573,6 +601,10 @@ class Settings(BaseSettings):
     def get_llm_fallback_order(self) -> List[str]:
         """Parsed, ordered LLM provider fallback list from configuration."""
         return self._parse_fallback_order(self.llm_provider_fallback_order)
+
+    def get_canary_disabled_providers(self) -> List[str]:
+        """Parsed list of provider names excluded from canary probing."""
+        return self._parse_fallback_order(self.canary_disabled_providers)
 
     def get_ocr_fallback_order(self) -> List[str]:
         """Parsed, ordered OCR provider fallback list from configuration."""

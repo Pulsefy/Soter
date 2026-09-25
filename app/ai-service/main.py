@@ -167,8 +167,28 @@ async def lifespan(app: FastAPI):
     app.state.is_shutting_down = False
     app.state.active_requests = 0
 
+    # Start the synthetic canary scheduler if enabled. The canary probes each
+    # active LLM provider on a fixed interval and feeds failures into the
+    # corresponding circuit breaker so degradation is detected before real
+    # traffic is affected.
+    from services.canary import get_canary
+
+    canary = get_canary()
+    canary_task = None
+    if settings.canary_enabled:
+        canary_task = canary.start()
+        app.state.canary = canary
+    else:
+        logger.info("[canary] disabled via CANARY_ENABLED=false")
+        app.state.canary = None
+
     yield
     logger.info("Shutting down Soter AI Service...")
+    app.state.is_shutting_down = True
+
+    # Stop the canary scheduler before draining requests.
+    if canary_task is not None:
+        await canary.stop()
     app.state.is_shutting_down = True
 
     drain_timeout = settings.drain_timeout_seconds
