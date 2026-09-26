@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
   Body,
   Param,
   HttpCode,
@@ -29,6 +30,11 @@ import {
   BatchCreateAidPackagesDto,
   DryRunAidPackageResultDto,
   ExtendAidPackageExpiryDto,
+  SetDelegateDto,
+  SetDelegateResponseDto,
+  RevokeDelegateResponseDto,
+  GetDelegateResponseDto,
+  GetDelegateHistoryResponseDto,
 } from './dto/aid-escrow.dto';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
@@ -647,6 +653,140 @@ export class AidEscrowController {
     } catch (error) {
       this.logger.error('Failed to get event correlations:', error);
       this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  // ------------------------------------------------------------------ //
+  //  Delegate lifecycle                                                   //
+  // ------------------------------------------------------------------ //
+
+  /**
+   * Assign or update a delegate for a package (admin action)
+   * POST /onchain/aid-escrow/packages/:id/delegate
+   */
+  @Post('packages/:id/delegate')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Set a delegate for an aid package',
+    description:
+      'Assigns a delegate address that may claim the package on behalf of the recipient. ' +
+      'Pass `expiresAt` (unix seconds) for a time-limited delegation; omit it for a permanent one. ' +
+      'Calls `set_delegate_with_expiry` on-chain when `expiresAt` is provided, otherwise `set_delegate`. ' +
+      'Admin-only.',
+  })
+  @ApiOkResponse({
+    description: 'Delegate set successfully.',
+    type: SetDelegateResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'Invalid input or package not active.' })
+  @ApiNotFoundResponse({ description: 'Package does not exist.' })
+  @ApiInternalServerErrorResponse({ description: 'Blockchain transaction failed.' })
+  async setDelegate(
+    @Param('id') packageId: string,
+    @Body() dto: SetDelegateDto,
+    @Req() req: Request & { user?: { address?: string } },
+  ): Promise<SetDelegateResponseDto> {
+    const adminAddress = (req as any).user?.address || 'admin';
+    try {
+      return await this.aidEscrowService.setDelegate(packageId, dto, adminAddress) as SetDelegateResponseDto;
+    } catch (error) {
+      this.logger.error('Failed to set delegate:', error);
+      this.errorMapper.throwMappedError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Revoke the delegate for a package (admin action)
+   * DELETE /onchain/aid-escrow/packages/:id/delegate
+   */
+  @Delete('packages/:id/delegate')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Revoke the delegate for an aid package',
+    description:
+      'Removes the currently assigned delegate for a package, preventing further claims via delegation. ' +
+      'Admin-only.',
+  })
+  @ApiOkResponse({
+    description: 'Delegate revoked successfully.',
+    type: RevokeDelegateResponseDto,
+  })
+  @ApiNotFoundResponse({ description: 'Package does not exist.' })
+  @ApiInternalServerErrorResponse({ description: 'Blockchain transaction failed.' })
+  async revokeDelegate(
+    @Param('id') packageId: string,
+    @Req() req: Request & { user?: { address?: string } },
+  ): Promise<RevokeDelegateResponseDto> {
+    const adminAddress = (req as any).user?.address || 'admin';
+    try {
+      return await this.aidEscrowService.revokeDelegate(packageId, adminAddress) as RevokeDelegateResponseDto;
+    } catch (error) {
+      this.logger.error('Failed to revoke delegate:', error);
+      this.errorMapper.throwMappedError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the current delegate for a package
+   * GET /onchain/aid-escrow/packages/:id/delegate
+   */
+  @Get('packages/:id/delegate')
+  @HttpCode(HttpStatus.OK)
+  @CacheResponse({ ttl: getCacheTTL().AID_PACKAGE_DETAILS })
+  @ApiOperation({
+    summary: 'Get the current delegate for an aid package',
+    description:
+      'Returns the active delegate address and its optional expiry timestamp. ' +
+      'Returns `delegateAddress: null` when no delegate is set or the delegation has expired.',
+  })
+  @ApiOkResponse({
+    description: 'Delegate information retrieved successfully.',
+    type: GetDelegateResponseDto,
+  })
+  @ApiNotFoundResponse({ description: 'Package does not exist.' })
+  @ApiInternalServerErrorResponse({ description: 'Failed to retrieve delegate.' })
+  async getDelegate(
+    @Param('id') packageId: string,
+  ): Promise<GetDelegateResponseDto> {
+    try {
+      return await this.aidEscrowService.getDelegate(packageId) as GetDelegateResponseDto;
+    } catch (error) {
+      this.logger.error('Failed to get delegate:', error);
+      this.errorMapper.throwMappedError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the delegate change history for a package
+   * GET /onchain/aid-escrow/packages/:id/delegate/history
+   */
+  @Get('packages/:id/delegate/history')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get delegate history for an aid package',
+    description:
+      'Returns a chronological audit trail of all delegate assignments and revocations for the package.',
+  })
+  @ApiOkResponse({
+    description: 'Delegate history retrieved successfully.',
+    type: GetDelegateHistoryResponseDto,
+  })
+  @ApiNotFoundResponse({ description: 'Package does not exist.' })
+  @ApiInternalServerErrorResponse({ description: 'Failed to retrieve delegate history.' })
+  async getDelegateHistory(
+    @Param('id') packageId: string,
+  ): Promise<GetDelegateHistoryResponseDto> {
+    try {
+      return await this.aidEscrowService.getDelegateHistory(packageId) as GetDelegateHistoryResponseDto;
+    } catch (error) {
+      this.logger.error('Failed to get delegate history:', error);
+      this.errorMapper.throwMappedError(error);
+      throw error;
     }
   }
 }

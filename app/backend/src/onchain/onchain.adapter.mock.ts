@@ -31,6 +31,15 @@ import {
   GetTransactionStatusResult,
   TxStatus,
   AidPackage,
+  SetDelegateParams,
+  SetDelegateResult,
+  RevokeDelegateParams,
+  RevokeDelegateResult,
+  GetDelegateParams,
+  GetDelegateResult,
+  GetDelegateHistoryParams,
+  GetDelegateHistoryResult,
+  DelegateHistoryEntry,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 
@@ -69,6 +78,22 @@ export class MockOnchainAdapter implements OnchainAdapter {
   private readonly mockPackages = new Map<string, MockAidPackage>();
   private readonly mockEscrowAddress =
     'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+
+  /**
+   * In-memory delegate store: packageId → { address, expiresAt }
+   */
+  private readonly mockDelegates = new Map<
+    string,
+    { address: string; expiresAt: number | null }
+  >();
+
+  /**
+   * In-memory delegate history: packageId → DelegateHistoryEntry[]
+   */
+  private readonly mockDelegateHistory = new Map<
+    string,
+    DelegateHistoryEntry[]
+  >();
 
   /**
    * Generate a deterministic mock transaction hash from input
@@ -503,6 +528,156 @@ export class MockOnchainAdapter implements OnchainAdapter {
       ledger: status === 'succeeded' ? 12345 : undefined,
       errorMessage:
         status === 'failed' ? 'Mock contract transaction failed' : undefined,
+    };
+  }
+
+  // --- Delegate lifecycle ---
+
+  async setDelegate(params: SetDelegateParams): Promise<SetDelegateResult> {
+    await Promise.resolve();
+
+    // Validate the package exists (if stored) and is not claimed
+    const pkg = this.mockPackages.get(params.packageId);
+    if (pkg) {
+      if (pkg.status === 'Claimed') {
+        throw new BadRequestException(
+          'Cannot set delegate: package is already claimed',
+        );
+      }
+      if (pkg.recipient === params.delegateAddress) {
+        throw new BadRequestException(
+          'Delegate address cannot be the same as the recipient address',
+        );
+      }
+    }
+
+    // Validate expiry (must be in the future if provided)
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (params.expiresAt && params.expiresAt > 0 && params.expiresAt <= nowSec) {
+      throw new BadRequestException(
+        'Delegate expiry timestamp must be in the future',
+      );
+    }
+
+    const previous = this.mockDelegates.get(params.packageId);
+    this.mockDelegates.set(params.packageId, {
+      address: params.delegateAddress,
+      expiresAt:
+        params.expiresAt && params.expiresAt > 0 ? params.expiresAt : null,
+    });
+
+    // Record history
+    const entry: DelegateHistoryEntry = {
+      packageId: params.packageId,
+      previousDelegate: previous?.address ?? null,
+      newDelegate: params.delegateAddress,
+      changedBy: params.adminAddress,
+      changedAt: nowSec,
+      reason: params.expiresAt ? 'delegate_set_with_expiry' : 'delegate_set',
+    };
+    const history = this.mockDelegateHistory.get(params.packageId) ?? [];
+    history.push(entry);
+    this.mockDelegateHistory.set(params.packageId, history);
+
+    const transactionHash = this.generateMockHash(
+      `set-delegate-${params.packageId}-${params.delegateAddress}-${Date.now()}`,
+    );
+    return {
+      packageId: params.packageId,
+      delegateAddress: params.delegateAddress,
+      transactionHash,
+      timestamp: new Date(),
+      status: 'success',
+      expiresAt: params.expiresAt ?? undefined,
+      metadata: {
+        packageId: params.packageId,
+        adminAddress: params.adminAddress,
+        adapter: 'mock',
+      },
+    };
+  }
+
+  async revokeDelegate(
+    params: RevokeDelegateParams,
+  ): Promise<RevokeDelegateResult> {
+    await Promise.resolve();
+
+    const existing = this.mockDelegates.get(params.packageId);
+    if (existing) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      // Record revocation in history
+      const entry: DelegateHistoryEntry = {
+        packageId: params.packageId,
+        previousDelegate: existing.address,
+        newDelegate: '',
+        changedBy: params.adminAddress,
+        changedAt: nowSec,
+        reason: 'delegate_revoked',
+      };
+      const history = this.mockDelegateHistory.get(params.packageId) ?? [];
+      history.push(entry);
+      this.mockDelegateHistory.set(params.packageId, history);
+      this.mockDelegates.delete(params.packageId);
+    }
+
+    const transactionHash = this.generateMockHash(
+      `revoke-delegate-${params.packageId}-${Date.now()}`,
+    );
+    return {
+      packageId: params.packageId,
+      transactionHash,
+      timestamp: new Date(),
+      status: 'success',
+      metadata: {
+        packageId: params.packageId,
+        adminAddress: params.adminAddress,
+        adapter: 'mock',
+      },
+    };
+  }
+
+  async getDelegate(params: GetDelegateParams): Promise<GetDelegateResult> {
+    await Promise.resolve();
+
+    const stored = this.mockDelegates.get(params.packageId);
+    if (!stored) {
+      return {
+        packageId: params.packageId,
+        delegateAddress: null,
+        expiresAt: null,
+        timestamp: new Date(),
+      };
+    }
+
+    // Check expiry
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (stored.expiresAt !== null && stored.expiresAt <= nowSec) {
+      return {
+        packageId: params.packageId,
+        delegateAddress: null,
+        expiresAt: null,
+        timestamp: new Date(),
+      };
+    }
+
+    return {
+      packageId: params.packageId,
+      delegateAddress: stored.address,
+      expiresAt: stored.expiresAt,
+      timestamp: new Date(),
+    };
+  }
+
+  async getDelegateHistory(
+    params: GetDelegateHistoryParams,
+  ): Promise<GetDelegateHistoryResult> {
+    await Promise.resolve();
+
+    const history = this.mockDelegateHistory.get(params.packageId) ?? [];
+    return {
+      packageId: params.packageId,
+      history: [...history],
+      timestamp: new Date(),
     };
   }
 

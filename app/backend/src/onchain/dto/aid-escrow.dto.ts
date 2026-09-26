@@ -277,3 +277,144 @@ export class ExtendAidPackageExpiryDto {
   @Min(1)
   newExpiresAt: number;
 }
+
+// --- Delegate lifecycle DTOs ---
+
+/**
+ * DTO for assigning (or updating) a delegate for a package.
+ * Use `expiresAt` to create a time-limited delegation; omit it for a
+ * permanent delegation (until explicitly revoked).
+ */
+export class SetDelegateDto {
+  @ApiProperty({
+    description: 'Stellar address of the delegate who may claim on behalf of the recipient',
+    example: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+  })
+  @IsString()
+  delegateAddress: string;
+
+  @ApiProperty({
+    description:
+      'Optional unix timestamp (seconds) when the delegation expires. Omit or pass 0 for no expiry.',
+    example: 1735689600,
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  expiresAt?: number;
+}
+
+/**
+ * Response shape for a set-delegate operation.
+ */
+export class SetDelegateResponseDto {
+  @ApiProperty({ description: 'Package ID the delegate was assigned to', example: 'pkg_123456789' })
+  packageId: string;
+
+  @ApiProperty({
+    description: 'Address of the assigned delegate',
+    example: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+  })
+  delegateAddress: string;
+
+  @ApiProperty({ description: 'Transaction hash', example: 'ABC123...ABCD' })
+  transactionHash: string;
+
+  @ApiProperty({ description: 'Timestamp of the operation', example: '2026-03-30T12:30:00.000Z' })
+  timestamp: Date;
+
+  @ApiProperty({ description: 'Operation status', example: 'success' })
+  status: string;
+
+  @ApiProperty({
+    description: 'Unix timestamp when the delegation expires, or null for no expiry',
+    example: 1735689600,
+    required: false,
+    nullable: true,
+  })
+  expiresAt?: number;
+}
+
+/**
+ * Response shape for a revoke-delegate operation.
+ */
+export class RevokeDelegateResponseDto {
+  @ApiProperty({ description: 'Package ID whose delegate was revoked', example: 'pkg_123456789' })
+  packageId: string;
+
+  @ApiProperty({ description: 'Transaction hash', example: 'ABC123...ABCD' })
+  transactionHash: string;
+
+  @ApiProperty({ description: 'Timestamp of the operation', example: '2026-03-30T12:30:00.000Z' })
+  timestamp: Date;
+
+  @ApiProperty({ description: 'Operation status', example: 'success' })
+  status: string;
+}
+
+/**
+ * Response shape for get-delegate queries.
+ */
+export class GetDelegateResponseDto {
+  @ApiProperty({ description: 'Package ID', example: 'pkg_123456789' })
+  packageId: string;
+
+  @ApiProperty({
+    description: 'Current active delegate address, or null if none or expired',
+    example: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+    nullable: true,
+  })
+  delegateAddress: string | null;
+
+  @ApiProperty({
+    description: 'Unix timestamp when the delegation expires, or null for no expiry / no delegate',
+    example: 1735689600,
+    nullable: true,
+  })
+  expiresAt: number | null;
+
+  @ApiProperty({ description: 'Response timestamp', example: '2026-03-30T12:30:00.000Z' })
+  timestamp: Date;
+}
+
+/**
+ * A single entry in the delegate audit history.
+ */
+export class DelegateHistoryEntryDto {
+  @ApiProperty({ description: 'Package ID this history entry belongs to', example: 'pkg_123456789' })
+  packageId: string;
+
+  @ApiProperty({
+    description: 'Address that held the delegate role before this change, or null for the first assignment',
+    nullable: true,
+  })
+  previousDelegate: string | null;
+
+  @ApiProperty({ description: 'Address that became (or was cleared as) the delegate' })
+  newDelegate: string;
+
+  @ApiProperty({ description: 'Address that authorised the change' })
+  changedBy: string;
+
+  @ApiProperty({ description: 'Unix timestamp when the change occurred', example: 1711814400 })
+  changedAt: number;
+
+  @ApiProperty({ description: 'Reason code for the change', example: 'delegate_set' })
+  reason: string;
+}
+
+/**
+ * Response shape for delegate history queries.
+ */
+export class GetDelegateHistoryResponseDto {
+  @ApiProperty({ description: 'Package ID', example: 'pkg_123456789' })
+  packageId: string;
+
+  @ApiProperty({ type: [DelegateHistoryEntryDto], description: 'Chronological list of delegate changes' })
+  history: DelegateHistoryEntryDto[];
+
+  @ApiProperty({ description: 'Response timestamp', example: '2026-03-30T12:30:00.000Z' })
+  timestamp: Date;
+}

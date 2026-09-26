@@ -35,6 +35,15 @@ import {
   GetTransactionStatusParams,
   GetTransactionStatusResult,
   TxStatus,
+  SetDelegateParams,
+  SetDelegateResult,
+  RevokeDelegateParams,
+  RevokeDelegateResult,
+  GetDelegateParams,
+  GetDelegateResult,
+  GetDelegateHistoryParams,
+  GetDelegateHistoryResult,
+  DelegateHistoryEntry,
 } from './onchain.adapter';
 
 /**
@@ -362,6 +371,110 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       status: readString(summary.status, 'Active'),
       timestamp: new Date(),
     };
+  }
+
+  // --- Delegate lifecycle ---
+
+  async setDelegate(params: SetDelegateParams): Promise<SetDelegateResult> {
+    this.logger.log(
+      `setDelegate packageId=${params.packageId} delegate=${params.delegateAddress}`,
+    );
+    const method =
+      params.expiresAt && params.expiresAt > 0
+        ? 'set_delegate_with_expiry'
+        : 'set_delegate';
+    const args =
+      params.expiresAt && params.expiresAt > 0
+        ? [
+            params.adminAddress,
+            params.packageId,
+            params.delegateAddress,
+            params.expiresAt,
+          ]
+        : [params.adminAddress, params.packageId, params.delegateAddress];
+
+    await this.invokeContract(method, args);
+    return {
+      packageId: params.packageId,
+      delegateAddress: params.delegateAddress,
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+      expiresAt: params.expiresAt ?? undefined,
+    };
+  }
+
+  async revokeDelegate(
+    params: RevokeDelegateParams,
+  ): Promise<RevokeDelegateResult> {
+    this.logger.log(`revokeDelegate packageId=${params.packageId}`);
+    await this.invokeContract('revoke_delegate', [
+      params.adminAddress,
+      params.packageId,
+    ]);
+    return {
+      packageId: params.packageId,
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+    };
+  }
+
+  async getDelegate(params: GetDelegateParams): Promise<GetDelegateResult> {
+    this.logger.log(`getDelegate packageId=${params.packageId}`);
+    const result = await rpcCall(
+      this.http,
+      this.rpcUrl,
+      'getContractData',
+      { contractId: this.contractId, key: `delegate_${params.packageId}` },
+    );
+    const data = result as Record<string, unknown> | null;
+    if (!data || !data.delegate) {
+      return {
+        packageId: params.packageId,
+        delegateAddress: null,
+        expiresAt: null,
+        timestamp: new Date(),
+      };
+    }
+    return {
+      packageId: params.packageId,
+      delegateAddress: typeof data.delegate === 'string' ? data.delegate : null,
+      expiresAt:
+        typeof data.expires_at === 'number' ? data.expires_at : null,
+      timestamp: new Date(),
+    };
+  }
+
+  async getDelegateHistory(
+    params: GetDelegateHistoryParams,
+  ): Promise<GetDelegateHistoryResult> {
+    this.logger.log(`getDelegateHistory packageId=${params.packageId}`);
+    const result = await rpcCall(
+      this.http,
+      this.rpcUrl,
+      'getContractData',
+      {
+        contractId: this.contractId,
+        key: `delegate_history_${params.packageId}`,
+      },
+    );
+    const raw = Array.isArray(result) ? result : [];
+    const history: DelegateHistoryEntry[] = raw.map((entry: unknown) => {
+      const e = entry as Record<string, unknown>;
+      return {
+        packageId: String(e.package_id ?? params.packageId),
+        previousDelegate:
+          e.previous_delegate != null
+            ? String(e.previous_delegate)
+            : null,
+        newDelegate: String(e.new_delegate ?? ''),
+        changedBy: String(e.changed_by ?? ''),
+        changedAt: Number(e.changed_at ?? 0),
+        reason: String(e.reason ?? ''),
+      };
+    });
+    return { packageId: params.packageId, history, timestamp: new Date() };
   }
 
   async createClaim(params: CreateClaimParams): Promise<CreateClaimResult> {
