@@ -2,6 +2,10 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
+jest.mock('expo-localization', () => ({
+  getLocales: () => [{ languageCode: 'en' }],
+}));
+
 jest.spyOn(console, 'warn').mockImplementation((message?: any, ...optionalParams: any[]) => {
   if (
     typeof message === 'string' &&

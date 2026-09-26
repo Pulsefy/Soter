@@ -4,12 +4,19 @@
  * route every user-facing string through `t(...)`.
  */
 
+import { useCallback } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
 
-import { t, Locale } from './index';
+import {
+  t,
+  Locale,
+  DEFAULT_LOCALE,
+  hasTranslation,
+  reportMissingTranslation,
+} from './index';
 
 export interface Translation {
-  t: typeof t;
+  t: (key: string, params?: Record<string, unknown>) => string;
   locale: Locale;
 }
 
@@ -17,8 +24,16 @@ export function useTranslation(): Translation {
   const { locale } = useLanguage();
   // `locale` is read so the hook subscribes to language changes and
   // re-renders the wrapping screen when the user switches locale.
-  return { t, locale };
+  const translate = useCallback(
+    (key: string, params?: Record<string, unknown>) => {
+      return t(key, { locale, ...params });
+    },
+    [locale],
+  );
+
+  return { t: translate, locale };
 }
 
 export { formatCurrency, formatDate, formatNumber, formatRelativeDate } from './formatters';
+export { DEFAULT_LOCALE, hasTranslation, reportMissingTranslation } from './index';
 export type { Locale } from './index';
