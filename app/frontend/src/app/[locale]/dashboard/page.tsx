@@ -2,18 +2,9 @@ import React from 'react';
 import dynamic from 'next/dynamic';
 import { MapSection } from '@/components/dashboard/MapSection';
 import { ExportControls } from '@/components/dashboard/ExportControls';
+import { DashboardSummaryCards } from '@/components/dashboard/DashboardSummaryCards';
 //import React, { Suspense } from 'react';
 //import { DashboardContent } from '@/components/dashboard/DashboardContent';
-
-function StatCard({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="p-6 rounded-lg border border-gray-200 dark:border-gray-800">
-      <h3 className="text-lg font-semibold mb-2">{title}</h3>
-      <p className="text-3xl font-bold">—</p>
-      <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">{description}</p>
-    </div>
-  );
-}
 
 const DashboardContent = dynamic(
   () => import('@/components/dashboard/DashboardContent').then(m => m.DashboardContent),
@@ -63,11 +54,7 @@ export default function AidDashboard() {
           </div>
 
           {/* Stat Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <StatCard title="Packages Funded" description="Live data coming soon" />
-            <StatCard title="Total Distributed" description="Pulled from Soroban contracts" />
-            <StatCard title="Recipients Reached" description="Verified on-chain claims" />
-          </div>
+          <DashboardSummaryCards />
 
           {/* Live Map */}
           <MapSection />
@@ -75,17 +62,12 @@ export default function AidDashboard() {
           {/* Search / Filter + Package list — client, needs Suspense for useSearchParams */}
           <DashboardContent />
 
-          {/* Coming-soon note */}
-          <p className="text-center text-gray-600 dark:text-gray-400 text-sm">
-            Full API wiring, claim tracking, and impact reports coming in a future wave.
-          </p>
-
           {/* CTA buttons */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
               Get Notified
             </button>
-            <button className="px-6 py-3 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+            <button className="px-6 py-3 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-700 dark:text-gray-200">
               Learn More
             </button>
           </div>

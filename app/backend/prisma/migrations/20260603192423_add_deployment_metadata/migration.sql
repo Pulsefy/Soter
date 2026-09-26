@@ -1,0 +1,5 @@
+-- This migration was a SQLite-only column-type fixup (JSON -> JSONB via table
+-- rebuild) that has no Postgres equivalent: Prisma's Json scalar maps
+-- straight to JSONB on Postgres, so the prior migration already created
+-- DeploymentMetadata.metadata as JSONB. Kept as a no-op to preserve
+-- migration history/ordering.

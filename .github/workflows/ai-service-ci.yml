@@ -31,7 +31,7 @@ jobs:
       working-directory: ./app/ai-service
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 black mypy
+        pip install flake8 "black==25.11.0" mypy
         pip install -r requirements.txt
         
     - name: Lint with flake8
@@ -44,7 +44,6 @@ jobs:
       working-directory: ./app/ai-service
       run: |
         black --check .
-      continue-on-error: true
       
     - name: Type checking with mypy
       working-directory: ./app/ai-service
@@ -76,8 +75,7 @@ jobs:
     - name: Run tests with pytest
       working-directory: ./app/ai-service
       run: |
-        pytest --cov=. --cov-report=xml || echo "No tests found or tests failed"
-      continue-on-error: true
+        pytest --cov=. --cov-report=xml --junitxml=test-results.xml
       
     - name: Run setup verification
       working-directory: ./app/ai-service
@@ -90,6 +88,38 @@ jobs:
         file: ./app/ai-service/coverage.xml
         flags: ai-service
       continue-on-error: true
+
+  openapi-drift:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      working-directory: ./app/ai-service
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Regenerate OpenAPI spec from the live app
+      working-directory: ./app/ai-service
+      run: |
+        python scripts/generate_openapi.py
+
+    - name: Fail if the committed spec drifted
+      run: |
+        # Regenerating must produce byte-identical output to the committed
+        # openapi.json. Any diff means routes or schemas changed without the
+        # static reference being updated in the same PR.
+        git diff --exit-code -- app/ai-service/openapi.json
+        echo "✓ app/ai-service/openapi.json is up to date"
 
   build:
     runs-on: ubuntu-latest
@@ -152,7 +182,11 @@ jobs:
         
     - name: Test Docker container
       run: |
-        docker run -d --name test-container -p 8000:8000 soter-ai-service:test
+        docker run -d --name test-container \
+          -e APP_ENV=development \
+          -e TEST_PROVIDER_MODE=true \
+          -p 8000:8000 \
+          soter-ai-service:test
         # Wait for container to be ready with retry logic
         for i in $(seq 1 30); do
           if curl -sf http://localhost:8000/health > /dev/null 2>&1; then

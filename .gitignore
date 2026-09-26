@@ -1,7 +1,15 @@
-# Dependencies
+# Dependencies 
 node_modules/
 .pnp
 .pnp.js
+
+
+# Python
+__pycache__/
+*.pyc
+
+# Kiro
+.kiro/
 
 # Compiled output
 dist/
@@ -41,6 +49,18 @@ expo-env.d.ts
 
 # TypeScript
 *.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local dumps
+output.txt
 
 # IDE
 .idea/
@@ -127,6 +147,8 @@ CLAUDE.local.md
 # Google Gemini CLI
 .gemini/
 GEMINI.md
+# OpenCode
+AGENTS.md
 # Sourcegraph Cody
 .cody/
 # SpecStory

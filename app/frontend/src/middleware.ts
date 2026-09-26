@@ -1,21 +1,30 @@
-import createMiddleware from 'next-intl/middleware';
-import { locales } from './i18n';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
-export default createMiddleware({
-  // A list of all locales that are supported
-  locales,
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const isProduction = process.env.NODE_ENV === 'production';
+  const allowDemos = process.env.NEXT_PUBLIC_ENABLE_DEMOS === 'true';
 
-  // Used when no locale matches
-  defaultLocale: 'en',
+  // Identify demo paths under app/[locale]/
+  const isDemoRoute =
+    pathname.includes('/demo-version') ||
+    pathname.includes('/demo-checklist') ||
+    pathname.includes('/admin-biometric-demo');
 
-  // Automatically detect the user's locale based on:
-  // 1. The `Accept-Language` header
-  // 2. The locale cookie
-  // 3. The pathname
-  localeDetection: true,
-});
+  if (isProduction && isDemoRoute && !allowDemos) {
+    // Return a 404 response in production builds
+    return NextResponse.rewrite(new URL('/404', request.url), { status: 404 });
+  }
+
+  return NextResponse.next();
+}
 
 export const config = {
-  // Match only internationalized pathnames
-  matcher: ['/', '/(en|es|fr)/:path*'],
+  matcher: [
+    '/:locale/demo-version',
+    '/:locale/demo-checklist',
+    '/:locale/admin-biometric-demo',
+    '/:locale/:path*',
+  ],
 };

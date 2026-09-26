@@ -1,6 +1,7 @@
 import { ApiKeyGuard } from './api-key.guard';
 import { UnauthorizedException } from '@nestjs/common';
 import { AppRole } from '../../auth/app-role.enum';
+import { ApiKeyScope } from '../../api-keys/api-key-scope.enum';
 
 const mockReflector = { getAllAndOverride: jest.fn().mockReturnValue(false) };
 const mockConfigService = { get: jest.fn().mockReturnValue('test-api-key') };
@@ -39,11 +40,12 @@ describe('ApiKeyGuard', () => {
     );
   });
 
-  it('should allow request with valid API key found in DB and attach role', async () => {
+  it('should allow request with valid API key found in DB and attach role and scopes', async () => {
     mockPrismaService.apiKey.findFirst.mockResolvedValue({
       id: '1',
       key: 'test-api-key',
       role: AppRole.admin,
+      scopes: '["admin"]',
     });
 
     const context = createContext({ 'x-api-key': 'test-api-key' });
@@ -51,7 +53,11 @@ describe('ApiKeyGuard', () => {
 
     expect(result).toBe(true);
     const req = context.switchToHttp().getRequest() as any;
-    expect(req.user).toMatchObject({ role: AppRole.admin, apiKeyId: '1' });
+    expect(req.user).toMatchObject({
+      role: AppRole.admin,
+      apiKeyId: '1',
+      scopes: [ApiKeyScope.admin],
+    });
     expect(mockPrismaService.apiKey.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: '1' },
@@ -60,21 +66,61 @@ describe('ApiKeyGuard', () => {
     );
   });
 
-  it('should attach correct role from DB record for operator', async () => {
+  it('should attach correct role and scopes from DB record for operator', async () => {
     mockPrismaService.apiKey.findFirst.mockResolvedValue({
       id: '2',
       key: 'operator-key',
       role: AppRole.operator,
+      scopes: '["read","write"]',
     });
 
     const context = createContext({ 'x-api-key': 'operator-key' });
     await guard.canActivate(context as any);
 
     const req = context.switchToHttp().getRequest() as any;
-    expect(req.user).toMatchObject({ role: AppRole.operator, apiKeyId: '2' });
+    expect(req.user).toMatchObject({
+      role: AppRole.operator,
+      apiKeyId: '2',
+      scopes: [ApiKeyScope.read, ApiKeyScope.write],
+    });
   });
 
-  it('should fall back to env key and assign admin role when no DB record', async () => {
+  it('should attach write scope from DB record', async () => {
+    mockPrismaService.apiKey.findFirst.mockResolvedValue({
+      id: '3',
+      key: 'write-only-key',
+      role: AppRole.client,
+      scopes: '["write"]',
+    });
+
+    const context = createContext({ 'x-api-key': 'write-only-key' });
+    await guard.canActivate(context as any);
+
+    const req = context.switchToHttp().getRequest() as any;
+    expect(req.user).toMatchObject({
+      role: AppRole.client,
+      scopes: [ApiKeyScope.write],
+    });
+  });
+
+  it('should attach webhook scope from DB record', async () => {
+    mockPrismaService.apiKey.findFirst.mockResolvedValue({
+      id: '4',
+      key: 'webhook-key',
+      role: AppRole.operator,
+      scopes: '["webhook"]',
+    });
+
+    const context = createContext({ 'x-api-key': 'webhook-key' });
+    await guard.canActivate(context as any);
+
+    const req = context.switchToHttp().getRequest() as any;
+    expect(req.user).toMatchObject({
+      scopes: [ApiKeyScope.webhook],
+    });
+  });
+
+  it('should fall back to env key and assign admin role with admin scope when no DB record', async () => {
     mockPrismaService.apiKey.findFirst.mockResolvedValue(null);
 
     const context = createContext({ 'x-api-key': 'test-api-key' });
@@ -82,7 +128,11 @@ describe('ApiKeyGuard', () => {
 
     expect(result).toBe(true);
     const req = context.switchToHttp().getRequest() as any;
-    expect(req.user).toEqual({ role: AppRole.admin, authType: 'envApiKey' });
+    expect(req.user).toEqual({
+      role: AppRole.admin,
+      authType: 'envApiKey',
+      scopes: [ApiKeyScope.admin],
+    });
   });
 
   it('should throw UnauthorizedException with missing API key', async () => {
@@ -102,14 +152,85 @@ describe('ApiKeyGuard', () => {
     );
   });
 
-  it('should reject revoked keys immediately', async () => {
-    // Guard queries with `revokedAt: null`, so a revoked record should not match
-    mockPrismaService.apiKey.findFirst.mockResolvedValue(null);
+  it('should reject revoked keys with a distinguishable error', async () => {
+    mockPrismaService.apiKey.findFirst.mockResolvedValue({
+      id: 'revoked-1',
+      keyHash: 'hashed-revoked-key',
+      role: AppRole.operator,
+      scopes: '["read"]',
+      revokedAt: new Date(Date.now() - 60_000),
+      expiresAt: null,
+      graceExpiresAt: null,
+      replacedById: null,
+    });
 
     const context = createContext({ 'x-api-key': 'revoked-key' });
     await expect(guard.canActivate(context as any)).rejects.toThrow(
-      UnauthorizedException,
+      'API key has been revoked',
     );
+    expect(mockPrismaService.apiKey.update).not.toHaveBeenCalled();
+  });
+
+  it('should reject expired keys with a distinguishable error', async () => {
+    mockPrismaService.apiKey.findFirst.mockResolvedValue({
+      id: 'expired-1',
+      key: 'expired-key',
+      role: AppRole.operator,
+      scopes: '["read"]',
+      revokedAt: null,
+      expiresAt: new Date(Date.now() - 60_000),
+      graceExpiresAt: null,
+      replacedById: null,
+    });
+
+    const context = createContext({ 'x-api-key': 'expired-key' });
+    await expect(guard.canActivate(context as any)).rejects.toThrow(
+      'API key has expired',
+    );
+    expect(mockPrismaService.apiKey.update).not.toHaveBeenCalled();
+  });
+
+  it('should allow a rotated predecessor during the grace overlap window', async () => {
+    mockPrismaService.apiKey.findFirst.mockResolvedValue({
+      id: 'old-1',
+      key: 'old-key',
+      role: AppRole.operator,
+      scopes: '["read"]',
+      revokedAt: null,
+      expiresAt: null,
+      graceExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      replacedById: 'new-1',
+    });
+
+    const context = createContext({ 'x-api-key': 'old-key' });
+    const result = await guard.canActivate(context as any);
+
+    expect(result).toBe(true);
+    const req = context.switchToHttp().getRequest() as any;
+    expect(req.user).toMatchObject({
+      apiKeyId: 'old-1',
+      role: AppRole.operator,
+      scopes: [ApiKeyScope.read],
+    });
+  });
+
+  it('should reject a rotated predecessor once the grace window has ended', async () => {
+    mockPrismaService.apiKey.findFirst.mockResolvedValue({
+      id: 'old-1',
+      key: 'old-key',
+      role: AppRole.operator,
+      scopes: '["read"]',
+      revokedAt: null,
+      expiresAt: null,
+      graceExpiresAt: new Date(Date.now() - 60_000),
+      replacedById: 'new-1',
+    });
+
+    const context = createContext({ 'x-api-key': 'old-key' });
+    await expect(guard.canActivate(context as any)).rejects.toThrow(
+      'API key has been rotated and its grace period has ended',
+    );
+    expect(mockPrismaService.apiKey.update).not.toHaveBeenCalled();
   });
 
   it('should allow public routes without API key', async () => {

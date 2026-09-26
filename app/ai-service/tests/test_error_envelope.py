@@ -4,9 +4,11 @@ Tests for the standardized error response envelope (Issue #244).
 Every error response must conform to:
   {"error": {"code": str, "message": str, "details": any|null}}
 """
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+import main
 from main import app
 from exceptions import AIServiceError
 
@@ -17,7 +19,9 @@ def assert_envelope(data: dict, expected_code: str):
     assert "error" in data, f"Missing 'error' key: {data}"
     err = data["error"]
     assert "code" in err and "message" in err, f"Malformed error detail: {err}"
-    assert err["code"] == expected_code, f"Expected code {expected_code!r}, got {err['code']!r}"
+    assert (
+        err["code"] == expected_code
+    ), f"Expected code {expected_code!r}, got {err['code']!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -42,14 +46,20 @@ class TestValidationError:
         # /v1/ai/inference expects {"type": ...}; send empty body
         r = client.post("/v1/ai/inference", json={})
         # type has a default so send truly invalid payload
-        r = client.post("/v1/ai/inference", content="not-json",
-                        headers={"Content-Type": "application/json"})
+        r = client.post(
+            "/v1/ai/inference",
+            content="not-json",
+            headers={"Content-Type": "application/json"},
+        )
         assert r.status_code == 422
         assert_envelope(r.json(), "VALIDATION_ERROR")
 
     def test_422_details_present(self):
-        r = client.post("/v1/ai/inference", content="not-json",
-                        headers={"Content-Type": "application/json"})
+        r = client.post(
+            "/v1/ai/inference",
+            content="not-json",
+            headers={"Content-Type": "application/json"},
+        )
         assert r.json()["error"]["details"] is not None
 
 
@@ -93,8 +103,27 @@ class TestAIServiceError:
 
 
 # ---------------------------------------------------------------------------
-# 5. Generic 500 Internal Server Error
+# 6. 503 Service Overloaded (load shedding)
 # ---------------------------------------------------------------------------
+class TestServiceOverloaded:
+    def test_503_shape(self):
+        @main.app.get("/_test/503")
+        async def _raise_503():
+            from exceptions import LoadShedError
+
+            raise LoadShedError(
+                "memory",
+                "Service temporarily unavailable due to high memory pressure",
+                details={"threshold_percent": 90.0},
+            )
+
+        r = client.get("/_test/503")
+        assert r.status_code == 503
+        assert_envelope(r.json(), "SERVICE_OVERLOADED")
+        assert r.json()["error"]["details"]["reason"] == "memory"
+        assert r.headers.get("retry-after") == "30"
+
+
 class TestInternalServerError:
     def test_500_shape(self):
         @app.get("/_test/500")

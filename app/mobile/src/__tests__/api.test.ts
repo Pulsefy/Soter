@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Unit tests for src/services/api.ts
  */
 import { fetchHealthStatus, getAidPackages } from '../services/api';

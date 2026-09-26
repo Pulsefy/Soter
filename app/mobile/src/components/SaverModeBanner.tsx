@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { SaverModeSource } from '../contexts/SaverModeContext';
+import { useAppTheme } from '../theme/useAppTheme';
+import { useTranslation } from '../i18n/useTranslation';
 
 interface Props {
   visible: boolean;
@@ -13,27 +15,30 @@ interface Props {
  * the degraded behaviour.
  */
 export const SaverModeBanner: React.FC<Props> = ({ visible, source }) => {
+  const { colors } = useAppTheme();
+  const { t } = useTranslation();
+
   if (!visible) return null;
 
   const reason =
     source === 'auto'
-      ? 'Slow or metered connection detected'
-      : 'Manually enabled';
+      ? t('saverBanner.reasonAuto')
+      : t('saverBanner.reasonManual');
 
   return (
     <View
-      style={styles.banner}
+      style={[styles.banner, { backgroundColor: colors.infoBg, borderBottomColor: colors.info }]}
       accessible
       accessibilityRole="alert"
-      accessibilityLabel={`Saver mode is active. ${reason}. Refresh, media, and background sync are reduced.`}
+      accessibilityLabel={t('saverBanner.accessible', { reason })}
     >
       <Text style={styles.icon} accessibilityElementsHidden>
         &#x1F4A1;
       </Text>
       <View style={styles.textContainer}>
-        <Text style={styles.title}>Saver Mode</Text>
-        <Text style={styles.subtitle}>
-          {reason}. Refresh, media &amp; background sync reduced.
+        <Text style={[styles.title, { color: colors.info }]} maxFontSizeMultiplier={2}>{t('saverBanner.saverMode')}</Text>
+        <Text style={[styles.subtitle, { color: colors.info }]} maxFontSizeMultiplier={2}>
+          {reason}. {t('saverBanner.subtitle')}
         </Text>
       </View>
     </View>
@@ -44,9 +49,7 @@ const styles = StyleSheet.create({
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#DBEAFE',
     borderBottomWidth: 1,
-    borderBottomColor: '#60A5FA',
     paddingHorizontal: 16,
     paddingVertical: 10,
     gap: 10,
@@ -60,11 +63,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#1E3A5F',
   },
   subtitle: {
     fontSize: 12,
-    color: '#2D5F8A',
     marginTop: 2,
+    opacity: 0.9,
   },
 });

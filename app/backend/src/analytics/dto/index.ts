@@ -23,6 +23,18 @@ export class TimeframeBucket {
 }
 
 export class GlobalStatsDto {
+  @ApiProperty({ example: 142 })
+  totalClaims: number;
+
+  @ApiProperty({ example: 48 })
+  totalPackages: number;
+
+  @ApiProperty({ example: 9 })
+  pendingReviews: number;
+
+  @ApiProperty({ example: 76 })
+  totalDisbursements: number;
+
   @ApiProperty({ example: 250000 })
   totalAidDisbursed: number;
 

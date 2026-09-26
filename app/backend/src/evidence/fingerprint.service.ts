@@ -164,7 +164,7 @@ export class FingerprintService {
   generateCompositeFingerprint(fields: Record<string, any>): string {
     const sortedKeys = Object.keys(fields).sort();
     const combined = sortedKeys
-      .map((key) => `${key}:${JSON.stringify(fields[key])}`)
+      .map(key => `${key}:${JSON.stringify(fields[key])}`)
       .join('|');
 
     return crypto.createHash('sha256').update(combined).digest('hex');

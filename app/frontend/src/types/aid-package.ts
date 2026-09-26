@@ -1,6 +1,6 @@
 export type AidPackageStatus = 'Active' | 'Claimed' | 'Expired';
 export type TokenType = 'USDC' | 'XLM' | 'EURC';
-export type FilterScope = 'dashboard' | 'campaigns';
+export type FilterScope = 'dashboard' | 'campaigns' | 'verification-review';
 
 export interface AidPackage {
   id: string;
@@ -16,6 +16,21 @@ export interface AidPackageFilters {
   search?: string;
   status?: AidPackageStatus | '';
   token?: TokenType | '';
+}
+
+export interface PaginationParams {
+  page?: number;
+  size?: number;
+  sortBy?: string;
+  sortDirection?: 'asc' | 'desc';
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  size: number;
+  totalPages: number;
 }
 
 /** A named, saved filter combination for a specific admin list view */

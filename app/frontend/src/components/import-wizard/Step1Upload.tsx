@@ -1,13 +1,16 @@
 'use client';
 
-import { ChangeEvent } from 'react';
+import { ChangeEvent, RefObject } from 'react';
 import { FileText, LoaderCircle, UploadCloud } from 'lucide-react';
+import type { ParseProgress } from '@/lib/csv-validation';
 
 interface Step1UploadProps {
   file: File | null;
   fileError: string | null;
   isParsing: boolean;
+  parseProgress: ParseProgress | null;
   canProceed: boolean;
+  headingRef?: RefObject<HTMLHeadingElement | null>;
   onFileSelected: (file: File | null) => void | Promise<void>;
   onNext: () => void;
 }
@@ -18,7 +21,7 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function Step1Upload({ file, fileError, isParsing, canProceed, onFileSelected, onNext }: Step1UploadProps) {
+export function Step1Upload({ file, fileError, isParsing, parseProgress, canProceed, headingRef, onFileSelected, onNext }: Step1UploadProps) {
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
     const nextFile = event.target.files?.[0] ?? null;
     void onFileSelected(nextFile);
@@ -27,7 +30,7 @@ export function Step1Upload({ file, fileError, isParsing, canProceed, onFileSele
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">Step 1: Upload recipient file</h2>
+        <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-slate-900 dark:text-slate-50 focus:outline-none">Step 1: Upload recipient file</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300">
           Choose a CSV export from your recipient system. We&apos;ll parse the file locally first so you can inspect the shape before anything is submitted.
         </p>
@@ -63,9 +66,21 @@ export function Step1Upload({ file, fileError, isParsing, canProceed, onFileSele
             </div>
           </div>
           {isParsing && (
-            <div className="inline-flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+            <div className="inline-flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
               <LoaderCircle className="h-4 w-4 animate-spin" />
-              Parsing file...
+              <span>
+                {parseProgress
+                  ? `Parsing rows: ${parseProgress.rowsParsed}`
+                  : 'Parsing file...'}
+              </span>
+              {parseProgress && parseProgress.percent > 0 && parseProgress.percent < 100 && (
+                <div className="w-24 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                  <div
+                    className="h-2 rounded-full bg-blue-600 transition-all duration-300"
+                    style={{ width: `${parseProgress.percent}%` }}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

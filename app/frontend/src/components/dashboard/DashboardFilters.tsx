@@ -24,7 +24,7 @@ interface FilterSelectProps {
   options: { value: string; label: string }[];
 }
 
-function FilterSelect({ value, onValueChange, placeholder, options }: FilterSelectProps) {
+const FilterSelect = React.memo(function FilterSelect({ value, onValueChange, placeholder, options }: FilterSelectProps) {
   return (
     <SelectPrimitive.Root value={value || undefined} onValueChange={onValueChange}>
       <SelectPrimitive.Trigger className="flex items-center gap-2 h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 dark:focus:border-blue-400 transition-colors min-w-36 data-[state=open]:border-blue-500 data-[state=open]:ring-2 data-[state=open]:ring-blue-500/30">
@@ -65,7 +65,7 @@ function FilterSelect({ value, onValueChange, placeholder, options }: FilterSele
       </SelectPrimitive.Portal>
     </SelectPrimitive.Root>
   );
-}
+});
 
 interface DashboardFiltersProps {
   search: string;
@@ -76,7 +76,7 @@ interface DashboardFiltersProps {
   onTokenChange: (value: string) => void;
 }
 
-export function DashboardFilters({
+export const DashboardFilters = React.memo(function DashboardFilters({
   search,
   status,
   token,
@@ -146,4 +146,4 @@ export function DashboardFilters({
       )}
     </div>
   );
-}
+});

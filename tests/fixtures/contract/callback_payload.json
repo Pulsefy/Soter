@@ -1,0 +1,1 @@
+{"taskId":"task-abc-123","deliveryId":"del-xyz-456","timestamp":"2024-03-24T10:30:00Z","status":"completed","result":{"score":0.9,"prediction":"approved"},"error":null,"taskType":"humanitarian_verification","completedAt":"2024-03-24T10:35:00Z","schemaVersion":"1.0"}

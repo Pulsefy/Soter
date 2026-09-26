@@ -10,11 +10,13 @@
 // Public (browser-safe) values
 // ---------------------------------------------------------------------------
 
+const isProd = process.env.NODE_ENV === 'production';
+
 /** Stellar network: testnet, futurenet, mainnet, etc. */
 export const stellarNetwork =
   process.env.NEXT_PUBLIC_STELLAR_NETWORK ??
   process.env.NEXT_PUBLIC_NETWORK ??
-  'unknown';
+  (isProd ? 'unknown' : 'testnet');
 
 /**
  * The network the wallet must be on for on-chain actions to be allowed.
@@ -28,11 +30,21 @@ export const envName: string | null =
 
 /** Backend API base URL (browser-safe, no secret). */
 export const apiUrl: string =
-  process.env.NEXT_PUBLIC_API_URL ?? '';
+  process.env.NEXT_PUBLIC_API_URL ?? (isProd ? '' : 'http://localhost:4000');
 
 /** Whether the reviewer demo-checklist route is enabled. Dev/internal only. */
 export const enableDemoChecklist: boolean =
   process.env.NEXT_PUBLIC_ENABLE_DEMO_CHECKLIST === 'true';
+
+/**
+ * Explicitly enable demo/mock mode banner from the environment.
+ * Set NEXT_PUBLIC_DEMO_MODE=true to always show the demo banner
+ * regardless of what the API health endpoint reports.
+ * The banner is also shown automatically when the API returns
+ * X-Demo-Mode: fixture or X-Demo-Mode: deterministic.
+ */
+export const demoModeEnabled: boolean =
+  process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
 
 // ---------------------------------------------------------------------------
 // Validation

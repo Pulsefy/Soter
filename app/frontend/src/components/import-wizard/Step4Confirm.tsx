@@ -1,14 +1,17 @@
 'use client';
 
-import { AlertCircle, CheckCircle2, ChevronLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle2, ChevronLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
+import type { RefObject } from 'react';
 import type { ValidationResult } from '@/lib/csv-validation';
 
 interface Step4ConfirmProps {
   result: ValidationResult;
   isSubmitting: boolean;
   hasBlockingErrors: boolean;
+  isMismatch: boolean;
   submitMessage: string | null;
   submitError: string | null;
+  headingRef?: RefObject<HTMLHeadingElement | null>;
   onBack: () => void;
   onConfirm: () => void | Promise<void>;
   onStartOver: () => void;
@@ -18,8 +21,10 @@ export function Step4Confirm({
   result,
   isSubmitting,
   hasBlockingErrors,
+  isMismatch,
   submitMessage,
   submitError,
+  headingRef,
   onBack,
   onConfirm,
   onStartOver,
@@ -27,7 +32,7 @@ export function Step4Confirm({
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">Step 4: Confirm import</h2>
+        <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-slate-900 dark:text-slate-50 focus:outline-none">Step 4: Confirm import</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300">
           Review the summary below, then submit the validated recipient list to complete the import.
         </p>
@@ -65,6 +70,13 @@ export function Step4Confirm({
         </div>
       )}
 
+      {isMismatch && (
+        <div className="flex items-start gap-3 rounded-xl border border-yellow-600 bg-yellow-900/30 px-4 py-3 text-sm text-yellow-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-400" />
+          <p>Cannot submit: wallet is on the wrong network. Switch to the correct network in Freighter to continue.</p>
+        </div>
+      )}
+
       {submitError && (
         <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -95,7 +107,8 @@ export function Step4Confirm({
           <button
             type="button"
             onClick={() => void onConfirm()}
-            disabled={isSubmitting || hasBlockingErrors || Boolean(submitMessage)}
+            disabled={isSubmitting || hasBlockingErrors || isMismatch || Boolean(submitMessage)}
+            title={isMismatch ? 'Wrong network — switch to the correct network in Freighter' : undefined}
             className="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSubmitting ? (

@@ -46,7 +46,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }`}
         >
           <div className="flex flex-col gap-1">
-            <ToastPrimitive.Title className={`text-sm font-semibold ${type === 'error' ? 'text-red-600' : type === 'success' ? 'text-green-600' : type === 'warning' ? 'text-yellow-600' : 'text-gray-900'}`}>
+            <ToastPrimitive.Title className={`text-sm font-semibold ${type === 'error' ? 'text-red-600' : type === 'success' ? 'text-green-600' : type === 'warning' ? 'text-yellow-700' : 'text-gray-900'}`}>
               {title}
             </ToastPrimitive.Title>
             {description && (
@@ -55,8 +55,11 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               </ToastPrimitive.Description>
             )}
           </div>
-          <ToastPrimitive.Close className="absolute top-2 right-2 p-1 text-gray-400 hover:text-gray-900 focus:outline-none">
-            <span aria-hidden>×</span>
+          <ToastPrimitive.Close
+            aria-label="Dismiss notification"
+            className="absolute top-2 right-2 p-1 text-gray-400 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+          >
+            <span aria-hidden="true">×</span>
           </ToastPrimitive.Close>
         </ToastPrimitive.Root>
         <ToastPrimitive.Viewport className="fixed bottom-0 right-0 p-[var(--viewport-padding)] w-[390px] max-w-[100vw] z-[2147483647]" />

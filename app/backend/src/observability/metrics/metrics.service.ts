@@ -6,6 +6,12 @@ export type CacheResult = 'hit' | 'miss';
 
 @Injectable()
 export class MetricsService {
+  // Dynamic metrics storage for Soroban transaction lifecycle tracking
+  private sorobanTransactionLatency?: Histogram<string>;
+  private readonly dynamicCounters = new Map<string, Counter<string>>();
+  private readonly dynamicGauges = new Map<string, Gauge<string>>();
+  private readonly dynamicHistograms = new Map<string, Histogram<string>>();
+
   constructor(
     @InjectMetric('http_requests_total')
     public httpRequestsCounter: Counter<string>,
@@ -23,12 +29,24 @@ export class MetricsService {
     public onchainOperationsCounter: Counter<string>,
     @InjectMetric('onchain_operation_duration_seconds')
     public onchainOperationDuration: Histogram<string>,
+    @InjectMetric('contract_call_latency_seconds')
+    public contractCallLatency: Histogram<string>,
+    @InjectMetric('tx_submission_failures_total')
+    public txSubmissionFailuresCounter: Counter<string>,
     @InjectMetric('ingestion_lag_seconds')
     public ingestionLagGauge: Gauge<string>,
     @InjectMetric('webhook_retries_total')
     public webhookRetriesCounter: Counter<string>,
     @InjectMetric('webhook_delivery_duration_seconds')
     public webhookDeliveryDuration: Histogram<string>,
+    @InjectMetric('callback_failures_total')
+    public callbackFailuresCounter: Counter<string>,
+
+    // Notification Delivery Metrics (issue #716)
+    @InjectMetric('notification_delivery_attempts_total')
+    public notificationDeliveryAttemptsCounter: Counter<string>,
+    @InjectMetric('notification_delivery_failures_by_category_total')
+    public notificationDeliveryFailuresByCategoryCounter: Counter<string>,
     @InjectMetric('error_rate_total')
     public errorRateCounter: Counter<string>,
     @InjectMetric('analytics_cache_hits_total')
@@ -37,7 +55,87 @@ export class MetricsService {
     public analyticsCacheMissesCounter: Counter<string>,
     @InjectMetric('analytics_cache_invalidations_total')
     public analyticsCacheInvalidationsCounter: Counter<string>,
+
+    // Generic Response Cache Metrics (issue #702)
+    @InjectMetric('cache_hits_total')
+    public cacheHitsCounter: Counter<string>,
+    @InjectMetric('cache_misses_total')
+    public cacheMissesCounter: Counter<string>,
+    @InjectMetric('cache_invalidations_total')
+    public cacheInvalidationsCounter: Counter<string>,
+    @InjectMetric('cache_keys_total')
+    public cacheKeysGauge: Gauge<string>,
+    @InjectMetric('verification_jobs_enqueued_total')
+    public verificationJobsEnqueuedCounter: Counter<string>,
+    @InjectMetric('verification_queue_waiting_by_priority')
+    public verificationQueueWaitingByPriorityGauge: Gauge<string>,
+
+    // Claim funnel metrics
+    @InjectMetric('claims_created_total')
+    public claimsCreatedCounter: Counter<string>,
+    @InjectMetric('claims_verified_total')
+    public claimsVerifiedCounter: Counter<string>,
+    @InjectMetric('claims_approved_total')
+    public claimsApprovedCounter: Counter<string>,
+    @InjectMetric('claims_disbursed_total')
+    public claimsDisbursedCounter: Counter<string>,
+    @InjectMetric('claims_cancelled_total')
+    public claimsCancelledCounter: Counter<string>,
+    @InjectMetric('claims_in_funnel')
+    public claimsInFunnelGauge: Gauge<string>,
+    @InjectMetric('claim_funnel_duration_seconds')
+    public claimFunnelDuration: Histogram<string>,
+
+    // Entity Link Review Queue Metrics (issue #949)
+    @InjectMetric('entity_link_review_queue_depth')
+    public entityLinkReviewQueueDepthGauge: Gauge<string>,
+    @InjectMetric('entity_link_review_decisions_total')
+    public entityLinkReviewDecisionsCounter: Counter<string>,
+    @InjectMetric('entity_link_review_duration_seconds')
+    public entityLinkReviewDuration: Histogram<string>,
+
+    // API Key Rate Limit Metrics (issue #952)
+    @InjectMetric('api_key_rate_limit_rejections_total')
+    public apiKeyRateLimitRejectionsCounter: Counter<string>,
+
+    // Idempotency Key Retention Metrics
+    @InjectMetric('idempotency_keys_purged_total')
+    public idempotencyKeysPurgedCounter: Counter<string>,
+    @InjectMetric('idempotency_purge_executions_total')
+    public idempotencyPurgeExecutionsCounter: Counter<string>,
+    @InjectMetric('idempotency_purge_failures_total')
+    public idempotencyPurgeFailuresCounter: Counter<string>,
+
+    // Evidence Queue SLA Metrics (issue #954)
+    @InjectMetric('evidence_queue_depth')
+    public evidenceQueueDepthGauge: Gauge<string>,
+    @InjectMetric('evidence_queue_oldest_pending_age_seconds')
+    public evidenceQueueOldestPendingAgeGauge: Gauge<string>,
+    @InjectMetric('evidence_intake_to_decision_duration_seconds')
+    public evidenceIntakeToDecisionDuration: Histogram<string>,
   ) {}
+
+  /**
+   * Increment the counter tracking how many jobs have been enqueued per priority tier.
+   * Call once per successful enqueue, passing the priority label (e.g. 'URGENT', 'NORMAL').
+   */
+  incrementVerificationJobEnqueued(priorityLabel: string): void {
+    this.verificationJobsEnqueuedCounter.inc({ priority: priorityLabel });
+  }
+
+  /**
+   * Set the current snapshot of waiting verification jobs per priority tier.
+   * Call after getQueueMetrics to keep the gauge in sync.
+   */
+  setVerificationQueueWaitingByPriority(
+    priorityLabel: string,
+    count: number,
+  ): void {
+    this.verificationQueueWaitingByPriorityGauge.set(
+      { priority: priorityLabel },
+      count,
+    );
+  }
 
   /**
    * Increment HTTP request counter
@@ -150,6 +248,21 @@ export class MetricsService {
     );
   }
 
+  recordContractCallLatency(
+    operation: string,
+    status: 'success' | 'failed',
+    durationSeconds: number,
+  ): void {
+    this.contractCallLatency.observe({ operation, status }, durationSeconds);
+  }
+
+  incrementTxSubmissionFailure(operation: string, reason: string): void {
+    this.txSubmissionFailuresCounter.inc({
+      operation,
+      reason: reason.slice(0, 80),
+    });
+  }
+
   /**
    * Set ingestion lag gauge (time between event creation and processing)
    */
@@ -179,6 +292,40 @@ export class MetricsService {
     );
   }
 
+  incrementCallbackFailure(callbackType: string, reason: string): void {
+    this.callbackFailuresCounter.inc({
+      callback_type: callbackType,
+      reason: reason.slice(0, 80),
+    });
+  }
+
+  /**
+   * Records a notification delivery attempt outcome (issue #716).
+   * Call once per attempt, for both success and failure.
+   */
+  incrementNotificationDeliveryAttempt(
+    type: string,
+    outcome: 'success' | 'failed',
+  ): void {
+    this.notificationDeliveryAttemptsCounter.inc({ type, outcome });
+  }
+
+  /**
+   * Records a failed notification delivery attempt's bounded failure
+   * category (see notification-failure-classifier.ts). Deliberately does
+   * NOT accept raw error text as a label, unlike incrementCallbackFailure
+   * above — category is a small fixed set, so this stays low-cardinality.
+   */
+  incrementNotificationDeliveryFailureByCategory(
+    type: string,
+    failureCategory: string,
+  ): void {
+    this.notificationDeliveryFailuresByCategoryCounter.inc({
+      type,
+      failure_category: failureCategory,
+    });
+  }
+
   /**
    * Record an analytics cache hit or miss.
    */
@@ -195,5 +342,327 @@ export class MetricsService {
    */
   incrementAnalyticsCacheInvalidation(reason: string): void {
     this.analyticsCacheInvalidationsCounter.inc({ reason });
+  }
+
+  /**
+   * Record the number of expired idempotency keys deleted by a purge batch.
+   */
+  recordIdempotencyKeysPurged(count: number): void {
+    this.idempotencyKeysPurgedCounter.inc(count);
+  }
+
+  /**
+   * Record a completed or failed idempotency key purge execution.
+   */
+  recordIdempotencyPurgeRun(status: 'success' | 'failed'): void {
+    this.idempotencyPurgeExecutionsCounter.inc({ status });
+  }
+
+  /**
+   * Record a failed idempotency key purge execution with a reason.
+   */
+  recordIdempotencyPurgeFailure(reason: string): void {
+    this.idempotencyPurgeFailuresCounter.inc({ reason: reason.slice(0, 80) });
+  }
+
+  /**
+   * Record a generic response cache hit for a given key group
+   * (e.g. 'verification', 'analytics', 'user').
+   */
+  recordCacheHit(keyGroup: string): void {
+    this.cacheHitsCounter.inc({ key_group: keyGroup });
+  }
+
+  /**
+   * Record a generic response cache miss for a given key group.
+   */
+  recordCacheMiss(keyGroup: string): void {
+    this.cacheMissesCounter.inc({ key_group: keyGroup });
+  }
+
+  /**
+   * Increment the generic response cache invalidation counter for a key group.
+   */
+  incrementCacheInvalidation(keyGroup: string): void {
+    this.cacheInvalidationsCounter.inc({ key_group: keyGroup });
+  }
+
+  /**
+   * Set the current Redis key count for a cache key group (Redis key health).
+   */
+  setCacheKeyGroupSize(keyGroup: string, count: number): void {
+    this.cacheKeysGauge.set({ key_group: keyGroup }, count);
+  }
+
+  /**
+   * Sum a counter's value across all of its label combinations.
+   */
+  private async sumCounter(counter: Counter<string>): Promise<number> {
+    const data = await counter.get();
+    return data.values.reduce((sum, entry) => sum + entry.value, 0);
+  }
+
+  /** Cumulative count of generic response cache hits across all key groups. */
+  async getCacheHitsTotal(): Promise<number> {
+    return this.sumCounter(this.cacheHitsCounter);
+  }
+
+  /** Cumulative count of generic response cache misses across all key groups. */
+  async getCacheMissesTotal(): Promise<number> {
+    return this.sumCounter(this.cacheMissesCounter);
+  }
+
+  /** Cumulative count of generic response cache invalidations across all key groups. */
+  async getCacheInvalidationsTotal(): Promise<number> {
+    return this.sumCounter(this.cacheInvalidationsCounter);
+  }
+
+  /**
+   * Increment the counter for claims created, labelled by campaign_id.
+   */
+  incrementClaimsCreated(campaignId: string): void {
+    this.claimsCreatedCounter.inc({ campaign_id: campaignId });
+  }
+
+  /**
+   * Increment the counter for claims that transitioned to verified.
+   */
+  incrementClaimsVerified(campaignId: string): void {
+    this.claimsVerifiedCounter.inc({ campaign_id: campaignId });
+  }
+
+  /**
+   * Increment the counter for claims that transitioned to approved.
+   */
+  incrementClaimsApproved(campaignId: string): void {
+    this.claimsApprovedCounter.inc({ campaign_id: campaignId });
+  }
+
+  /**
+   * Increment the counter for claims that transitioned to disbursed.
+   */
+  incrementClaimsDisbursed(campaignId: string, onchainEnabled: boolean): void {
+    this.claimsDisbursedCounter.inc({
+      campaign_id: campaignId,
+      onchain_enabled: String(onchainEnabled),
+    });
+  }
+
+  /**
+   * Increment the counter for claims that were cancelled.
+   */
+  incrementClaimsCancelled(campaignId: string, fromStatus: string): void {
+    this.claimsCancelledCounter.inc({
+      campaign_id: campaignId,
+      from_status: fromStatus,
+    });
+  }
+
+  /**
+   * Adjust the gauge tracking the current number of claims at a given funnel stage.
+   * Increments (inc) when a claim enters the stage, decrements (dec) when it leaves.
+   */
+  adjustClaimsInFunnel(status: string, delta: 1 | -1): void {
+    this.claimsInFunnelGauge.inc({ status }, delta);
+  }
+
+  /**
+   * Set the absolute count of claims at a given funnel stage.
+   * Used for periodic gauge refresh to correct drift from incremental updates.
+   */
+  setClaimsInFunnel(status: string, count: number): void {
+    this.claimsInFunnelGauge.set({ status }, count);
+  }
+
+  /** Set the current number of notification outbox records awaiting replay. */
+  setNotificationDeadLetterDepth(count: number): void {
+    this.setGauge('notification_dead_letter_depth', count);
+  }
+
+  /**
+   * Adjust the gauge tracking how many entity links are currently sitting
+   * in the review queue for a given entity type. Increments (+1) when a
+   * link is queued, decrements (-1) when a reviewer decides it.
+   */
+  adjustEntityLinkReviewQueueDepth(entityType: string, delta: 1 | -1): void {
+    this.entityLinkReviewQueueDepthGauge.inc(
+      { entity_type: entityType },
+      delta,
+    );
+  }
+
+  /**
+   * Set the absolute entity-link review queue depth for an entity type.
+   * Used for periodic refresh to correct drift from incremental updates.
+   */
+  setEntityLinkReviewQueueDepth(entityType: string, count: number): void {
+    this.entityLinkReviewQueueDepthGauge.set(
+      { entity_type: entityType },
+      count,
+    );
+  }
+
+  /** Record a reviewer decision on a queued entity link ('accept'|'reject'|'remap'). */
+  incrementEntityLinkReviewDecision(decision: string): void {
+    this.entityLinkReviewDecisionsCounter.inc({ decision });
+  }
+
+  /**
+   * Record how long a link sat in the review queue before a reviewer
+   * decided it (seconds between `queuedAt` and the decision).
+   */
+  recordEntityLinkReviewDuration(
+    decision: string,
+    durationSeconds: number,
+  ): void {
+    this.entityLinkReviewDuration.observe({ decision }, durationSeconds);
+  }
+
+  // Evidence Queue SLA Metrics (issue #954)
+
+  /**
+   * Set the absolute evidence queue depth for an EvidenceStatus. Called from
+   * a periodic refresh so the gauge reflects the true backlog per status.
+   * Label cardinality is bounded by the EvidenceStatus enum.
+   */
+  setEvidenceQueueDepth(status: string, count: number): void {
+    this.evidenceQueueDepthGauge.set({ status }, count);
+  }
+
+  /**
+   * Set the age (seconds) of the oldest evidence item still pending review,
+   * or 0 when the pending backlog is empty.
+   */
+  setEvidenceQueueOldestPendingAgeSeconds(ageSeconds: number): void {
+    this.evidenceQueueOldestPendingAgeGauge.set(ageSeconds);
+  }
+
+  /**
+   * Record how long an evidence item took to go from intake to a terminal
+   * decision (`completed` or `failed`), in seconds.
+   */
+  recordEvidenceIntakeToDecisionDuration(
+    status: string,
+    durationSeconds: number,
+  ): void {
+    this.evidenceIntakeToDecisionDuration.observe({ status }, durationSeconds);
+  }
+
+  /**
+   * Record the duration in seconds a claim spent within a funnel stage before transitioning.
+   */
+  recordClaimFunnelDuration(
+    fromStatus: string,
+    toStatus: string,
+    durationSeconds: number,
+  ): void {
+    this.claimFunnelDuration.observe(
+      {
+        from_status: fromStatus,
+        to_status: toStatus,
+      },
+      durationSeconds,
+    );
+  }
+
+  /**
+   * Record Soroban transaction latency with comprehensive status tracking
+   */
+  recordSorobanTransactionLatency(
+    operation: string,
+    status: 'success' | 'failed',
+    duration: number,
+  ): void {
+    // Create dynamic histogram if it doesn't exist
+    if (!this.sorobanTransactionLatency) {
+      this.sorobanTransactionLatency = new Histogram({
+        name: 'soroban_transaction_duration_seconds',
+        help: 'Duration of Soroban transaction operations with lifecycle tracking',
+        labelNames: ['operation', 'status'],
+        buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300],
+      });
+    }
+
+    this.sorobanTransactionLatency.observe(
+      {
+        operation,
+        status,
+      },
+      duration,
+    );
+  }
+
+  /**
+   * Increment counter with dynamic labels for flexible metrics
+   */
+  incrementCounter(name: string, labels?: Record<string, string>): void {
+    if (!this.dynamicCounters.has(name)) {
+      this.dynamicCounters.set(
+        name,
+        new Counter({
+          name,
+          help: `Counter for ${name}`,
+          labelNames: labels ? Object.keys(labels) : [],
+        }),
+      );
+    }
+
+    const counter = this.dynamicCounters.get(name)!;
+    counter.inc(labels || {});
+  }
+
+  /**
+   * Set gauge value with dynamic labels for monitoring
+   */
+  setGauge(name: string, value: number, labels?: Record<string, string>): void {
+    if (!this.dynamicGauges.has(name)) {
+      this.dynamicGauges.set(
+        name,
+        new Gauge({
+          name,
+          help: `Gauge for ${name}`,
+          labelNames: labels ? Object.keys(labels) : [],
+        }),
+      );
+    }
+
+    const gauge = this.dynamicGauges.get(name)!;
+    if (labels) {
+      gauge.set(labels, value);
+    } else {
+      gauge.set(value);
+    }
+  }
+
+  /**
+   * Record histogram metrics for duration tracking
+   */
+  recordHistogram(
+    name: string,
+    value: number,
+    labels?: Record<string, string>,
+  ): void {
+    const key = `${name}_histogram`;
+    if (!this.dynamicHistograms.has(key)) {
+      this.dynamicHistograms.set(
+        key,
+        new Histogram({
+          name,
+          help: `Histogram for ${name}`,
+          labelNames: labels ? Object.keys(labels) : [],
+          buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60],
+        }),
+      );
+    }
+
+    const histogram = this.dynamicHistograms.get(key)!;
+    histogram.observe(labels || {}, value);
+  }
+
+  /**
+   * Increment the counter tracking per-API-key rate limit rejections (issue #952).
+   */
+  incrementApiKeyRateLimitRejection(scope: string, apiKeyId: string): void {
+    this.apiKeyRateLimitRejectionsCounter.inc({ scope, api_key_id: apiKeyId });
   }
 }

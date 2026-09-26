@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as ExpoLinking from 'expo-linking';
 import {
   NavigationContainer,
@@ -6,6 +6,7 @@ import {
 } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ErrorBoundary } from '@sentry/react-native';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import {
   RootStackParamList,
@@ -20,9 +21,16 @@ import {
   useNotification,
 } from './src/contexts/NotificationContext';
 import { SaverModeProvider } from './src/contexts/SaverModeContext';
+import { SyncDeferralProvider } from './src/contexts/SyncDeferralContext';
+import { LanguageProvider } from './src/contexts/LanguageContext';
 import { UpdateProvider, useUpdate } from './src/contexts/UpdateContext';
+import {
+  CrashReportingProvider,
+  useCrashReporting,
+} from './src/contexts/CrashReportingContext';
 import { ReleaseNotesModal } from './src/components/ReleaseNotesModal';
 import { ForceUpgradeScreen } from './src/screens/ForceUpgradeScreen';
+import { markColdStartPhase } from './src/startup/coldStartTracker';
 
 // ---------------------------------------------------------------------------
 // Deep-link configuration for React Navigation
@@ -54,12 +62,13 @@ const AppInner = () => {
   const navigationRef =
     useRef<NavigationContainerRef<RootStackParamList>>(null);
   const { isForceUpgrade, isLoading } = useUpdate();
+  const [isNavReady, setIsNavReady] = useState(false);
 
   // -----------------------------------------------------------------------
   // Navigate when a deep link is pending (from notification tap)
   // -----------------------------------------------------------------------
   useEffect(() => {
-    if (!pendingDeepLink) return;
+    if (!pendingDeepLink || !isNavReady) return;
 
     const navParams = deepLinkToNavParams(pendingDeepLink);
     if (!navParams) {
@@ -67,32 +76,14 @@ const AppInner = () => {
       return;
     }
 
-    let active = true;
-    let retryTimer: NodeJS.Timeout | null = null;
-
-    const attemptNavigate = () => {
-      if (!active) return;
-      if (navigationRef.current?.isReady?.()) {
-        navigationRef.current.navigate(
-          navParams.screen as any,
-          navParams.params as any,
-        );
-        consumeDeepLink();
-        return;
-      }
-
-      retryTimer = setTimeout(attemptNavigate, 100);
-    };
-
-    attemptNavigate();
-
-    return () => {
-      active = false;
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-      }
-    };
-  }, [pendingDeepLink, consumeDeepLink]);
+    if (navigationRef.current?.isReady?.()) {
+      navigationRef.current.navigate(
+        navParams.screen as any,
+        navParams.params as any,
+      );
+      consumeDeepLink();
+    }
+  }, [pendingDeepLink, isNavReady, consumeDeepLink]);
 
   if (isLoading) {
     return null;
@@ -105,17 +96,23 @@ const AppInner = () => {
   return (
     <WalletProvider>
       <BiometricProvider>
-        <SyncProvider>
-          <NavigationContainer
-            linking={linking}
-            theme={navTheme}
-            ref={navigationRef}
-          >
-            <AppNavigator />
-            <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-          </NavigationContainer>
-          <ReleaseNotesModal />
-        </SyncProvider>
+        <SyncDeferralProvider>
+          <SyncProvider>
+            <NavigationContainer
+              linking={linking}
+              theme={navTheme}
+              ref={navigationRef}
+              onReady={() => {
+                markColdStartPhase('navigationReady');
+                setIsNavReady(true);
+              }}
+            >
+              <AppNavigator />
+              <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+            </NavigationContainer>
+            <ReleaseNotesModal />
+          </SyncProvider>
+        </SyncDeferralProvider>
       </BiometricProvider>
     </WalletProvider>
   );
@@ -125,18 +122,48 @@ const AppInner = () => {
 // Root – wraps providers from the outside in
 // ---------------------------------------------------------------------------
 
-export default function App() {
+/**
+ * Wrapper that reads the crash-reporting preference and renders the Sentry
+ * ErrorBoundary around the rest of the app.
+ */
+const CrashReportingGate: React.FC = () => {
+  const { isLoading } = useCrashReporting();
+  // While the preference is loading, render nothing to avoid a flash of the
+  // wrong state. The CrashReportingProvider already handles init.
+  if (isLoading) return null;
+
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <UpdateProvider>
-          <SaverModeProvider>
-            <NotificationProvider>
-              <AppInner />
-            </NotificationProvider>
-          </SaverModeProvider>
-        </UpdateProvider>
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary
+      onError={(error, errorInfo) => {
+        // The ErrorBoundary already reports to Sentry automatically.
+        // We just log for development diagnostics.
+        console.warn('[CrashReportingGate] Caught by ErrorBoundary:', error);
+      }}
+    >
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <LanguageProvider>
+            <UpdateProvider>
+              <SaverModeProvider>
+                <SyncDeferralProvider>
+                  <NotificationProvider>
+                    <AppInner />
+                  </NotificationProvider>
+                </SyncDeferralProvider>
+              </SaverModeProvider>
+            </UpdateProvider>
+          </LanguageProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
+  );
+};
+
+export default function App() {
+  markColdStartPhase('appRenderStart');
+  return (
+    <CrashReportingProvider>
+      <CrashReportingGate />
+    </CrashReportingProvider>
   );
 }

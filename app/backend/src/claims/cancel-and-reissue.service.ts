@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
 import { ClaimStatus } from '@prisma/client';
@@ -31,6 +32,7 @@ export class CancelAndReissueService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly encryptionService: EncryptionService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -109,6 +111,12 @@ export class CancelAndReissueService {
     };
 
     await this.emitEvent(event);
+
+    this.metricsService.incrementClaimsCancelled(
+      claim.campaignId,
+      claim.status,
+    );
+    this.metricsService.adjustClaimsInFunnel(claim.status, -1);
 
     this.logger.log(`Claim ${id} cancelled by ${dto.operatorId}`, {
       claimId: id,
@@ -246,6 +254,14 @@ export class CancelAndReissueService {
       this.emitEvent(cancelEvent),
       this.emitEvent(reissueEvent),
     ]);
+
+    this.metricsService.incrementClaimsCancelled(
+      original.campaignId,
+      original.status,
+    );
+    this.metricsService.adjustClaimsInFunnel(original.status, -1);
+    this.metricsService.incrementClaimsCreated(original.campaignId);
+    this.metricsService.adjustClaimsInFunnel('requested', 1);
 
     this.logger.log(
       `Claim ${originalId} cancelled and reissued as ${newClaim.id} by ${dto.operatorId}`,
@@ -414,7 +430,7 @@ export class CancelAndReissueService {
         entity: 'claim',
         entityId,
         action: event.type,
-        metadata: event as unknown as Record<string, unknown>,
+        metadata: event,
       });
     } catch (err) {
       // Audit failures are logged but must not surface to the caller

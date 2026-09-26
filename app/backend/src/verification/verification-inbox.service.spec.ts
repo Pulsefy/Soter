@@ -93,7 +93,7 @@ describe('VerificationInboxService', () => {
       );
       prismaMock.verificationRequest.update.mockResolvedValue({
         ...baseVerification,
-        status: 'approved' as VerificationStatus,
+        status: 'approved',
         reviewedAt: now,
         reviewedBy: 'reviewer-1',
       });
@@ -135,7 +135,7 @@ describe('VerificationInboxService', () => {
       );
       prismaMock.verificationRequest.update.mockResolvedValue({
         ...baseVerification,
-        status: 'approved' as VerificationStatus,
+        status: 'approved',
         reviewedAt: now,
         reviewedBy: 'reviewer-1',
       });

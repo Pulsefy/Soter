@@ -1,7 +1,8 @@
 [
   {
+    "scenario": "strong_valid",
     "is_real_person": true,
-    "confidence": 0.87,
+    "confidence": 0.91,
     "threshold": 0.65,
     "checks": {
       "face_detected": true,
@@ -9,21 +10,36 @@
       "head_movement_detected": true,
       "processed_burst_frames": 5
     },
-    "reason": "Face detected and confidence threshold met"
+    "reason": "Strong face and liveness evidence detected"
   },
   {
+    "scenario": "valid_with_burst",
     "is_real_person": true,
-    "confidence": 0.74,
-    "threshold": 0.65,
+    "confidence": 0.82,
+    "threshold": 0.70,
     "checks": {
       "face_detected": true,
       "blink_detected": true,
       "head_movement_detected": false,
       "processed_burst_frames": 3
     },
-    "reason": "Face detected and confidence threshold met"
+    "reason": "Valid selfie with sufficient liveness evidence"
   },
   {
+    "scenario": "borderline",
+    "is_real_person": false,
+    "confidence": 0.68,
+    "threshold": 0.70,
+    "checks": {
+      "face_detected": true,
+      "blink_detected": false,
+      "head_movement_detected": false,
+      "processed_burst_frames": 0
+    },
+    "reason": "Borderline confidence: score is close to the threshold and liveness evidence is limited"
+  },
+  {
+    "scenario": "no_liveness",
     "is_real_person": false,
     "confidence": 0.42,
     "threshold": 0.65,
@@ -36,6 +52,7 @@
     "reason": "No liveness signal detected from burst frames"
   },
   {
+    "scenario": "no_face",
     "is_real_person": false,
     "confidence": 0.05,
     "threshold": 0.65,
@@ -48,18 +65,7 @@
     "reason": "No face detected in selfie image"
   },
   {
-    "is_real_person": true,
-    "confidence": 0.93,
-    "threshold": 0.65,
-    "checks": {
-      "face_detected": true,
-      "blink_detected": true,
-      "head_movement_detected": true,
-      "processed_burst_frames": 8
-    },
-    "reason": "Face detected and confidence threshold met"
-  },
-  {
+    "scenario": "below_threshold",
     "is_real_person": false,
     "confidence": 0.55,
     "threshold": 0.70,

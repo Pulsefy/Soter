@@ -53,6 +53,7 @@ export class RequestCorrelationMiddleware implements NestMiddleware {
     // Set in response headers (both headers for client compatibility)
     res.setHeader(CORRELATION_ID_HEADER, correlationId);
     res.setHeader(REQUEST_ID_HEADER, correlationId);
+    res.setHeader('trace_id', correlationId);
 
     // Store correlation ID in async local storage for the logger
     const asyncLocalStorage = this.logger.getAsyncLocalStorage();

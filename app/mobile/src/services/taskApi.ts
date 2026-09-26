@@ -1,6 +1,4 @@
-import { config } from '../config';
-
-const API_URL = config.apiUrl;
+import { apiGet } from './requestLayer';
 
 export type TaskStatus = 'pending' | 'in-progress' | 'completed';
 export type TaskDueState = 'due-today' | 'overdue' | 'upcoming';
@@ -16,22 +14,19 @@ export interface TaskItem {
 
 /** Fetch task list from the backend */
 export const fetchTaskList = async (): Promise<TaskItem[]> => {
-  const response = await fetch(`${API_URL}/tasks`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  const { data } = await apiGet<TaskItem[]>('/tasks');
+  return data;
 };
 
 /** Fallback mock data used when the backend is unreachable */
 export const getMockTaskList = (): TaskItem[] => {
   const now = new Date();
-  
+
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
-  
+
   const today = new Date(now);
-  
+
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
 

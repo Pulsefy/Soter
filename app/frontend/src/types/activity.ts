@@ -5,7 +5,7 @@
 
 export type ActivityStatus = 'pending' | 'processing' | 'succeeded' | 'failed';
 
-export type ActivityType = 'transaction' | 'job' | 'verification';
+export type ActivityType = 'transaction' | 'job' | 'verification' | 'notification' | 'audit' | 'review';
 
 export interface ActivityItem {
   id: string;
@@ -15,11 +15,15 @@ export interface ActivityItem {
   description: string;
   timestamp: Date;
   currentStep?: string;
-  retryAction?: () => Promise<any>;
+  retryAction?: () => Promise<unknown>;
   explorerUrl?: string;
   transactionHash?: string;
   errorMessage?: string;
   metadata?: Record<string, unknown>;
+  read?: boolean;
+  correlationId?: string;
+  linkHref?: string;
+  linkLabel?: string;
 }
 
 export interface ActivityStore {

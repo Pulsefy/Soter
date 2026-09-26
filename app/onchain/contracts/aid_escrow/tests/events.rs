@@ -69,12 +69,46 @@ fn data_address(env: &Env, data: &Val, field: &str) -> Address {
     Address::try_from_val(env, &val).expect("not address")
 }
 
+fn data_symbol(env: &Env, data: &Val, field: &str) -> Symbol {
+    let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(env, data).unwrap();
+    let val = map.get(sym(env, field)).expect("missing field");
+    Symbol::try_from_val(env, &val).expect("not Symbol")
+}
+
+fn data_vec_u64(env: &Env, data: &Val, field: &str) -> soroban_sdk::Vec<u64> {
+    let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(env, data).unwrap();
+    let val = map.get(sym(env, field)).expect("missing field");
+    soroban_sdk::Vec::<u64>::try_from_val(env, &val).expect("not Vec<u64>")
+}
+
 fn assert_field_exists(env: &Env, data: &Val, field: &str) {
     let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(env, data).unwrap();
     assert!(
         map.get(sym(env, field)).is_some(),
         "field '{}' missing from event data",
         field
+    );
+}
+
+fn data_string(env: &Env, data: &Val, field: &str) -> soroban_sdk::String {
+    let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(env, data).unwrap();
+    let val = map.get(sym(env, field)).expect("missing field");
+    soroban_sdk::String::try_from_val(env, &val).expect("not string")
+}
+
+fn data_u32(env: &Env, data: &Val, field: &str) -> u32 {
+    let map = soroban_sdk::Map::<Symbol, Val>::try_from_val(env, data).unwrap();
+    let val = map.get(sym(env, field)).expect("missing field");
+    u32::try_from_val(env, &val).expect("not u32")
+}
+
+/// Asserts that the schema_version field is present and matches the expected version
+fn assert_schema_version(env: &Env, data: &Val, expected_version: u32) {
+    let version = data_u32(env, data, "schema_version");
+    assert_eq!(
+        version, expected_version,
+        "schema_version mismatch: expected {}, got {}",
+        expected_version, version
     );
 }
 
@@ -94,7 +128,9 @@ fn test_escrow_funded_event() {
     client.fund(&token_client.address, &admin, &(5 * UNIT));
 
     let data = last_event_data(&env, &contract_id, "escrow_funded");
+    assert_schema_version(&env, &data, 1);
     assert_eq!(data_address(&env, &data, "from"), admin);
+    assert_eq!(data_address(&env, &data, "token"), token_client.address);
     assert_eq!(data_i128(&env, &data, "amount"), 5 * UNIT);
     assert_field_exists(&env, &data, "timestamp");
 }
@@ -126,10 +162,51 @@ fn test_package_created_event() {
     );
 
     let data = last_event_data(&env, &contract_id, "package_created");
+    assert_schema_version(&env, &data, 1);
     assert_eq!(data_u64(&env, &data, "package_id"), 42);
     assert_eq!(data_address(&env, &data, "recipient"), recipient);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_field_exists(&env, &data, "timestamp");
+}
+
+#[test]
+fn test_package_reassigned_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let previous_recipient = Address::generate(&env);
+    let new_recipient = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+    client.create_package(
+        &admin,
+        &7,
+        &previous_recipient,
+        &UNIT,
+        &token_client.address,
+        &0,
+        &Map::new(&env),
+    );
+
+    client.reassign_package(&7, &new_recipient);
+
+    let data = last_event_data(&env, &contract_id, "package_reassigned");
+    assert_schema_version(&env, &data, 1);
+    assert_eq!(data_u64(&env, &data, "package_id"), 7);
+    assert_eq!(
+        data_address(&env, &data, "previous_recipient"),
+        previous_recipient
+    );
+    assert_eq!(data_address(&env, &data, "new_recipient"), new_recipient);
+    assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_field_exists(&env, &data, "timestamp");
 }
 
 #[test]
@@ -159,9 +236,17 @@ fn test_package_claimed_event() {
     client.claim(&0u64);
 
     let data = last_event_data(&env, &contract_id, "package_claimed");
+    assert_schema_version(&env, &data, 1);
     assert_eq!(data_u64(&env, &data, "package_id"), 0);
     assert_eq!(data_address(&env, &data, "recipient"), recipient);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+    assert_eq!(data_address(&env, &data, "actor"), recipient);
+    assert_field_exists(&env, &data, "timestamp");
+    // receipt_hash is absent from metadata -> must be an empty string
+    assert_eq!(
+        data_string(&env, &data, "receipt_hash"),
+        soroban_sdk::String::from_str(&env, "")
+    );
 }
 
 #[test]
@@ -191,9 +276,17 @@ fn test_package_disbursed_event() {
     client.disburse(&0u64);
 
     let data = last_event_data(&env, &contract_id, "package_disbursed");
+    assert_schema_version(&env, &data, 1);
     assert_eq!(data_u64(&env, &data, "package_id"), 0);
     assert_eq!(data_address(&env, &data, "recipient"), recipient);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+    assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_field_exists(&env, &data, "timestamp");
+    // receipt_hash is absent from metadata -> must be an empty string
+    assert_eq!(
+        data_string(&env, &data, "receipt_hash"),
+        soroban_sdk::String::from_str(&env, "")
+    );
 }
 
 #[test]
@@ -228,10 +321,12 @@ fn test_package_revoked_event() {
     // TOPIC: Ensure this matches the first symbol in your env.events().publish(...) call
     let data = last_event_data(&env, &contract_id, "package_revoked");
 
+    assert_schema_version(&env, &data, 1);
     assert_eq!(data_u64(&env, &data, "package_id"), pkg_id);
     assert_eq!(data_address(&env, &data, "recipient"), recipient);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
     assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_field_exists(&env, &data, "timestamp");
 }
 
 #[test]
@@ -264,8 +359,12 @@ fn test_package_refunded_event() {
     client.refund(&0u64);
 
     let data = last_event_data(&env, &contract_id, "package_refunded");
+    assert_schema_version(&env, &data, 1);
     assert_eq!(data_u64(&env, &data, "package_id"), 0);
+    assert_eq!(data_address(&env, &data, "recipient"), recipient);
     assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+    assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_field_exists(&env, &data, "timestamp");
 }
 
 #[test]
@@ -297,7 +396,410 @@ fn test_extended_event_records_old_and_new_expiry() {
     client.extend_expiry(&42u64, &new_expires_at);
 
     let data = last_event_data(&env, &contract_id, "extended_event");
-    assert_eq!(data_u64(&env, &data, "id"), 42);
+    assert_schema_version(&env, &data, 1);
+    assert_eq!(data_u64(&env, &data, "package_id"), 42);
     assert_eq!(data_u64(&env, &data, "old_expires_at"), old_expires_at);
     assert_eq!(data_u64(&env, &data, "new_expires_at"), new_expires_at);
+    assert_field_exists(&env, &data, "admin");
+}
+
+#[test]
+fn test_batch_created_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient1 = Address::generate(&env);
+    let recipient2 = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
+
+    let recipients = Vec::from_array(&env, [recipient1.clone(), recipient2.clone()]);
+    let amounts = Vec::from_array(&env, [UNIT, 2 * UNIT]);
+    let metadatas = Vec::from_array(&env, [Map::new(&env), Map::new(&env)]);
+
+    client.batch_create_packages(
+        &admin,
+        &recipients,
+        &amounts,
+        &token_client.address,
+        &86400u64,
+        &metadatas,
+    );
+
+    let data = last_event_data(&env, &contract_id, "batch_created_event");
+    assert_schema_version(&env, &data, 1);
+    let ids = data_vec_u64(&env, &data, "ids");
+    assert_eq!(ids.len(), 2);
+    assert_eq!(ids.get(0).unwrap(), 0);
+    assert_eq!(ids.get(1).unwrap(), 1);
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_eq!(data_i128(&env, &data, "total_amount"), 3 * UNIT);
+}
+
+#[test]
+fn test_surplus_withdrawn_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
+
+    client.withdraw_surplus(&recipient, &UNIT, &token_client.address);
+
+    let data = last_event_data(&env, &contract_id, "surplus_withdrawn_event");
+    assert_schema_version(&env, &data, 1);
+    assert_eq!(data_address(&env, &data, "to"), recipient);
+    assert_eq!(data_address(&env, &data, "token"), token_client.address);
+    assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+}
+
+#[test]
+fn test_contract_paused_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    client.pause();
+
+    let data = last_event_data(&env, &contract_id, "contract_paused_event");
+    assert_schema_version(&env, &data, 1);
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+}
+
+#[test]
+fn test_contract_unpaused_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    client.pause();
+    client.unpause();
+
+    let data = last_event_data(&env, &contract_id, "contract_unpaused_event");
+    assert_schema_version(&env, &data, 1);
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+}
+
+#[test]
+fn test_action_paused_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    client.pause_action(&sym(&env, "claim"));
+
+    let data = last_event_data(&env, &contract_id, "action_paused_event");
+    assert_schema_version(&env, &data, 1);
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_eq!(data_symbol(&env, &data, "action"), sym(&env, "claim"));
+}
+
+#[test]
+fn test_action_unpaused_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    client.pause_action(&sym(&env, "claim"));
+    client.unpause_action(&sym(&env, "claim"));
+
+    let data = last_event_data(&env, &contract_id, "action_unpaused_event");
+    assert_schema_version(&env, &data, 1);
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_eq!(data_symbol(&env, &data, "action"), sym(&env, "claim"));
+}
+
+#[test]
+fn test_delegate_added_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let delegate = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
+
+    let expires_at = env.ledger().timestamp() + 86400;
+    client.create_package(
+        &admin,
+        &42u64,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &expires_at,
+        &Map::new(&env),
+    );
+
+    // Set delegate
+    let expiry = env.ledger().timestamp() + 3600;
+    client.set_delegate_with_expiry(&admin, &42u64, &delegate, &expiry);
+
+    let data = last_event_data(&env, &contract_id, "delegate_added");
+    assert_schema_version(&env, &data, 1);
+    assert_eq!(data_u64(&env, &data, "package_id"), 42);
+    assert_eq!(data_address(&env, &data, "recipient"), recipient);
+    assert_eq!(data_address(&env, &data, "delegate"), delegate);
+    assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_eq!(data_u64(&env, &data, "expires_at"), expiry);
+    assert_field_exists(&env, &data, "timestamp");
+}
+
+#[test]
+fn test_delegate_revoked_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let delegate = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
+
+    let expires_at = env.ledger().timestamp() + 86400;
+    client.create_package(
+        &admin,
+        &42u64,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &expires_at,
+        &Map::new(&env),
+    );
+
+    // Set delegate
+    let expiry = env.ledger().timestamp() + 3600;
+    client.set_delegate_with_expiry(&admin, &42u64, &delegate, &expiry);
+
+    // Revoke delegate
+    client.revoke_delegate(&admin, &42u64);
+
+    let data = last_event_data(&env, &contract_id, "delegate_revoked");
+    assert_schema_version(&env, &data, 1);
+    assert_eq!(data_u64(&env, &data, "package_id"), 42);
+    assert_eq!(data_address(&env, &data, "recipient"), recipient);
+    assert_eq!(data_address(&env, &data, "delegate"), delegate);
+    assert_eq!(data_address(&env, &data, "actor"), admin);
+    assert_field_exists(&env, &data, "timestamp");
+}
+
+#[test]
+fn test_sweep_emits_delegate_revoked_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let delegate = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
+
+    client.create_package(
+        &admin,
+        &99u64,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &(env.ledger().timestamp() + 86400),
+        &Map::new(&env),
+    );
+
+    let now = env.ledger().timestamp();
+    let expiry = now + 50;
+    client.set_delegate_with_expiry(&admin, &99u64, &delegate, &expiry);
+
+    // Advance to expiry
+    env.ledger().set_timestamp(expiry);
+
+    // Perform sweep
+    let swept = client.sweep_expired_delegates(&10);
+    assert_eq!(swept, 1);
+
+    // Verify DelegateRevoked event was emitted
+    let data = last_event_data(&env, &contract_id, "delegate_revoked");
+    assert_eq!(data_u64(&env, &data, "package_id"), 99);
+    assert_eq!(data_address(&env, &data, "recipient"), recipient);
+    assert_eq!(data_address(&env, &data, "delegate"), delegate);
+    assert_eq!(data_address(&env, &data, "actor"), contract_id);
+    assert_field_exists(&env, &data, "timestamp");
+}
+
+#[test]
+fn test_sweep_emits_package_swept_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
+
+    let now = env.ledger().timestamp();
+    let expires_at = now + 50;
+    client.create_package(
+        &admin,
+        &99u64,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &expires_at,
+        &Map::new(&env),
+    );
+
+    // Advance past expiry
+    env.ledger().set_timestamp(expires_at + 1);
+
+    // Perform sweep
+    let swept = client.sweep_expired_packages(&10);
+    assert_eq!(swept, 1);
+
+    // Verify PackageSwept event was emitted
+    let data = last_event_data(&env, &contract_id, "package_swept");
+    assert_eq!(data_u64(&env, &data, "package_id"), 99);
+    assert_eq!(data_address(&env, &data, "recipient"), recipient);
+    assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+    assert_eq!(data_address(&env, &data, "actor"), contract_id);
+    assert_field_exists(&env, &data, "timestamp");
+}
+
+#[test]
+fn test_delegate_claimed_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let delegate = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(10 * UNIT));
+    client.fund(&token_client.address, &admin, &(5 * UNIT));
+
+    let expires_at = env.ledger().timestamp() + 86400;
+    client.create_package(
+        &admin,
+        &42u64,
+        &recipient,
+        &UNIT,
+        &token_client.address,
+        &expires_at,
+        &Map::new(&env),
+    );
+
+    // Set delegate
+    let expiry = env.ledger().timestamp() + 3600;
+    client.set_delegate_with_expiry(&admin, &42u64, &delegate, &expiry);
+
+    // Delegate claims the package using claim_with_proof (empty proof for delegate claim)
+    let proof: Vec<soroban_sdk::String> = Vec::new(&env);
+    client.claim_with_proof(&42u64, &delegate, &proof);
+
+    // Check DelegateClaimed event
+    let data = last_event_data(&env, &contract_id, "delegate_claimed");
+    assert_eq!(data_u64(&env, &data, "package_id"), 42);
+    assert_eq!(data_address(&env, &data, "recipient"), recipient);
+    assert_eq!(data_address(&env, &data, "delegate"), delegate);
+    assert_eq!(data_i128(&env, &data, "amount"), UNIT);
+    assert_field_exists(&env, &data, "timestamp");
+
+    // Also check that DelegateRevoked event was emitted (delegate is cleared after claim)
+    let revoked_data = last_event_data(&env, &contract_id, "delegate_revoked");
+    assert_eq!(data_u64(&env, &revoked_data, "package_id"), 42);
+    assert_eq!(data_address(&env, &revoked_data, "recipient"), recipient);
+    assert_eq!(data_address(&env, &revoked_data, "delegate"), delegate);
+    // Actor for revoked after claim is the delegate who claimed
+    assert_eq!(data_address(&env, &revoked_data, "actor"), delegate);
+}
+
+#[test]
+fn test_token_added_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (token_client, _token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    client.add_allowed_token(&token_client.address);
+
+    let data = last_event_data(&env, &contract_id, "token_added");
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_eq!(data_address(&env, &data, "token"), token_client.address);
+    assert_field_exists(&env, &data, "timestamp");
+}
+
+#[test]
+fn test_token_removed_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (token_client, _token_admin_client) = setup_token(&env, &admin);
+
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    client.add_allowed_token(&token_client.address);
+    client.remove_allowed_token(&token_client.address);
+
+    let data = last_event_data(&env, &contract_id, "token_removed");
+    assert_eq!(data_address(&env, &data, "admin"), admin);
+    assert_eq!(data_address(&env, &data, "token"), token_client.address);
+    assert_field_exists(&env, &data, "timestamp");
 }

@@ -126,8 +126,11 @@ describe('Comprehensive E2E Harness', () => {
     it('should proxy a call to the blockchain contract (mocked)', async () => {
       const packageId = 'pkg_harness_001';
 
+      // Cast the mock object to any to safely attach runtime spy properties
+      const adapterSpy = mockSorobanAdapter as any;
+
       // Mock the getAidPackage response
-      mockSorobanAdapter.getAidPackage = jest.fn().mockResolvedValue({
+      adapterSpy.getAidPackage = jest.fn().mockResolvedValue({
         package: {
           id: packageId,
           recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
@@ -147,7 +150,7 @@ describe('Comprehensive E2E Harness', () => {
 
       expect(res.body.package).toBeDefined();
       expect(res.body.package.id).toBe(packageId);
-      expect(mockSorobanAdapter.getAidPackage).toHaveBeenCalledWith({
+      expect(adapterSpy.getAidPackage).toHaveBeenCalledWith({
         packageId,
       });
     });

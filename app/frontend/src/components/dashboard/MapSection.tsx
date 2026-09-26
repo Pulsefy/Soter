@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import React from 'react';
+import { useSearchParams } from 'next/navigation';
 
 function MapSkeleton() {
   return (
@@ -21,5 +22,14 @@ const AidDistributionMap = dynamic(
 );
 
 export function MapSection() {
-  return <AidDistributionMap />;
+  const searchParams = useSearchParams();
+  return (
+    <AidDistributionMap
+      filters={{
+        search: searchParams.get('search') ?? '',
+        status: searchParams.get('status') ?? '',
+        token: searchParams.get('token') ?? '',
+      }}
+    />
+  );
 }

@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -15,19 +16,38 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
+import { useTranslation } from '../i18n/useTranslation';
 import { useSync } from '../contexts/SyncContext';
-import { buildEvidenceUploadPayload, EvidenceUploadRequest } from '../services/verificationApi';
+import {
+  buildEvidenceUploadPayload,
+  EvidenceUploadRequest,
+} from '../services/verificationApi';
+import { structuredLogger } from '../services/logger';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EvidenceUpload'>;
 
 const MAX_IMAGE_WIDTH = 1024;
 const JPEG_QUALITY = 0.65;
 
-export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => {
+export const EvidenceUploadScreen: React.FC<Props> = ({
+  route,
+  navigation,
+}) => {
   const { aidId } = route.params;
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { isConnected, queueEvidenceUpload } = useSync();
+  const { isConnected, queueEvidenceUpload, getActionsForAid, retryAction } =
+    useSync();
+
+  const uploadActions = useMemo(
+    () => getActionsForAid(aidId),
+    [getActionsForAid, aidId],
+  );
+  const activeUpload = useMemo(
+    () => uploadActions.find(a => a.type === 'evidence-upload'),
+    [uploadActions],
+  );
 
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [compressedBase64, setCompressedBase64] = useState<string | null>(null);
@@ -40,7 +60,11 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
     const result = await ImageManipulator.manipulateAsync(
       uri,
       [{ resize: { width: MAX_IMAGE_WIDTH } }],
-      { compress: JPEG_QUALITY, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      {
+        compress: JPEG_QUALITY,
+        format: ImageManipulator.SaveFormat.JPEG,
+        base64: true,
+      },
     );
 
     if (!result.base64) {
@@ -58,7 +82,10 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
 
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission required', 'Photo library access is required to select evidence.');
+      Alert.alert(
+        'Permission required',
+        'Photo library access is required to select evidence.',
+      );
       return;
     }
 
@@ -75,13 +102,50 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
     await compressPhoto(result.assets[0].uri);
   }, [compressPhoto]);
 
+  const openSettings = useCallback(async () => {
+    try {
+      if (Platform.OS === 'ios') {
+        await Linking.openURL('app-settings:');
+      } else {
+        await Linking.openSettings();
+      }
+    } catch {
+      structuredLogger.warn(
+        'evidence_upload.open_settings_failed',
+        { platform: Platform.OS },
+        'evidenceUpload',
+      );
+    }
+  }, []);
+
   const takePhoto = useCallback(async () => {
     setStatusMessage(null);
     setError(null);
 
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission required', 'Camera access is required to capture evidence.');
+      // Check if we can ask again or if it's permanently blocked
+      if (!permission.canAskAgain) {
+        Alert.alert(
+          'Camera Access Blocked',
+          'Camera access has been blocked. Please enable it in your device settings to capture evidence photos.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: openSettings },
+            { text: 'Use Photo Library', onPress: pickImage },
+          ],
+        );
+      } else {
+        Alert.alert(
+          'Camera Permission Required',
+          'Camera access is needed to capture evidence photos. Would you like to try again or choose from your photo library?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Try Again', onPress: takePhoto },
+            { text: 'Use Photo Library', onPress: pickImage },
+          ],
+        );
+      }
       return;
     }
 
@@ -96,7 +160,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
     }
 
     await compressPhoto(result.assets[0].uri);
-  }, [compressPhoto]);
+  }, [compressPhoto, openSettings, pickImage]);
 
   const handleUpload = useCallback(async () => {
     if (!compressedBase64) {
@@ -116,7 +180,10 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
     };
 
     try {
-      const result = await queueEvidenceUpload(aidId, buildEvidenceUploadPayload(payload));
+      const result = await queueEvidenceUpload(
+        aidId,
+        buildEvidenceUploadPayload(payload),
+      );
 
       if (result.status === 'completed') {
         setStatusMessage('Evidence uploaded successfully.');
@@ -154,9 +221,10 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Step 1: Choose a photo</Text>
+        <Text style={styles.sectionTitle}>{t('evidence.step1')}</Text>
         <Text style={styles.helpText}>
-          Use your camera or photo library to capture a document, receipt, or other proof.
+          Use your camera or photo library to capture a document, receipt, or
+          other proof.
         </Text>
         <View style={styles.buttonGroup}>
           <TouchableOpacity
@@ -166,7 +234,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
             accessibilityLabel="Take a photo of evidence"
             activeOpacity={0.8}
           >
-            <Text style={styles.buttonText}>Take Photo</Text>
+            <Text style={styles.buttonText}>{t('evidence.takePhoto')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.button, styles.secondaryButton]}
@@ -175,17 +243,20 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
             accessibilityLabel="Select an evidence photo from your library"
             activeOpacity={0.8}
           >
-            <Text style={styles.secondaryButtonText}>Select Photo</Text>
+            <Text style={styles.secondaryButtonText}>{t('evidence.selectPhoto')}</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       {selectedImageUri ? (
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Step 2: Preview</Text>
-          <Image source={{ uri: selectedImageUri }} style={styles.previewImage} />
+          <Text style={styles.sectionTitle}>{t('evidence.step2')}</Text>
+          <Image
+            source={{ uri: selectedImageUri }}
+            style={styles.previewImage}
+          />
           <Text style={styles.previewLabel}>{filename}</Text>
-          <View style={styles.buttonGroup}> 
+          <View style={styles.buttonGroup}>
             <TouchableOpacity
               style={[styles.button, styles.secondaryButton]}
               onPress={resetSelection}
@@ -193,37 +264,103 @@ export const EvidenceUploadScreen: React.FC<Props> = ({ route, navigation }) => 
               accessibilityLabel="Choose a different photo"
               activeOpacity={0.8}
             >
-              <Text style={styles.secondaryButtonText}>Choose Again</Text>
+              <Text style={styles.secondaryButtonText}>{t('evidence.chooseAgain')}</Text>
             </TouchableOpacity>
           </View>
         </View>
       ) : null}
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Step 3: Upload</Text>
+        <Text style={styles.sectionTitle}>{t('evidence.step3')}</Text>
         <Text style={styles.helpText}>
           Compressed image upload saves data on low-bandwidth connections.
         </Text>
         <TouchableOpacity
           style={[styles.button, styles.primaryButton]}
           onPress={handleUpload}
-          disabled={!compressedBase64 || uploading}
+          disabled={!compressedBase64 || uploading || !!activeUpload}
           accessibilityRole="button"
-          accessibilityLabel={uploading ? 'Uploading evidence' : 'Upload evidence now'}
-          accessibilityState={{ busy: uploading, disabled: !compressedBase64 || uploading }}
+          accessibilityLabel={
+            uploading ? 'Uploading evidence' : 'Upload evidence now'
+          }
+          accessibilityState={{
+            busy: uploading,
+            disabled: !compressedBase64 || uploading || !!activeUpload,
+          }}
           activeOpacity={0.8}
         >
           {uploading ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.buttonText}>Upload Evidence</Text>
+            <Text style={styles.buttonText}>{t('aidDetails.uploadEvidence')}</Text>
           )}
         </TouchableOpacity>
-        {statusMessage ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
+        {statusMessage ? (
+          <Text style={styles.statusText}>{statusMessage}</Text>
+        ) : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        {!isConnected ? (
+        {activeUpload ? (
+          <View style={styles.queueCard}>
+            <View style={styles.queueHeader}>
+              <Text style={styles.queueTitle}>
+                {activeUpload.state === 'failed'
+                  ? '⚠️ Upload Failed'
+                  : activeUpload.state === 'retrying'
+                    ? '🔄 Retrying Upload…'
+                    : '📤 Uploading…'}
+              </Text>
+              <Text style={styles.queueStatus}>
+                {activeUpload.state === 'failed'
+                  ? 'Unstable connection'
+                  : activeUpload.state === 'retrying'
+                    ? `Attempt ${activeUpload.retryCount} of ${activeUpload.maxRetries}`
+                    : 'Transferring chunks'}
+              </Text>
+            </View>
+
+            <View style={styles.progressBarBg}>
+              <View
+                style={[
+                  styles.progressBarFill,
+                  {
+                    width: `${Math.round((activeUpload.payload.progress || 0) * 100)}%`,
+                    backgroundColor:
+                      activeUpload.state === 'failed'
+                        ? colors.error
+                        : colors.brand.primary,
+                  },
+                ]}
+              />
+            </View>
+
+            <View style={styles.progressRow}>
+              <Text style={styles.progressText}>
+                {Math.round((activeUpload.payload.progress || 0) * 100)}%
+                Completed
+              </Text>
+              {activeUpload.state === 'failed' && (
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={() => retryAction(activeUpload.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry failed upload"
+                >
+                  <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {activeUpload.lastError ? (
+              <Text style={styles.errorDetails}>
+                Reason: {activeUpload.lastError}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+        {!isConnected && !activeUpload ? (
           <Text style={styles.offlineNotice}>
-            Offline mode: evidence upload will queue and resend when the device reconnects.
+            Offline mode: evidence upload will queue and resend when the device
+            reconnects.
           </Text>
         ) : null}
       </View>
@@ -326,5 +463,66 @@ const makeStyles = (colors: any) =>
       marginTop: 12,
       fontSize: 13,
       color: colors.textSecondary,
+    },
+    queueCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 14,
+      marginTop: 12,
+      gap: 10,
+    },
+    queueHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    queueTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    queueStatus: {
+      fontSize: 13,
+      color: colors.textSecondary,
+    },
+    progressBarBg: {
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.border,
+      overflow: 'hidden',
+      width: '100%',
+    },
+    progressBarFill: {
+      height: '100%',
+      borderRadius: 4,
+    },
+    progressRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    progressText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    retryButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+      backgroundColor: colors.brand.primary,
+    },
+    retryButtonText: {
+      color: '#FFFFFF',
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    errorDetails: {
+      fontSize: 12,
+      color: colors.error,
+      marginTop: 4,
+      lineHeight: 16,
     },
   });
