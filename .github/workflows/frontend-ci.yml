@@ -1,0 +1,35 @@
+name: Frontend CI
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'app/frontend/**'
+      - '.github/workflows/frontend-ci.yml'
+
+# Source-size proxy for the shipped JS bundle: compiled-bundle measurement
+# needs `next build`, which currently fails repo-wide on an unrelated
+# middleware.ts/proxy.ts conflict. Budget documents today's baseline
+# (largest route is ~41KB); ratchet down once the build is fixed and this
+# can measure real compiled chunk sizes instead.
+env:
+  ROUTE_BUDGET_BYTES: 65536
+
+jobs:
+  bundle-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check per-route source size budget
+        working-directory: app/frontend/src/app
+        run: |
+          FAILED=0
+          for dir in $(find . -name 'page.tsx' -exec dirname {} \;); do
+            SIZE=$(find "$dir" -maxdepth 1 -name '*.tsx' -exec stat -c%s {} \; | awk '{s+=$1} END {print s+0}')
+            echo "$dir: ${SIZE} bytes"
+            if [ "$SIZE" -gt "$ROUTE_BUDGET_BYTES" ]; then
+              echo "::error::Route $dir exceeds the ${ROUTE_BUDGET_BYTES}-byte source budget ($SIZE bytes)"
+              FAILED=1
+            fi
+          done
+          exit $FAILED
