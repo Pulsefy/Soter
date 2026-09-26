@@ -8,6 +8,7 @@ One test class per acceptance criterion:
 * sensitive fields are redacted per ``logging_redaction.py`` before persistence
 * records survive process restart
 * retention is configurable
+* export mode streams CSV/NDJSON with the same filters and redaction (#1206)
 """
 
 from __future__ import annotations
@@ -260,6 +261,93 @@ class TestQueryability:
         assert found.status_code == 200
         assert found.json()["result"]["record_id"] == record.record_id
         assert client.get("/v1/ai/decision-audit/da_missing").status_code == 404
+
+
+
+# ---------------------------------------------------------------------------
+# Issue #1206: export mode on the query endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestDecisionAuditExport:
+    def _seed(self, store):
+        early = store.record(
+            "humanitarian_verification",
+            "eligible",
+            claim_id="export-claim",
+            campaign_ref="export-campaign",
+            inputs={"aid_claim": "Reach me at export.worker@example.com"},
+        )
+        time.sleep(0.01)
+        late = store.record(
+            "fraud_detection",
+            "flagged",
+            claim_id="export-claim-2",
+            campaign_ref="export-campaign",
+            reasons=["ok"],
+        )
+        return early, late
+
+    def test_ndjson_export_streams_redacted_rows(self, client, store):
+        self._seed(store)
+        response = client.get(
+            "/v1/ai/decision-audit?campaign_ref=export-campaign&format=ndjson"
+        )
+        assert response.status_code == 200, response.text
+        assert "application/x-ndjson" in response.headers["content-type"]
+        assert "attachment" in response.headers.get("content-disposition", "")
+        lines = [ln for ln in response.text.strip().splitlines() if ln]
+        assert len(lines) == 2
+        rows = [json.loads(ln) for ln in lines]
+        assert all(r["campaign_ref"] == "export-campaign" for r in rows)
+        # Sensitive fields already redacted at write time remain redacted.
+        blob = response.text
+        assert "export.worker@example.com" not in blob
+        assert "[REDACTED]" in blob
+
+    def test_csv_export_has_header_and_rows(self, client, store):
+        self._seed(store)
+        response = client.get(
+            "/v1/ai/decision-audit?campaign_ref=export-campaign&format=csv"
+        )
+        assert response.status_code == 200, response.text
+        assert "text/csv" in response.headers["content-type"]
+        lines = response.text.strip().splitlines()
+        assert lines[0].startswith("record_id,")
+        assert len(lines) == 3  # header + 2 rows
+
+    def test_export_respects_date_range_and_pagination(self, client, store):
+        early, late = self._seed(store)
+        mid = (early.created_at + late.created_at) / 2.0
+        only_late = client.get(
+            f"/v1/ai/decision-audit?campaign_ref=export-campaign"
+            f"&format=ndjson&created_after={mid}"
+        )
+        assert only_late.status_code == 200
+        rows = [json.loads(ln) for ln in only_late.text.strip().splitlines() if ln]
+        assert len(rows) == 1
+        assert rows[0]["record_id"] == late.record_id
+
+        page = client.get(
+            "/v1/ai/decision-audit?campaign_ref=export-campaign&format=ndjson&limit=1&offset=1"
+        )
+        assert page.status_code == 200
+        page_rows = [json.loads(ln) for ln in page.text.strip().splitlines() if ln]
+        assert len(page_rows) == 1
+        assert page_rows[0]["record_id"] == early.record_id
+
+    def test_export_requires_identifier_like_json_query(self, client):
+        response = client.get("/v1/ai/decision-audit?format=csv")
+        assert response.status_code == 400
+
+    def test_json_query_still_works_with_date_filters(self, client, store):
+        early, late = self._seed(store)
+        mid = (early.created_at + late.created_at) / 2.0
+        response = client.get(
+            f"/v1/ai/decision-audit?campaign_ref=export-campaign&created_after={mid}"
+        )
+        assert response.status_code == 200
+        assert len(response.json()["result"]) == 1
 
 
 # ---------------------------------------------------------------------------
