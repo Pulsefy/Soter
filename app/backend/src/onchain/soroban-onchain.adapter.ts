@@ -33,6 +33,10 @@ import {
   GetTransactionStatusParams,
   GetTransactionStatusResult,
   TxStatus,
+  TransferAdminParams,
+  TransferAdminResult,
+  AcceptAdminResult,
+  CancelAdminTransferResult,
 } from './onchain.adapter';
 
 /**
@@ -334,6 +338,56 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       status: readString(summary.status, 'Active'),
       timestamp: new Date(),
     };
+  }
+
+  async transferAdmin(
+    params: TransferAdminParams,
+  ): Promise<TransferAdminResult> {
+    this.logger.log('transferAdmin newAdmin=' + params.newAdmin);
+    await this.invokeContract('transfer_admin', [params.newAdmin]);
+    return {
+      newAdmin: params.newAdmin,
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+      metadata: { adapter: 'soroban-rpc', contractId: this.contractId },
+    };
+  }
+
+  async acceptAdmin(): Promise<AcceptAdminResult> {
+    const pendingAdmin = await this.getPendingAdmin();
+    this.logger.log('acceptAdmin pendingAdmin=' + (pendingAdmin ?? '-'));
+    await this.invokeContract('accept_admin', []);
+    return {
+      admin: pendingAdmin ?? '',
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+      metadata: { adapter: 'soroban-rpc', contractId: this.contractId },
+    };
+  }
+
+  async cancelAdminTransfer(): Promise<CancelAdminTransferResult> {
+    const pendingAdmin = await this.getPendingAdmin();
+    this.logger.log(
+      'cancelAdminTransfer pendingAdmin=' + (pendingAdmin ?? '-'),
+    );
+    await this.invokeContract('cancel_admin_transfer', []);
+    return {
+      cancelledAdmin: pendingAdmin ?? '',
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+      metadata: { adapter: 'soroban-rpc', contractId: this.contractId },
+    };
+  }
+
+  async getPendingAdmin(): Promise<string | null> {
+    const result = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId: this.contractId,
+      key: 'pending_admin',
+    });
+    return typeof result === 'string' && result.length > 0 ? result : null;
   }
 
   async createClaim(params: CreateClaimParams): Promise<CreateClaimResult> {
