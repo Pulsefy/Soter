@@ -180,6 +180,37 @@ Authorization: Bearer <admin-token>
 Response: 204 No Content
 ```
 
+### Trigger a Contract Migration
+```http
+POST /deployment-metadata/:id/migrate
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+
+{
+  "newVersion": 2,
+  "expectedCurrentVersion": "1"
+}
+
+Response: 200 OK
+{
+  "deploymentId": "...",
+  "contractName": "AidEscrow",
+  "network": "testnet",
+  "contractId": "CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG",
+  "previousVersion": "1",
+  "contractVersion": "2",
+  "transactionHash": "292bf42f063310028456890e88861cd1650149ef0d4e66ba2a22ea5769964e64",
+  "migratedAt": "2026-09-26T12:00:00.000Z",
+  "metadata": { "contractVersion": "2", "previousContractVersion": "1" }
+}
+```
+
+Submits the contract's `migrate(newVersion)` and only rolls this deployment's metadata forward
+after the chain reports that the contract version actually changed. `expectedCurrentVersion` is
+an optional pre-flight guard that makes a retry safe after a partially-completed run. A
+migration that cannot be verified answers `502` and leaves the stored metadata untouched.
+See `docs/contract-migration-runbook.md` for the pre-flight checklist and rollback options.
+
 ## Database Schema
 
 The `DeploymentMetadata` table in SQLite includes:
