@@ -378,14 +378,17 @@ export class MockOnchainAdapter implements OnchainAdapter {
   }
 
   async pauseAction(action: OnchainAction): Promise<void> {
+    await Promise.resolve();
     this.actionPauseStates.set(action, true);
   }
 
   async unpauseAction(action: OnchainAction): Promise<void> {
+    await Promise.resolve();
     this.actionPauseStates.set(action, false);
   }
 
   async isActionPaused(action: OnchainAction): Promise<boolean> {
+    await Promise.resolve();
     return this.actionPauseStates.get(action) ?? false;
   }
 
