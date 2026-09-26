@@ -1,4 +1,12 @@
-import { IsString, IsOptional, IsDateString, IsObject } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsDateString,
+  IsObject,
+  IsInt,
+  Min,
+  Max,
+} from 'class-validator';
 
 export class CreateDeploymentMetadataDto {
   @IsString()
@@ -53,6 +61,24 @@ export class UpdateDeploymentMetadataDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * Body for POST /deployment-metadata/:id/migrate.
+ *
+ * `expectedCurrentVersion` is an optional pre-flight guard: when supplied, the
+ * migration is only submitted if the chain currently reports exactly that
+ * version, which makes a retry safe after a partially-completed run.
+ */
+export class MigrateContractDto {
+  @IsInt()
+  @Min(1)
+  @Max(4294967295)
+  newVersion: number;
+
+  @IsOptional()
+  @IsString()
+  expectedCurrentVersion?: string;
 }
 
 export class DeploymentMetadataResponseDto {
