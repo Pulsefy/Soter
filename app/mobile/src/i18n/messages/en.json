@@ -143,7 +143,11 @@
     "packageId": "Package ID: {id}",
     "due": "Due",
     "cachedData": "Showing cached data. Pull to refresh.",
-    "cachedDataHint": "Showing cached data. Pull down to refresh."
+    "cachedDataHint": "Showing cached data. Pull down to refresh.",
+    "unavailable": "Unable to load tasks. Backend unreachable and no cached data is available.",
+    "unavailableHint": "Task list unavailable. Backend unreachable and no cached data is available.",
+    "unavailableBadge": "UNAVAILABLE",
+    "retry": "Retry Connection"
   },
   "scanner": {
     "title": "Scanner",

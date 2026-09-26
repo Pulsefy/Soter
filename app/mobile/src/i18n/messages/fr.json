@@ -143,7 +143,11 @@
     "packageId": "ID du colis : {id}",
     "due": "Échéance",
     "cachedData": "Affichage des données en cache. Tirez pour actualiser.",
-    "cachedDataHint": "Affichage des données en cache. Tirez vers le bas pour actualiser."
+    "cachedDataHint": "Affichage des données en cache. Tirez vers le bas pour actualiser.",
+    "unavailable": "Impossible de charger les tâches. Backend inaccessible et aucune donnée en cache.",
+    "unavailableHint": "Liste des tâches indisponible. Backend inaccessible et aucune donnée en cache.",
+    "unavailableBadge": "INDISPONIBLE",
+    "retry": "Réessayer la connexion"
   },
   "scanner": {
     "title": "Scanner",
