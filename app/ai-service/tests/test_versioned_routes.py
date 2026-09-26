@@ -30,7 +30,6 @@ import main
 import metrics
 from main import app
 
-
 # ---------------------------------------------------------------------------
 # Session-level resource-check bypass
 # Every test gets healthy resources unless it opts out explicitly.
@@ -44,6 +43,21 @@ def mock_healthy_resources():
         yield
 
 
+@pytest.fixture(autouse=True)
+def reset_app_state():
+    """Ensure app.state is clean for each test.
+
+    The Starlette TestClient manages the ASGI lifespan lifecycle.  When a
+    previous module's TestClient is torn down the lifespan shutdown sets
+    ``app.state.is_shutting_down = True``.  Since ``app`` is a
+    module-level singleton, that stale value leaks into subsequent test
+    modules and causes every throttled endpoint to return 503.
+    """
+    app.state.is_shutting_down = False
+    app.state.active_requests = 0
+    yield
+
+
 # ---------------------------------------------------------------------------
 # Clients
 # ---------------------------------------------------------------------------
@@ -52,12 +66,22 @@ def mock_healthy_resources():
 @pytest.fixture(scope="module")
 def client():
     """TestClient that does NOT follow redirects – lets us inspect 308s."""
+    # Ensure app state is initialized for test client (lifespan not called automatically)
+    if not hasattr(app.state, "is_shutting_down"):
+        app.state.is_shutting_down = False
+    if not hasattr(app.state, "active_requests"):
+        app.state.active_requests = 0
     return TestClient(app, follow_redirects=False)
 
 
 @pytest.fixture(scope="module")
 def following_client():
     """TestClient that follows redirects transparently."""
+    # Ensure app state is initialized for test client (lifespan not called automatically)
+    if not hasattr(app.state, "is_shutting_down"):
+        app.state.is_shutting_down = False
+    if not hasattr(app.state, "active_requests"):
+        app.state.active_requests = 0
     return TestClient(app, follow_redirects=True)
 
 
@@ -180,7 +204,9 @@ class TestOCRV1Path:
         img = Image.new("RGB", (60, 60), color="green")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        with patch("api.v1.ocr.run_ocr_from_bytes", return_value=self._FAKE_OCR) as mock_run:
+        with patch(
+            "api.v1.ocr.run_ocr_from_bytes", return_value=self._FAKE_OCR
+        ) as mock_run:
             response = client.post(
                 "/v1/ai/ocr",
                 files={"image": ("img.png", buf.getvalue(), "image/png")},
@@ -239,16 +265,16 @@ class TestLegacyRedirects:
     @pytest.mark.parametrize("method,path,expected_location", REDIRECT_CASES)
     def test_redirect_status_308(self, client, method, path, expected_location):
         response = client.request(method, path, json={})
-        assert response.status_code == 308, (
-            f"Expected 308 for {method} {path}, got {response.status_code}"
-        )
+        assert (
+            response.status_code == 308
+        ), f"Expected 308 for {method} {path}, got {response.status_code}"
 
     @pytest.mark.parametrize("method,path,expected_location", REDIRECT_CASES)
     def test_redirect_location_header(self, client, method, path, expected_location):
         response = client.request(method, path, json={})
-        assert response.headers.get("location") == expected_location, (
-            f"Wrong Location for {method} {path}: {response.headers.get('location')}"
-        )
+        assert (
+            response.headers.get("location") == expected_location
+        ), f"Wrong Location for {method} {path}: {response.headers.get('location')}"
 
 
 class TestLegacyPrefixRedirects:

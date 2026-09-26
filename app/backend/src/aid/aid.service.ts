@@ -1,8 +1,36 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { RedisService } from '../../cache/redis.service';
-import { AiTaskWebhookDto, TaskStatus } from './dto/ai-task-webhook.dto';
+import {
+  AiVerificationWebhookDto,
+  TaskStatus,
+} from '../webhooks/dto/ai-verification-webhook.dto';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import type { Prisma } from '@prisma/client';
+
+export interface AidOrganizationContext {
+  orgId?: string | null;
+  ngoId?: string | null;
+}
+
+export interface PaginatedResult<T> {
+  data: T[];
+  total: number;
+  page: number;
+  size: number;
+  totalPages: number;
+}
+
+export interface ListAidPackagesParams {
+  page?: number;
+  size?: number;
+  sortBy?: string;
+  sortDirection?: 'asc' | 'desc';
+  search?: string;
+  status?: string;
+  token?: string;
+}
 
 @Injectable()
 export class AidService {
@@ -12,10 +40,94 @@ export class AidService {
     private auditService: AuditService,
     private redisService: RedisService,
     private metricsService: MetricsService,
+    private prisma: PrismaService,
   ) {}
 
-  async createCampaign(data: Record<string, unknown>) {
-    const campaignId = 'mock-c-id';
+  async listAidPackages(
+    params: ListAidPackagesParams,
+  ): Promise<PaginatedResult<Record<string, unknown>>> {
+    const page = Math.max(1, params.page ?? 1);
+    const size = Math.min(100, Math.max(1, params.size ?? 10));
+    const sortBy = params.sortBy ?? 'id';
+    const sortDirection = params.sortDirection ?? 'asc';
+    const skip = (page - 1) * size;
+
+    const where: Prisma.AidPackageWhereInput = {};
+
+    if (params.status) {
+      where.status = params.status;
+    }
+
+    if (params.search) {
+      const searchLower = params.search.toLowerCase();
+      where.OR = [{ id: { contains: searchLower, mode: 'insensitive' } }];
+    }
+
+    const orderBy: Prisma.AidPackageOrderByWithRelationInput = {
+      [sortBy]: sortDirection,
+    };
+
+    const [packages, total] = await Promise.all([
+      this.prisma.aidPackage.findMany({
+        where,
+        orderBy,
+        skip,
+        take: size,
+      }),
+      this.prisma.aidPackage.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / size);
+
+    return {
+      data: packages,
+      total,
+      page,
+      size,
+      totalPages,
+    };
+  }
+
+  async createCampaign(
+    data: Record<string, unknown>,
+    organizationContext?: AidOrganizationContext,
+  ) {
+    const requestedCampaignId =
+      typeof data.campaignId === 'string' && data.campaignId.trim().length > 0
+        ? data.campaignId.trim()
+        : undefined;
+    const organizationId =
+      organizationContext?.orgId ?? organizationContext?.ngoId;
+
+    // Prefer an explicit campaign reference and use the authenticated org as a
+    // fallback while enforcing ownership for either resolution path.
+    const campaign = requestedCampaignId
+      ? await this.prisma.campaign.findUnique({
+          where: { id: requestedCampaignId },
+        })
+      : organizationId
+        ? await this.prisma.campaign.findFirst({
+            where: organizationContext?.orgId
+              ? { orgId: organizationId, deletedAt: null }
+              : { ngoId: organizationId, deletedAt: null },
+            orderBy: { createdAt: 'desc' },
+          })
+        : null;
+
+    const belongsToOrganization =
+      !organizationContext ||
+      !organizationId ||
+      (organizationContext.orgId
+        ? campaign?.orgId === organizationId
+        : campaign?.ngoId === organizationId);
+
+    if (!campaign || !belongsToOrganization || campaign.deletedAt) {
+      throw new BadRequestException(
+        'A valid campaign could not be resolved from campaignId or the authenticated organization',
+      );
+    }
+
+    const campaignId = campaign.id;
     await this.auditService.record({
       actorId: 'admin-id',
       entity: 'campaign',
@@ -58,7 +170,7 @@ export class AidService {
     return { id, status: toStatus };
   }
 
-  async handleTaskWebhook(payload: AiTaskWebhookDto) {
+  async handleTaskWebhook(payload: AiVerificationWebhookDto) {
     const deliveryKey = `webhook:delivery:${payload.deliveryId}`;
     const isDuplicate = await this.redisService.get(deliveryKey);
 

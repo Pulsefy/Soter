@@ -7,7 +7,7 @@ import * as crypto from 'crypto';
 
 describe('ArtifactOwnershipTokenService', () => {
   let service: ArtifactOwnershipTokenService;
-  let prismaService: jest.Mocked<PrismaService>;
+  let prismaService: any;
   let auditService: jest.Mocked<AuditService>;
   let configService: jest.Mocked<ConfigService>;
 

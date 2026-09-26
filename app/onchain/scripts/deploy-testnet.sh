@@ -64,6 +64,13 @@ REGISTER_OUT=$(python3 "$SCRIPT_DIR/register-deployment.py" \
 
 echo "$REGISTER_OUT"
 
+python3 "$SCRIPT_DIR/verify-deployment.py" \
+    --project-dir "$PROJECT_DIR" \
+    --contract-id "$CONTRACT_ID" \
+    --version "$CONTRACT_VERSION" \
+    --network testnet \
+    --wasm "$WASM_FILE"
+
 VERSION_TAG=$(echo "$REGISTER_OUT" | awk -F= '/^VERSION_TAG=/{print $2}')
 echo ""
 echo "✅ Registered deployment in deployments/registry.json"

@@ -73,10 +73,12 @@ def test_registry_required_fields():
     testnet = registry["contracts"]["aid_escrow"]["networks"]["testnet"]
 
     # Required fields per the issue
-    required_fields = ["contract_id", "version", "deployed_at"]
+    required_fields = ["contract_id", "wasm_hash", "version", "deployed_at"]
     for field in required_fields:
         assert field in testnet, f"Missing required field: {field}"
         assert testnet[field], f"Required field {field} is empty"
+
+    assert len(testnet["wasm_hash"]) == 64
 
     # network is implicit in the key structure (testnet), but we verify
     # it's present in the networks map

@@ -36,11 +36,27 @@ export interface ImportJobStatusResponse {
   totalRows: number;
   processedRows: number;
   errorRows: number;
+  checkpointRow: number;
   errors: ImportError[] | null;
   reportUrl: string | null;
   fileName: string;
   createdAt: Date;
   updatedAt: Date;
+  startedAt: Date | null;
   completedAt: Date | null;
+  cancelledAt: Date | null;
   progress: number;
+}
+
+export interface ImportJobResumeState {
+  id: string;
+  status: ImportJobStatus;
+  campaignId: string;
+  fileName: string;
+  filePath: string | null;
+  totalRows: number;
+  processedRows: number;
+  errorRows: number;
+  checkpointRow: number;
+  errors: ImportError[];
 }

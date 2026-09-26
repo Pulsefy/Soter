@@ -7,6 +7,7 @@ import React, {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
+import { confirmValueMovingAction } from '../services/valueActionConfirmation';
 
 const STORAGE_KEY = 'biometric_lock_enabled';
 
@@ -22,6 +23,11 @@ interface BiometricContextValue {
    * Resolves `true` on success, `false` on failure/cancel.
    */
   authenticate: () => Promise<boolean>;
+  /**
+   * Prompt the user to confirm a value-moving action with biometrics or device passcode.
+   * Resolves `true` on success, `false` on failure/cancel.
+   */
+  confirmValueAction: (promptMessage?: string) => Promise<boolean>;
 }
 
 const BiometricContext = createContext<BiometricContextValue | undefined>(
@@ -66,9 +72,22 @@ export const BiometricProvider: React.FC<PropsWithChildren> = ({ children }) => 
     return result.success;
   };
 
+  const confirmValueAction = async (
+    promptMessage = 'Confirm this claim action',
+  ): Promise<boolean> => {
+    const result = await confirmValueMovingAction(promptMessage);
+    return result.ok;
+  };
+
   return (
     <BiometricContext.Provider
-      value={{ biometricEnabled, biometricSupported, toggleBiometric, authenticate }}
+      value={{
+        biometricEnabled,
+        biometricSupported,
+        toggleBiometric,
+        authenticate,
+        confirmValueAction,
+      }}
     >
       {children}
     </BiometricContext.Provider>

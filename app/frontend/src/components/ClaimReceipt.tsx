@@ -22,7 +22,6 @@ export interface ClaimReceiptData {
   contractAddress?: string;
   timestamp: string;
   recipientRef?: string;
-  transactionHash?: string;
   explorerLink?: string;
 }
 
@@ -71,6 +70,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
     approved:  'bg-green-50 border-green-200 text-green-900 dark:bg-green-950/40 dark:border-green-800 dark:text-green-200',
     disbursed: 'bg-emerald-50 border-emerald-200 text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-200',
     archived:  'bg-gray-50 border-gray-200 text-gray-900 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200',
+    cancelled: 'bg-red-50 border-red-200 text-red-900 dark:bg-red-950/40 dark:border-red-800 dark:text-red-200',
   };
 
   const statusBadgeColors = {
@@ -79,21 +79,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
     approved:  'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200',
     disbursed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200',
     archived:  'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
-    requested: 'bg-yellow-50 border-yellow-200 text-yellow-900',
-    verified: 'bg-blue-50 border-blue-200 text-blue-900',
-    approved: 'bg-green-50 border-green-200 text-green-900',
-    disbursed: 'bg-emerald-50 border-emerald-200 text-emerald-900',
-    archived: 'bg-gray-50 border-gray-200 text-gray-900',
-    cancelled: 'bg-red-50 border-red-200 text-red-900',
-  };
-
-  const statusBadgeColors = {
-    requested: 'bg-yellow-100 text-yellow-800',
-    verified: 'bg-blue-100 text-blue-800',
-    approved: 'bg-green-100 text-green-800',
-    disbursed: 'bg-emerald-100 text-emerald-800',
-    archived: 'bg-gray-100 text-gray-800',
-    cancelled: 'bg-red-100 text-red-800',
+    cancelled: 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200',
   };
 
   const formattedDate = useMemo(() => {
@@ -105,15 +91,6 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
   }, [claim.timestamp]);
 
   const receiptText = useMemo(() => {
-    return `Claim Receipt
-Claim ID: ${claim.claimId}
-Package ID: ${claim.packageId}
-Status: ${claim.status.toUpperCase()}
-Amount: ${claim.amount} tokens
-Date: ${formattedDate}
-${claim.tokenAddress ? `Token Address: ${claim.tokenAddress}` : ''}
-${claim.contractAddress ? `Contract Address: ${claim.contractAddress}` : ''}
-${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}`.trim();
     const lines = [
       'Claim Receipt',
       `Claim ID: ${claim.claimId}`,
@@ -124,6 +101,9 @@ ${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}`.tr
     ];
     if (claim.tokenAddress) {
       lines.push(`Token Address: ${claim.tokenAddress}`);
+    }
+    if (claim.contractAddress) {
+      lines.push(`Contract Address: ${claim.contractAddress}`);
     }
     if (claim.transactionHash) {
       lines.push(`Transaction Hash: ${claim.transactionHash}`);
@@ -278,12 +258,6 @@ ${claim.transactionHash ? `Transaction Hash: ${claim.transactionHash}` : ''}`.tr
               </a>
               <FieldCopyButton value={claim.transactionHash} label="transaction hash" />
             </div>
-          </div>
-        )}
-        {claim.transactionHash && (
-          <div className="col-span-2">
-            <p className="text-xs font-semibold opacity-75 mb-1">TRANSACTION HASH</p>
-            <p className="font-mono text-xs break-all">{claim.transactionHash}</p>
           </div>
         )}
         {claim.explorerLink && (

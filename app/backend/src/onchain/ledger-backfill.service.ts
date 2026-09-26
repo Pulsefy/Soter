@@ -79,11 +79,31 @@ export class LedgerBackfillService {
         (campaignId ? ` (campaignId=${campaignId})` : ''),
     );
 
-    const checkpoint = await this.checkpointService.initCheckpoint(
-      startLedger,
-      endLedger,
-      batchSize,
-      campaignId,
+    const totalCount = endLedger - startLedger + 1;
+
+    const job = await this.onchainQueue.add(
+      'ledger-backfill',
+      {
+        startLedger,
+        endLedger,
+        campaignId,
+        batchSize,
+      },
+      {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 5000,
+        },
+        removeOnComplete: {
+          count: 10,
+          age: 3600,
+        },
+        removeOnFail: {
+          count: 5,
+          age: 7200,
+        },
+      },
     );
 
     const jobData: BackfillJobData = {

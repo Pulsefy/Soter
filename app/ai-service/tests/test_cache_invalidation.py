@@ -37,24 +37,46 @@ class TestCacheInvalidationHelper:
     def test_invalidate_task_status_uses_task_id_pattern(self, helper, mock_cache):
         helper.invalidate_task_status("task-1")
 
-        mock_cache.delete_pattern.assert_called_once_with("cache:ai:task_status:*task-1*")
-
-    def test_invalidate_artifact_access_uses_artifact_id_pattern(self, helper, mock_cache):
-        helper.invalidate_artifact_access("artifact-1")
-
-        mock_cache.delete_pattern.assert_called_once_with("cache:ai:artifact_access:*artifact-1*")
-
-    def test_invalidate_verification_by_artifact_targets_artifact_tag(self, helper, mock_cache):
-        helper.invalidate_verification_by_artifact("artifact-1")
-
         mock_cache.delete_pattern.assert_called_once_with(
-            "cache:ai:humanitarian_verification:*artifact_tag=*artifact-1*"
+            "cache:ai:task_status:*task-1*"
         )
 
-    def test_invalidate_verification_by_artifact_returns_deleted_count(self, helper, mock_cache):
-        mock_cache.delete_pattern.return_value = 5
+    def test_invalidate_artifact_access_uses_artifact_id_pattern(
+        self, helper, mock_cache
+    ):
+        helper.invalidate_artifact_access("artifact-1")
+
+        mock_cache.delete_pattern.assert_called_once_with(
+            "cache:ai:artifact_access:*artifact-1*"
+        )
+
+    def test_invalidate_verification_by_artifact_targets_artifact_tag(
+        self, helper, mock_cache
+    ):
+        helper.invalidate_verification_by_artifact("artifact-1")
+
+        patterns = [c.args[0] for c in mock_cache.delete_pattern.call_args_list]
+        assert (
+            "cache:ai:humanitarian_verification:*artifact_tag=*artifact-1*" in patterns
+        )
+
+    def test_invalidate_verification_by_artifact_deletes_content_hash_entries(
+        self, helper, mock_cache
+    ):
+        """Issue #1203: artifact invalidation must also wipe content-hash-keyed
+        entries, which never embed the artifact id by design."""
+        helper.invalidate_verification_by_artifact("artifact-1")
+
+        patterns = [c.args[0] for c in mock_cache.delete_pattern.call_args_list]
+        assert "cache:ai:humanitarian_verification:*content_hash=*" in patterns
+
+    def test_invalidate_verification_by_artifact_returns_deleted_count(
+        self, helper, mock_cache
+    ):
+        mock_cache.delete_pattern.side_effect = [3, 2]  # artifact + content patterns
 
         assert helper.invalidate_verification_by_artifact("artifact-1") == 5
+        assert mock_cache.delete_pattern.call_count == 2
 
     def test_invalidate_verification_by_model_version_targets_sanitized_model_version(
         self, helper, mock_cache
@@ -70,14 +92,18 @@ class TestCacheInvalidationHelper:
 
         mock_cache.delete_pattern.assert_called_once_with("cache:ai:*")
 
-    def test_invalidate_verification_by_artifact_records_metric(self, helper, mock_cache):
+    def test_invalidate_verification_by_artifact_records_metric(
+        self, helper, mock_cache
+    ):
         before = _counter_value("artifact_updated")
 
         helper.invalidate_verification_by_artifact("artifact-1")
 
         assert _counter_value("artifact_updated") == before + 1
 
-    def test_invalidate_verification_by_model_version_records_metric(self, helper, mock_cache):
+    def test_invalidate_verification_by_model_version_records_metric(
+        self, helper, mock_cache
+    ):
         before = _counter_value("model_version_changed")
 
         helper.invalidate_verification_by_model_version("openai", "gpt-4o-mini")

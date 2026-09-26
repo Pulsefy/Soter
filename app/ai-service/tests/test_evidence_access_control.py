@@ -4,6 +4,7 @@ Test evidence access control enforcement in humanitarian verification endpoints.
 This module tests that evidence artifacts can only be processed by their owning
 organization and that cross-org access attempts are denied with proper audit logging.
 """
+
 import pytest
 import json
 from unittest.mock import Mock, patch
@@ -11,7 +12,10 @@ from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from services.evidence_access_control import EvidenceAccessControl, EvidenceAccessControlError
+from services.evidence_access_control import (
+    EvidenceAccessControl,
+    EvidenceAccessControlError,
+)
 from services.artifact_access import ArtifactAccessError
 
 
@@ -22,7 +26,11 @@ def artifact_access_control():
     mock_artifact_service.validate_role.return_value = True
     mock_artifact_service.resolve_artifact.return_value = (
         "/path/to/artifact.bin",
-        {"org_id": "org-123", "filename": "test.bin", "mime_type": "application/octet-stream"},
+        {
+            "org_id": "org-123",
+            "filename": "test.bin",
+            "mime_type": "application/octet-stream",
+        },
     )
 
     def _enforce_org(metadata, org_id):
@@ -47,7 +55,7 @@ def client_with_app(artifact_access_control):
         description="Test evidence access control enforcement",
         version="1.0.0",
     )
-    
+
     # Configure CORS for testing
     app.add_middleware(
         CORSMiddleware,
@@ -56,9 +64,10 @@ def client_with_app(artifact_access_control):
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
-    
+
     # Add the humanitarian router which requires evidence access control
     from api.v1.humanitarian import router as humanitarian_router
+
     # Match the production /v1 prefix added in api/v1/router.py so the
     # endpoint resolves at /v1/ai/humanitarian/verify exactly as it does
     # in deployment.
@@ -85,13 +94,13 @@ def client_with_app(artifact_access_control):
     # so the fixture mirrors ``main.app``'s coverage of both exception types.
     app.add_exception_handler(FastAPIHTTPException, _http_exception_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
-    
+
     # Mock services
     app.state.cache = Mock()
     app.state.cache.enabled = False
     app.state.artifact_access_control = artifact_access_control
     app.state.humanitarian_verification_service = Mock()
-    
+
     app.state.humanitarian_verification_service.verify_claim = Mock(
         return_value={
             "provider": "test",
@@ -104,17 +113,17 @@ def client_with_app(artifact_access_control):
             },
         }
     )
-    
+
     app.state.humanitarian_verification_service.get_model_version = Mock(
         return_value="test:test-provider/fixture"
     )
-    
+
     yield TestClient(app, follow_redirects=False)
 
 
 class TestEvidenceAccessControl:
     """Test evidence access control enforcement."""
-    
+
     def test_evidence_access_control_service(self, artifact_access_control):
         """Test that EvidenceAccessControl service correctly validates evidence."""
         # Test successful validation (same org)
@@ -125,23 +134,35 @@ class TestEvidenceAccessControl:
             user_role="operator",
             correlation_id="test-123",
         )
-        
+
         # Verify the underlying service methods were called
-        artifact_access_control.artifact_access_service.validate_role.assert_called_with("operator")
-        artifact_access_control.artifact_access_service.resolve_artifact.assert_called_with("evidence-1.bin")
-        artifact_access_control.artifact_access_service.enforce_org_ownership.assert_called_with(
-            {"org_id": "org-123", "filename": "test.bin", "mime_type": "application/octet-stream"},
-            "org-123"
+        artifact_access_control.artifact_access_service.validate_role.assert_called_with(
+            "operator"
         )
-    
+        artifact_access_control.artifact_access_service.resolve_artifact.assert_called_with(
+            "evidence-1.bin"
+        )
+        artifact_access_control.artifact_access_service.enforce_org_ownership.assert_called_with(
+            {
+                "org_id": "org-123",
+                "filename": "test.bin",
+                "mime_type": "application/octet-stream",
+            },
+            "org-123",
+        )
+
     def test_cross_org_access_denied(self, artifact_access_control):
         """Test that evidence from different orgs cannot be processed."""
         # Make enforce_org_ownership raise an error for different org
         artifact_access_control.artifact_access_service.resolve_artifact.return_value = (
             "/path/to/artifact.bin",
-            {"org_id": "org-456", "filename": "test.bin", "mime_type": "application/octet-stream"},
+            {
+                "org_id": "org-456",
+                "filename": "test.bin",
+                "mime_type": "application/octet-stream",
+            },
         )
-        
+
         # Should raise EvidenceAccessControlError when org doesn't match
         with pytest.raises(EvidenceAccessControlError) as exc_info:
             artifact_access_control.validate_evidence_access(
@@ -151,9 +172,9 @@ class TestEvidenceAccessControl:
                 user_role="operator",
                 correlation_id="test-123",
             )
-        
+
         assert "different organization" in str(exc_info.value)
-    
+
     def test_no_artifacts_bypass_validation(self, artifact_access_control):
         """Test that requests without artifact references bypass validation."""
         # Should not raise any error when no artifacts are provided
@@ -167,11 +188,11 @@ def test_artifact_fixture(tmp_path):
     """Create a test artifact with metadata."""
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    
+
     artifact_id = "evidence-1.bin"
     artifact_path = artifact_dir / artifact_id
     artifact_path.write_bytes(b"secure-evidence")
-    
+
     metadata = {
         "org_id": "org-123",
         "filename": "evidence.bin",
@@ -180,11 +201,12 @@ def test_artifact_fixture(tmp_path):
     (artifact_dir / f"{artifact_id}.meta.json").write_text(
         json.dumps(metadata), encoding="utf-8"
     )
-    
+
     import api.v1.artifacts as artifacts_module
+
     artifacts_module.artifact_access_service.artifacts_dir = str(artifact_dir.resolve())
     artifacts_module.artifact_access_service.ttl_seconds = 60
-    
+
     return artifact_id
 
 
@@ -197,7 +219,7 @@ def test_endpoint_cross_org_access_denied(client_with_app, test_artifact_fixture
         "provider_preference": "test",
         "context_factors": {},
     }
-    
+
     response = client_with_app.post(
         "/v1/ai/humanitarian/verify",
         headers={
@@ -207,7 +229,7 @@ def test_endpoint_cross_org_access_denied(client_with_app, test_artifact_fixture
         },
         json=payload,
     )
-    
+
     # Should be denied - evidence belongs to different org
     assert response.status_code == 403
     body = response.json()
@@ -227,7 +249,7 @@ def test_endpoint_same_org_access_allowed(client_with_app, test_artifact_fixture
         "provider_preference": "test",
         "context_factors": {},
     }
-    
+
     response = client_with_app.post(
         "/v1/ai/humanitarian/verify",
         headers={
@@ -237,7 +259,7 @@ def test_endpoint_same_org_access_allowed(client_with_app, test_artifact_fixture
         },
         json=payload,
     )
-    
+
     # Should be allowed
     assert response.status_code == 200
     assert "result" in response.json()
@@ -251,7 +273,7 @@ def test_endpoint_no_artifacts_bypass_validation(client_with_app):
         "supporting_evidence": ["Some evidence"],
         "context_factors": {},
     }
-    
+
     response = client_with_app.post(
         "/v1/ai/humanitarian/verify",
         headers={
@@ -261,7 +283,7 @@ def test_endpoint_no_artifacts_bypass_validation(client_with_app):
         },
         json=payload,
     )
-    
+
     # Should be allowed - no artifacts to validate
     assert response.status_code == 200
     assert "result" in response.json()
@@ -277,7 +299,7 @@ def test_endpoint_audit_logging(client_with_app, test_artifact_fixture, caplog):
         "provider_preference": "test",
         "context_factors": {},
     }
-    
+
     response = client_with_app.post(
         "/v1/ai/humanitarian/verify",
         headers={
@@ -287,7 +309,7 @@ def test_endpoint_audit_logging(client_with_app, test_artifact_fixture, caplog):
         },
         json=payload,
     )
-    
+
     # Should be denied
     assert response.status_code == 403
 
@@ -296,7 +318,9 @@ def test_endpoint_audit_logging(client_with_app, test_artifact_fixture, caplog):
     # rather than in the rendered message body.  Inspect them directly so
     # the assertion stays decoupled from future message-text tweaks.
     audit_records = [
-        r for r in caplog.records if getattr(r, "event", None) == "evidence_access_check"
+        r
+        for r in caplog.records
+        if getattr(r, "event", None) == "evidence_access_check"
     ]
     assert audit_records, "expected an evidence_access_check log record"
     denied_records = [r for r in audit_records if getattr(r, "status", "") == "denied"]
@@ -305,6 +329,5 @@ def test_endpoint_audit_logging(client_with_app, test_artifact_fixture, caplog):
     assert any(getattr(r, "reason", "") == "forbidden_org" for r in denied_records)
     # The denial must reference the artifact we tried to access.
     assert any(
-        test_artifact_fixture in getattr(r, "artifact_ids", [])
-        for r in denied_records
+        test_artifact_fixture in getattr(r, "artifact_ids", []) for r in denied_records
     )

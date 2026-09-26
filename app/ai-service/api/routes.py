@@ -9,6 +9,7 @@ from slowapi.util import get_remote_address
 
 from schemas.ocr import OCRData, OCRFieldResult, OCRResponse, LanguageHint
 from services.ocr import OCRService
+from services.ocr_confidence import assess_confidence
 from config import settings
 
 router = APIRouter(tags=["ai"])
@@ -31,7 +32,18 @@ ocr_service = OCRService()
 async def process_ocr(
     request: Request,
     image: Annotated[UploadFile, File(description="Image file to process")],
-    language_hint: Annotated[Optional[LanguageHint], Form(description="Language hint for OCR")] = None,
+    language_hint: Annotated[
+        Optional[LanguageHint], Form(description="Language hint for OCR")
+    ] = None,
+    document_type: Annotated[
+        Optional[str],
+        Form(
+            description=(
+                "Optional document type (e.g. id_card, passport) used to pick "
+                "a per-document-type review threshold"
+            )
+        ),
+    ] = None,
 ) -> OCRResponse:
     start_time = time.time()
 
@@ -70,13 +82,22 @@ async def process_ocr(
             )
 
         start_inference = time.time()
-        result = ocr_service.process_image(img, language_hint=language_hint.value if language_hint else None)
+        result = ocr_service.process_image(
+            img, language_hint=language_hint.value if language_hint else None
+        )
         inference_latency = time.time() - start_inference
-        
+
         metrics.INFERENCE_LATENCY.labels(task_type="ocr").observe(inference_latency)
         metrics.logger.info(f"OCR Inference completed in {inference_latency:.4f}s")
 
         processing_time_ms = int((time.time() - start_time) * 1000)
+
+        # Band the extraction so a low-confidence document is flagged for a
+        # human instead of being treated as authoritative (issue #984).
+        assessment = assess_confidence(
+            [field.confidence for field in result.fields.values()],
+            document_type=document_type,
+        )
 
         return OCRResponse(
             success=True,
@@ -87,6 +108,11 @@ async def process_ocr(
                 },
                 raw_text=result.raw_text,
                 processing_time_ms=processing_time_ms,
+                confidence=assessment.confidence,
+                confidence_band=assessment.band,
+                needs_review=assessment.needs_review,
+                review_threshold=assessment.review_threshold,
+                document_type=document_type,
             ),
             processing_time_ms=processing_time_ms,
         )

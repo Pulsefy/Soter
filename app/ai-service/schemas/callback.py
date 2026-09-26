@@ -4,11 +4,11 @@ Canonical callback payload contract for AI verification results.
 Schema version: v1
 
 This module is the single source of truth for the payload that the AI service
-POSTs to the NestJS backend webhook endpoint (`POST /aid/webhook`).  Both
+POSTs to the NestJS backend webhook endpoint (`POST /webhooks/ai-verification`).  Both
 sides MUST derive their field expectations from this file (or its TypeScript
-mirror in `app/backend/src/aid/dto/ai-task-webhook.dto.ts`).
+mirror in `app/backend/src/webhooks/dto/ai-verification-webhook.dto.ts`).
 
-Field alignment with AiTaskWebhookDto (backend):
+Field alignment with AiVerificationWebhookDto (backend):
   AI service field  <->  Backend DTO field
   ─────────────────────────────────────────
   task_id           <->  taskId
@@ -22,10 +22,10 @@ Field alignment with AiTaskWebhookDto (backend):
   schema_version    <->  (informational — backend ignores unknown fields)
 
 HMAC header:
-  Header name : x-webhook-signature
+  Header name : X-Signature-256
   Algorithm   : HMAC-SHA256 over the raw JSON body (UTF-8)
   Encoding    : lowercase hex digest
-  Secret      : WEBHOOK_SECRET env var (must match backend WEBHOOK_SECRET)
+  Secret      : AI_WEBHOOK_SECRET env var (must match backend AI_WEBHOOK_SECRET)
 """
 
 from __future__ import annotations
@@ -49,6 +49,7 @@ SCHEMA_VERSION = "1.0"
 
 class CallbackStatus(str, Enum):
     """Mirrors TaskStatus in the backend DTO."""
+
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
@@ -163,7 +164,9 @@ class AiCallbackPayload(BaseModel):
             task_type=task_type,
             result=result,
             error=error,
-            completed_at=now_iso if CallbackStatus(status) == CallbackStatus.COMPLETED else None,
+            completed_at=(
+                now_iso if CallbackStatus(status) == CallbackStatus.COMPLETED else None
+            ),
         )
 
     # ── Wire serialisation ────────────────────────────────────────────────
@@ -177,7 +180,7 @@ class AiCallbackPayload(BaseModel):
         Compute HMAC-SHA256 over the canonical JSON representation.
 
         Returns the lowercase hex digest suitable for the
-        ``x-webhook-signature`` HTTP header.
+        ``X-Signature-256`` HTTP header.
         """
         raw = self.to_json_bytes()
         return hmac.new(
@@ -190,6 +193,7 @@ class AiCallbackPayload(BaseModel):
 # ---------------------------------------------------------------------------
 # HMAC helpers (standalone, for callers that already have the raw bytes)
 # ---------------------------------------------------------------------------
+
 
 def compute_hmac(body_bytes: bytes, secret: str) -> str:
     """Return hex HMAC-SHA256 of *body_bytes* signed with *secret*."""

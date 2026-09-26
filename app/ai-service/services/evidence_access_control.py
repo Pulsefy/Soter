@@ -14,12 +14,16 @@ import time
 from services.artifact_access import ArtifactAccessService, ArtifactAccessError
 
 logger = logging.getLogger(__name__)
+
+
 class EvidenceAccessControlError(Exception):
     """Raised for invalid evidence access control attempts."""
+
+
 class EvidenceAccessControl:
     """
     Manages evidence access control with organization ownership validation and audit logging.
-    
+
     Ensures evidence artifacts can only be processed by their owning organization
     and logs all access attempts for audit purposes.
     """
@@ -37,14 +41,14 @@ class EvidenceAccessControl:
     ) -> None:
         """
         Validate that all evidence artifacts belong to the requesting organization.
-        
+
         Args:
             artifact_ids: List of evidence artifact IDs to validate
             org_id: Organization ID requesting access
             user_id: User ID requesting access
             user_role: User role (admin, operator, reviewer)
             correlation_id: Correlation ID for request tracing
-            
+
         Raises:
             EvidenceAccessControlError: If evidence access is not authorized
         """
@@ -99,14 +103,16 @@ class EvidenceAccessControl:
     ) -> None:
         """
         Validate that a single evidence artifact belongs to the requesting organization.
-        
+
         Raises:
             EvidenceAccessControlError: If artifact access is not authorized
         """
         try:
-            artifact_path, metadata = self.artifact_access_service.resolve_artifact(artifact_id)
+            artifact_path, metadata = self.artifact_access_service.resolve_artifact(
+                artifact_id
+            )
             self.artifact_access_service.enforce_org_ownership(metadata, org_id)
-            
+
             # Log successful access
             self._log_access_attempt(
                 [artifact_id],
@@ -117,10 +123,10 @@ class EvidenceAccessControl:
                 status="authorized",
                 correlation_id=correlation_id,
             )
-            
+
         except ArtifactAccessError as exc:
             error_code = str(exc)
-            
+
             # Log failed access attempt
             self._log_access_attempt(
                 [artifact_id],
@@ -132,7 +138,7 @@ class EvidenceAccessControl:
                 reason=error_code,
                 correlation_id=correlation_id,
             )
-            
+
             # Convert to EvidenceAccessControlError
             if error_code == "artifact_not_found":
                 raise EvidenceAccessControlError(f"Artifact not found: {artifact_id}")
@@ -158,7 +164,7 @@ class EvidenceAccessControl:
     ) -> None:
         """
         Log evidence access attempt for audit purposes.
-        
+
         This log includes all relevant context for auditing cross-org access denial
         and security compliance requirements.
         """
@@ -173,10 +179,10 @@ class EvidenceAccessControl:
             "timestamp": int(time.time()),
             "trace_id": correlation_id,
         }
-        
+
         if reason:
             log_data["reason"] = reason
-        
+
         if status == "authorized":
             logger.info("Evidence access authorized", extra=log_data)
         elif status == "denied":

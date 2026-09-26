@@ -1,3 +1,5 @@
+import { EntityLinkReviewStatus } from '@prisma/client';
+
 export interface CreateEntityLinkDto {
   sourceType: 'campaign' | 'claim' | 'verification';
   sourceId: string;
@@ -23,6 +25,8 @@ export interface LinkEntityResult {
   projectId: string | null;
   confidenceScore: number;
   matchMethod: string | null;
+  reviewStatus: EntityLinkReviewStatus;
+  queuedAt: Date | null;
   isActive: boolean;
   reviewedBy: string | null;
   reviewedAt: Date | null;
@@ -37,8 +41,37 @@ export interface EntityLinkQueryDto {
   entityType?: 'organization' | 'location' | 'asset' | 'project';
   minConfidence?: number;
   isActive?: boolean;
+  reviewStatus?: EntityLinkReviewStatus;
   page?: number;
   limit?: number;
+}
+
+/**
+ * Query params for listing the low-confidence review queue
+ * (`GET /entity-linking/review-queue`). Always scoped to
+ * `reviewStatus: pending_review` server-side.
+ */
+export interface EntityLinkReviewQueueQueryDto {
+  entityType?: 'organization' | 'location' | 'asset' | 'project';
+  sourceType?: 'campaign' | 'claim' | 'verification';
+  page?: number;
+  limit?: number;
+}
+
+export type EntityLinkReviewAction = 'accept' | 'reject' | 'remap';
+
+/**
+ * Body for `PATCH /entity-linking/review/:linkId` — a reviewer's decision
+ * on a queued (or previously decided) link.
+ */
+export interface ReviewEntityLinkDto {
+  action: EntityLinkReviewAction;
+  reviewNotes?: string;
+  /** Required when action is 'remap': the canonical registry record to
+   * point this link at instead. registryId is matched the same way
+   * CreateEntityLinkDto.registryId is (RegistryOrganization.registryId, etc). */
+  remapEntityType?: 'organization' | 'location' | 'asset' | 'project';
+  remapRegistryId?: string;
 }
 
 export interface RegistrySearchResult {

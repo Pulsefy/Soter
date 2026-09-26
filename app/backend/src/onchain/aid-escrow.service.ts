@@ -355,11 +355,13 @@ export class AidEscrowService {
     this.logger.debug('Claiming aid package:', {
       packageId: dto.packageId,
       recipient: recipientAddress,
+      amount: dto.amount,
     });
 
     const result = await this.onchainAdapter.claimAidPackage({
       packageId: dto.packageId,
       recipientAddress,
+      amount: dto.amount,
     });
 
     this.logger.debug('Aid package claimed successfully:', {

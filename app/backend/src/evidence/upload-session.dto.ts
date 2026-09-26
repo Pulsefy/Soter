@@ -8,7 +8,7 @@ export class CreateUploadSessionDto {
   @IsString()
   fileName: string;
 
-  @IsIn(ALLOWED_MIME_TYPES as unknown as string[])
+  @IsIn(ALLOWED_MIME_TYPES)
   mimeType: string;
 
   /** Total file size in bytes. */

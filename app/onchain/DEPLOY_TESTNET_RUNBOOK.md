@@ -18,7 +18,7 @@ From `app/onchain` with a funded `.env`:
 ./scripts/deploy-testnet.sh
 ```
 
-This builds WASM, deploys via `deploy.sh`, writes `deployments/registry.json`, and prints the semver/git tag (`v<crate-version>-testnet`).
+This builds WASM, deploys via `deploy.sh`, writes `deployments/registry.json`, verifies the artifact checksum against that registry entry, and prints the semver/git tag (`v<crate-version>-testnet`).
 
 To create the local git tag automatically:
 
@@ -121,6 +121,8 @@ Example expected output:
 ```
 
 If the script updates `.env`, it will also write `CONTRACT_ID=<id>` there.
+
+After registration, the deployment flow prints a machine-readable verification result. It exits nonzero if the SHA-256 checksum of the uploaded Wasm artifact differs from the checksum recorded next to the contract ID in `deployments/registry.json`.
 
 ### Manual deploy alternative
 

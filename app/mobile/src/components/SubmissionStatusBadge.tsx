@@ -23,6 +23,7 @@ export const SubmissionStatusBadge: React.FC<Props> = ({ state, onRetry }) => {
     retrying:  { label: 'Retrying',  icon: 'refresh',              bg: appColors.infoBg || '#DBEAFE', fg: appColors.info || '#1E40AF' },
     submitted: { label: 'Submitted', icon: 'check-circle-outline', bg: appColors.successBg || '#D1FAE5', fg: appColors.success || '#065F46' },
     failed:    { label: 'Failed',    icon: 'alert-circle-outline', bg: appColors.errorBg || '#FEE2E2', fg: appColors.error || '#991B1B' },
+    conflict:  { label: 'Conflict',  icon: 'alert-decagram-outline', bg: '#F3E8FF', fg: '#6B21A8' },
   };
 
   const { label, icon, bg, fg } = CONFIG[state] ?? CONFIG.pending;
@@ -36,7 +37,7 @@ export const SubmissionStatusBadge: React.FC<Props> = ({ state, onRetry }) => {
         <MaterialCommunityIcons name={icon as any} size={14} color={fg} />
       )}
       <Text style={[styles.label, { color: fg }]} maxFontSizeMultiplier={2}>{label}</Text>
-      {(state === 'failed' || state === 'retrying') && onRetry && (
+      {(state === 'failed' || state === 'retrying' || state === 'conflict') && onRetry && (
         <TouchableOpacity
           onPress={onRetry}
           accessibilityRole="button"

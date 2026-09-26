@@ -1,5 +1,25 @@
 import { ApiProperty } from '@nestjs/swagger';
 
+export class ClaimTimelineEntryDto {
+  @ApiProperty({ description: 'Status the claim transitioned to' })
+  status: string;
+
+  @ApiProperty({ description: 'ISO timestamp of the status change' })
+  timestamp: string;
+
+  @ApiProperty({
+    description: 'Transaction hash if this was an on-chain action',
+    required: false,
+  })
+  transactionHash?: string;
+
+  @ApiProperty({
+    description: 'Explorer URL for the transaction',
+    required: false,
+  })
+  explorerUrl?: string;
+}
+
 export class ClaimReceiptDto {
   @ApiProperty({
     description: 'Unique claim identifier',
@@ -72,6 +92,12 @@ export class ClaimReceiptDto {
     required: false,
   })
   explorerLink?: string;
+
+  @ApiProperty({
+    description: 'Status change timeline',
+    type: [ClaimTimelineEntryDto],
+  })
+  timeline: ClaimTimelineEntryDto[];
 }
 
 export class ClaimShareResponseDto {

@@ -1,1 +1,1 @@
-export * from './ai-verification.dto';
+export * from './ai-verification-webhook.dto';

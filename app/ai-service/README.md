@@ -20,6 +20,24 @@ Or using uvicorn directly:
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+## API Reference
+
+The service exposes an interactive Swagger UI at `/docs` and serves its raw
+OpenAPI document at `/openapi.json`. A generated, browsable snapshot of that
+document is checked in at [`openapi.json`](openapi.json) so contributors and
+backend integrators can read request/response shapes without running the
+service.
+
+**Regenerating the snapshot** (do this whenever routes or schemas change):
+
+```bash
+python scripts/generate_openapi.py
+```
+
+CI (`openapi-drift` in the AI Service workflow) regenerates the document from
+the live app and fails if the committed `openapi.json` drifts, so keep the
+regenerated file in the same PR as the route change.
+
 ## API
 
 ### Health Check
@@ -102,6 +120,18 @@ curl -X POST "http://localhost:8000/ai/ocr" -F "image=@document.jpg"
 ```
 
 **Rate limit:** 10 requests/minute per IP
+
+### Request Safety Limits
+
+Write requests to `/v1/*` and legacy `/ai/*` endpoints are limited by default to
+10 MiB (`MAX_REQUEST_BODY_BYTES=10485760`). Oversized requests receive HTTP 413
+and are counted in the `api_request_rejections_total` metric with the endpoint
+and `request_body_too_large` reason labels.
+
+Caller-supplied humanitarian verification timeouts are capped at 60 seconds by
+default (`MAX_REQUEST_TIMEOUT_SECONDS=60`). A larger timeout is reduced to the
+server ceiling and counted with the `timeout_clamped` reason label. Both values
+are configurable through environment variables.
 
 **Response:**
 

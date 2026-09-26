@@ -11,7 +11,9 @@ from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
-_FIXTURES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fixtures")
+_FIXTURES_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fixtures"
+)
 
 
 class TestProvider:
@@ -29,7 +31,9 @@ class TestProvider:
         self._fixtures_dir = fixtures_dir
         self._cache: Dict[str, Any] = {}
 
-    def get_response(self, endpoint: str, request_data: Dict[str, Any]) -> Dict[str, Any]:
+    def get_response(
+        self, endpoint: str, request_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         fixture = self._load_fixtures(endpoint)
         if endpoint == "proof_of_life":
             idx = self._select_proof_of_life_fixture(fixture, request_data)
@@ -40,11 +44,15 @@ class TestProvider:
         selected = fixture[idx]
         logger.info(
             "TestProvider returning fixture %d/%d for endpoint=%s",
-            idx, len(fixture), endpoint,
+            idx,
+            len(fixture),
+            endpoint,
         )
         return dict(selected)
 
-    def _select_proof_of_life_fixture(self, fixture: list, request_data: Dict[str, Any]) -> int:
+    def _select_proof_of_life_fixture(
+        self, fixture: list, request_data: Dict[str, Any]
+    ) -> int:
         scenario = str(request_data.get("scenario", "")).strip().lower()
         if scenario:
             for idx, candidate in enumerate(fixture):

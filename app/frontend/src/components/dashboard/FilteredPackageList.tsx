@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useAidPackages } from '@/hooks/useAidPackages';
+import { Pagination } from '@/components/Pagination';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { getAppUserRole, isOperationsRole } from '@/lib/app-role';
 import type { AidPackage, AidPackageFilters, AidPackageStatus } from '@/types/aid-package';
@@ -59,10 +60,16 @@ const PackageCard = React.memo(function PackageCard({ pkg }: { pkg: AidPackage }
 
 interface FilteredPackageListProps {
   filters: AidPackageFilters;
+  page?: number;
+  size?: number;
+  onPageChange?: (page: number) => void;
 }
 
-export const FilteredPackageList = React.memo(function FilteredPackageList({ filters }: FilteredPackageListProps) {
-  const { data: packages, isLoading, error } = useAidPackages(filters);
+export const FilteredPackageList = React.memo(function FilteredPackageList({ filters, page = 1, size = 10, onPageChange }: FilteredPackageListProps) {
+  const { data: response, isLoading, error } = useAidPackages(filters, { page, size });
+  const packages = response?.data ?? [];
+  const totalItems = response?.total ?? 0;
+  const totalPages = response?.totalPages ?? 1;
   const role = getAppUserRole();
   const hasFilters = Boolean(filters.search || filters.status || filters.token);
 
@@ -214,6 +221,17 @@ export const FilteredPackageList = React.memo(function FilteredPackageList({ fil
           />
         )}
       </div>
+
+      {/* Pagination */}
+      {!isLoading && totalItems > 0 && (
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={size}
+          totalItems={totalItems}
+          onPageChange={onPageChange ?? (() => {})}
+        />
+      )}
     </>
   );
 });

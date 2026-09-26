@@ -28,22 +28,56 @@ export class RecipientImportProcessor extends WorkerHost {
         ` (${job.data.totalRows} rows from ${job.data.fileName})`,
     );
 
-    await this.recipientImportService.setJobProcessing(jobId);
+    const started = await this.recipientImportService.setJobProcessing(jobId);
+    if (!started) {
+      this.logger.log(`Import job ${jobId} was cancelled before processing`);
+      return;
+    }
 
-    const allErrors: ImportError[] = [];
-    let processedRows = 0;
-    let errorRows = 0;
+    const resumeState = await this.recipientImportService.getResumeState(jobId);
+    if (resumeState.status === 'cancelled') {
+      this.logger.log(`Import job ${jobId} was cancelled before processing`);
+      return;
+    }
+
+    const allErrors: ImportError[] = [...resumeState.errors];
+    let processedRows = resumeState.processedRows;
+    let errorRows = resumeState.errorRows;
+    const filePath = resumeState.filePath ?? job.data.filePath;
 
     try {
-      const fileContent = readFileSync(job.data.filePath, 'utf-8');
+      const fileContent = readFileSync(filePath, 'utf-8');
       const { headers, rows } =
         this.recipientImportService.parseCsv(fileContent);
 
-      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      for (
+        let i = resumeState.checkpointRow;
+        i < rows.length;
+        i += BATCH_SIZE
+      ) {
         const batch = rows.slice(i, i + BATCH_SIZE);
 
         for (let j = 0; j < batch.length; j++) {
-          const rowIndex = i + j + 2; // +2 for 1-indexed + header row
+          if (
+            await this.recipientImportService.isCancellationRequested(jobId)
+          ) {
+            this.logger.log(
+              `Import job ${jobId} cancelled at row checkpoint ${processedRows}`,
+            );
+            return;
+          }
+
+          const rowIndex = i + j + 2;
+          const rowOffset = i + j + 1;
+          const alreadyImported =
+            await this.recipientImportService.hasImportedRow(jobId, rowIndex);
+
+          if (alreadyImported) {
+            processedRows = Math.max(processedRows, rowOffset);
+            await this.checkpoint(job, processedRows, errorRows, allErrors);
+            continue;
+          }
+
           const validation = this.recipientImportService.validateRow(
             batch[j],
             headers,
@@ -54,6 +88,7 @@ export class RecipientImportProcessor extends WorkerHost {
             allErrors.push(...validation.errors);
             errorRows++;
             processedRows++;
+            await this.checkpoint(job, processedRows, errorRows, allErrors);
             continue;
           }
 
@@ -63,11 +98,19 @@ export class RecipientImportProcessor extends WorkerHost {
               amount: validation.amount!,
               recipientRef: validation.recipientRef!,
               evidenceRef: validation.evidenceRef,
+              importJobId: jobId,
+              importRowNumber: rowIndex,
               tokenAddress:
                 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
             });
             processedRows++;
           } catch (error) {
+            if (this.isDuplicateImportedRow(error)) {
+              processedRows++;
+              await this.checkpoint(job, processedRows, errorRows, allErrors);
+              continue;
+            }
+
             allErrors.push({
               row: rowIndex,
               field: 'claim',
@@ -79,20 +122,9 @@ export class RecipientImportProcessor extends WorkerHost {
             errorRows++;
             processedRows++;
           }
+
+          await this.checkpoint(job, processedRows, errorRows, allErrors);
         }
-
-        await this.recipientImportService.updateJobProgress(
-          jobId,
-          processedRows,
-          errorRows,
-          allErrors,
-        );
-
-        await job.updateProgress({
-          processedRows,
-          errorRows,
-          totalRows: job.data.totalRows,
-        });
       }
 
       const reportUrl =
@@ -121,10 +153,52 @@ export class RecipientImportProcessor extends WorkerHost {
         errorRows,
         allErrors,
         null,
+        'failed',
       );
 
       throw error;
     }
+  }
+
+  private async checkpoint(
+    job: Job<ImportJobData, void, string>,
+    processedRows: number,
+    errorRows: number,
+    errors: ImportError[],
+  ): Promise<void> {
+    const jobId = job.id!;
+    await this.recipientImportService.updateJobProgress(
+      jobId,
+      processedRows,
+      errorRows,
+      errors,
+    );
+
+    await job.updateProgress({
+      processedRows,
+      errorRows,
+      totalRows: job.data.totalRows,
+    });
+  }
+
+  private isDuplicateImportedRow(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const maybePrismaError = error as {
+      code?: string;
+      meta?: { target?: string | string[] };
+    };
+    const target = maybePrismaError.meta?.target;
+
+    return (
+      maybePrismaError.code === 'P2002' &&
+      ((Array.isArray(target) &&
+        target.includes('importJobId') &&
+        target.includes('importRowNumber')) ||
+        target === 'Claim_importJobId_importRowNumber_key')
+    );
   }
 
   @OnWorkerEvent('completed')

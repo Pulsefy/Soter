@@ -430,7 +430,7 @@ export class CancelAndReissueService {
         entity: 'claim',
         entityId,
         action: event.type,
-        metadata: event as unknown as Record<string, unknown>,
+        metadata: event,
       });
     } catch (err) {
       // Audit failures are logged but must not surface to the caller

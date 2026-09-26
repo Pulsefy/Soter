@@ -82,8 +82,7 @@ _PATTERNS: List[Pattern[str]] = [
     ),
     # IPv4 addresses (strict octets to avoid matching version strings).
     re.compile(
-        r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}"
-        r"(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
+        r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}" r"(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
     ),
 ]
 

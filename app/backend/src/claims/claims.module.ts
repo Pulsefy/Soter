@@ -10,6 +10,7 @@ import { AuditModule } from '../audit/audit.module';
 import { EncryptionModule } from '../common/encryption/encryption.module';
 import { BudgetService } from '../common/budget/budget.service';
 import { CommonServicesModule } from '../common/services/common-services.module';
+import { VerificationModule } from '../verification/verification.module';
 
 @Module({
   imports: [
@@ -20,9 +21,11 @@ import { CommonServicesModule } from '../common/services/common-services.module'
     AuditModule,
     EncryptionModule,
     CommonServicesModule,
+    VerificationModule,
   ],
   controllers: [ClaimsController],
   providers: [ClaimsService, CancelAndReissueService, BudgetService],
   exports: [CancelAndReissueService],
 })
 export class ClaimsModule {}
+

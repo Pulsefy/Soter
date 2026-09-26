@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Request } from 'express';
@@ -28,10 +23,18 @@ import {
 import { AuditService } from '../audit/audit.service';
 import { firstValueFrom } from 'rxjs';
 import OpenAI from 'openai';
+import {
+  AppException,
+  INTEGRATION_ERROR_CODES,
+} from '../common/constants/integration-error-codes';
 import * as crypto from 'crypto';
 import { CircuitBreaker } from '../common/utils/circuit-breaker.util';
 import { VerificationMetadataService } from './metadata.service';
 import { VerificationResultDto } from './dto/verification-result.dto';
+import {
+  mergeClaimAnchorMetadata,
+  toPersistedVerificationResult,
+} from './verification-result.persistence';
 import { CorrelationPropagationUtil } from '../common/utils/correlation-propagation.util';
 import { MetricsService } from '../observability/metrics/metrics.service';
 
@@ -218,7 +221,12 @@ export class VerificationService {
     });
 
     if (!claim) {
-      throw new NotFoundException(`Claim with ID ${claimId} not found`);
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+        404,
+        `Claim with ID ${claimId} not found`,
+        { claimId },
+      );
     }
 
     if (claim.status === 'verified') {
@@ -298,7 +306,12 @@ export class VerificationService {
     });
 
     if (!claim) {
-      throw new NotFoundException(`Claim with ID ${claimId} not found`);
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+        404,
+        `Claim with ID ${claimId} not found`,
+        { claimId },
+      );
     }
 
     let result: VerificationResult;
@@ -321,7 +334,7 @@ export class VerificationService {
     const shouldVerify = enhancedResult.score >= this.verificationThreshold;
 
     // Build anchor metadata to persist
-    const anchorMetadataToPersist = anchorMetadata
+    const anchorMetadataToPersist: Prisma.InputJsonObject | null = anchorMetadata
       ? {
           campaignRef: anchorMetadata.campaignRef ?? null,
           claimId: anchorMetadata.claimId ?? null,
@@ -330,15 +343,25 @@ export class VerificationService {
         }
       : null;
 
-    // Update claim with verification result including metadata
+    // Persist the outcome on the claim itself. The claim row - not the queue,
+    // and not an in-flight job - is what operators read and what
+    // ClaimsService.verify() gates on, so a completed verification is only
+    // durable once it lands here. The write merges, so it can neither erase
+    // the anchor metadata the AI service wrote nor an earlier outcome.
+    const persistedVerification = toPersistedVerificationResult(
+      enhancedResult,
+      this.verificationThreshold,
+    );
+
     await this.prisma.claim.update({
       where: { id: claimId },
       data: {
         status: shouldVerify ? 'verified' : 'requested',
-        anchorMetadata:
-          anchorMetadataToPersist === null
-            ? Prisma.JsonNull
-            : (anchorMetadataToPersist as Prisma.InputJsonValue),
+        anchorMetadata: mergeClaimAnchorMetadata(
+          claim.anchorMetadata,
+          anchorMetadataToPersist,
+          persistedVerification,
+        ),
       },
     });
 
@@ -664,17 +687,34 @@ the JSON verdict.
         message: string;
       };
       if (err.response) {
-        throw new Error(
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_INVALID_RESPONSE,
+          502,
           `OCR service returned ${err.response.status}: ` +
             `${JSON.stringify(err.response.data)}`,
+          { httpStatus: err.response.status, body: err.response.data },
         );
-      } else if (err.code === 'ECONNREFUSED') {
-        throw new Error(
+      } else if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_SERVICE_UNAVAILABLE,
+          503,
           `OCR service unavailable at ${this.aiServiceUrl}. ` +
             `Is the Python ai-service running?`,
+          { serviceUrl: this.aiServiceUrl },
+        );
+      } else if (err.message?.includes('timeout') || err.code === 'ETIMEDOUT') {
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_SERVICE_TIMEOUT,
+          504,
+          `OCR service call timed out: ${err.message}`,
+          { serviceUrl: this.aiServiceUrl },
         );
       } else {
-        throw new Error(`OCR service call failed: ${err.message}`);
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_SERVICE_UNAVAILABLE,
+          503,
+          `OCR service call failed: ${err.message}`,
+        );
       }
     }
   }
@@ -928,7 +968,12 @@ the JSON verdict.
   async findOne(id: string) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
-      throw new NotFoundException(`Claim with ID ${id} not found`);
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+        404,
+        `Claim with ID ${id} not found`,
+        { claimId: id },
+      );
     }
     return claim;
   }
@@ -1166,12 +1211,20 @@ the JSON verdict.
         typeof parsed.createdAt !== 'string' ||
         typeof parsed.id !== 'string'
       ) {
-        throw new BadRequestException('Invalid review queue cursor');
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+          400,
+          'Invalid review queue cursor',
+        );
       }
 
       const createdAt = new Date(parsed.createdAt);
       if (Number.isNaN(createdAt.getTime())) {
-        throw new BadRequestException('Invalid review queue cursor');
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+          400,
+          'Invalid review queue cursor',
+        );
       }
 
       return {
@@ -1179,11 +1232,16 @@ the JSON verdict.
         id: parsed.id,
       };
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof AppException) {
         throw error;
       }
 
-      throw new BadRequestException('Invalid review queue cursor');
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+        400,
+        'Invalid review queue cursor',
+      );
     }
   }
 }
+

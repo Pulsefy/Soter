@@ -1,310 +1,377 @@
+-- CreateEnum
+CREATE TYPE "CampaignStatus" AS ENUM ('draft', 'active', 'paused', 'completed', 'archived');
+
+-- CreateEnum
+CREATE TYPE "ClaimStatus" AS ENUM ('requested', 'verified', 'approved', 'disbursed', 'archived', 'cancelled');
+
+-- CreateEnum
+CREATE TYPE "VerificationChannel" AS ENUM ('email', 'phone');
+
+-- CreateEnum
+CREATE TYPE "VerificationSessionStatus" AS ENUM ('pending', 'completed', 'expired', 'failed');
+
+-- CreateEnum
+CREATE TYPE "SessionType" AS ENUM ('otp_verification', 'claim_verification', 'multi_step_verification');
+
+-- CreateEnum
+CREATE TYPE "SessionStepStatus" AS ENUM ('pending', 'in_progress', 'completed', 'failed', 'skipped');
+
+-- CreateEnum
+CREATE TYPE "VerificationStatus" AS ENUM ('pending', 'pending_review', 'approved', 'rejected', 'needs_resubmission');
+
+-- CreateEnum
+CREATE TYPE "PurgeStrategy" AS ENUM ('soft_delete', 'hard_delete', 'anonymize');
+
+-- CreateEnum
+CREATE TYPE "InviteStatus" AS ENUM ('pending', 'accepted', 'revoked', 'expired');
+
+-- CreateEnum
+CREATE TYPE "AppRole" AS ENUM ('admin', 'operator', 'client', 'ngo');
+
+-- CreateEnum
+CREATE TYPE "EvidenceStatus" AS ENUM ('pending', 'uploading', 'completed', 'failed');
+
+-- CreateEnum
+CREATE TYPE "NotificationOutboxStatus" AS ENUM ('pending', 'enqueued', 'sent', 'failed');
+
+-- CreateEnum
+CREATE TYPE "RegistryEntityType" AS ENUM ('organization', 'location', 'asset', 'project');
+
+-- CreateEnum
+CREATE TYPE "EntityLinkSourceType" AS ENUM ('campaign', 'claim', 'verification');
+
 -- CreateTable
 CREATE TABLE "AidPackage" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "id" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'draft',
     "campaignId" TEXT,
-    "totalAmount" REAL NOT NULL DEFAULT 0,
-    "claimedAmount" REAL NOT NULL DEFAULT 0,
-    "remainingAmount" REAL NOT NULL DEFAULT 0,
-    CONSTRAINT "AidPackage_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "totalAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "claimedAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "remainingAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+
+    CONSTRAINT "AidPackage_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "BalanceLedger" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "campaignId" TEXT NOT NULL,
     "claimId" TEXT,
     "eventType" TEXT NOT NULL,
-    "amount" REAL NOT NULL,
+    "amount" DOUBLE PRECISION NOT NULL,
     "note" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "BalanceLedger_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
-    CONSTRAINT "BalanceLedger_claimId_fkey" FOREIGN KEY ("claimId") REFERENCES "Claim" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "BalanceLedger_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "VerificationSession" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "channel" TEXT NOT NULL,
+    "id" TEXT NOT NULL,
+    "channel" "VerificationChannel" NOT NULL,
     "identifier" TEXT NOT NULL,
     "code" TEXT NOT NULL,
     "attempts" INTEGER NOT NULL DEFAULT 0,
     "resendCount" INTEGER NOT NULL DEFAULT 0,
-    "status" TEXT NOT NULL DEFAULT 'pending',
-    "expiresAt" DATETIME NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    "deletedAt" DATETIME,
+    "status" "VerificationSessionStatus" NOT NULL DEFAULT 'pending',
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "deletedAt" TIMESTAMP(3),
     "orgId" TEXT,
-    CONSTRAINT "VerificationSession_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+
+    CONSTRAINT "VerificationSession_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Session" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "type" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'pending',
+    "id" TEXT NOT NULL,
+    "type" "SessionType" NOT NULL,
+    "status" "VerificationSessionStatus" NOT NULL DEFAULT 'pending',
     "contextId" TEXT,
     "metadata" JSONB,
-    "expiresAt" DATETIME,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    "completedAt" DATETIME,
-    "failedAt" DATETIME,
-    "deletedAt" DATETIME,
+    "expiresAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "completedAt" TIMESTAMP(3),
+    "failedAt" TIMESTAMP(3),
+    "deletedAt" TIMESTAMP(3),
     "orgId" TEXT,
-    CONSTRAINT "Session_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+
+    CONSTRAINT "Session_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "SessionStep" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "sessionId" TEXT NOT NULL,
     "stepName" TEXT NOT NULL,
     "stepOrder" INTEGER NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'pending',
+    "status" "SessionStepStatus" NOT NULL DEFAULT 'pending',
     "input" JSONB,
     "output" JSONB,
     "error" TEXT,
     "attempts" INTEGER NOT NULL DEFAULT 0,
     "maxAttempts" INTEGER NOT NULL DEFAULT 3,
-    "startedAt" DATETIME,
-    "completedAt" DATETIME,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "SessionStep_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "Session" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "startedAt" TIMESTAMP(3),
+    "completedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "SessionStep_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "SessionSubmission" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "sessionId" TEXT NOT NULL,
     "stepId" TEXT,
     "submissionKey" TEXT NOT NULL,
     "payload" JSONB NOT NULL,
     "response" JSONB,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "deletedAt" DATETIME,
-    CONSTRAINT "SessionSubmission_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "Session" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT "SessionSubmission_stepId_fkey" FOREIGN KEY ("stepId") REFERENCES "SessionStep" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deletedAt" TIMESTAMP(3),
+
+    CONSTRAINT "SessionSubmission_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "VerificationRequest" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    "deletedAt" DATETIME,
-    "status" TEXT NOT NULL DEFAULT 'pending',
+    "id" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "deletedAt" TIMESTAMP(3),
+    "status" "VerificationStatus" NOT NULL DEFAULT 'pending',
     "orgId" TEXT,
-    "reviewedAt" DATETIME,
+    "reviewedAt" TIMESTAMP(3),
     "reviewedBy" TEXT,
     "rejectionReason" TEXT,
     "nextStepMessage" TEXT,
-    CONSTRAINT "VerificationRequest_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+
+    CONSTRAINT "VerificationRequest_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Claim" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    "deletedAt" DATETIME,
-    "status" TEXT NOT NULL DEFAULT 'requested',
+    "id" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "deletedAt" TIMESTAMP(3),
+    "status" "ClaimStatus" NOT NULL DEFAULT 'requested',
     "campaignId" TEXT NOT NULL,
-    "amount" REAL NOT NULL,
+    "amount" DOUBLE PRECISION NOT NULL,
     "recipientRef" TEXT NOT NULL,
     "evidenceRef" TEXT,
-    "expiresAt" DATETIME,
-    "cancelledAt" DATETIME,
+    "expiresAt" TIMESTAMP(3),
+    "cancelledAt" TIMESTAMP(3),
     "cancelledBy" TEXT,
     "cancelReason" TEXT,
     "reissuedFromId" TEXT,
-    CONSTRAINT "Claim_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
-    CONSTRAINT "Claim_reissuedFromId_fkey" FOREIGN KEY ("reissuedFromId") REFERENCES "Claim" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+
+    CONSTRAINT "Claim_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "RetentionPolicy" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "entity" TEXT NOT NULL,
     "retentionDays" INTEGER NOT NULL,
-    "strategy" TEXT NOT NULL DEFAULT 'soft_delete',
+    "strategy" "PurgeStrategy" NOT NULL DEFAULT 'soft_delete',
     "enabled" BOOLEAN NOT NULL DEFAULT true,
     "description" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RetentionPolicy_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "AuditLog" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "actorId" TEXT NOT NULL,
     "entity" TEXT NOT NULL,
     "entityId" TEXT NOT NULL,
     "action" TEXT NOT NULL,
-    "timestamp" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "metadata" JSONB,
-    "deletedAt" DATETIME
+    "deletedAt" TIMESTAMP(3),
+
+    CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Organization" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    "deletedAt" DATETIME
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "deletedAt" TIMESTAMP(3),
+
+    CONSTRAINT "Organization_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "User" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "email" TEXT NOT NULL,
-    "role" TEXT NOT NULL DEFAULT 'client',
+    "role" "AppRole" NOT NULL DEFAULT 'client',
     "orgId" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "User_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Invite" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "orgId" TEXT NOT NULL,
     "email" TEXT NOT NULL,
-    "role" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'pending',
-    "expiresAt" DATETIME NOT NULL,
+    "role" "AppRole" NOT NULL,
+    "status" "InviteStatus" NOT NULL DEFAULT 'pending',
+    "expiresAt" TIMESTAMP(3) NOT NULL,
     "createdBy" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "Invite_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Invite_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Campaign" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'draft',
-    "budget" REAL NOT NULL,
+    "status" "CampaignStatus" NOT NULL DEFAULT 'draft',
+    "budget" DOUBLE PRECISION NOT NULL,
     "metadata" JSONB,
     "ngoId" TEXT,
     "orgId" TEXT,
-    "archivedAt" DATETIME,
-    "deletedAt" DATETIME,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "Campaign_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "archivedAt" TIMESTAMP(3),
+    "deletedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Campaign_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Role" (
-    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-    "name" TEXT NOT NULL
+    "id" SERIAL NOT NULL,
+    "name" TEXT NOT NULL,
+
+    CONSTRAINT "Role_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "ApiKey" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "key" TEXT,
     "keyHash" TEXT,
     "keyPreview" TEXT,
-    "role" TEXT NOT NULL,
+    "role" "AppRole" NOT NULL,
     "ngoId" TEXT,
     "orgId" TEXT,
     "description" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    "lastUsedAt" DATETIME,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "lastUsedAt" TIMESTAMP(3),
     "createdBy" TEXT,
-    "revokedAt" DATETIME,
+    "revokedAt" TIMESTAMP(3),
     "revokedBy" TEXT,
     "revokedReason" TEXT,
     "replacedById" TEXT,
-    CONSTRAINT "ApiKey_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
-    CONSTRAINT "ApiKey_replacedById_fkey" FOREIGN KEY ("replacedById") REFERENCES "ApiKey" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+
+    CONSTRAINT "ApiKey_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "InternalNote" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "entityType" TEXT NOT NULL,
     "entityId" TEXT NOT NULL,
     "content" TEXT NOT NULL,
     "authorId" TEXT NOT NULL,
     "category" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "InternalNote_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "EvidenceQueueItem" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "fileName" TEXT NOT NULL,
     "filePath" TEXT,
     "fileHash" TEXT NOT NULL,
     "fingerprint" TEXT,
     "mimeType" TEXT NOT NULL,
     "size" INTEGER NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'pending',
+    "status" "EvidenceStatus" NOT NULL DEFAULT 'pending',
     "retryCount" INTEGER NOT NULL DEFAULT 0,
     "lastError" TEXT,
     "ownerId" TEXT NOT NULL,
     "orgId" TEXT,
     "nearDuplicateOf" TEXT,
     "metadata" JSONB,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "EvidenceQueueItem_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "EvidenceQueueItem_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "NotificationOutbox" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "recipient" TEXT NOT NULL,
     "subject" TEXT,
     "message" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'pending',
+    "status" "NotificationOutboxStatus" NOT NULL DEFAULT 'pending',
     "retryCount" INTEGER NOT NULL DEFAULT 0,
     "lastError" TEXT,
-    "lastAttemptAt" DATETIME,
-    "scheduledFor" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "sentAt" DATETIME,
+    "lastAttemptAt" TIMESTAMP(3),
+    "scheduledFor" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "sentAt" TIMESTAMP(3),
     "jobId" TEXT,
     "metadata" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "NotificationOutbox_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "IdempotencyKey" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "key" TEXT NOT NULL,
     "responseStatus" INTEGER NOT NULL,
     "responseBody" TEXT NOT NULL,
-    "expiresAt" DATETIME NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "IdempotencyKey_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "RegistryOrganization" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "registryId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "aliases" TEXT,
     "externalId" TEXT,
     "metadata" JSONB,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RegistryOrganization_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "RegistryLocation" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "registryId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "type" TEXT,
@@ -314,63 +381,67 @@ CREATE TABLE "RegistryLocation" (
     "aliases" TEXT,
     "externalId" TEXT,
     "metadata" JSONB,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RegistryLocation_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "RegistryAsset" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "registryId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "type" TEXT,
     "category" TEXT,
     "externalId" TEXT,
     "metadata" JSONB,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RegistryAsset_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "RegistryProject" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "registryId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "description" TEXT,
     "status" TEXT NOT NULL DEFAULT 'active',
-    "startDate" DATETIME,
-    "endDate" DATETIME,
+    "startDate" TIMESTAMP(3),
+    "endDate" TIMESTAMP(3),
     "externalId" TEXT,
     "metadata" JSONB,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RegistryProject_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "EntityLink" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    "sourceType" TEXT NOT NULL,
+    "id" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "sourceType" "EntityLinkSourceType" NOT NULL,
     "sourceId" TEXT NOT NULL,
     "extractedName" TEXT NOT NULL,
     "extractedType" TEXT,
-    "entityType" TEXT NOT NULL,
+    "entityType" "RegistryEntityType" NOT NULL,
     "organizationId" TEXT,
     "locationId" TEXT,
     "assetId" TEXT,
     "projectId" TEXT,
-    "confidenceScore" REAL NOT NULL,
+    "confidenceScore" DOUBLE PRECISION NOT NULL,
     "matchMethod" TEXT,
     "reviewedBy" TEXT,
-    "reviewedAt" DATETIME,
+    "reviewedAt" TIMESTAMP(3),
     "reviewNotes" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "metadata" JSONB,
-    CONSTRAINT "EntityLink_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "RegistryOrganization" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
-    CONSTRAINT "EntityLink_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "RegistryLocation" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
-    CONSTRAINT "EntityLink_assetId_fkey" FOREIGN KEY ("assetId") REFERENCES "RegistryAsset" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
-    CONSTRAINT "EntityLink_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "RegistryProject" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+
+    CONSTRAINT "EntityLink_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -660,3 +731,67 @@ CREATE INDEX "EntityLink_confidenceScore_idx" ON "EntityLink"("confidenceScore")
 
 -- CreateIndex
 CREATE INDEX "EntityLink_isActive_idx" ON "EntityLink"("isActive");
+
+-- AddForeignKey
+ALTER TABLE "AidPackage" ADD CONSTRAINT "AidPackage_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "BalanceLedger" ADD CONSTRAINT "BalanceLedger_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "BalanceLedger" ADD CONSTRAINT "BalanceLedger_claimId_fkey" FOREIGN KEY ("claimId") REFERENCES "Claim"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "VerificationSession" ADD CONSTRAINT "VerificationSession_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Session" ADD CONSTRAINT "Session_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SessionStep" ADD CONSTRAINT "SessionStep_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "Session"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SessionSubmission" ADD CONSTRAINT "SessionSubmission_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "Session"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SessionSubmission" ADD CONSTRAINT "SessionSubmission_stepId_fkey" FOREIGN KEY ("stepId") REFERENCES "SessionStep"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "VerificationRequest" ADD CONSTRAINT "VerificationRequest_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Claim" ADD CONSTRAINT "Claim_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Claim" ADD CONSTRAINT "Claim_reissuedFromId_fkey" FOREIGN KEY ("reissuedFromId") REFERENCES "Claim"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "User" ADD CONSTRAINT "User_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Invite" ADD CONSTRAINT "Invite_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Campaign" ADD CONSTRAINT "Campaign_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ApiKey" ADD CONSTRAINT "ApiKey_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ApiKey" ADD CONSTRAINT "ApiKey_replacedById_fkey" FOREIGN KEY ("replacedById") REFERENCES "ApiKey"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "EvidenceQueueItem" ADD CONSTRAINT "EvidenceQueueItem_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "EntityLink" ADD CONSTRAINT "EntityLink_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "RegistryOrganization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "EntityLink" ADD CONSTRAINT "EntityLink_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "RegistryLocation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "EntityLink" ADD CONSTRAINT "EntityLink_assetId_fkey" FOREIGN KEY ("assetId") REFERENCES "RegistryAsset"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "EntityLink" ADD CONSTRAINT "EntityLink_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "RegistryProject"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+

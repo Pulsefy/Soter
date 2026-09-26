@@ -74,6 +74,7 @@ jest.mock('fs/promises', () => ({
 }));
 
 jest.mock('fs', () => ({
+  ...jest.requireActual('fs'),
   existsSync: jest.fn(() => true),
   mkdirSync: jest.fn(),
 }));
@@ -155,6 +156,34 @@ describe('UploadSessionService', () => {
           'owner-1',
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects a disallowed extension even with an allowed mimeType', async () => {
+      await expect(
+        service.create(
+          {
+            fileName: 'evil.exe',
+            mimeType: 'text/plain',
+            totalSize: 10,
+            chunkSize: 10,
+          },
+          'owner-1',
+        ),
+      ).rejects.toThrow(/extension/i);
+    });
+
+    it('rejects an extension/mimeType mismatch (txt declared as pdf)', async () => {
+      await expect(
+        service.create(
+          {
+            fileName: 'note.txt',
+            mimeType: 'application/pdf',
+            totalSize: 10,
+            chunkSize: 10,
+          },
+          'owner-1',
+        ),
+      ).rejects.toThrow(/does not match/i);
     });
   });
 
@@ -309,6 +338,55 @@ describe('UploadSessionService', () => {
     it('cleans up Redis keys after finalization', async () => {
       await service.finalize('sess-1', 'owner-1');
       expect(mockStore.cleanupSession).toHaveBeenCalledWith('sess-1', 3);
+    });
+
+    it('aborts the session and rejects when assembled content does not match the declared mimeType', async () => {
+      mockStore.getSession.mockResolvedValue(
+        makeSession({ fileName: 'evidence.png', mimeType: 'image/png' }),
+      );
+      // Plain bytes, not a real PNG (no PNG magic-byte signature).
+      const fakeChunk = Buffer.alloc(100, 0x61);
+      mockStore.getAllChunks.mockResolvedValue([
+        fakeChunk,
+        fakeChunk,
+        fakeChunk,
+      ]);
+
+      await expect(service.finalize('sess-1', 'owner-1')).rejects.toThrow(
+        /do not match/i,
+      );
+
+      expect(mockStore.updateSessionStatus).toHaveBeenCalledWith(
+        'sess-1',
+        UploadSessionStatus.aborted,
+      );
+      expect(mockStore.cleanupSession).toHaveBeenCalledWith('sess-1', 3);
+      expect(mockPrisma.evidenceQueueItem.create).not.toHaveBeenCalled();
+      expect(fsPromises.writeFile).not.toHaveBeenCalled();
+    });
+
+    it('accepts assembled content whose magic bytes match the declared mimeType', async () => {
+      mockStore.getSession.mockResolvedValue(
+        makeSession({ fileName: 'evidence.png', mimeType: 'image/png' }),
+      );
+      const pngMagic = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ]);
+      const firstChunk = Buffer.concat([pngMagic, Buffer.alloc(92, 1)]);
+      const otherChunk = Buffer.alloc(100, 1);
+      mockStore.getAllChunks.mockResolvedValue([
+        firstChunk,
+        otherChunk,
+        otherChunk,
+      ]);
+
+      const result = await service.finalize('sess-1', 'owner-1');
+
+      expect(result).toMatchObject({ id: 'ev-1' });
+      expect(mockStore.updateSessionStatus).toHaveBeenCalledWith(
+        'sess-1',
+        UploadSessionStatus.completed,
+      );
     });
   });
 

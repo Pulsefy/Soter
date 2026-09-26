@@ -35,6 +35,19 @@ pnpm --filter backend prisma:generate
 pnpm --filter backend prisma:migrate
 ```
 
+If your change touches the aid_escrow contract interface (functions, structs,
+enums, error variants), re-export the contract spec and regenerate the bindings
+from it:
+
+```bash
+pnpm --filter backend contract:export     # app/onchain/.../interface.xdr
+pnpm --filter backend contract:generate   # src/onchain/generated/aid-escrow.contract.ts
+```
+
+Commit both files. CI runs `contract:check` (types vs. spec) and
+`contract:check:wasm` (spec vs. freshly built WASM) and fails on drift. Types
+live in `src/onchain/generated/aid-escrow.contract.ts`; never edit them by hand.
+
 ## Pull Request expectations
 
 Include all of the following in the PR description:
@@ -55,4 +68,5 @@ Include all of the following in the PR description:
 - [ ] `pnpm --filter backend test` passes
 - [ ] `pnpm --filter backend lint` passes
 - [ ] Database migration included if schema changed
+- [ ] Contract spec + bindings re-exported if the contract interface changed
 - [ ] `/health` returns `200` locally

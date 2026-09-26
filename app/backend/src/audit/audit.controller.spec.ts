@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditController } from './audit.controller';
 import { AuditService } from './audit.service';
+import { AuditChainService } from './audit-chain.service';
 import { MetricsService } from 'src/audit/metrics.service';
 
 describe('AuditController', () => {
@@ -37,6 +38,25 @@ describe('AuditController', () => {
     getMetrics: jest.fn().mockResolvedValue('# HELP ...'),
   };
 
+  const mockChainService = {
+    verifyChain: jest.fn().mockResolvedValue({
+      valid: true,
+      backfillPending: false,
+      sealedCount: 2,
+      legacyCount: 0,
+      skippedAnonymized: 0,
+      issues: [],
+      headSequence: '2',
+      headHash: 'a'.repeat(64),
+    }),
+    backfillChain: jest.fn().mockResolvedValue({
+      sealed: 0,
+      remaining: 0,
+      headSequence: '2',
+      headHash: 'a'.repeat(64),
+    }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuditController],
@@ -48,6 +68,10 @@ describe('AuditController', () => {
         {
           provide: AuditService,
           useValue: mockAuditService,
+        },
+        {
+          provide: AuditChainService,
+          useValue: mockChainService,
         },
       ],
     }).compile();
@@ -68,7 +92,7 @@ describe('AuditController', () => {
         setHeader: jest.fn(),
       } as any;
 
-      await controller.getLogs(query as any, res);
+      await controller.getLogs(query, res);
 
       expect(service.findLogs).toHaveBeenCalledWith(query);
       expect(res.setHeader).toHaveBeenCalledWith('X-Total-Count', '0');
@@ -98,7 +122,7 @@ describe('AuditController', () => {
     it('should return CSV string and set headers when format=csv', async () => {
       const res = makeRes();
       const returned = await controller.exportLogs(
-        { format: 'csv' } as any,
+        { format: 'csv' },
         res as any,
       );
 
@@ -118,13 +142,54 @@ describe('AuditController', () => {
     it('should pass from/to filters to exportLogs', async () => {
       const res = makeRes();
       await controller.exportLogs(
-        { from: '2024-01-01', to: '2024-12-31' } as any,
+        { from: '2024-01-01', to: '2024-12-31' },
         res as any,
       );
 
       expect(service.exportLogs).toHaveBeenCalledWith({
         from: '2024-01-01',
         to: '2024-12-31',
+      });
+    });
+  });
+
+  describe('getChainStatus', () => {
+    it('should return chain verification results from the chain service', async () => {
+      const result = await controller.getChainStatus();
+
+      expect(mockChainService.verifyChain).toHaveBeenCalledWith(undefined);
+      expect(result).toEqual({
+        valid: true,
+        backfillPending: false,
+        sealedCount: 2,
+        legacyCount: 0,
+        skippedAnonymized: 0,
+        issues: [],
+        headSequence: '2',
+        headHash: 'a'.repeat(64),
+      });
+    });
+
+    it('should pass a supplied expected head hash as the anchor', async () => {
+      const anchor = 'b'.repeat(64);
+      await controller.getChainStatus(anchor);
+
+      expect(mockChainService.verifyChain).toHaveBeenCalledWith({
+        expectedHeadHash: anchor,
+      });
+    });
+  });
+
+  describe('backfillChain', () => {
+    it('should delegate to the chain service backfill', async () => {
+      const result = await controller.backfillChain();
+
+      expect(mockChainService.backfillChain).toHaveBeenCalled();
+      expect(result).toEqual({
+        sealed: 0,
+        remaining: 0,
+        headSequence: '2',
+        headHash: 'a'.repeat(64),
       });
     });
   });

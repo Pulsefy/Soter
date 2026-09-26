@@ -215,6 +215,15 @@ export class ClaimAidPackageDto {
   })
   @IsString()
   packageId: string;
+
+  @ApiProperty({
+    description: 'Optional amount to claim (for partial/tranche claims)',
+    example: '500000000',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  amount?: string;
 }
 
 /**

@@ -38,6 +38,20 @@ const TestWrapper = ({ children }: { children: React.ReactNode }) => (
 
 describe('Version Management Integration', () => {
   beforeEach(() => {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: jest.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: jest.fn(),
+        removeListener: jest.fn(),
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+        dispatchEvent: jest.fn(),
+      })),
+    });
+
     // Clear localStorage before each test
     localStorage.clear();
   });
@@ -97,6 +111,8 @@ describe('Version Management Integration', () => {
         version: '1.5.0',
         title: "What's New",
         changes: ['Test feature'],
+        continueLabel: 'Continue',
+        changelogUrl: 'https://example.com/changelog',
       },
     });
 
@@ -127,6 +143,8 @@ describe('Version Management Integration', () => {
         version: '1.5.0',
         title: "What's New",
         changes: ['Test feature'],
+        continueLabel: 'Continue',
+        changelogUrl: 'https://example.com/changelog',
       },
     });
 
@@ -160,6 +178,12 @@ describe('Version Management Integration', () => {
         version: '1.5.0',
         title: "What's New",
         changes: ['Test feature'],
+        continueLabel: 'Continue',
+        changelogUrl: 'https://example.com/changelog',
+      },
+      forceUpgradeScreen: {
+        title: 'Upgrade Required',
+        message: 'Please update to continue',
       },
     });
 
@@ -187,6 +211,8 @@ describe('Version Management Integration', () => {
         version: '1.6.0',
         title: "What's New",
         changes: ['New feature'],
+        continueLabel: 'Continue',
+        changelogUrl: 'https://example.com/changelog',
       },
     });
 

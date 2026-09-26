@@ -10,10 +10,16 @@ from pydantic import BaseModel, Field
 class CreateUploadSessionRequest(BaseModel):
     """Request body for starting a new resumable upload session."""
 
-    filename: str = Field(..., min_length=1, max_length=255, examples=["evidence_photo.jpg"])
+    filename: str = Field(
+        ..., min_length=1, max_length=255, examples=["evidence_photo.jpg"]
+    )
     content_type: str = Field(..., min_length=1, examples=["image/jpeg"])
-    total_size: int = Field(..., gt=0, description="Total file size in bytes", examples=[1048576])
-    total_chunks: int = Field(..., gt=0, description="Number of chunks to be sent", examples=[10])
+    total_size: int = Field(
+        ..., gt=0, description="Total file size in bytes", examples=[1048576]
+    )
+    total_chunks: int = Field(
+        ..., gt=0, description="Number of chunks to be sent", examples=[10]
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -22,7 +28,7 @@ class CreateUploadSessionRequest(BaseModel):
                     "filename": "evidence_photo.jpg",
                     "content_type": "image/jpeg",
                     "total_size": 1048576,
-                    "total_chunks": 10
+                    "total_chunks": 10,
                 }
             ]
         }
@@ -55,7 +61,7 @@ class UploadSessionResponse(BaseModel):
                     "received_chunks": [0, 1, 2],
                     "status": "in_progress",
                     "expires_at": 1719784800.0,
-                    "completed": False
+                    "completed": False,
                 }
             ]
         }
@@ -79,7 +85,7 @@ class ChunkUploadResponse(BaseModel):
                     "chunk_index": 3,
                     "received_chunks": [0, 1, 2, 3],
                     "remaining_chunks": 6,
-                    "status": "in_progress"
+                    "status": "in_progress",
                 }
             ]
         }
@@ -105,7 +111,7 @@ class FinalizeUploadResponse(BaseModel):
                     "filename": "evidence_photo.jpg",
                     "content_type": "image/jpeg",
                     "total_size": 1048576,
-                    "status": "completed"
+                    "status": "completed",
                 }
             ]
         }

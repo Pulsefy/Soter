@@ -27,7 +27,7 @@ import {
 } from '@nestjs/swagger';
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
-import { BackfillCheckpointService } from './backfill-checkpoint.service';
+import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 
@@ -37,7 +37,7 @@ export class LedgerAdminController {
   constructor(
     private readonly backfillService: LedgerBackfillService,
     private readonly reconciliationService: LedgerReconciliationService,
-    private readonly checkpointService: BackfillCheckpointService,
+    private readonly sorobanTransactionLifecycleService: SorobanTransactionLifecycleService,
   ) {}
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -326,5 +326,78 @@ export class LedgerAdminController {
       throw new NotFoundException(`Reconciliation job not found: ${jobId}`);
     }
     return status;
+  }
+
+  @Get('soroban/stuck')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'List stuck Soroban transactions',
+    description:
+      'Returns Soroban transactions that have been in a non-terminal state (pending or submitted) longer than the configured threshold (STUCK_TRANSACTION_THRESHOLD_MS). Each transaction is classified as `retryable` (expected to self-heal on a future retry) or `terminal` (non-retryable / retries exhausted, requiring operator intervention).',
+  })
+  @ApiOkResponse({
+    description: 'Stuck transactions retrieved successfully.',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          stuckCount: 2,
+          retryableCount: 1,
+          terminalCount: 1,
+          thresholdMs: 300000,
+          byOperation: {
+            create_claim: 1,
+            disburse_claim: 1,
+            init_escrow: 0,
+          },
+          transactions: [
+            {
+              id: 'tx_123',
+              operation: 'create_claim',
+              status: 'pending',
+              errorType: 'network_timeout',
+              lastError: 'timeout waiting for response',
+              isRetryable: true,
+              attemptCount: 2,
+              maxAttempts: 5,
+              classification: 'retryable',
+              stuckAgeMs: 600000,
+              updatedAt: '2026-08-25T20:00:00.000Z',
+              createdAt: '2026-08-25T19:50:00.000Z',
+              claimId: 'claim_456',
+              correlationId: 'corr_789',
+            },
+            {
+              id: 'tx_456',
+              operation: 'disburse_claim',
+              status: 'submitted',
+              errorType: null,
+              lastError: 'NotAuthorized',
+              isRetryable: false,
+              attemptCount: 5,
+              maxAttempts: 5,
+              classification: 'terminal',
+              stuckAgeMs: 900000,
+              updatedAt: '2026-08-25T19:45:00.000Z',
+              createdAt: '2026-08-25T19:30:00.000Z',
+              claimId: 'claim_789',
+              correlationId: 'corr_790',
+            },
+          ],
+        },
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - admin role required.',
+  })
+  async getStuckSorobanTransactions() {
+    const result =
+      await this.sorobanTransactionLifecycleService.detectStuckTransactions();
+    return { success: true, data: result };
   }
 }

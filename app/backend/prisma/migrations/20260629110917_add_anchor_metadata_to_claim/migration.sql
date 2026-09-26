@@ -1,2 +1,3 @@
--- AddColumn
-ALTER TABLE "Claim" ADD COLUMN "anchorMetadata" JSONB;
+-- AlterTable
+ALTER TABLE "Claim" ADD COLUMN     "anchorMetadata" JSONB;
+

@@ -15,8 +15,11 @@ import { TaskItem, fetchTaskList, getMockTaskList } from '../services/taskApi';
 import { cacheTaskList, loadCachedTaskList, getTaskCacheTimestamp } from '../services/taskCache';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { OfflineBanner } from '../components/OfflineBanner';
+import { DataFreshnessIndicator } from '../components/DataFreshnessIndicator';
 import { useTheme } from '../theme/ThemeContext';
 import { AppColors } from '../theme/useAppTheme';
+import { useTranslation } from '../i18n/useTranslation';
+import { formatDate } from '../i18n/formatters';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TaskList'>;
 
@@ -32,19 +35,20 @@ const DUE_STATE_COLORS: Record<string, string> = {
   'upcoming': '#2563EB',
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  'completed': 'Completed',
-  'in-progress': 'In Progress',
-  'pending': 'Pending',
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  'completed': 'tasks.completed',
+  'in-progress': 'tasks.inProgress',
+  'pending': 'tasks.pending',
 };
 
-const DUE_STATE_LABELS: Record<string, string> = {
-  'due-today': 'Due Today',
-  'overdue': 'Overdue',
-  'upcoming': 'Upcoming',
+const DUE_STATE_LABEL_KEYS: Record<string, string> = {
+  'due-today': 'tasks.dueToday',
+  'overdue': 'tasks.overdue',
+  'upcoming': 'tasks.upcoming',
 };
 
 export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
+  const { t } = useTranslation();
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
@@ -53,6 +57,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [isCached, setIsCached] = useState(false);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
 
   const loadData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -60,11 +65,13 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
 
     try {
       const fresh = await fetchTaskList();
+      if (isRefresh) setRefreshMessage(t('tasks.refreshed'));
       setTaskList(fresh);
       setIsCached(false);
       await cacheTaskList(fresh);
       setCachedAt(null);
     } catch {
+      if (isRefresh) setRefreshMessage(t('tasks.refreshFailed'));
       const cached = await loadCachedTaskList();
       if (cached && cached.length > 0) {
         setTaskList(cached);
@@ -82,7 +89,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t]);
 
   const handleReconnect = useCallback(async () => {
     if (!isCached) return;
@@ -98,9 +105,11 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
   const renderItem = ({ item }: { item: TaskItem }) => {
     const statusKey = item.status;
     const dueStateKey = item.dueState;
-    const statusLabel = STATUS_LABELS[statusKey] ?? item.status;
-    const dueStateLabel = DUE_STATE_LABELS[dueStateKey] ?? item.dueState;
-    const formattedDate = new Date(item.dueDate).toLocaleDateString();
+    const statusKeyPath = STATUS_LABEL_KEYS[statusKey];
+    const dueStateKeyPath = DUE_STATE_LABEL_KEYS[dueStateKey];
+    const statusLabel = statusKeyPath ? t(statusKeyPath) : item.status;
+    const dueStateLabel = dueStateKeyPath ? t(dueStateKeyPath) : item.dueState;
+    const formattedDate = formatDate(new Date(item.dueDate).getTime(), { ms: true });
 
     return (
       <View style={styles.card}>
@@ -128,33 +137,33 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         </View>
         
-        <Text style={styles.cardDescription}>Package ID: {item.assignedPackageId}</Text>
-        <Text style={styles.cardDescription}>Due: {formattedDate}</Text>
+        <Text style={styles.cardDescription}>{t('tasks.packageId', { id: item.assignedPackageId })}</Text>
+        <Text style={styles.cardDescription}>{t('tasks.due')}: {formattedDate}</Text>
         
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => navigation.navigate('AidDetails', { aidId: item.assignedPackageId })}
             accessibilityRole="button"
-            accessibilityLabel="View details"
+            accessibilityLabel={t('tasks.viewDetails')}
           >
-            <Text style={styles.actionButtonText}>Detail</Text>
+            <Text style={styles.actionButtonText}>{t('tasks.detail')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => navigation.navigate('Scanner')}
             accessibilityRole="button"
-            accessibilityLabel="Scan QR"
+            accessibilityLabel={t('tasks.scan')}
           >
-            <Text style={styles.actionButtonText}>Scan</Text>
+            <Text style={styles.actionButtonText}>{t('tasks.scan')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => navigation.navigate('AidDetails', { aidId: item.assignedPackageId })}
             accessibilityRole="button"
-            accessibilityLabel="Verify action"
+            accessibilityLabel={t('tasks.verify')}
           >
-            <Text style={styles.actionButtonText}>Verify</Text>
+            <Text style={styles.actionButtonText}>{t('tasks.verify')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -169,7 +178,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
           color={colors.textPrimary}
           accessibilityElementsHidden
         />
-        <Text style={styles.loadingText}>Loading tasks...</Text>
+        <Text style={styles.loadingText}>{t('tasks.loading')}</Text>
       </SafeAreaView>
     );
   }
@@ -177,6 +186,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <OfflineBanner visible={!isConnected} cachedAt={cachedAt} pendingCount={0} />
+      <DataFreshnessIndicator isCached={isCached} isConnected={isConnected} cachedAt={cachedAt} refreshing={refreshing} refreshMessage={refreshMessage} onRefresh={() => loadData(true)} />
 
       <FlatList
         data={taskList}
@@ -188,7 +198,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
             refreshing={refreshing}
             onRefresh={() => loadData(true)}
             tintColor={colors.textPrimary}
-            accessibilityLabel="Pull to refresh tasks"
+            accessibilityLabel={t('tasks.pullToRefresh')}
           />
         }
         ListHeaderComponent={
@@ -197,17 +207,17 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
               style={styles.staleNotice}
               accessible
               accessibilityRole="alert"
-              accessibilityLabel="Showing cached data. Pull down to refresh."
+              accessibilityLabel={t('tasks.cachedDataHint')}
             >
               <Text style={styles.staleText}>
-                Showing cached data. Pull to refresh.
+                {t('tasks.cachedData')}
               </Text>
             </View>
           ) : null
         }
         ListEmptyComponent={
-          <View style={styles.centered} accessible accessibilityLabel="No tasks found">
-            <Text style={styles.emptyText}>No tasks found.</Text>
+          <View style={styles.centered} accessible accessibilityLabel={t('tasks.noTasks')}>
+            <Text style={styles.emptyText}>{t('tasks.noTasks')}.</Text>
           </View>
         }
       />

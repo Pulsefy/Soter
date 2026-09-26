@@ -43,6 +43,33 @@ import {
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
+import {
+  Aggregates,
+  Package,
+  PackageStatus,
+} from './generated/aid-escrow.contract';
+import { getNetworkProfile } from 'src/config/network.config';
+
+/**
+ * Maps the contract's `PackageStatus` enum (generated from the on-chain spec)
+ * onto the backend's camel-cased status strings. Typed as a complete
+ * `Record`, so adding a status to the contract fails to compile here until the
+ * backend knows how to present it.
+ */
+const PACKAGE_STATUS_LABELS: Record<PackageStatus, AidPackage['status']> = {
+  [PackageStatus.Created]: 'Created',
+  [PackageStatus.Claimed]: 'Claimed',
+  [PackageStatus.Expired]: 'Expired',
+  [PackageStatus.Cancelled]: 'Cancelled',
+  [PackageStatus.Refunded]: 'Refunded',
+};
+
+function labelForStatusCode(code: number): AidPackage['status'] {
+  const match = Object.entries(PACKAGE_STATUS_LABELS).find(
+    ([statusCode]) => Number(statusCode) === code,
+  );
+  return match ? match[1] : 'Created';
+}
 
 @Injectable()
 export class SorobanAdapter implements OnchainAdapter {
@@ -62,13 +89,14 @@ export class SorobanAdapter implements OnchainAdapter {
       '',
     );
     this.network = this.configService.get<string>('SOROBAN_NETWORK', 'testnet');
+    const networkProfile = getNetworkProfile(this.network);
     this.rpcUrl = this.configService.get<string>(
       'STELLAR_RPC_URL',
-      'https://soroban-testnet.stellar.org',
+      networkProfile.defaultRpcUrl,
     );
     this.networkPassphrase = this.configService.get<string>(
       'STELLAR_NETWORK_PASSPHRASE',
-      'Test SDF Network ; September 2015',
+      networkProfile.passphrase,
     );
     this.adminSecretKey = this.configService.get<string>(
       'SOROBAN_ADMIN_SECRET_KEY',
@@ -92,14 +120,20 @@ export class SorobanAdapter implements OnchainAdapter {
         'SOROBAN_ADMIN_SECRET_KEY is not configured. Required for signing Soroban transactions.',
       );
     }
-    if (!this.rpcUrl.includes('testnet')) {
+    const expectedProfile = getNetworkProfile(this.network);
+    if (this.networkPassphrase !== expectedProfile.passphrase) {
       throw new Error(
-        `Cross-network mismatch: STELLAR_RPC_URL (${this.rpcUrl}) does not appear to be testnet.`,
+        `Cross-network mismatch: STELLAR_NETWORK_PASSPHRASE does not match the ` +
+          `${this.network} passphrase.`,
       );
     }
-    if (!this.networkPassphrase.includes('Test SDF Network')) {
+    const conflictingKeyword = expectedProfile.foreignRpcKeywords.find(
+      keyword => this.rpcUrl.toLowerCase().includes(keyword),
+    );
+    if (conflictingKeyword) {
       throw new Error(
-        'Cross-network mismatch: STELLAR_NETWORK_PASSPHRASE does not match testnet passphrase.',
+        `Cross-network mismatch: STELLAR_RPC_URL (${this.rpcUrl}) looks like a ` +
+          `${conflictingKeyword} endpoint, but SOROBAN_NETWORK is "${this.network}".`,
       );
     }
   }
@@ -331,16 +365,7 @@ export class SorobanAdapter implements OnchainAdapter {
 
   private parsePackage(scv: unknown): AidPackage | null {
     if (!scv || typeof scv !== 'object') return null;
-    const data = scv as {
-      id?: string | number;
-      recipient?: string;
-      amount?: string | number;
-      token?: string;
-      status?: number | string;
-      created_at?: number;
-      expires_at?: number;
-      metadata?: Record<string, string>;
-    };
+    const data = scv as Partial<Package>;
     return {
       id: String(data.id ?? ''),
       recipient: String(data.recipient ?? ''),
@@ -349,20 +374,26 @@ export class SorobanAdapter implements OnchainAdapter {
       status: this.parseStatus(data.status),
       createdAt: Number(data.created_at ?? 0),
       expiresAt: Number(data.expires_at ?? 0),
-      metadata: data.metadata,
+      metadata: this.parseMetadata(data.metadata),
     };
+  }
+
+  private parseMetadata(
+    metadata: Package['metadata'] | undefined,
+  ): Record<string, string> | undefined {
+    if (metadata === undefined) return undefined;
+    const entries =
+      metadata instanceof Map
+        ? Array.from(metadata.entries())
+        : Object.entries(metadata);
+    return Object.fromEntries(
+      entries.map(([key, value]) => [String(key), String(value)]),
+    );
   }
 
   private parseStatus(status: unknown): AidPackage['status'] {
     if (typeof status === 'number') {
-      const map: Record<number, AidPackage['status']> = {
-        0: 'Created',
-        1: 'Claimed',
-        2: 'Expired',
-        3: 'Cancelled',
-        4: 'Refunded',
-      };
-      return map[status] ?? 'Created';
+      return labelForStatusCode(status);
     }
     if (typeof status === 'string') {
       if (
@@ -572,12 +603,7 @@ export class SorobanAdapter implements OnchainAdapter {
       cid,
     );
 
-    const data =
-      (result as {
-        total_committed?: string | number;
-        total_claimed?: string | number;
-        total_expired_cancelled?: string | number;
-      }) || {};
+    const data = (result as Partial<Aggregates> | undefined) ?? {};
     return {
       aggregates: {
         totalCommitted: String(data.total_committed ?? '0'),

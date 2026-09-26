@@ -14,6 +14,7 @@ import {
   ERROR_CODES,
   getErrorCodeFromStatus,
 } from '../dto/error-response.dto';
+import { AppException } from '../constants/integration-error-codes';
 
 export interface ErrorResponse {
   code: number;
@@ -49,7 +50,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let errorResponse: ErrorResponse;
 
-    if (exception instanceof HttpException) {
+    if (exception instanceof AppException) {
+      errorResponse = this.handleAppException(
+        exception,
+        request,
+        traceId,
+        correlationId,
+      );
+    } else if (exception instanceof HttpException) {
       errorResponse = this.handleHttpException(
         exception,
         request,
@@ -96,6 +104,28 @@ export class AllExceptionsFilter implements ExceptionFilter {
     };
 
     response.status(finalResponse.code).json(finalResponse);
+  }
+
+  /**
+   * Handles AppException, which carries a stable domain errorCode that is
+   * emitted verbatim rather than being inferred from the HTTP status.
+   */
+  private handleAppException(
+    exception: AppException,
+    request: Request,
+    traceId?: string,
+    correlationId?: string,
+  ): ErrorResponse {
+    return {
+      code: exception.statusCode,
+      message: exception.message,
+      details: exception.details,
+      traceId,
+      timestamp: new Date().toISOString(),
+      path: request.url,
+      errorCode: exception.errorCode,
+      correlationId,
+    };
   }
 
   private handleHttpException(

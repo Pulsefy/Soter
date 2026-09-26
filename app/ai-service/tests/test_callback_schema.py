@@ -140,7 +140,9 @@ class TestStatusSemantics:
 
     def test_failed_status_with_error_accepted(self):
         p = AiCallbackPayload(
-            **_make_payload(status=CallbackStatus.FAILED, error="Out of memory", result=None)
+            **_make_payload(
+                status=CallbackStatus.FAILED, error="Out of memory", result=None
+            )
         )
         assert p.status == CallbackStatus.FAILED
         assert p.error == "Out of memory"
@@ -181,7 +183,9 @@ class TestOptionalFields:
 class TestWireSerialization:
     def test_serialises_to_camel_case(self):
         p = AiCallbackPayload(
-            **_make_payload(task_type="image_analysis", completed_at="2024-03-24T10:35:00Z")
+            **_make_payload(
+                task_type="image_analysis", completed_at="2024-03-24T10:35:00Z"
+            )
         )
         wire = json.loads(p.model_dump_json(by_alias=True))
 

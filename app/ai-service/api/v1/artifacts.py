@@ -38,19 +38,32 @@ class CacheInvalidationResponse(BaseModel):
     invalidated_entries: int
 
 
-def _create_error_response(code: str, status_code: int, detail: str) -> tuple:
-    """Create standardized error response with logging."""
+def _create_error_response(
+    code: str,
+    status_code: int,
+    detail: str,
+    log_code: str = "",
+) -> tuple:
+    """Create standardized error response with logging.
+
+    ``log_code`` lets callers keep a precise reason (e.g. ``forbidden_org``)
+    in audit logs while returning an externally generic response so denial
+    responses do not leak artifact existence to other tenants.
+    """
     logger.warning(
         "artifact_access_denied",
         extra={
             "event": "artifact_access_denied",
-            "code": code,
+            "code": log_code or code,
         },
     )
-    return JSONResponse(
-        status_code=status_code,
-        content={"error": {"code": code, "message": detail}},
-    ), status_code
+    return (
+        JSONResponse(
+            status_code=status_code,
+            content={"error": {"code": code, "message": detail}},
+        ),
+        status_code,
+    )
 
 
 @router.post("/ai/verification-artifacts/{artifact_id}/access")
@@ -106,9 +119,7 @@ async def request_artifact_access(
 
     # Resolve artifact and validate organization ownership
     try:
-        artifact_path, metadata = (
-            artifact_access_service.resolve_artifact(artifact_id)
-        )
+        artifact_path, metadata = artifact_access_service.resolve_artifact(artifact_id)
         artifact_access_service.enforce_org_ownership(metadata, x_org_id)
     except ArtifactAccessError as exc:
         error_code = str(exc)
@@ -119,14 +130,16 @@ async def request_artifact_access(
                 "Artifact not found",
             )
         elif error_code == "forbidden_org":
-            msg = (
-                "Access denied: artifact belongs to "
-                "a different organization"
-            )
+            # Multi-tenant isolation: cross-org denials must be
+            # indistinguishable from missing artifacts, otherwise the status
+            # difference would let attackers enumerate which artifact IDs
+            # exist in other organizations. The precise reason stays in the
+            # audit log via ``log_code``.
             response, _ = _create_error_response(
-                error_code,
-                403,
-                msg,
+                "artifact_not_found",
+                404,
+                "Artifact not found",
+                log_code="forbidden_org",
             )
         else:
             response, _ = _create_error_response(
@@ -151,12 +164,8 @@ async def request_artifact_access(
     if request.mode == "proxy":
         return FileResponse(
             path=artifact_path,
-            filename=metadata.get(
-                "filename", os.path.basename(artifact_path)
-            ),
-            media_type=metadata.get(
-                "mime_type", "application/octet-stream"
-            ),
+            filename=metadata.get("filename", os.path.basename(artifact_path)),
+            media_type=metadata.get("mime_type", "application/octet-stream"),
         )
 
     # Generate short-lived signed URL token
@@ -165,12 +174,8 @@ async def request_artifact_access(
     )
     return {
         "artifact_id": artifact_id,
-        "download_url": (
-            f"/v1/ai/verification-artifacts/download?token={token}"
-        ),
-        "expires_in_seconds": (
-            settings.verification_artifact_url_ttl_seconds
-        ),
+        "download_url": (f"/v1/ai/verification-artifacts/download?token={token}"),
+        "expires_in_seconds": (settings.verification_artifact_url_ttl_seconds),
         "signed_url_configured_ttl_seconds": (
             settings.verification_artifact_url_ttl_seconds
         ),
@@ -178,9 +183,7 @@ async def request_artifact_access(
 
 
 @router.get("/ai/verification-artifacts/download")
-async def download_artifact_with_token(
-    token: str = Query(..., min_length=10)
-):
+async def download_artifact_with_token(token: str = Query(..., min_length=10)):
     """
     Download an artifact using a short-lived signed URL token.
 
@@ -200,14 +203,12 @@ async def download_artifact_with_token(
         payload = artifact_access_service.verify_signed_token(token)
 
         # Resolve artifact from payload
-        artifact_path, metadata = (
-            artifact_access_service.resolve_artifact(payload["aid"])
+        artifact_path, metadata = artifact_access_service.resolve_artifact(
+            payload["aid"]
         )
 
         # Ensure organization ownership matches token organization
-        artifact_access_service.enforce_org_ownership(
-            metadata, payload["org"]
-        )
+        artifact_access_service.enforce_org_ownership(metadata, payload["org"])
     except ArtifactAccessError as exc:
         error_code = str(exc)
 
@@ -236,14 +237,14 @@ async def download_artifact_with_token(
                 "Token format is invalid",
             )
         elif error_code == "forbidden_org":
-            msg = (
-                "Token organization does not match "
-                "artifact organization"
-            )
+            # Same anti-enumeration rule as the /access endpoint: return the
+            # exact same response as a missing artifact (audit log keeps the
+            # real reason).
             response, _ = _create_error_response(
-                error_code,
-                403,
-                msg,
+                "artifact_not_found",
+                404,
+                "Artifact not found",
+                log_code="forbidden_org",
             )
         else:
             response, _ = _create_error_response(
@@ -265,12 +266,8 @@ async def download_artifact_with_token(
 
     return FileResponse(
         path=artifact_path,
-        filename=metadata.get(
-            "filename", os.path.basename(artifact_path)
-        ),
-        media_type=metadata.get(
-            "mime_type", "application/octet-stream"
-        ),
+        filename=metadata.get("filename", os.path.basename(artifact_path)),
+        media_type=metadata.get("mime_type", "application/octet-stream"),
     )
 
 
@@ -319,4 +316,6 @@ async def invalidate_artifact_cache(
         },
     )
 
-    return CacheInvalidationResponse(artifact_id=artifact_id, invalidated_entries=deleted)
+    return CacheInvalidationResponse(
+        artifact_id=artifact_id, invalidated_entries=deleted
+    )

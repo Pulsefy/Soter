@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import type { VerificationChannel } from '@prisma/client';
 import {
   StartVerificationDto,
   VerificationChannelDto,
@@ -91,7 +90,7 @@ export class VerificationFlowService {
 
     const session = await this.prisma.verificationSession.create({
       data: {
-        channel: dto.channel as VerificationChannel,
+        channel: dto.channel,
         identifier: encryptedIdentifier,
         code: this.encryptionService.encrypt(code),
         expiresAt,

@@ -65,6 +65,16 @@ cd app/frontend
 pnpm install
 ```
 
+### Distribution map performance
+
+The map targets at most 250 rendered markers, including clusters, for a 10,000-point dataset. It only clusters points in the padded Leaflet viewport and keeps marker components keyed and memoized across filter changes. Override the target with `NEXT_PUBLIC_MAP_TARGET_MARKERS`; tune the zoom thresholds with `NEXT_PUBLIC_MAP_GRID_WORLD`, `NEXT_PUBLIC_MAP_GRID_REGIONAL`, `NEXT_PUBLIC_MAP_GRID_LOCAL`, and `NEXT_PUBLIC_MAP_GRID_DETAIL`.
+
+Run the large-fixture regression check with:
+
+```bash
+pnpm test -- --runInBand src/components/dashboard/__tests__/AidDistributionMap.performance.test.ts
+```
+
 ### Environment Setup
 
 1. Copy the example environment file:
@@ -161,6 +171,31 @@ To enable the mock API layer for development when the backend is unavailable:
 1.  Set `NEXT_PUBLIC_USE_MOCKS=true` in your `.env.local` file.
 2.  The application will intercept requests to supported endpoints (e.g., `/health`, `/aid-packages`) and return mock data.
 3.  Mock handlers are defined in `src/lib/mock-api/handlers.ts`.
+
+When `NEXT_PUBLIC_USE_MOCKS=true` a **Demo Mode banner** is shown at the top of every page so contributors and testers always know they are not seeing live data.
+
+## Demo / Degraded Mode
+
+The platform surfaces three distinct modes to make data provenance explicit:
+
+| Mode | Trigger | What it means |
+|---|---|---|
+| `fixture` | `NEXT_PUBLIC_USE_MOCKS=true` **or** `NEXT_PUBLIC_DEMO_MODE=true` **or** AI service `TEST_PROVIDER_MODE=true` | All AI responses come from local fixture files. No API keys required. |
+| `deterministic` | AI service `AI_DETERMINISTIC_MODE=true` | AI inference returns hardcoded stable outputs. Useful for CI. |
+| `live` | All mock flags are off and a real API key is configured | Real AI provider is active. |
+
+A coloured banner is rendered at the top of the app for `fixture` and `deterministic` modes.  
+The AI service also stamps every response with the `X-Demo-Mode` header (`fixture`, `deterministic`, or `live`) and exposes a `/health/mode` JSON endpoint for programmatic consumers.
+
+### Enabling demo mode for contributors
+
+Add to `.env.local`:
+
+```env
+NEXT_PUBLIC_USE_MOCKS=true
+# or, to force the banner independently of the mock layer:
+# NEXT_PUBLIC_DEMO_MODE=true
+```
 
 ## Key Features Implementation
 

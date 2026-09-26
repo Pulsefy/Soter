@@ -138,6 +138,7 @@ def build_contract_registry(
 
         contracts_map[contract_name]["networks"][network] = {
             "contract_id": dep["contract_id"],
+            "wasm_hash": dep["wasm_hash"],
             "version": dep["version"],
             "deployed_at": dep["deployed_at"],
         }

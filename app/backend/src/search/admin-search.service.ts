@@ -1,5 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import { SearchIndexEntityType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+export interface SearchResult {
+  type: string;
+  label: string;
+  status: string;
+  id: string;
+}
+
+const ENTITY_VALUES = new Set<string>(Object.values(SearchIndexEntityType));
 
 @Injectable()
 export class AdminSearchService {
@@ -9,16 +19,57 @@ export class AdminSearchService {
     query: string,
     entity: string | undefined,
     orgId: string,
-  ): Promise<
-    Array<{ type: string; label: string; status: string; id: string }>
-  > {
-    const results: Array<{
-      type: string;
-      label: string;
-      status: string;
-      id: string;
-    }> = [];
-    const q = query.toLowerCase();
+  ): Promise<SearchResult[]> {
+    if (!orgId) {
+      return [];
+    }
+
+    const q = (query ?? '').trim().toLowerCase();
+
+    // Prefer the materialized search index. When it is empty (e.g. a fresh
+    // deployment before the first rebuild), fall back to live queries so
+    // search keeps working until a rebuild populates the index.
+    const indexed = await this.prisma.searchIndexEntry.count({
+      where: { orgId },
+    });
+    if (indexed > 0) {
+      return this.searchIndexed(q, entity, orgId);
+    }
+
+    return this.searchLive(q, entity, orgId);
+  }
+
+  private async searchIndexed(
+    q: string,
+    entity: string | undefined,
+    orgId: string,
+  ): Promise<SearchResult[]> {
+    const entries = await this.prisma.searchIndexEntry.findMany({
+      where: {
+        orgId,
+        ...(entity && ENTITY_VALUES.has(entity)
+          ? { entityType: entity as SearchIndexEntityType }
+          : {}),
+        searchText: { contains: q },
+      },
+      orderBy: { entityType: 'asc' },
+      take: 10,
+    });
+
+    return entries.map(entry => ({
+      type: entry.entityType,
+      label: entry.label,
+      status: entry.status,
+      id: entry.entityId,
+    }));
+  }
+
+  private async searchLive(
+    q: string,
+    entity: string | undefined,
+    orgId: string,
+  ): Promise<SearchResult[]> {
+    const results: SearchResult[] = [];
 
     // 1. Search Campaigns
     if (!entity || entity === 'campaign') {

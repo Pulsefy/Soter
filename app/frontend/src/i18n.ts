@@ -21,5 +21,19 @@ export default getRequestConfig(async ({ requestLocale }) => {
   return {
     locale,
     messages: messages[locale as Locale],
+
+    // Log missing keys in development so translators can spot gaps quickly.
+    // In production this is a no-op; the fallback string is still shown to users.
+    onError(error) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[i18n] missing translation key:', error.message);
+      }
+    },
+
+    // Return a readable placeholder instead of throwing so the UI stays usable
+    // when a key is absent (e.g. during active translation work).
+    getMessageFallback({ namespace, key }) {
+      return [namespace, key].filter(Boolean).join('.');
+    },
   };
 });

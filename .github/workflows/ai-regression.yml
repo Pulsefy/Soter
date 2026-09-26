@@ -1,0 +1,103 @@
+name: AI Regression Harness
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: Scheduled accuracy regression
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/ai-service
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: app/ai-service/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run golden-set regression harness
+        run: |
+          python regression_harness/run_accuracy_harness.py \
+            --output regression-report.json
+
+      - name: Add report to job summary
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+
+          with open("regression-report.json") as report_file:
+              report = json.load(report_file)
+
+          metrics = report["metrics"]
+          print("## Golden-set regression")
+          print(f"- Status: **{report['status']}**")
+          print(f"- Generated: `{report['generated_at']}`")
+          print(f"- Accuracy: `{metrics['accuracy']:.4f}`")
+          print(f"- Cases: `{metrics['correct_cases']}/{metrics['total_cases']}` correct")
+          if report["regressions"]:
+              print("- Regressions:")
+              for regression in report["regressions"]:
+                  print(
+                      f"  - `{regression['metric']}`: "
+                      f"{regression['baseline']} -> {regression['current']}"
+                  )
+
+          calibration = report.get("calibration") or {}
+          if calibration:
+              print("")
+              print("## Confidence calibration")
+              print(
+                  "- Expected calibration error: "
+                  f"`{calibration['expected_calibration_error']:.4f}`"
+              )
+              print(
+                  "- Calibrated: "
+                  f"**{'yes' if calibration['is_calibrated'] else 'no'}**"
+              )
+              flagged = calibration.get("flagged_bands", [])
+              if flagged:
+                  print("- Miscalibrated bands (accuracy vs stated confidence):")
+                  for band in flagged:
+                      print(
+                          f"  - `{band['band']}`: accuracy "
+                          f"`{band['accuracy']:.4f}` vs confidence "
+                          f"`{band['mean_confidence']:.4f}` "
+                          f"({band['direction']}, gap `{band['gap']:+.4f}`)"
+                      )
+          PY
+
+      - name: Retain historical regression report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-regression-${{ github.run_id }}
+          path: app/ai-service/regression-report.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Retain confidence calibration report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: confidence-calibration-${{ github.run_id }}
+          path: reports/confidence_calibration.md
+          retention-days: 90
+          if-no-files-found: warn

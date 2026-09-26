@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from main import app
 from schemas.ocr import OCRResponse
-
+from services.ocr import FieldMatch
 
 client = TestClient(app)
 
@@ -64,21 +64,34 @@ class TestOCRRoutes:
 
     def test_ocr_endpoint_with_language_hint(self):
         from PIL import Image
+        from services.providers import OCRField, OCRResponse
 
         img = Image.new("RGB", (50, 50), color="blue")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
-        
-        with patch("services.ocr.OCRService._run_tesseract", return_value={"text": ["Test"], "conf": [90]}) as mock_run:
+
+        from services.ocr import OCRResult
+
+        mock_result = OCRResult(
+            fields={"name": FieldMatch(value="Test", confidence=0.9)},
+            raw_text="Test",
+            processing_time_ms=10,
+        )
+
+        with patch(
+            "api.routes.ocr_service.process_image",
+            return_value=mock_result,
+        ) as mock_process:
             response = client.post(
                 "/ai/ocr",
                 files={"image": ("test.png", buf.getvalue(), "image/png")},
                 data={"language_hint": "eng"},
             )
         assert response.status_code == 200
-        mock_run.assert_called_once()
-        assert mock_run.call_args[1].get("language_hint") == "eng"
+        mock_process.assert_called_once()
+        call_kwargs = mock_process.call_args[1]
+        assert call_kwargs.get("language_hint") == "eng"
 
     def test_ocr_endpoint_unsupported_language_hint(self):
         from PIL import Image
@@ -87,7 +100,7 @@ class TestOCRRoutes:
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
-        
+
         response = client.post(
             "/ai/ocr",
             files={"image": ("test.png", buf.getvalue(), "image/png")},
@@ -128,6 +141,7 @@ class TestHealthDependenciesEndpoint:
         text = response.text
         # Ensure no API key values leak into the response
         from config import settings
+
         for secret in filter(None, [settings.openai_api_key, settings.groq_api_key]):
             assert secret not in text
 
@@ -136,7 +150,9 @@ class TestHealthDependenciesEndpoint:
 
         with patch("redis.from_url") as mock_from_url:
             mock_client = MagicMock()
-            mock_client.ping.side_effect = redis_lib.exceptions.ConnectionError("refused")
+            mock_client.ping.side_effect = redis_lib.exceptions.ConnectionError(
+                "refused"
+            )
             mock_from_url.return_value = mock_client
 
             response = client.get("/health/dependencies")

@@ -18,6 +18,21 @@ export interface AidPackageFilters {
   token?: TokenType | '';
 }
 
+export interface PaginationParams {
+  page?: number;
+  size?: number;
+  sortBy?: string;
+  sortDirection?: 'asc' | 'desc';
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  size: number;
+  totalPages: number;
+}
+
 /** A named, saved filter combination for a specific admin list view */
 export interface FilterPreset {
   /** Unique ID (timestamp-based) */

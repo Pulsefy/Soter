@@ -1,8 +1,16 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useState,
+  useEffect,
+} from 'react';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { VersionInfo, UpdateState } from '../types/update';
-import { fetchVersionInfo, compareVersions } from '../services/updateService';
+import { UpdateState } from '../types/update';
+import { resolveVersionInfo, compareVersions } from '../services/updateService';
+import { structuredLogger } from '../services/logger';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
 
 interface UpdateContextType extends UpdateState {
   markReleaseNotesSeen: () => Promise<void>;
@@ -14,7 +22,9 @@ const UpdateContext = createContext<UpdateContextType | undefined>(undefined);
 
 const SEEN_RELEASE_NOTES_KEY = '@Soter:SeenReleaseNotes';
 
-export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [state, setState] = useState<UpdateState>({
     isUpdateAvailable: false,
     isForceUpgrade: false,
@@ -25,17 +35,44 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const currentVersion = Constants.expoConfig?.version || '0.0.0';
 
-  const checkUpdates = async () => {
+  const checkUpdates = useCallback(async () => {
     try {
-      setIsLoading(true);
-      const versionInfo = await fetchVersionInfo();
-      
-      const updateAvailable = compareVersions(versionInfo.latestVersion, currentVersion) > 0;
-      const forceUpgrade = compareVersions(versionInfo.minRequiredVersion, currentVersion) > 0;
-      
+      const { versionInfo, source } = await resolveVersionInfo();
+
+      // No connectivity and no cached policy: fail open rather than blocking
+      // a field worker behind an update check that could not run.
+      if (!versionInfo) {
+        structuredLogger.warn(
+          'updates.version_check_offline_no_cache',
+          {},
+          'updates',
+        );
+        setState(prev => ({
+          ...prev,
+          isUpdateAvailable: false,
+          isForceUpgrade: false,
+        }));
+        return;
+      }
+
+      if (source === 'cache') {
+        structuredLogger.info(
+          'updates.version_check_offline_cached',
+          { minRequiredVersion: versionInfo.minRequiredVersion },
+          'updates',
+        );
+      }
+
+      const updateAvailable =
+        compareVersions(versionInfo.latestVersion, currentVersion) > 0;
+      const forceUpgrade =
+        compareVersions(versionInfo.minRequiredVersion, currentVersion) > 0;
+
       let hasSeen = true;
       if (updateAvailable) {
-        const storedVersion = await AsyncStorage.getItem(SEEN_RELEASE_NOTES_KEY);
+        const storedVersion = await AsyncStorage.getItem(
+          SEEN_RELEASE_NOTES_KEY,
+        );
         hasSeen = storedVersion === versionInfo.latestVersion;
       }
 
@@ -46,30 +83,40 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         hasSeenReleaseNotes: hasSeen,
       });
     } catch (error) {
-      console.error('UpdateProvider: Failed to check for updates', error);
+      structuredLogger.error(
+        'updates.check_failed',
+        { error: error instanceof Error ? error.message : String(error) },
+        'updates',
+      );
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentVersion]);
+
+  // Re-run the check as soon as connectivity is restored.
+  useNetworkStatus(checkUpdates);
 
   const markReleaseNotesSeen = async () => {
     if (state.versionInfo) {
-      await AsyncStorage.setItem(SEEN_RELEASE_NOTES_KEY, state.versionInfo.latestVersion);
+      await AsyncStorage.setItem(
+        SEEN_RELEASE_NOTES_KEY,
+        state.versionInfo.latestVersion,
+      );
       setState(prev => ({ ...prev, hasSeenReleaseNotes: true }));
     }
   };
 
   useEffect(() => {
     checkUpdates();
-  }, []);
+  }, [checkUpdates]);
 
   return (
-    <UpdateContext.Provider 
-      value={{ 
-        ...state, 
-        markReleaseNotesSeen, 
+    <UpdateContext.Provider
+      value={{
+        ...state,
+        markReleaseNotesSeen,
         checkUpdates,
-        isLoading 
+        isLoading,
       }}
     >
       {children}
