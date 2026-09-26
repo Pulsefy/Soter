@@ -33,6 +33,7 @@ import {
   GetTransactionStatusParams,
   GetTransactionStatusResult,
   TxStatus,
+  OnchainAction,
 } from './onchain.adapter';
 
 /**
@@ -306,6 +307,32 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       isPaused: typeof result === 'boolean' ? result : false,
       timestamp: new Date(),
     };
+  }
+
+  async pauseAction(action: OnchainAction): Promise<void> {
+    await this.invokeContract('pause_action', [action]);
+  }
+
+  async unpauseAction(action: OnchainAction): Promise<void> {
+    await this.invokeContract('unpause_action', [action]);
+  }
+
+  async isActionPaused(action: OnchainAction): Promise<boolean> {
+    const pauseKeys: Record<OnchainAction, string> = {
+      create: 'p_create',
+      claim: 'p_claim',
+      disburse: 'p_disbrs',
+      refund: 'p_refund',
+      withdraw: 'p_wdrw',
+    };
+    const [globalPause, actionPause] = await Promise.all([
+      this.getPauseState(),
+      rpcCall(this.http, this.rpcUrl, 'getContractData', {
+        contractId: this.contractId,
+        key: pauseKeys[action],
+      }),
+    ]);
+    return globalPause.isPaused || actionPause === true;
   }
 
   async getFeeConfig(): Promise<FeeConfig> {

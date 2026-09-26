@@ -29,6 +29,7 @@ import {
   GetTransactionStatusResult,
   TxStatus,
   AidPackage,
+  OnchainAction,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 
@@ -65,6 +66,7 @@ interface MockAidPackage {
 @Injectable()
 export class MockOnchainAdapter implements OnchainAdapter {
   private readonly mockPackages = new Map<string, MockAidPackage>();
+  private readonly actionPauseStates = new Map<OnchainAction, boolean>();
   private readonly mockEscrowAddress =
     'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
@@ -373,6 +375,18 @@ export class MockOnchainAdapter implements OnchainAdapter {
       isPaused: false,
       timestamp: new Date(),
     };
+  }
+
+  async pauseAction(action: OnchainAction): Promise<void> {
+    this.actionPauseStates.set(action, true);
+  }
+
+  async unpauseAction(action: OnchainAction): Promise<void> {
+    this.actionPauseStates.set(action, false);
+  }
+
+  async isActionPaused(action: OnchainAction): Promise<boolean> {
+    return this.actionPauseStates.get(action) ?? false;
   }
 
   async getFeeConfig(): Promise<FeeConfig> {

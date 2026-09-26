@@ -19,6 +19,20 @@ describe('MockOnchainAdapter', () => {
     expect(adapter).toBeDefined();
   });
 
+  describe('action pause controls', () => {
+    it('pauses one action without pausing the others', async () => {
+      await adapter.pauseAction('claim');
+
+      await expect(adapter.isActionPaused('claim')).resolves.toBe(true);
+      await expect(adapter.isActionPaused('create')).resolves.toBe(false);
+      await expect(adapter.isActionPaused('withdraw')).resolves.toBe(false);
+      await expect(adapter.isActionPaused('refund')).resolves.toBe(false);
+
+      await adapter.unpauseAction('claim');
+      await expect(adapter.isActionPaused('claim')).resolves.toBe(false);
+    });
+  });
+
   describe('initEscrow', () => {
     it('should return a valid InitEscrowResult', async () => {
       const params = {

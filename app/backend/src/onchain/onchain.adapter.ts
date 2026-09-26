@@ -1,6 +1,12 @@
 export const ONCHAIN_ADAPTER_TOKEN = 'ONCHAIN_ADAPTER';
 
 export type TxStatus = 'pending' | 'succeeded' | 'failed' | 'unknown';
+export type OnchainAction =
+  | 'create'
+  | 'claim'
+  | 'disburse'
+  | 'refund'
+  | 'withdraw';
 
 export interface GetTransactionStatusParams {
   hash: string;
@@ -267,6 +273,9 @@ export interface OnchainAdapter {
 
   getContractMetadata(): Promise<ContractMetadata>;
   getPauseState(): Promise<PauseState>;
+  pauseAction(action: OnchainAction): Promise<void>;
+  unpauseAction(action: OnchainAction): Promise<void>;
+  isActionPaused(action: OnchainAction): Promise<boolean>;
   getFeeConfig(): Promise<FeeConfig>;
   getPackageSummary(packageId: string): Promise<PackageSummary>;
 

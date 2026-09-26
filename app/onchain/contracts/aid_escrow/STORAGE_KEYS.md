@@ -59,6 +59,7 @@ A singleton key is a bare `Symbol`; exactly one entry exists per key.
 | `KEY_PAUSED`            | `"paused"`     | `bool`      | `pause` / `unpause`. Permanent flag. |
 | `KEY_PAUSE_CREATE`      | `"p_create"`   | `bool`      | `pause_action("create")` / `unpause_action`. Permanent flag. |
 | `KEY_PAUSE_CLAIM`       | `"p_claim"`    | `bool`      | `pause_action("claim")` / `unpause_action`. Permanent flag. |
+| `KEY_PAUSE_DISBURSE`    | `"p_disbrs"`   | `bool`      | `pause_action("disburse")` / `unpause_action`. Permanent flag. |
 | `KEY_PAUSE_REFUND`      | `"p_refund"`   | `bool`      | `pause_action("refund")` / `unpause_action`. Permanent flag. |
 | `KEY_PAUSE_WITHDRAW`    | `"p_wdrw"`     | `bool`      | `pause_action("withdraw")` / `unpause_action`. Permanent flag. |
 | `KEY_CAMPAIGN_PAUSED`   | `"camp_pzd"`   | `Map<String, bool>` | `pause_campaign` / `unpause_campaign`, keyed by `campaign_ref`. Grows with campaigns; permanent. |
@@ -113,6 +114,7 @@ amount keys share a dynamic `storage_key` in `adjust_campaign_token_amount`.
 | `KEY_PAUSED` | `is_paused`, `check_action_paused` | `pause`, `unpause` |
 | `KEY_PAUSE_CREATE` | `is_action_paused`, `check_action_paused` (via `get_pause_key`) | `pause_action`, `unpause_action` (via `get_pause_key`) |
 | `KEY_PAUSE_CLAIM` | `is_action_paused`, `check_action_paused` (via `get_pause_key`) | `pause_action`, `unpause_action` (via `get_pause_key`) |
+| `KEY_PAUSE_DISBURSE` | `is_action_paused`, `check_action_paused` (via `get_pause_key`) | `pause_action`, `unpause_action` (via `get_pause_key`) |
 | `KEY_PAUSE_REFUND` | `is_action_paused`, `check_action_paused` (via `get_pause_key`) | `pause_action`, `unpause_action` (via `get_pause_key`) |
 | `KEY_PAUSE_WITHDRAW` | `is_action_paused`, `check_action_paused` (via `get_pause_key`) | `pause_action`, `unpause_action` (via `get_pause_key`) |
 | `KEY_CAMPAIGN_PAUSED` | `pause_campaign`, `unpause_campaign`, `is_campaign_paused`, `check_campaign_paused` | `pause_campaign`, `unpause_campaign` |

@@ -1,3 +1,5 @@
+    KEY_PAUSE_CREATE, KEY_PAUSE_DISBURSE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW,
+    KEY_PENDING_ADMIN, KEY_PKG_COUNTER,
 #![no_std]
 
 //! # Token Amount Normalization & Validation Policy
@@ -1744,8 +1746,10 @@ impl AidEscrow {
     pub fn disburse(env: Env, id: u64) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
+        Self::check_action_paused(&env, symbol_short!("disburse"))?;
 
         let key = crate::keys::package_key(id);
+            /// Admin-only. Pauses a specific action (create, claim, disburse, refund, or withdraw).
         let mut package: Package = env
             .storage()
             .persistent()
@@ -2336,6 +2340,8 @@ impl AidEscrow {
             Ok(KEY_PAUSE_CREATE)
         } else if action == symbol_short!("claim") {
             Ok(KEY_PAUSE_CLAIM)
+        } else if action == symbol_short!("disburse") {
+            Ok(KEY_PAUSE_DISBURSE)
         } else if action == symbol_short!("withdraw") {
             Ok(KEY_PAUSE_WITHDRAW)
         } else if action == symbol_short!("refund") {

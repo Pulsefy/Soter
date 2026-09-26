@@ -1,3 +1,4 @@
+| `pause_action(env, action)` | Admin | Pauses a single action (`create`/`claim`/`disburse`/`refund`/`withdraw`). |
 # Aid Escrow Contract
 
 Soroban smart contract for managing aid-package escrow on Stellar.
