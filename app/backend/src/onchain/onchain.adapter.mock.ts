@@ -29,6 +29,10 @@ import {
   GetTransactionStatusResult,
   TxStatus,
   AidPackage,
+  TransferAdminParams,
+  TransferAdminResult,
+  AcceptAdminResult,
+  CancelAdminTransferResult,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 
@@ -67,6 +71,9 @@ export class MockOnchainAdapter implements OnchainAdapter {
   private readonly mockPackages = new Map<string, MockAidPackage>();
   private readonly mockEscrowAddress =
     'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+  private mockAdminAddress =
+    'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ';
+  private mockPendingAdmin: string | null = null;
 
   /**
    * Generate a deterministic mock transaction hash from input
@@ -422,6 +429,73 @@ export class MockOnchainAdapter implements OnchainAdapter {
       errorMessage:
         status === 'failed' ? 'Mock contract transaction failed' : undefined,
     };
+  }
+
+  async transferAdmin(
+    params: TransferAdminParams,
+  ): Promise<TransferAdminResult> {
+    await Promise.resolve();
+    const newAdmin = (params.newAdmin || '').trim();
+    if (!newAdmin) {
+      throw new BadRequestException('newAdmin is required');
+    }
+    if (newAdmin === this.mockAdminAddress) {
+      throw new BadRequestException(
+        'New admin must differ from the current admin',
+      );
+    }
+    this.mockPendingAdmin = newAdmin;
+    return {
+      newAdmin,
+      transactionHash: this.generateMockHash(
+        `transfer-admin-${newAdmin}-${Date.now()}`,
+      ),
+      timestamp: new Date(),
+      status: 'success',
+      metadata: { adapter: 'mock', pendingAdmin: newAdmin },
+    };
+  }
+
+  async acceptAdmin(): Promise<AcceptAdminResult> {
+    await Promise.resolve();
+    if (!this.mockPendingAdmin) {
+      throw new BadRequestException('No pending admin transfer to accept');
+    }
+    const admin = this.mockPendingAdmin;
+    this.mockAdminAddress = admin;
+    this.mockPendingAdmin = null;
+    return {
+      admin,
+      transactionHash: this.generateMockHash(
+        `accept-admin-${admin}-${Date.now()}`,
+      ),
+      timestamp: new Date(),
+      status: 'success',
+      metadata: { adapter: 'mock' },
+    };
+  }
+
+  async cancelAdminTransfer(): Promise<CancelAdminTransferResult> {
+    await Promise.resolve();
+    if (!this.mockPendingAdmin) {
+      throw new BadRequestException('No pending admin transfer to cancel');
+    }
+    const cancelledAdmin = this.mockPendingAdmin;
+    this.mockPendingAdmin = null;
+    return {
+      cancelledAdmin,
+      transactionHash: this.generateMockHash(
+        `cancel-admin-transfer-${cancelledAdmin}-${Date.now()}`,
+      ),
+      timestamp: new Date(),
+      status: 'success',
+      metadata: { adapter: 'mock' },
+    };
+  }
+
+  async getPendingAdmin(): Promise<string | null> {
+    await Promise.resolve();
+    return this.mockPendingAdmin;
   }
 
   // Legacy methods for backward compatibility

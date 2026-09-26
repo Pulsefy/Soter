@@ -175,6 +175,37 @@ export interface PackageSummary {
   timestamp: Date;
 }
 
+export interface TransferAdminParams {
+  /** Stellar address proposed as the next contract admin. */
+  newAdmin: string;
+}
+
+export interface TransferAdminResult {
+  newAdmin: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  metadata?: Record<string, any>;
+}
+
+export interface AcceptAdminResult {
+  /** Address that accepted the admin role. */
+  admin: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  metadata?: Record<string, any>;
+}
+
+export interface CancelAdminTransferResult {
+  /** Pending admin whose nomination was cancelled. */
+  cancelledAdmin: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  metadata?: Record<string, any>;
+}
+
 // Legacy interfaces kept for backward compatibility
 export interface CreateClaimParams {
   claimId: string;
@@ -276,6 +307,29 @@ export interface OnchainAdapter {
   getTransactionStatus(
     params: GetTransactionStatusParams,
   ): Promise<GetTransactionStatusResult>;
+
+  /**
+   * Propose a new contract admin (first step of the two-step transfer).
+   * The nominated address must later call {@link OnchainAdapter.acceptAdmin}.
+   */
+  transferAdmin(params: TransferAdminParams): Promise<TransferAdminResult>;
+
+  /**
+   * Accept a previously proposed admin transfer (second step). Signs with the
+   * currently configured admin key, which must match the nominated address.
+   */
+  acceptAdmin(): Promise<AcceptAdminResult>;
+
+  /**
+   * Cancel a pending admin transfer before it is accepted.
+   */
+  cancelAdminTransfer(): Promise<CancelAdminTransferResult>;
+
+  /**
+   * Read the address currently nominated to become admin, or `null` when no
+   * transfer is in flight.
+   */
+  getPendingAdmin(): Promise<string | null>;
 
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;

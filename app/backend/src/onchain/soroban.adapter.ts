@@ -40,6 +40,10 @@ import {
   GetTransactionStatusParams,
   GetTransactionStatusResult,
   TxStatus,
+  TransferAdminParams,
+  TransferAdminResult,
+  AcceptAdminResult,
+  CancelAdminTransferResult,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
@@ -755,6 +759,75 @@ export class SorobanAdapter implements OnchainAdapter {
       }
       throw error;
     }
+  }
+
+  async transferAdmin(
+    params: TransferAdminParams,
+  ): Promise<TransferAdminResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] transferAdmin newAdmin=${params.newAdmin}`);
+
+    const { hash } = await this.submitContractOp(
+      'transfer_admin',
+      [this.scvAddress(params.newAdmin)],
+      cid,
+    );
+
+    return {
+      newAdmin: params.newAdmin,
+      transactionHash: hash,
+      timestamp: new Date(),
+      status: 'success',
+      metadata: { adapter: 'soroban', contractId: this.contractId },
+    };
+  }
+
+  async acceptAdmin(): Promise<AcceptAdminResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    const pendingAdmin = await this.getPendingAdmin();
+    this.logger.log(`[${cid}] acceptAdmin pendingAdmin=${pendingAdmin ?? '-'}`);
+
+    const { hash } = await this.submitContractOp('accept_admin', [], cid);
+
+    return {
+      admin: pendingAdmin ?? '',
+      transactionHash: hash,
+      timestamp: new Date(),
+      status: 'success',
+      metadata: { adapter: 'soroban', contractId: this.contractId },
+    };
+  }
+
+  async cancelAdminTransfer(): Promise<CancelAdminTransferResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    const pendingAdmin = await this.getPendingAdmin();
+    this.logger.log(
+      `[${cid}] cancelAdminTransfer pendingAdmin=${pendingAdmin ?? '-'}`,
+    );
+
+    const { hash } = await this.submitContractOp(
+      'cancel_admin_transfer',
+      [],
+      cid,
+    );
+
+    return {
+      cancelledAdmin: pendingAdmin ?? '',
+      transactionHash: hash,
+      timestamp: new Date(),
+      status: 'success',
+      metadata: { adapter: 'soroban', contractId: this.contractId },
+    };
+  }
+
+  async getPendingAdmin(): Promise<string | null> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    const raw = await this.simulateReadOnly('get_pending_admin', [], cid);
+    return typeof raw === 'string' && raw.length > 0 ? raw : null;
   }
 
   async createClaim(params: CreateClaimParams): Promise<CreateClaimResult> {
