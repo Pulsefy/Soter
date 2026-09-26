@@ -1,5 +1,4 @@
 """
-"""
 Tests for Per-Organization Rate Limiting (Issue #1200).
 
 Tests verify that:
