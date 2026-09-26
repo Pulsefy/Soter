@@ -41,6 +41,8 @@ import {
   PackageSummary,
   GetTransactionStatusParams,
   GetTransactionStatusResult,
+  MigrateContractParams,
+  MigrateContractResult,
   TxStatus,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
@@ -720,6 +722,44 @@ export class SorobanAdapter implements OnchainAdapter {
       version: String((version as string | number) ?? '0'),
       name: 'Soroban AidEscrow Contract',
       timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Submit `migrate(new_version)` for this adapter's configured contract.
+   *
+   * The caller supplies the deployment's contract id so a metadata record that
+   * points at a different contract is rejected before anything is signed.
+   */
+  async migrateContract(
+    params: MigrateContractParams,
+  ): Promise<MigrateContractResult> {
+    this.ensureConfigured();
+
+    if (params.contractId !== this.contractId) {
+      throw new Error(
+        `Refusing to migrate contract ${params.contractId}: this adapter is configured for ` +
+          `${this.contractId} (AID_ESCROW_CONTRACT_ID).`,
+      );
+    }
+
+    const cid = this.correlationId();
+    this.logger.log(
+      `[${cid}] migrate newVersion=${params.newVersion} contract=${params.contractId}`,
+    );
+
+    const { hash } = await this.submitContractOp(
+      'migrate',
+      [this.scvU32(params.newVersion)],
+      cid,
+    );
+
+    return {
+      contractId: params.contractId,
+      newVersion: params.newVersion,
+      transactionHash: hash,
+      timestamp: new Date(),
+      status: 'success',
     };
   }
 

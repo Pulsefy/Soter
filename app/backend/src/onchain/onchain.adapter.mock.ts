@@ -29,6 +29,8 @@ import {
   PackageSummary,
   GetTransactionStatusParams,
   GetTransactionStatusResult,
+  MigrateContractParams,
+  MigrateContractResult,
   TxStatus,
   AidPackage,
 } from './onchain.adapter';
@@ -69,6 +71,8 @@ export class MockOnchainAdapter implements OnchainAdapter {
   private readonly mockPackages = new Map<string, MockAidPackage>();
   private readonly mockEscrowAddress =
     'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+  /** Version reported by `getContractMetadata`, advanced by `migrateContract`. */
+  private mockContractVersion = '1.0.0';
 
   /**
    * Generate a deterministic mock transaction hash from input
@@ -443,9 +447,32 @@ export class MockOnchainAdapter implements OnchainAdapter {
   async getContractMetadata(): Promise<ContractMetadata> {
     await Promise.resolve();
     return {
-      version: '1.0.0',
+      version: this.mockContractVersion,
       name: 'Mock Contract',
       timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Simulate `migrate(new_version)`: bump the version reported by
+   * `getContractMetadata()` so the version-verification flow can be exercised
+   * end to end against the mock adapter.
+   */
+  async migrateContract(
+    params: MigrateContractParams,
+  ): Promise<MigrateContractResult> {
+    await Promise.resolve();
+    const transactionHash = this.generateMockHash(
+      `migrate-${params.contractId}-${params.newVersion}-${Date.now()}`,
+    );
+    this.mockContractVersion = String(params.newVersion);
+
+    return {
+      contractId: params.contractId,
+      newVersion: params.newVersion,
+      transactionHash,
+      timestamp: new Date(),
+      status: 'success',
     };
   }
 
