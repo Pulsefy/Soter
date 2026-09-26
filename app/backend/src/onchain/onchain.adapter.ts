@@ -229,6 +229,79 @@ export interface ExtendAidPackageExpiryResult {
   metadata?: Record<string, any>;
 }
 
+// --- Delegate lifecycle ---
+
+export interface SetDelegateParams {
+  /** Package ID to assign a delegate for. */
+  packageId: string;
+  /** Stellar address of the delegate. */
+  delegateAddress: string;
+  /** Admin address authorising the change. */
+  adminAddress: string;
+  /**
+   * Optional unix timestamp (seconds) when the delegate authorization expires.
+   * `0` or omitted means no expiry.
+   */
+  expiresAt?: number;
+}
+
+export interface SetDelegateResult {
+  packageId: string;
+  delegateAddress: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  expiresAt?: number;
+  metadata?: Record<string, any>;
+}
+
+export interface RevokeDelegateParams {
+  /** Package ID whose delegate should be removed. */
+  packageId: string;
+  /** Admin address authorising the revocation. */
+  adminAddress: string;
+}
+
+export interface RevokeDelegateResult {
+  packageId: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  metadata?: Record<string, any>;
+}
+
+export interface GetDelegateParams {
+  packageId: string;
+}
+
+export interface GetDelegateResult {
+  packageId: string;
+  /** Current active delegate address, or `null` if none (or expired). */
+  delegateAddress: string | null;
+  /** Unix timestamp when the delegate authorization expires, or `null` if no expiry. */
+  expiresAt: number | null;
+  timestamp: Date;
+}
+
+export interface DelegateHistoryEntry {
+  packageId: string;
+  previousDelegate: string | null;
+  newDelegate: string;
+  changedBy: string;
+  changedAt: number;
+  reason: string;
+}
+
+export interface GetDelegateHistoryParams {
+  packageId: string;
+}
+
+export interface GetDelegateHistoryResult {
+  packageId: string;
+  history: DelegateHistoryEntry[];
+  timestamp: Date;
+}
+
 /**
  * Interface for on-chain operations with Soroban AidEscrow contract
  */
@@ -311,6 +384,31 @@ export interface OnchainAdapter {
   getTransactionStatus(
     params: GetTransactionStatusParams,
   ): Promise<GetTransactionStatusResult>;
+
+  // --- Delegate lifecycle ---
+
+  /**
+   * Assign or update a delegate for a package.
+   * Pass `expiresAt` to use `set_delegate_with_expiry`; omit it for `set_delegate`.
+   */
+  setDelegate(params: SetDelegateParams): Promise<SetDelegateResult>;
+
+  /**
+   * Remove the delegate for a package.
+   */
+  revokeDelegate(params: RevokeDelegateParams): Promise<RevokeDelegateResult>;
+
+  /**
+   * Return the current active delegate (and expiry) for a package.
+   */
+  getDelegate(params: GetDelegateParams): Promise<GetDelegateResult>;
+
+  /**
+   * Return the full audit history of delegate changes for a package.
+   */
+  getDelegateHistory(
+    params: GetDelegateHistoryParams,
+  ): Promise<GetDelegateHistoryResult>;
 
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;

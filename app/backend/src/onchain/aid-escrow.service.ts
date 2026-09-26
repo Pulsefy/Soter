@@ -17,6 +17,7 @@ import {
   GetAidPackageStatsDto,
   DryRunAidPackageResultDto,
   DryRunValidationErrorDto,
+  SetDelegateDto,
 } from './dto/aid-escrow.dto';
 import { BudgetService } from '../common/budget/budget.service';
 import { AuditService } from '../audit/audit.service';
@@ -527,5 +528,73 @@ export class AidEscrowService {
     });
 
     return { ...result, explorerUrl: explorerTxUrl(result.hash, this.network) };
+  }
+
+  // --- Delegate lifecycle ---
+
+  /**
+   * Assign (or update) a delegate for a package.
+   * Calls `set_delegate_with_expiry` when `dto.expiresAt` is provided, otherwise `set_delegate`.
+   */
+  async setDelegate(
+    packageId: string,
+    dto: SetDelegateDto,
+    adminAddress: string,
+  ) {
+    this.logger.debug('Setting delegate:', {
+      packageId,
+      delegate: dto.delegateAddress,
+      expiresAt: dto.expiresAt,
+    });
+
+    const result = await this.onchainAdapter.setDelegate({
+      packageId,
+      delegateAddress: dto.delegateAddress,
+      adminAddress,
+      expiresAt: dto.expiresAt,
+    });
+
+    this.logger.debug('Delegate set:', {
+      packageId,
+      delegate: result.delegateAddress,
+      transactionHash: result.transactionHash,
+    });
+
+    return this.withTxExplorerUrl(result);
+  }
+
+  /**
+   * Revoke the delegate for a package.
+   */
+  async revokeDelegate(packageId: string, adminAddress: string) {
+    this.logger.debug('Revoking delegate:', { packageId, admin: adminAddress });
+
+    const result = await this.onchainAdapter.revokeDelegate({
+      packageId,
+      adminAddress,
+    });
+
+    this.logger.debug('Delegate revoked:', {
+      packageId,
+      transactionHash: result.transactionHash,
+    });
+
+    return this.withTxExplorerUrl(result);
+  }
+
+  /**
+   * Return the current active delegate (and expiry) for a package.
+   */
+  async getDelegate(packageId: string) {
+    this.logger.debug('Getting delegate:', { packageId });
+    return this.onchainAdapter.getDelegate({ packageId });
+  }
+
+  /**
+   * Return the full audit history of delegate changes for a package.
+   */
+  async getDelegateHistory(packageId: string) {
+    this.logger.debug('Getting delegate history:', { packageId });
+    return this.onchainAdapter.getDelegateHistory({ packageId });
   }
 }
