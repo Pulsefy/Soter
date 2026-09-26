@@ -1,5 +1,6 @@
+import { AppException, ERROR_CODES } from '../../common/dto/error-response.dto';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 /** Subset of PrismaClient/TransactionClient this service relies on. */
@@ -46,7 +47,7 @@ export class BudgetService {
    *
    * NOTE: this performs a plain read-then-compare and is only safe when the
    * caller does not need protection against a concurrent caller doing the
-   * same check for the same campaign at (roughly) the same time — e.g.
+   * same check for the same campaign at (roughly) the same time â€” e.g.
    * one-off/administrative checks. Anything that creates a lock/disburse
    * entry as a result of this check (claim creation, disbursement) MUST use
    * `reserveBudget` instead, inside the same transaction that writes the
@@ -56,11 +57,20 @@ export class BudgetService {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: campaignId },
     });
-    if (!campaign) throw new BadRequestException('Campaign not found');
+    if (!campaign)
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Campaign not found',
+      );
     const usage = await this.getCampaignBudgetUsage(campaignId);
     const total = usage.locked + usage.disbursed + newAmount;
     if (total > campaign.budget) {
-      throw new BadRequestException('Campaign funding cap exceeded');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Campaign funding cap exceeded',
+      );
     }
   }
 
@@ -89,7 +99,12 @@ export class BudgetService {
       Prisma.sql`SELECT "id", "budget" FROM "Campaign" WHERE "id" = ${campaignId} FOR UPDATE`,
     );
     const campaign = rows[0];
-    if (!campaign) throw new BadRequestException('Campaign not found');
+    if (!campaign)
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Campaign not found',
+      );
 
     const [locked, disbursed] = await Promise.all([
       tx.balanceLedger.aggregate({
@@ -106,7 +121,11 @@ export class BudgetService {
       (locked._sum.amount || 0) + (disbursed._sum.amount || 0) + newAmount;
 
     if (total > campaign.budget) {
-      throw new BadRequestException('Campaign funding cap exceeded');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Campaign funding cap exceeded',
+      );
     }
   }
 }

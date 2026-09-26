@@ -1,10 +1,5 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-  Optional,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
@@ -264,9 +259,15 @@ export class NotificationsService {
       where: { id },
     });
     if (!record)
-      throw new NotFoundException(`Outbox record with id "${id}" not found`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Outbox record with id "${id}" not found`,
+      );
     if (record.status !== 'dead_letter') {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Only dead-lettered notifications can be replayed',
       );
     }
@@ -280,7 +281,9 @@ export class NotificationsService {
       },
     });
     if (claimed.count !== 1) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Notification replay is already in progress',
       );
     }

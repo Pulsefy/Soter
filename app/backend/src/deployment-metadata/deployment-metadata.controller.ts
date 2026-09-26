@@ -1,3 +1,4 @@
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import {
   Controller,
   Get,
@@ -8,7 +9,6 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
-  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import {
@@ -77,7 +77,9 @@ export class DeploymentMetadataController {
     } catch (error: unknown) {
       this.logger.error('Failed to create deployment metadata:', error);
       if ((error as { code?: string }).code === 'P2002') {
-        throw new BadRequestException(
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
           `Deployment metadata already exists for ${dto.network}/${dto.contractName}`,
         );
       }

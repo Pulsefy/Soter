@@ -1,4 +1,5 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -112,7 +113,11 @@ export class VerificationMetadataService {
       });
 
       if (!claim) {
-        throw new BadRequestException(`Claim ${claimId} not found`);
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Claim ${claimId} not found`,
+        );
       }
 
       // Build metadata with stable identifiers.

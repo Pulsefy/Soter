@@ -1,10 +1,5 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-  ConflictException,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   VerificationSessionStatus,
@@ -39,7 +34,11 @@ export class SessionService {
 
     // Validate expiration time
     if (expiresAt && expiresAt <= new Date()) {
-      throw new BadRequestException('Expiration time must be in the future');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Expiration time must be in the future',
+      );
     }
 
     const session = await this.prisma.session.create({
@@ -86,7 +85,11 @@ export class SessionService {
     });
 
     if (!session) {
-      throw new NotFoundException(`Session ${sessionId} not found`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Session ${sessionId} not found`,
+      );
     }
 
     // Check if session is expired
@@ -132,20 +135,28 @@ export class SessionService {
     // Validate session and step
     const session = await this.getSession(sessionId);
     if (session.status !== VerificationSessionStatus.pending) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Session ${sessionId} is not in pending state`,
       );
     }
 
     const step = session.steps?.find(s => s.id === stepId);
     if (!step) {
-      throw new NotFoundException(
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
         `Step ${stepId} not found in session ${sessionId}`,
       );
     }
 
     if (step.status === SessionStepStatus.completed) {
-      throw new ConflictException(`Step ${stepId} is already completed`);
+      throw new AppException(
+        ERROR_CODES.CONFLICT,
+        409,
+        `Step ${stepId} is already completed`,
+      );
     }
 
     // Process the submission
@@ -193,7 +204,11 @@ export class SessionService {
     });
 
     if (!step) {
-      throw new NotFoundException(`Step ${stepId} not found`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Step ${stepId} not found`,
+      );
     }
 
     // Update step to in_progress if not already
@@ -304,11 +319,19 @@ export class SessionService {
     };
 
     if (!code || !expectedCode) {
-      throw new BadRequestException('Code and expectedCode are required');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Code and expectedCode are required',
+      );
     }
 
     if (code !== expectedCode) {
-      throw new BadRequestException('Invalid verification code');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Invalid verification code',
+      );
     }
 
     return {
@@ -330,7 +353,11 @@ export class SessionService {
     };
 
     if (!documentUrl) {
-      throw new BadRequestException('Document URL is required');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Document URL is required',
+      );
     }
 
     // Simulate document processing
@@ -354,7 +381,9 @@ export class SessionService {
     };
 
     if (!identityDocument || !personalInfo) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Identity document and personal info are required',
       );
     }
@@ -380,7 +409,11 @@ export class SessionService {
     const { claimId } = payload as { claimId: string };
 
     if (!claimId) {
-      throw new BadRequestException('Claim ID is required');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Claim ID is required',
+      );
     }
 
     // Simulate claim verification
@@ -483,7 +516,11 @@ export class SessionService {
     const session = await this.getSession(sessionId);
 
     if (session.status === VerificationSessionStatus.completed) {
-      throw new BadRequestException('Cannot resume completed session');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Cannot resume completed session',
+      );
     }
 
     if (session.status === VerificationSessionStatus.expired) {

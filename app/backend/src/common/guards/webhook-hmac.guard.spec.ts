@@ -1,4 +1,5 @@
-import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { AppException } from '../../common/dto/error-response.dto';
+import { ExecutionContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'node:crypto';
 import { HmacService } from '../hmac/hmac.service';
@@ -48,6 +49,6 @@ describe('WebhookHmacGuard', () => {
 
     expect(() =>
       guard.canActivate(createContext('invalid-signature', rawBody)),
-    ).toThrow(UnauthorizedException);
+    ).toThrow(AppException);
   });
 });

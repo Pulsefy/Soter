@@ -1,5 +1,6 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+
 import { ConfigService } from '@nestjs/config';
 import {
   ApiKeysService,
@@ -202,7 +203,7 @@ describe('ApiKeysService', () => {
         expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
         expiresInDays: 30,
       }),
-    ).rejects.toThrow(BadRequestException);
+    ).rejects.toThrow(AppException);
   });
 
   it('rejects past expiresAt', async () => {
@@ -211,7 +212,7 @@ describe('ApiKeysService', () => {
         role: AppRole.operator,
         expiresAt: new Date(Date.now() - 1000).toISOString(),
       }),
-    ).rejects.toThrow(BadRequestException);
+    ).rejects.toThrow(AppException);
   });
 
   it('creates a key with custom scopes', async () => {
@@ -246,7 +247,7 @@ describe('ApiKeysService', () => {
 
   it('requires ngoId for NGO role', async () => {
     await expect(service.create({ role: AppRole.ngo }, {})).rejects.toThrow(
-      BadRequestException,
+      AppException,
     );
   });
 
@@ -294,7 +295,7 @@ describe('ApiKeysService', () => {
     it('throws NotFound if id missing', async () => {
       mockPrisma.apiKey.findUnique.mockResolvedValue(null);
       await expect(service.revoke('missing', undefined, {})).rejects.toThrow(
-        NotFoundException,
+        AppException,
       );
     });
 
@@ -349,9 +350,7 @@ describe('ApiKeysService', () => {
         }),
       );
 
-      await expect(service.rotate('missing', {})).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.rotate('missing', {})).rejects.toThrow(AppException);
     });
 
     it('rejects rotation of revoked keys', async () => {
@@ -371,9 +370,7 @@ describe('ApiKeysService', () => {
         }),
       );
 
-      await expect(service.rotate('k1', {})).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.rotate('k1', {})).rejects.toThrow(AppException);
     });
 
     it('creates a replacement and keeps the old key valid during the grace window', async () => {

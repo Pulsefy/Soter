@@ -1,11 +1,5 @@
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-  Optional,
-  Inject,
-  Logger,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Optional, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
@@ -125,7 +119,7 @@ export class ClaimsService {
       where: { id: createClaimDto.campaignId },
     });
     if (!campaign) {
-      throw new NotFoundException('Campaign not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Campaign not found');
     }
 
     // Budget enforcement + claim creation + the ledger entry that records
@@ -231,7 +225,7 @@ export class ClaimsService {
     });
     const claim = claimResult;
     if (!claim || claim.deletedAt) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
     return {
       ...claim,
@@ -251,19 +245,23 @@ export class ClaimsService {
   async verify(id: string) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
     const verification = readPersistedVerificationResult(claim.anchorMetadata);
 
     if (!verification) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Claim ${id} has no completed verification record. Verification is queued automatically when a claim is created; wait for it to complete before verifying.`,
       );
     }
 
     if (!verification.passed) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Claim ${id} did not pass verification (score ${verification.score} below threshold ${verification.threshold}) and cannot be marked verified.`,
       );
     }
@@ -296,11 +294,13 @@ export class ClaimsService {
     });
 
     if (!claim) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
     if (claim.status !== ClaimStatus.approved) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Cannot transition from ${claim.status} to ${ClaimStatus.disbursed}`,
       );
     }
@@ -580,10 +580,12 @@ export class ClaimsService {
   ) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
     if (claim.status !== fromStatus) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Cannot transition from ${claim.status} to ${toStatus}`,
       );
     }
@@ -689,7 +691,7 @@ export class ClaimsService {
       };
     }
 
-    throw new NotFoundException('Claim not found');
+    throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
   }
 
   private async findDisbursementTransaction(
@@ -717,7 +719,7 @@ export class ClaimsService {
     const claim = await this.resolveClaimByIdentifier(identifier);
 
     if (!claim) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
     const tokenAddress = this.getTokenAddressForClaim(claim);
@@ -907,10 +909,18 @@ export class ClaimsService {
 
     if (query.from || query.to) {
       if (query.from && isNaN(Date.parse(query.from))) {
-        throw new BadRequestException(`Invalid 'from' date: ${query.from}`);
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Invalid 'from' date: ${query.from}`,
+        );
       }
       if (query.to && isNaN(Date.parse(query.to))) {
-        throw new BadRequestException(`Invalid 'to' date: ${query.to}`);
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Invalid 'to' date: ${query.to}`,
+        );
       }
       where.createdAt = {};
       if (query.from) where.createdAt.gte = new Date(query.from);
@@ -1004,4 +1014,3 @@ export class ClaimsService {
     }
   }
 }
-

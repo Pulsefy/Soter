@@ -13,6 +13,7 @@ import {
 
 describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
   let service: SorobanTransactionLifecycleService;
+  let testingModules: TestingModule[] = [];
 
   const mockPrismaService = {
     sorobanTransaction: {
@@ -53,7 +54,7 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
       ),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    const module = await Test.createTestingModule({
       providers: [
         SorobanTransactionLifecycleService,
         { provide: PrismaService, useValue: mockPrismaService },
@@ -65,6 +66,7 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
         },
       ],
     }).compile();
+    testingModules.push(module);
 
     return module.get<SorobanTransactionLifecycleService>(
       SorobanTransactionLifecycleService,
@@ -93,7 +95,9 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
     service = await buildService('300000');
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await Promise.all(testingModules.map(m => m.close()));
+    testingModules = [];
     jest.clearAllMocks();
   });
 

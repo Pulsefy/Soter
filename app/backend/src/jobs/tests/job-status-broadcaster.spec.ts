@@ -17,6 +17,7 @@ import {
 describe('JobStatusBroadcaster', () => {
   let service: JobStatusBroadcaster;
   let mockRedis: any;
+  let module: TestingModule;
 
   beforeEach(async () => {
     // Mock Redis
@@ -38,7 +39,7 @@ describe('JobStatusBroadcaster', () => {
       llen: jest.fn().mockResolvedValue(0),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         JobStatusBroadcaster,
         {
@@ -49,6 +50,12 @@ describe('JobStatusBroadcaster', () => {
     }).compile();
 
     service = module.get<JobStatusBroadcaster>(JobStatusBroadcaster);
+  });
+
+  afterEach(async () => {
+    if (module) {
+      await module.close();
+    }
   });
 
   describe('broadcastJobStatus', () => {

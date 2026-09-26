@@ -1,5 +1,6 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+
 import { ConfigService } from '@nestjs/config';
 import { ClaimsService, ClaimExportRow } from './claims.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -260,12 +261,10 @@ describe('ClaimsService', () => {
         .mockResolvedValue(mockCampaign as any);
     });
 
-    it('throws NotFoundException when the campaign does not exist', async () => {
+    it('throws AppException when the campaign does not exist', async () => {
       jest.spyOn(prismaService.campaign, 'findUnique').mockResolvedValue(null);
 
-      await expect(service.create(createDto)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.create(createDto)).rejects.toThrow(AppException);
       expect(prismaService.$transaction).not.toHaveBeenCalled();
     });
 
@@ -297,8 +296,7 @@ describe('ClaimsService', () => {
       // written, so a rejection never leaves a partial claim behind.
       const reserveOrder = (budgetService.reserveBudget as jest.Mock).mock
         .invocationCallOrder[0];
-      const createOrder = (tx.claim.create as jest.Mock).mock
-        .invocationCallOrder[0];
+      const createOrder = tx.claim.create.mock.invocationCallOrder[0];
       expect(reserveOrder).toBeLessThan(createOrder);
 
       // A matching 'lock' ledger entry is written for the new claim so that
@@ -318,7 +316,7 @@ describe('ClaimsService', () => {
     it('rolls back (creates no claim) when the transaction-safe budget check rejects', async () => {
       const tx = mockTransaction();
       (budgetService.reserveBudget as jest.Mock).mockRejectedValue(
-        new BadRequestException('Campaign funding cap exceeded'),
+        new Error('Campaign funding cap exceeded'),
       );
 
       await expect(service.create(createDto)).rejects.toThrow(
@@ -563,15 +561,15 @@ describe('ClaimsService', () => {
       expect(transactionSpy).toHaveBeenCalled();
     });
 
-    it('should throw NotFoundException if claim does not exist', async () => {
+    it('should throw AppException if claim does not exist', async () => {
       jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue(null);
 
       await expect(service.disburse('non-existent')).rejects.toThrow(
-        NotFoundException,
+        AppException,
       );
     });
 
-    it('should throw BadRequestException if claim is not in approved status', async () => {
+    it('should throw AppException if claim is not in approved status', async () => {
       const unapprovedClaim = {
         ...mockClaim,
         status: ClaimStatus.verified,
@@ -580,9 +578,7 @@ describe('ClaimsService', () => {
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(unapprovedClaim);
 
-      await expect(service.disburse('claim-123')).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.disburse('claim-123')).rejects.toThrow(AppException);
     });
   });
 
@@ -712,9 +708,9 @@ describe('ClaimsService', () => {
     });
 
     it('countExport(): rejects an invalid date filter', async () => {
-      await expect(
-        service.countExport({ from: 'not-a-date' }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.countExport({ from: 'not-a-date' })).rejects.toThrow(
+        AppException,
+      );
     });
 
     it('streamExportRows(): pages through results with cursor-based pagination', async () => {

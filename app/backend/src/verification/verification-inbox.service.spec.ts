@@ -1,5 +1,6 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
+
 import { VerificationInboxService } from './verification-inbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -48,7 +49,7 @@ describe('VerificationInboxService', () => {
 
       await expect(
         service.updateStatus('missing', 'approved', 'reviewer-1'),
-      ).rejects.toBeInstanceOf(NotFoundException);
+      ).rejects.toThrow(AppException);
     });
 
     it('throws BadRequestException when already approved', async () => {
@@ -59,7 +60,7 @@ describe('VerificationInboxService', () => {
 
       await expect(
         service.updateStatus('v1', 'approved', 'reviewer-1'),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toThrow(AppException);
     });
 
     it('updates status and records audit trail', async () => {
@@ -152,7 +153,7 @@ describe('VerificationInboxService', () => {
 
       await expect(
         service.addInternalNote('missing', 'note content', 'author-1'),
-      ).rejects.toBeInstanceOf(NotFoundException);
+      ).rejects.toThrow(AppException);
     });
 
     it('creates note and records audit trail', async () => {
@@ -194,8 +195,8 @@ describe('VerificationInboxService', () => {
     it('throws NotFoundException when verification not found', async () => {
       prismaMock.verificationRequest.findUnique.mockResolvedValue(null);
 
-      await expect(service.getInternalNotes('missing')).rejects.toBeInstanceOf(
-        NotFoundException,
+      await expect(service.getInternalNotes('missing')).rejects.toThrow(
+        AppException,
       );
     });
 

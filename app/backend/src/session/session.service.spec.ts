@@ -1,3 +1,4 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SessionService } from './session.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -6,11 +7,6 @@ import {
   VerificationSessionStatus,
   SessionStepStatus,
 } from '@prisma/client';
-import {
-  NotFoundException,
-  BadRequestException,
-  ConflictException,
-} from '@nestjs/common';
 
 describe('SessionService', () => {
   let service: SessionService;
@@ -169,7 +165,7 @@ describe('SessionService', () => {
       };
 
       await expect(service.createSession(createDto)).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
     });
   });
@@ -209,7 +205,7 @@ describe('SessionService', () => {
       mockPrismaService.session.findUnique.mockResolvedValue(null);
 
       await expect(service.getSession('nonexistent')).rejects.toThrow(
-        NotFoundException,
+        AppException,
       );
     });
 
@@ -419,7 +415,7 @@ describe('SessionService', () => {
 
       await expect(
         service.submitToStep('session123', 'step1', submitDto),
-      ).rejects.toThrow(ConflictException);
+      ).rejects.toThrow(AppException);
     });
 
     it('should handle step failure and retry logic', async () => {
@@ -477,7 +473,7 @@ describe('SessionService', () => {
 
       await expect(
         service.submitToStep('session123', 'step1', submitDto),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
 
       // Check that the step was marked as failed (should be the last call)
       const updateCalls = mockPrismaService.sessionStep.update.mock.calls;
@@ -552,7 +548,7 @@ describe('SessionService', () => {
       mockPrismaService.session.findUnique.mockResolvedValue(completedSession);
 
       await expect(service.resumeSession('session123')).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
     });
   });

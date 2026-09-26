@@ -1,10 +1,10 @@
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import {
   Controller,
   Get,
   Post,
   Param,
   Query,
-  NotFoundException,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -167,7 +167,11 @@ export class OutboxController {
   async getOne(@Param('id') id: string) {
     const record = await this.notificationsService.getOutboxRecord(id);
     if (!record) {
-      throw new NotFoundException(`Outbox record with id "${id}" not found`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Outbox record with id "${id}" not found`,
+      );
     }
     return ApiResponseDto.ok(record, 'Outbox record fetched');
   }
@@ -194,7 +198,11 @@ export class OutboxController {
   async getAttempts(@Param('id') id: string) {
     const record = await this.notificationsService.getOutboxRecord(id);
     if (!record) {
-      throw new NotFoundException(`Outbox record with id "${id}" not found`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Outbox record with id "${id}" not found`,
+      );
     }
     const attempts = await this.notificationsService.getDeliveryAttempts(id);
     return ApiResponseDto.ok(attempts, 'Delivery attempts fetched');

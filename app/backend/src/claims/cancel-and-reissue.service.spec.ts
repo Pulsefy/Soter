@@ -1,5 +1,6 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+
 import { CancelAndReissueService } from './cancel-and-reissue.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -256,7 +257,7 @@ describe('CancelAndReissueService', () => {
 
       await expect(
         service.cancel('nonexistent', { operatorId: 'op-1' }),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(AppException);
       expect(auditService.record).not.toHaveBeenCalled();
     });
 
@@ -268,7 +269,7 @@ describe('CancelAndReissueService', () => {
 
       await expect(
         service.cancel('claim-123', { operatorId: 'op-1' }),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(AppException);
       expect(auditService.record).not.toHaveBeenCalled();
     });
 
@@ -280,7 +281,7 @@ describe('CancelAndReissueService', () => {
 
       await expect(
         service.cancel('claim-123', { operatorId: 'op-1' }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
       expect(auditService.record).not.toHaveBeenCalled();
     });
   });

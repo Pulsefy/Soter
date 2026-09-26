@@ -1,5 +1,6 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+
 import { DeviceTokensService } from './device-tokens.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DevicePlatform } from '@prisma/client';
@@ -133,9 +134,7 @@ describe('DeviceTokensService', () => {
         token: 'apns-token-abc',
       };
 
-      await expect(service.register(dto, {})).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.register(dto, {})).rejects.toThrow(AppException);
     });
   });
 
@@ -197,7 +196,7 @@ describe('DeviceTokensService', () => {
       mockPrisma.deviceNotificationToken.findFirst.mockResolvedValue(null);
 
       await expect(service.get('token-1', 'user-1')).rejects.toThrow(
-        NotFoundException,
+        AppException,
       );
     });
   });
@@ -244,7 +243,7 @@ describe('DeviceTokensService', () => {
 
       await expect(
         service.revoke('token-1', 'reason', { userId: 'user-1' }),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(AppException);
     });
 
     it('returns existing token if already revoked', async () => {
@@ -288,7 +287,7 @@ describe('DeviceTokensService', () => {
       mockPrisma.deviceNotificationToken.findFirst.mockResolvedValue(null);
 
       await expect(service.delete('token-1', 'user-1')).rejects.toThrow(
-        NotFoundException,
+        AppException,
       );
     });
   });
@@ -314,7 +313,7 @@ describe('DeviceTokensService', () => {
       mockPrisma.deviceNotificationToken.findFirst.mockResolvedValue(null);
 
       await expect(service.updateLastUsed('token-1', 'user-1')).rejects.toThrow(
-        NotFoundException,
+        AppException,
       );
     });
   });

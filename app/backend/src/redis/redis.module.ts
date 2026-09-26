@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Inject, Module, OnModuleDestroy } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
@@ -52,4 +52,12 @@ export function createRedisClient(
   ],
   exports: [REDIS_CLIENT],
 })
-export class RedisModule {}
+export class RedisModule implements OnModuleDestroy {
+  constructor(@Inject(REDIS_CLIENT) private readonly client: Redis) {}
+
+  onModuleDestroy() {
+    if (this.client && typeof this.client.disconnect === 'function') {
+      this.client.disconnect();
+    }
+  }
+}

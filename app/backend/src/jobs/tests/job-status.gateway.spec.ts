@@ -68,6 +68,7 @@ describe('JobStatusGateway', () => {
   let mockPrisma: { apiKey: { findFirst: jest.Mock } };
   let mockRedis: any;
   let mockBroadcaster: Partial<JobStatusBroadcaster>;
+  let module: TestingModule;
 
   beforeEach(async () => {
     mockPrisma = {
@@ -106,7 +107,7 @@ describe('JobStatusGateway', () => {
       getJobHistory: jest.fn().mockResolvedValue([]),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         JobStatusGateway,
         { provide: JobStatusBroadcaster, useValue: mockBroadcaster },
@@ -116,6 +117,12 @@ describe('JobStatusGateway', () => {
     }).compile();
 
     gateway = module.get<JobStatusGateway>(JobStatusGateway);
+  });
+
+  afterEach(async () => {
+    if (module) {
+      await module.close();
+    }
   });
 
   // =========================================================================

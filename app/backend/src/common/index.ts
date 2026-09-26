@@ -16,3 +16,6 @@ export * from './interceptors/deprecation.interceptor';
 
 // Budget
 export * from './budget/budget.service';
+
+// Errors
+export * from './dto/error-response.dto';

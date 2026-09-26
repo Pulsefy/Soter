@@ -1,3 +1,4 @@
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import {
   Controller,
   Post,
@@ -8,7 +9,6 @@ import {
   HttpStatus,
   Req,
   Query,
-  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { Request } from 'express';
@@ -45,6 +45,20 @@ import { SorobanEventCorrelationService } from './soroban-event-correlation.serv
 @ApiBearerAuth('JWT-auth')
 @Controller('onchain/aid-escrow')
 export class AidEscrowController {
+  private requireUserAddress(
+    req: Request & { user?: { address?: string } },
+  ): string {
+    const address = req.user?.address;
+    if (!address) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Recipient address is required',
+      );
+    }
+    return address;
+  }
+
   private readonly logger = new Logger(AidEscrowController.name);
   private readonly errorMapper = new SorobanErrorMapper();
 
@@ -91,7 +105,7 @@ export class AidEscrowController {
     try {
       const operatorAddress = req.user?.address || 'admin';
       return await this.aidEscrowService.createAidPackage(dto, operatorAddress);
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to create aid package:', error);
       this.errorMapper.throwMappedError(error);
     }
@@ -126,7 +140,7 @@ export class AidEscrowController {
         dto,
         operatorAddress,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to dry-run aid package issuance:', error);
       this.errorMapper.throwMappedError(error);
       throw error;
@@ -171,7 +185,9 @@ export class AidEscrowController {
     @Req() req: Request & { user?: { address?: string } },
   ): Promise<any> {
     if (dto.recipientAddresses.length !== dto.amounts.length) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Recipients and amounts arrays must have the same length',
       );
     }
@@ -182,7 +198,7 @@ export class AidEscrowController {
         dto,
         operatorAddress,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to batch create aid packages:', error);
       this.errorMapper.throwMappedError(error);
     }
@@ -227,7 +243,11 @@ export class AidEscrowController {
   ): Promise<any> {
     const recipientAddress = req.user?.address;
     if (!recipientAddress) {
-      throw new BadRequestException('Recipient address required');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Recipient address required',
+      );
     }
 
     try {
@@ -235,7 +255,7 @@ export class AidEscrowController {
         { packageId },
         recipientAddress,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to claim aid package:', error);
       this.errorMapper.throwMappedError(error);
     }
@@ -286,7 +306,7 @@ export class AidEscrowController {
         { packageId },
         operatorAddress,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to disburse aid package:', error);
       this.errorMapper.throwMappedError(error);
     }
@@ -386,7 +406,7 @@ export class AidEscrowController {
   async getAidPackage(@Param('id') packageId: string): Promise<any> {
     try {
       return await this.aidEscrowService.getAidPackage({ packageId });
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to get aid package:', error);
       this.errorMapper.throwMappedError(error);
     }
@@ -430,7 +450,7 @@ export class AidEscrowController {
       return await this.aidEscrowService.getAidPackageStats({
         tokenAddress: defaultTokenAddress,
       });
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to get aid package stats:', error);
       this.errorMapper.throwMappedError(error);
     }
@@ -466,11 +486,15 @@ export class AidEscrowController {
   })
   async getTransactionStatus(@Param('hash') hash: string): Promise<any> {
     if (!hash || hash.length < 10) {
-      throw new BadRequestException('Invalid transaction hash');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Invalid transaction hash',
+      );
     }
     try {
       return await this.aidEscrowService.getTransactionStatus(hash);
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to get transaction status:', error);
       this.errorMapper.throwMappedError(error);
     }
@@ -521,7 +545,7 @@ export class AidEscrowController {
         events,
         total: events.length,
       };
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to get package events:', error);
       this.errorMapper.throwMappedError(error);
     }
@@ -563,14 +587,18 @@ export class AidEscrowController {
   })
   async correlateTransaction(@Param('txHash') txHash: string): Promise<any> {
     if (!txHash || txHash.length < 10) {
-      throw new BadRequestException('Invalid transaction hash');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Invalid transaction hash',
+      );
     }
     try {
       return await this.eventCorrelationService.correlateTransaction(
         txHash,
         'on_demand',
       );
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to correlate transaction:', error);
       this.errorMapper.throwMappedError(error);
     }
@@ -644,7 +672,7 @@ export class AidEscrowController {
         startLedger,
         endLedger,
       });
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to get event correlations:', error);
       this.errorMapper.throwMappedError(error);
     }

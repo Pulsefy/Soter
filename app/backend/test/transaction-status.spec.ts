@@ -1,6 +1,6 @@
+import { AppException } from '../src/common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { BadRequestException } from '@nestjs/common';
 import { AidEscrowService } from '../src/onchain/aid-escrow.service';
 import { AidEscrowController } from '../src/onchain/aid-escrow.controller';
 import { MockOnchainAdapter } from '../src/onchain/onchain.adapter.mock';
@@ -158,13 +158,13 @@ describe('Transaction Status Polling', () => {
 
     it('throws BadRequestException for empty hash', async () => {
       await expect(controller.getTransactionStatus('')).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
     });
 
     it('throws BadRequestException for hash that is too short', async () => {
       await expect(controller.getTransactionStatus('ABC')).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
     });
 

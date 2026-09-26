@@ -1,4 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
+import { AppException } from '../common/dto/error-response.dto';
+
 import { RecipientsService } from './recipients.service';
 
 describe('RecipientsService', () => {
@@ -70,14 +71,12 @@ describe('RecipientsService', () => {
     });
 
     it('rejects empty input', () => {
-      expect(() => service.validateImport('')).toThrow(BadRequestException);
-      expect(() => service.validateImport('   \n  ')).toThrow(
-        BadRequestException,
-      );
+      expect(() => service.validateImport('')).toThrow(AppException);
+      expect(() => service.validateImport('   \n  ')).toThrow(AppException);
     });
 
     it('rejects files without headers', () => {
-      expect(() => service.validateImport(',,,')).toThrow(BadRequestException);
+      expect(() => service.validateImport(',,,')).toThrow(AppException);
     });
   });
 

@@ -6,7 +6,7 @@
  * Linting is disabled because this module contains many stub providers and
  * imports that are necessary for metadata collection but not for actual runtime use.
  */
-import { Module } from '@nestjs/common';
+import {        Module        } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { AppController } from '../src/app.controller';

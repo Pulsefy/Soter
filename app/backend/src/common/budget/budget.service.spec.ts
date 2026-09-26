@@ -69,9 +69,7 @@ describe('BudgetService', () => {
         });
 
       return {
-        $queryRaw: jest
-          .fn()
-          .mockResolvedValue(overrides.campaignRows ?? []),
+        $queryRaw: jest.fn().mockResolvedValue(overrides.campaignRows ?? []),
         balanceLedger: { aggregate },
       } as any;
     }
@@ -116,9 +114,9 @@ describe('BudgetService', () => {
         disbursed: 30,
       });
 
-      await expect(
-        budgetService.reserveBudget(tx, 'c1', 20),
-      ).rejects.toThrow('Campaign funding cap exceeded');
+      await expect(budgetService.reserveBudget(tx, 'c1', 20)).rejects.toThrow(
+        'Campaign funding cap exceeded',
+      );
     });
 
     it('throws if the campaign row does not exist', async () => {

@@ -1,11 +1,5 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-  ForbiddenException,
-  ConflictException,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { AuditService } from '../audit/audit.service';
@@ -49,17 +43,23 @@ export class UploadSessionService {
 
   async create(dto: CreateUploadSessionDto, ownerId: string, orgId?: string) {
     if (!isSafeFilename(dto.fileName)) {
-      throw new BadRequestException('Invalid fileName');
+      throw new AppException(ERROR_CODES.BAD_REQUEST, 400, 'Invalid fileName');
     }
     if (!(ALLOWED_MIME_TYPES as readonly string[]).includes(dto.mimeType)) {
-      throw new BadRequestException(`Disallowed mimeType: ${dto.mimeType}`);
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Disallowed mimeType: ${dto.mimeType}`,
+      );
     }
     // Extension must be on the allow-list and consistent with the declared
     // mimeType (e.g. rejects "evil.txt" declared as "application/pdf").
     // Content itself can't be checked yet since no bytes have arrived.
     validateExtensionForMime(dto.fileName, dto.mimeType);
     if (dto.totalSize > MAX_FILE_SIZE) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `totalSize exceeds maximum of ${MAX_FILE_SIZE} bytes`,
       );
     }
@@ -106,7 +106,9 @@ export class UploadSessionService {
     const session = await this.getActiveSession(sessionId, ownerId);
 
     if (index < 0 || index >= session.totalChunks) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Chunk index ${index} out of range [0, ${session.totalChunks - 1}]`,
       );
     }
@@ -118,7 +120,9 @@ export class UploadSessionService {
     );
     if (existingChecksum) {
       if (existingChecksum !== checksum) {
-        throw new ConflictException(
+        throw new AppException(
+          ERROR_CODES.CONFLICT,
+          409,
           `Chunk ${index} already uploaded with a different checksum`,
         );
       }
@@ -132,7 +136,9 @@ export class UploadSessionService {
       : session.chunkSize;
 
     if (buffer.length !== expectedSize) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Chunk ${index} size mismatch: expected ${expectedSize}, got ${buffer.length}`,
       );
     }
@@ -143,7 +149,11 @@ export class UploadSessionService {
       .update(buffer)
       .digest('hex');
     if (actualChecksum !== checksum) {
-      throw new BadRequestException(`Chunk ${index} checksum mismatch`);
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Chunk ${index} checksum mismatch`,
+      );
     }
 
     // Persist chunk to Redis and record in Prisma
@@ -173,7 +183,11 @@ export class UploadSessionService {
         { length: session.totalChunks },
         (_, i) => i,
       ).filter(i => !receivedIndices.includes(i));
-      throw new BadRequestException(`Missing chunks: [${missing.join(', ')}]`);
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Missing chunks: [${missing.join(', ')}]`,
+      );
     }
 
     // Reassemble from Redis
@@ -193,7 +207,7 @@ export class UploadSessionService {
         size: assembled.length,
         buffer: assembled,
       });
-    } catch (error) {
+    } catch (error: unknown) {
       await this.store.updateSessionStatus(
         sessionId,
         UploadSessionStatus.aborted,
@@ -237,7 +251,11 @@ export class UploadSessionService {
         UploadSessionStatus.completed,
       );
       await this.store.cleanupSession(sessionId, session.totalChunks);
-      throw new ConflictException('File already exists in evidence queue');
+      throw new AppException(
+        ERROR_CODES.CONFLICT,
+        409,
+        'File already exists in evidence queue',
+      );
     }
 
     const item = await this.prisma.evidenceQueueItem.create({
@@ -285,17 +303,36 @@ export class UploadSessionService {
 
   private async getActiveSession(sessionId: string, ownerId: string) {
     const session = await this.store.getSession(sessionId);
-    if (!session) throw new NotFoundException('Upload session not found');
-    if (session.ownerId !== ownerId) throw new ForbiddenException();
+    if (!session)
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Upload session not found',
+      );
+    if (session.ownerId !== ownerId) {
+      throw new AppException(
+        ERROR_CODES.FORBIDDEN,
+        403,
+        'You do not have access to this upload session',
+      );
+    }
     if (session.status !== UploadSessionStatus.active) {
-      throw new BadRequestException(`Session is ${session.status}`);
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Session is ${session.status}`,
+      );
     }
     if (session.expiresAt < new Date()) {
       await this.store.updateSessionStatus(
         sessionId,
         UploadSessionStatus.expired,
       );
-      throw new BadRequestException('Session has expired');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Session has expired',
+      );
     }
     return session;
   }

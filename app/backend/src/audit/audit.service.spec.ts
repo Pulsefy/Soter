@@ -1,5 +1,6 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+
 import { AuditService } from './audit.service';
 import { AuditChainService } from './audit-chain.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -188,13 +189,13 @@ describe('AuditService', () => {
 
     it('should throw BadRequestException for invalid from date', async () => {
       await expect(service.exportLogs({ from: 'not-a-date' })).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
     });
 
     it('should throw BadRequestException for invalid to date', async () => {
       await expect(service.exportLogs({ to: 'not-a-date' })).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
     });
   });

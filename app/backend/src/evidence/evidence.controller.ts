@@ -263,7 +263,10 @@ export class EvidenceController {
     @Param('id') id: string,
     @Request() req: ExpressRequest,
   ) {
-    const tokenPayload = req['artifactToken'];
+    const tokenPayload = req['artifactToken'] as {
+      artifactId: string;
+      userId: string;
+    };
 
     // Additional validation: ensure token artifact ID matches URL
     if (tokenPayload.artifactId !== id) {

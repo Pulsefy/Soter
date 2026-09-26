@@ -1,9 +1,5 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue, Job } from 'bullmq';
 import { RETENTION_PURGE_QUEUE } from '../retention-policy/retention-purge.processor';
@@ -86,7 +82,11 @@ export class DlqService {
   async getJobHistory(id: string) {
     const job = await this.dlqQueue.getJob(id);
     if (!job) {
-      throw new NotFoundException(`Job ${id} not found in DLQ`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Job ${id} not found in DLQ`,
+      );
     }
     return {
       id: job.id,
@@ -101,16 +101,26 @@ export class DlqService {
   async replayJob(id: string, actorId: string) {
     const job = await this.dlqQueue.getJob(id);
     if (!job) {
-      throw new NotFoundException(`Job ${id} not found in DLQ`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Job ${id} not found in DLQ`,
+      );
     }
     const originalQueueName = job.data?.originalQueue;
     if (!originalQueueName) {
-      throw new BadRequestException(`Job ${id} is missing originalQueue data`);
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Job ${id} is missing originalQueue data`,
+      );
     }
 
     const targetQueue = this.getOriginalQueue(originalQueueName);
     if (!targetQueue) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Target queue ${originalQueueName} is not recognized`,
       );
     }

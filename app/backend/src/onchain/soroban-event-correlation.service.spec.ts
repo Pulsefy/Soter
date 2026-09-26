@@ -9,6 +9,7 @@ import { MetricsService } from '../observability/metrics/metrics.service';
 
 describe('SorobanEventCorrelationService', () => {
   let service: SorobanEventCorrelationService;
+  let module: TestingModule;
 
   const mockPrismaService = {
     sorobanEventCorrelation: {
@@ -36,7 +37,7 @@ describe('SorobanEventCorrelationService', () => {
   };
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         SorobanEventCorrelationService,
         { provide: PrismaService, useValue: mockPrismaService },
@@ -50,7 +51,8 @@ describe('SorobanEventCorrelationService', () => {
     );
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await module?.close();
     jest.clearAllMocks();
   });
 

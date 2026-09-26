@@ -1,8 +1,5 @@
-import {
-  Injectable,
-  InternalServerErrorException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import {
@@ -136,7 +133,9 @@ export class SeedService {
       });
 
       if (!campaign) {
-        throw new UnprocessableEntityException(
+        throw new AppException(
+          ERROR_CODES.VALIDATION_ERROR,
+          422,
           `Demo campaign "${seed.campaignName}" not found. Run seedCampaigns() first.`,
         );
       }
@@ -178,7 +177,9 @@ export class SeedService {
     try {
       tenant = await this.seedTenant();
     } catch (err) {
-      throw new InternalServerErrorException(
+      throw new AppException(
+        ERROR_CODES.INTERNAL_SERVER_ERROR,
+        500,
         `Seed step "tenant" failed: ${(err as Error).message}`,
       );
     }
@@ -186,7 +187,9 @@ export class SeedService {
     try {
       campaigns = await this.seedCampaigns();
     } catch (err) {
-      throw new InternalServerErrorException(
+      throw new AppException(
+        ERROR_CODES.INTERNAL_SERVER_ERROR,
+        500,
         `Seed step "campaigns" failed: ${(err as Error).message}`,
       );
     }
@@ -194,7 +197,9 @@ export class SeedService {
     try {
       claims = await this.seedClaims();
     } catch (err) {
-      throw new InternalServerErrorException(
+      throw new AppException(
+        ERROR_CODES.INTERNAL_SERVER_ERROR,
+        500,
         `Seed step "claims" failed: ${(err as Error).message}`,
       );
     }

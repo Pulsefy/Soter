@@ -60,4 +60,3 @@ export async function createSwaggerDocument(): Promise<{
   const document = SwaggerModule.createDocument(app, buildSwaggerConfig());
   return { app, document };
 }
-

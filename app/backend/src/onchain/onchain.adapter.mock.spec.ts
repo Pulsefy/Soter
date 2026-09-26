@@ -3,12 +3,13 @@ import { MockOnchainAdapter } from './onchain.adapter.mock';
 
 describe('MockOnchainAdapter', () => {
   let adapter: MockOnchainAdapter;
+  let module: TestingModule;
 
   const MOCK_TOKEN_ADDRESS =
     'GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [MockOnchainAdapter],
     }).compile();
 
