@@ -294,6 +294,10 @@ model SorobanTransaction {
   operation         SorobanOperationType
   packageId         String?               /// Soroban package ID if applicable
   txHash            String?               /// Actual transaction hash when submitted
+  /// Stable key tying one logical operation to exactly one row, so a retry
+  /// after a partial failure reuses it instead of creating a second attempt
+  /// that could submit the same disbursement again.
+  idempotencyKey    String?               @unique
   status            SorobanTransactionStatus @default(pending)
   
   /// Retry mechanism tracking
@@ -329,6 +333,7 @@ model SorobanTransaction {
   
   @@index([claimId])
   @@index([status])
+  @@index([status, submittedAt])
   @@index([operation])
   @@index([txHash])
   @@index([nextRetryAt])

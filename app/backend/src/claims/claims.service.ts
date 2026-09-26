@@ -18,6 +18,7 @@ import {
   Prisma,
   SorobanOperationType,
   SorobanTransaction,
+  SorobanTransactionStatus,
 } from '@prisma/client';
 import {
   OnchainAdapter,
@@ -317,10 +318,15 @@ export class ClaimsService {
       try {
         const packageId = await this.getPackageIdForClaim(id);
         const tokenAddress = this.getTokenAddressForClaim(claim);
-        const correlationId = `disburse-${id}-${Date.now()}`;
+        // Deterministic on purpose. A timestamp suffix gave every retry its own
+        // correlation id, so a resubmission was indistinguishable from a fresh
+        // disbursement (Pulsefy/Soter#1175).
+        const correlationId = `disburse-${id}`;
+        const idempotencyKey =
+          SorobanTransactionLifecycleService.disbursementIdempotencyKey(id);
 
-        sorobanTransaction =
-          await this.sorobanTransactionService.createTransaction({
+        const created =
+          await this.sorobanTransactionService.createOrReuseTransaction({
             claimId: id,
             operation: SorobanOperationType.disburse_claim,
             packageId,
@@ -331,6 +337,7 @@ export class ClaimsService {
             amount: claim.amount.toString(),
             tokenAddress,
             correlationId,
+            idempotencyKey,
             metadata: {
               campaignId: claim.campaignId,
               claimAmount: claim.amount,
@@ -340,13 +347,35 @@ export class ClaimsService {
             maxAttempts: 5,
           });
 
-        await this.sorobanTransactionScheduler.scheduleTransaction(
-          sorobanTransaction.id,
-          {
-            correlationId,
-            priority: 1,
-          },
-        );
+        sorobanTransaction = created.transaction;
+
+        // Never queue a row that is already in flight or settled. The existing
+        // job still owns it, and a second submission is precisely the
+        // double-disbursement this guards against.
+        const alreadyInFlight =
+          sorobanTransaction.status === SorobanTransactionStatus.submitted;
+        const alreadySettled =
+          sorobanTransaction.status === SorobanTransactionStatus.confirmed;
+
+        if (!alreadyInFlight && !alreadySettled) {
+          await this.sorobanTransactionScheduler.scheduleTransaction(
+            sorobanTransaction.id,
+            {
+              correlationId,
+              priority: 1,
+            },
+          );
+        } else {
+          this.logger.warn(
+            'Reused disbursement transaction left to its in-flight job',
+            {
+              claimId: id,
+              transactionId: sorobanTransaction.id,
+              status: sorobanTransaction.status,
+              created: created.created,
+            },
+          );
+        }
 
         this.logger.log(
           'Created Soroban transaction with lifecycle tracking for claim disbursement',

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -12,7 +12,7 @@ export interface SorobanTransactionJobData {
 }
 
 @Injectable()
-export class SorobanTransactionScheduler {
+export class SorobanTransactionScheduler implements OnModuleInit {
   private readonly logger = new Logger(SorobanTransactionScheduler.name);
   private isProcessingRetries = false;
   private isProcessingCleanup = false;
@@ -23,6 +23,45 @@ export class SorobanTransactionScheduler {
     private readonly sorobanTransactionService: SorobanTransactionLifecycleService,
     private readonly metricsService: MetricsService,
   ) {}
+
+  /**
+   * Reconcile anything left in flight by a previous process before this worker
+   * starts scheduling retries (Pulsefy/Soter#1175).
+   *
+   * A restart is exactly when the ambiguity created by a crash matters: the
+   * predecessor may have submitted a disbursement that this process has no
+   * record of confirming. Resolving that against the ledger up front is what
+   * makes the retry sweep safe.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      const summary =
+        await this.sorobanTransactionService.reconcileInFlightTransactions();
+
+      if (summary.scanned > 0) {
+        this.logger.log(
+          `Startup reconciliation resolved ${summary.scanned} in-flight Soroban transaction(s)`,
+          {
+            confirmed: summary.confirmed,
+            retryable: summary.retryable,
+            terminal: summary.terminal,
+            inFlight: summary.inFlight,
+            unavailable: summary.unavailable,
+            errored: summary.errored,
+          },
+        );
+      }
+    } catch (error) {
+      // A failed reconciliation must not stop the worker from booting; the
+      // retry sweep reconciles again before it acts on anything.
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Startup reconciliation of in-flight Soroban transactions failed: ${errorMessage}`,
+        { error: errorMessage },
+      );
+    }
+  }
 
   /**
    * Schedule retryable transactions with exponential backoff - every 30 seconds
@@ -41,6 +80,11 @@ export class SorobanTransactionScheduler {
     const startTime = Date.now();
 
     try {
+      // Resolve in-flight rows against the ledger before choosing what to
+      // retry, so a row that already landed on-chain is settled instead of
+      // resubmitted (Pulsefy/Soter#1175).
+      await this.sorobanTransactionService.reconcileInFlightTransactions();
+
       const retryableTransactions =
         await this.sorobanTransactionService.getRetryableTransactions();
 
