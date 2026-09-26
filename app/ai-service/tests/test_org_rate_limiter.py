@@ -277,7 +277,7 @@ class TestOrgRateLimitIntegration:
         monkeypatch.setattr(settings, "org_rate_limit_enabled", True)
 
         # Set up test configuration
-        org_limiter.set_organization_tier("org-test", "2/minute")
+        org_rate_limiter.set_organization_tier("org-test", "2/minute")
         api_key_org_mapping.set_mapping("key-org-test", "org-test")
         rate_limiter.set_endpoint_override("/v1/ai/inference", "100/minute")
 
@@ -310,7 +310,7 @@ class TestOrgRateLimitIntegration:
         monkeypatch.setattr(settings, "org_rate_limit_enabled", True)
 
         # Configure org with 4 request/minute limit
-        org_limiter.set_organization_tier("org-multi", "4/minute")
+        org_rate_limiter.set_organization_tier("org-multi", "4/minute")
         api_key_org_mapping.set_mapping("key-multi-001", "org-multi")
         api_key_org_mapping.set_mapping("key-multi-002", "org-multi")
         api_key_org_mapping.set_mapping("key-multi-003", "org-multi")
@@ -355,7 +355,7 @@ class TestOrgRateLimitIntegration:
         monkeypatch.setattr(settings, "org_rate_limit_enabled", True)
 
         # Set organization limit
-        org_limiter.set_organization_tier("org-exclusive", "2/minute")
+        org_rate_limiter.set_organization_tier("org-exclusive", "2/minute")
         api_key_org_mapping.set_mapping("key-org-exclusive", "org-exclusive")
 
         # Set generous per-key limit
@@ -395,11 +395,11 @@ class TestOrgRateLimitIntegration:
         monkeypatch.setattr(settings, "org_rate_limit_enabled", True)
 
         # Org Alpha: 2 requests/minute
-        org_limiter.set_organization_tier("org-alpha", "2/minute")
+        org_rate_limiter.set_organization_tier("org-alpha", "2/minute")
         api_key_org_mapping.set_mapping("key-alpha", "org-alpha")
 
         # Org Beta: 3 requests/minute
-        org_limiter.set_organization_tier("org-beta", "3/minute")
+        org_rate_limiter.set_organization_tier("org-beta", "3/minute")
         api_key_org_mapping.set_mapping("key-beta", "org-beta")
 
         rate_limiter.set_endpoint_override("/v1/ai/inference", "100/minute")
@@ -434,7 +434,7 @@ class TestOrgRateLimitIntegration:
         monkeypatch.setattr(settings, "test_provider_mode", True)
         monkeypatch.setattr(settings, "org_rate_limit_enabled", False)
 
-        org_limiter.set_organization_tier("org-disabled", "1/minute")
+        org_rate_limiter.set_organization_tier("org-disabled", "1/minute")
         api_key_org_mapping.set_mapping("key-disabled", "org-disabled")
         rate_limiter.set_endpoint_override("/v1/ai/inference", "100/minute")
 
@@ -455,7 +455,7 @@ class TestOrgRateLimitIntegration:
         monkeypatch.setattr(settings, "org_rate_limit_enabled", True)
 
         # Set org limit high
-        org_limiter.set_organization_tier("org-test", "100/minute")
+        org_rate_limiter.set_organization_tier("org-test", "100/minute")
         api_key_org_mapping.set_mapping("key-per-key-test", "org-test")
 
         # Set per-key limit low
@@ -489,7 +489,7 @@ class TestOrgRateLimitIntegration:
         monkeypatch.setattr(settings, "test_provider_mode", True)
         monkeypatch.setattr(settings, "org_rate_limit_enabled", True)
 
-        org_limiter.set_organization_tier("org-headers", "1/minute")
+        org_rate_limiter.set_organization_tier("org-headers", "1/minute")
         api_key_org_mapping.set_mapping("key-headers", "org-headers")
         rate_limiter.set_endpoint_override("/v1/ai/inference", "100/minute")
 
