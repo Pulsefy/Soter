@@ -1,4 +1,5 @@
 """
+"""
 Tests for Per-Organization Rate Limiting (Issue #1200).
 
 Tests verify that:
@@ -10,10 +11,8 @@ Tests verify that:
 6. Rate limits can be configured per organization tier
 """
 
-import time
-from unittest.mock import patch
-
 import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from config import settings
