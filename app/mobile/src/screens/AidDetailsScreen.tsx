@@ -20,6 +20,7 @@ import {
   ClaimTimelineStatus,
   ClaimStatus,
   fetchAidDetails,
+  getMockAidDetails,
 } from '../services/aidApi';
 import {
   cacheAidDetails,
@@ -52,6 +53,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [isCached, setIsCached] = useState(false);
+  const [isMock, setIsMock] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const {
@@ -95,6 +97,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         const data = await fetchAidDetails(aidId);
         setDetails(data);
         setIsCached(false);
+        setIsMock(false);
         setError(null);
         await cacheAidDetails(aidId, data);
         const now = new Date().toISOString();
@@ -105,14 +108,26 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         if (cached) {
           setDetails(cached);
           setIsCached(true);
+          setIsMock(false);
           const ts = await getAidDetailsCacheTimestamp(aidId);
           setLastUpdated(ts || new Date().toISOString());
           setError('Unable to reach the server. Showing last known cached data.');
           if (isRefresh) setRefreshMessage('Refresh failed. Showing the last cached data.');
         } else {
-          setDetails(null);
-          setIsCached(false);
-          setError('Unable to reach the server. Aid details are unavailable offline.');
+          // Fallback to mock data when neither the backend nor the cache is available
+          const mock = getMockAidDetails(aidId);
+          if (mock) {
+            setDetails(mock);
+            setIsCached(true);
+            setIsMock(true);
+            setLastUpdated(null);
+            setError('Unable to reach the server. Showing mock data.');
+          } else {
+            setDetails(null);
+            setIsCached(false);
+            setIsMock(false);
+            setError('Unable to reach the server. Aid details are unavailable offline.');
+          }
           if (isRefresh) setRefreshMessage('Refresh failed. Server is unreachable.');
         }
       } finally {
@@ -344,6 +359,17 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <DataFreshnessIndicator isCached={isCached} isConnected={isConnected} cachedAt={lastUpdated} refreshing={refreshing} refreshMessage={refreshMessage} onRefresh={() => loadDetails(true)} />
+
+      {isMock ? (
+        <View
+          style={styles.mockBadge}
+          accessible
+          accessibilityRole="alert"
+          accessibilityLabel="Showing mock aid details. The backend is unreachable."
+        >
+          <Text style={styles.mockBadgeText}>🔧 MOCK</Text>
+        </View>
+      ) : null}
 
       <View style={styles.header}>
         <Text style={styles.title} accessibilityRole="header">
@@ -719,7 +745,7 @@ const TimelineMilestoneRow = ({
               onPress={handleCopyHash}
               activeOpacity={0.8}
             >
-              <Text style={styles.timelineActionText}>{t('aidDetails.copyHash')}</Text>
+              <Text style={styles.timelineActionText}>Copy Hash</Text>
             </TouchableOpacity>
           </View>
         ) : null}
@@ -1034,6 +1060,19 @@ const makeStyles = (colors: AppColors) =>
     },
     header: {
       gap: 6,
+    },
+    mockBadge: {
+      alignSelf: 'center',
+      backgroundColor: colors.warningBg,
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      marginTop: 8,
+    },
+    mockBadgeText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.warning,
     },
     statusPill: {
       alignSelf: 'flex-start',

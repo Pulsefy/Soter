@@ -13,6 +13,7 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { AidPackage, getAidPackages } from '../services/api';
+import { getMockAidList } from '../services/aidApi';
 import { cacheAidList, loadCachedAidList, getCacheTimestamp } from '../services/aidCache';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { OfflineBanner } from '../components/OfflineBanner';
@@ -48,6 +49,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isCached, setIsCached] = useState(false);
+  const [isMock, setIsMock] = useState(false);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -64,6 +66,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
       if (isRefresh) setRefreshMessage('Data refreshed successfully.');
       setAidList(fresh);
       setIsCached(false);
+      setIsMock(false);
       await cacheAidList(fresh);
       setCachedAt(null);
     } catch {
@@ -72,11 +75,14 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
       if (cached && cached.length > 0) {
         setAidList(cached);
         setIsCached(true);
+        setIsMock(false);
         const ts = await getCacheTimestamp();
         setCachedAt(ts);
       } else {
-        setAidList([]);
+        // Fallback to mock data when neither the backend nor the cache is available
+        setAidList(getMockAidList());
         setIsCached(true);
+        setIsMock(true);
         setCachedAt(null);
       }
     } finally {
@@ -165,6 +171,17 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
       <SaverModeBanner visible={saverModeActive} source={saverModeSource} />
       <OfflineBanner visible={!isConnected} cachedAt={cachedAt} pendingCount={pendingCount} />
       <DataFreshnessIndicator isCached={isCached} isConnected={isConnected} cachedAt={cachedAt} refreshing={refreshing} refreshMessage={refreshMessage} onRefresh={() => loadData(true)} />
+
+      {isMock && (
+        <View
+          style={styles.mockBadge}
+          accessible
+          accessibilityRole="alert"
+          accessibilityLabel="Showing mock aid data. The backend is unreachable."
+        >
+          <Text style={styles.mockBadgeText}>🔧 MOCK</Text>
+        </View>
+      )}
 
       {/* Resolved sync banner: dynamic condition + accessibility */}
       {(syncing || isQueueSyncing) && (
@@ -354,6 +371,19 @@ const makeStyles = (colors: AppColors) =>
       borderRadius: 8,
       padding: 10,
       marginBottom: 8,
+    },
+    mockBadge: {
+      alignSelf: 'center',
+      backgroundColor: colors.warningBg,
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      marginTop: 8,
+    },
+    mockBadgeText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.warning,
     },
     staleText: {
       fontSize: 13,

@@ -97,21 +97,28 @@ export const submitClaim = async (claimId: string, idempotencyKey: string, corre
 };
 
 /** Fallback mock detail data */
-export const getMockAidDetails = (aidId: string): AidDetails => ({
-  id: aidId,
-  title: 'Emergency Food Supply',
-  description: 'Distribution of emergency food packages to affected families.',
-  recipient: {
-    name: 'Amina Yusuf',
-    id: 'REC-2041',
-    wallet: 'GAKD...Q9X2',
-  },
-  tokenType: 'USDC',
-  amount: '150',
-  expiryDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString(),
-  status: 'verified',
-  claimId: `claim-${aidId}`,
-  createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(),
-  verifiedAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
-  approvalTransactionHash: 'f'.repeat(64),
-});
+export const getMockAidDetails = (aidId: string): AidDetails | null => {
+  const mock = getMockAidList().find((item) => item.id === aidId);
+  if (!mock) {
+    return null;
+  }
+
+  return {
+    id: mock.id,
+    title: mock.title,
+    description: mock.description,
+    recipient: {
+      name: 'Amina Yusuf',
+      id: 'REC-2041',
+      wallet: 'GAKD...Q9X2',
+    },
+    tokenType: 'USDC',
+    amount: '150',
+    expiryDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString(),
+    status: 'verified',
+    claimId: `claim-${mock.id}`,
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(),
+    verifiedAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
+    approvalTransactionHash: 'f'.repeat(64),
+  };
+};
