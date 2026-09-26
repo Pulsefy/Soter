@@ -175,6 +175,27 @@ export interface PackageSummary {
   timestamp: Date;
 }
 
+/**
+ * Trigger the contract's `migrate(new_version)` upgrade.
+ *
+ * `contractId` is the deployment the caller intends to migrate; adapters that
+ * are bound to a single configured contract must reject a mismatch rather than
+ * migrating the wrong deployment.
+ */
+export interface MigrateContractParams {
+  contractId: string;
+  newVersion: number;
+}
+
+export interface MigrateContractResult {
+  contractId: string;
+  newVersion: number;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  metadata?: Record<string, any>;
+}
+
 // Legacy interfaces kept for backward compatibility
 export interface CreateClaimParams {
   claimId: string;
@@ -269,6 +290,14 @@ export interface OnchainAdapter {
   getPauseState(): Promise<PauseState>;
   getFeeConfig(): Promise<FeeConfig>;
   getPackageSummary(packageId: string): Promise<PackageSummary>;
+
+  /**
+   * Submit the contract's `migrate(new_version)` upgrade for a deployment.
+   * Callers are responsible for verifying the reported version changed.
+   */
+  migrateContract(
+    params: MigrateContractParams,
+  ): Promise<MigrateContractResult>;
 
   /**
    * Get the status of a transaction by hash
