@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, DeploymentMetadata } from '@prisma/client';
 import {
@@ -124,6 +124,69 @@ export class DeploymentMetadataService {
       where: { id },
     });
     await this.contractConfigCache.invalidateAll();
+  }
+
+  /**
+   * Get a single deployment metadata record by id.
+   *
+   * Reads through Prisma rather than the contract-config cache: the cache is
+   * keyed by network / contract id for request-path lookups, while admin
+   * operations (see `ContractMigrationService`) address records by id.
+   */
+  async findById(id: string): Promise<DeploymentMetadataResponseDto | null> {
+    const metadata = await this.prisma.deploymentMetadata.findUnique({
+      where: { id },
+    });
+    return metadata ? this.mapToResponse(metadata) : null;
+  }
+
+  /**
+   * Roll deployment metadata forward after a migration has been confirmed
+   * on-chain.
+   *
+   * Callers must verify the on-chain version actually changed before calling
+   * this — it is the only step that makes a migration visible in the API, so it
+   * deliberately takes the observed versions rather than the requested one.
+   * Existing `metadata` keys are preserved; the migration fields are merged on
+   * top of them. `deployedAt` and `wasmHash` are left alone, because a state
+   * migration does not by itself prove a new WASM hash was installed.
+   */
+  async recordVerifiedMigration(
+    id: string,
+    params: {
+      transactionHash: string;
+      previousVersion: string;
+      contractVersion: string;
+      migratedAt: Date;
+    },
+  ): Promise<DeploymentMetadataResponseDto> {
+    const existing = await this.prisma.deploymentMetadata.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      throw new NotFoundException(`Deployment metadata ${id} not found`);
+    }
+
+    const existingMetadata =
+      (existing.metadata as Record<string, unknown> | null) ?? {};
+
+    const metadata = await this.prisma.deploymentMetadata.update({
+      where: { id },
+      data: {
+        transactionHash: params.transactionHash,
+        metadata: {
+          ...existingMetadata,
+          contractVersion: params.contractVersion,
+          previousContractVersion: params.previousVersion,
+          migrationTransactionHash: params.transactionHash,
+          migratedAt: params.migratedAt.toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.contractConfigCache.invalidateAll();
+    return this.mapToResponse(metadata);
   }
 
   /**
