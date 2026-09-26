@@ -56,7 +56,6 @@ pub const KEY_PAUSE_CLAIM: Symbol = symbol_short!("p_claim");
 pub const KEY_PAUSE_DISBURSE: Symbol = symbol_short!("p_disbrs");
 /// Per-action pause flag for `refund` (`bool`).
 pub const KEY_PAUSE_REFUND: Symbol = symbol_short!("p_refund");
-    fn singleton_keys() -> [Symbol; 23] {
 /// Per-action pause flag for `withdraw_surplus` (`bool`).
 pub const KEY_PAUSE_WITHDRAW: Symbol = symbol_short!("p_wdrw");
 /// Campaign pause registry (`Map<String, bool>` keyed by `campaign_ref`).
