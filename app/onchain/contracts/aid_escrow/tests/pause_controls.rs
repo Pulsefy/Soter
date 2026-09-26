@@ -1,3 +1,4 @@
+//! Tests for action-specific pause controls (create, claim, disburse, refund, withdraw).
 //! Tests for action-specific pause controls (create, claim, refund, withdraw).
 
 #![cfg(test)]
@@ -142,6 +143,18 @@ fn test_unpause_resumes_claim() {
 
     let result = f.client.try_claim(&0u64);
     assert!(result.is_ok());
+}
+
+#[test]
+fn test_pause_blocks_disburse_without_blocking_claim() {
+    let f = setup();
+    let package_id = create_package(&f);
+    f.client.pause_action(&sym(&f.env, "disburse"));
+
+    assert!(f.client.try_disburse(&package_id).is_err());
+    assert!(f.client.is_action_paused(&sym(&f.env, "disburse")));
+    assert!(!f.client.is_action_paused(&sym(&f.env, "claim")));
+    assert!(f.client.try_claim(&package_id).is_ok());
 }
 
 #[test]

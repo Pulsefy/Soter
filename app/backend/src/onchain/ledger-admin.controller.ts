@@ -7,7 +7,10 @@ import {
   Version,
   HttpCode,
   HttpStatus,
+  Req,
+  BadRequestException,
 } from '@nestjs/common';
+import { Request } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -18,11 +21,22 @@ import {
   ApiUnauthorizedResponse,
   ApiForbiddenResponse,
 } from '@nestjs/swagger';
+import { Inject } from '@nestjs/common';
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
+import { AuditService } from '../audit/audit.service';
+import { OnchainAdapter, ONCHAIN_ADAPTER_TOKEN, OnchainAction } from './onchain.adapter';
+
+const ONCHAIN_ACTIONS: readonly OnchainAction[] = [
+  'create',
+  'claim',
+  'disburse',
+  'withdraw',
+  'refund',
+];
 
 @ApiTags('Ledger Admin')
 @Controller('admin/ledger')
@@ -31,7 +45,80 @@ export class LedgerAdminController {
     private readonly backfillService: LedgerBackfillService,
     private readonly reconciliationService: LedgerReconciliationService,
     private readonly sorobanTransactionLifecycleService: SorobanTransactionLifecycleService,
+    @Inject(ONCHAIN_ADAPTER_TOKEN)
+    private readonly onchainAdapter: OnchainAdapter,
+    private readonly auditService: AuditService,
   ) {}
+
+  @Post('actions/:action/pause')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Pause one on-chain action' })
+  @ApiParam({ name: 'action', enum: ONCHAIN_ACTIONS })
+  @ApiOkResponse({ description: 'Action pause submitted successfully.' })
+  @ApiBadRequestResponse({ description: 'Unsupported on-chain action.' })
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - admin role required.',
+  })
+  async pauseAction(
+    @Param('action') action: string,
+    @Req() request: Request,
+  ) {
+    return this.setActionPause(action, true, request);
+  }
+
+  @Post('actions/:action/unpause')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Unpause one on-chain action' })
+  @ApiParam({ name: 'action', enum: ONCHAIN_ACTIONS })
+  @ApiOkResponse({ description: 'Action unpause submitted successfully.' })
+  @ApiBadRequestResponse({ description: 'Unsupported on-chain action.' })
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - admin role required.',
+  })
+  async unpauseAction(
+    @Param('action') action: string,
+    @Req() request: Request,
+  ) {
+    return this.setActionPause(action, false, request);
+  }
+
+  private async setActionPause(
+    action: string,
+    paused: boolean,
+    request: Request,
+  ) {
+    if (!ONCHAIN_ACTIONS.includes(action as OnchainAction)) {
+      throw new BadRequestException(`Unsupported on-chain action: ${action}`);
+    }
+
+    const validAction = action as OnchainAction;
+    if (paused) {
+      await this.onchainAdapter.pauseAction(validAction);
+    } else {
+      await this.onchainAdapter.unpauseAction(validAction);
+    }
+
+    await this.auditService.record({
+      actorId:
+        request.user?.id ?? request.user?.sub ?? request.user?.apiKeyId ?? 'system',
+      entity: 'onchain_action',
+      entityId: validAction,
+      action: paused ? 'pause' : 'unpause',
+      metadata: { action: validAction, paused },
+    });
+
+    return { success: true, action: validAction, paused };
+  }
 
   @Post('backfill')
   @Version('1')

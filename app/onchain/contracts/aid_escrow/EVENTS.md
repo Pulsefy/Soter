@@ -1,3 +1,4 @@
+| `action_paused_event`     | `pause_action`      | Admin pauses a single action (create/claim/disburse/refund/withdraw).  |
 # AidEscrow Event Schema (Indexer Reference)
 
 This document is the canonical reference for the on-chain events emitted by the

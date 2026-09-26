@@ -52,6 +52,8 @@ pub const KEY_PAUSED: Symbol = symbol_short!("paused");
 pub const KEY_PAUSE_CREATE: Symbol = symbol_short!("p_create");
 /// Per-action pause flag for claim paths (`bool`).
 pub const KEY_PAUSE_CLAIM: Symbol = symbol_short!("p_claim");
+/// Per-action pause flag for admin disbursements (`bool`).
+pub const KEY_PAUSE_DISBURSE: Symbol = symbol_short!("p_disbrs");
 /// Per-action pause flag for `refund` (`bool`).
 pub const KEY_PAUSE_REFUND: Symbol = symbol_short!("p_refund");
 /// Per-action pause flag for `withdraw_surplus` (`bool`).
@@ -157,6 +159,7 @@ mod tests {
             KEY_PAUSED,
             KEY_PAUSE_CREATE,
             KEY_PAUSE_CLAIM,
+            KEY_PAUSE_DISBURSE,
             KEY_PAUSE_REFUND,
             KEY_PAUSE_WITHDRAW,
             KEY_CAMPAIGN_PAUSED,

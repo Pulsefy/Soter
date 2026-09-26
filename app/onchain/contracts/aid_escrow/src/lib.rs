@@ -37,7 +37,7 @@ pub use crate::keys::{
     package_index_entry, package_key, KEY_ADMIN, KEY_CAMPAIGN_PAUSED, KEY_CAMPAIGN_TOKEN_CLAIMED,
     KEY_CAMPAIGN_TOKEN_LOCKED, KEY_CONFIG, KEY_DELEGATES, KEY_DELEGATE_EXPIRY,
     KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_MAX_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM,
-    KEY_PAUSE_CREATE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN, KEY_PKG_COUNTER,
+    KEY_PAUSE_CREATE, KEY_PAUSE_DISBURSE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN, KEY_PKG_COUNTER,
     KEY_PKG_IDX, KEY_RECIPIENT_LAST_CLAIM, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
 };
 
@@ -1744,8 +1744,10 @@ impl AidEscrow {
     pub fn disburse(env: Env, id: u64) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
+        Self::check_action_paused(&env, symbol_short!("disburse"))?;
 
         let key = crate::keys::package_key(id);
+            /// Admin-only. Pauses a specific action (create, claim, disburse, refund, or withdraw).
         let mut package: Package = env
             .storage()
             .persistent()
@@ -2336,6 +2338,8 @@ impl AidEscrow {
             Ok(KEY_PAUSE_CREATE)
         } else if action == symbol_short!("claim") {
             Ok(KEY_PAUSE_CLAIM)
+        } else if action == symbol_short!("disburse") {
+            Ok(KEY_PAUSE_DISBURSE)
         } else if action == symbol_short!("withdraw") {
             Ok(KEY_PAUSE_WITHDRAW)
         } else if action == symbol_short!("refund") {

@@ -40,6 +40,7 @@ import {
   GetTransactionStatusParams,
   GetTransactionStatusResult,
   TxStatus,
+  OnchainAction,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
@@ -681,6 +682,40 @@ export class SorobanAdapter implements OnchainAdapter {
       isPaused: result === true,
       timestamp: new Date(),
     };
+  }
+
+  async pauseAction(action: OnchainAction): Promise<void> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] pauseAction action=${action}`);
+    await this.submitContractOp(
+      'pause_action',
+      [this.scvSymbol(action)],
+      cid,
+    );
+  }
+
+  async unpauseAction(action: OnchainAction): Promise<void> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] unpauseAction action=${action}`);
+    await this.submitContractOp(
+      'unpause_action',
+      [this.scvSymbol(action)],
+      cid,
+    );
+  }
+
+  async isActionPaused(action: OnchainAction): Promise<boolean> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] isActionPaused action=${action}`);
+    const result = await this.simulateReadOnly(
+      'is_action_paused',
+      [this.scvSymbol(action)],
+      cid,
+    );
+    return result === true;
   }
 
   getFeeConfig(): Promise<FeeConfig> {
