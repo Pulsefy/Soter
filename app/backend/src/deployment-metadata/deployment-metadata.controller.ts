@@ -19,13 +19,20 @@ import {
   ApiBadRequestResponse,
   ApiNotFoundResponse,
   ApiInternalServerErrorResponse,
+  ApiConflictResponse,
+  ApiBadGatewayResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { DeploymentMetadataService } from './deployment-metadata.service';
 import {
+  ContractMigrationService,
+  ContractMigrationResult,
+} from './contract-migration.service';
+import {
   CreateDeploymentMetadataDto,
   UpdateDeploymentMetadataDto,
   DeploymentMetadataResponseDto,
+  MigrateContractDto,
 } from './dto/deployment-metadata.dto';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
@@ -43,6 +50,7 @@ export class DeploymentMetadataController {
 
   constructor(
     private readonly deploymentMetadataService: DeploymentMetadataService,
+    private readonly contractMigrationService: ContractMigrationService,
   ) {}
 
   /**
@@ -243,6 +251,67 @@ export class DeploymentMetadataController {
   }> {
     this.logger.log('Admin-triggered contract-config cache refresh');
     return this.deploymentMetadataService.refreshCache();
+  }
+
+  /**
+   * Trigger an on-chain contract migration for a recorded deployment
+   * POST /deployment-metadata/:id/migrate
+   *
+   * Submits `migrate(new_version)` and only rolls the deployment metadata
+   * forward once the chain reports that the contract version actually changed.
+   * See docs/contract-migration-runbook.md for the pre-flight checklist.
+   * @protected admin only
+   */
+  @Post(':id/migrate')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Trigger an on-chain contract migration (admin only)',
+    description:
+      'Submits migrate(newVersion) for the contract recorded by this deployment and verifies ' +
+      'that the reported contract version changed before updating the deployment metadata. ' +
+      'If the migration cannot be verified, the deployment metadata is left untouched.',
+  })
+  @ApiOkResponse({
+    description:
+      'Migration submitted and the reported contract version changed; deployment metadata updated.',
+    schema: {
+      type: 'object',
+      properties: {
+        deploymentId: { type: 'string' },
+        contractName: { type: 'string' },
+        network: { type: 'string' },
+        contractId: { type: 'string' },
+        previousVersion: { type: 'string' },
+        contractVersion: { type: 'string' },
+        transactionHash: { type: 'string' },
+        migratedAt: { type: 'string', format: 'date-time' },
+        metadata: { type: 'object' },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid input parameters.' })
+  @ApiNotFoundResponse({ description: 'Deployment metadata not found.' })
+  @ApiConflictResponse({
+    description:
+      'Nothing was submitted: the pre-flight version guard failed or the contract already reports the requested version.',
+  })
+  @ApiBadGatewayResponse({
+    description:
+      'The migration could not be verified on-chain; deployment metadata was not modified.',
+  })
+  async migrateContract(
+    @Param('id') id: string,
+    @Body() dto: MigrateContractDto,
+  ): Promise<ContractMigrationResult> {
+    this.logger.log(
+      `Admin-triggered contract migration for deployment ${id} to version ${dto.newVersion}`,
+    );
+    return this.contractMigrationService.migrateDeployment(
+      id,
+      dto.newVersion,
+      dto.expectedCurrentVersion,
+    );
   }
 
   /**
