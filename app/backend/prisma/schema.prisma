@@ -892,3 +892,40 @@ model SorobanEventCorrelation {
   @@index([correlationSource])
   @@unique([txHash, eventIndex]) // Each event in a transaction is unique
 }
+
+// ============================================================================
+// LEDGER BACKFILL CHECKPOINTING
+// ============================================================================
+
+enum BackfillStatus {
+  pending
+  running
+  completed
+  failed
+}
+
+/// Persists ledger backfill progress so jobs can safely resume after interruption.
+/// jobKey uniquely identifies a backfill run (derived from start/end ledger + campaignId).
+model BackfillCheckpoint {
+  id                   String          @id @default(cuid())
+  /// Deterministic key identifying this backfill run (e.g. "backfill:1000:2000:campaign-abc")
+  jobKey               String          @unique
+  startLedger          Int
+  endLedger            Int
+  /// Last successfully processed ledger — resume from here on restart
+  lastProcessedLedger  Int
+  status               BackfillStatus  @default(pending)
+  processedCount       Int             @default(0)
+  errorCount           Int             @default(0)
+  campaignId           String?
+  batchSize            Int             @default(100)
+  /// Human-readable error message if status=failed
+  lastError            String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  @@index([status])
+  @@index([campaignId])
+  @@index([startLedger, endLedger])
+  @@index([createdAt])
+}

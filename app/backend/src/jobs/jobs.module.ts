@@ -9,6 +9,7 @@ import { DlqService } from './dlq.service';
     BullModule.registerQueue({ name: 'verification' }),
     BullModule.registerQueue({ name: 'notifications' }),
     BullModule.registerQueue({ name: 'onchain' }),
+    BullModule.registerQueue({ name: 'ledger-backfill' }),
     BullModule.registerQueue({ name: RETENTION_PURGE_QUEUE }),
     BullModule.registerQueue({ name: 'dead-letter' }),
   ],

@@ -9,6 +9,8 @@ import { SorobanAdapter } from './soroban.adapter';
 import { OnchainProcessor } from './onchain.processor';
 import { OnchainService } from './onchain.service';
 import { LedgerBackfillService } from './ledger-backfill.service';
+import { LedgerBackfillProcessor } from './ledger-backfill.processor';
+import { BackfillCheckpointService } from './backfill-checkpoint.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { LedgerAdminController } from './ledger-admin.controller';
 import { JobsModule } from '../jobs/jobs.module';
@@ -75,6 +77,17 @@ const onchainAdapterProvider: Provider = {
       }),
       inject: [ConfigService],
     }),
+    BullModule.registerQueueAsync({
+      name: 'ledger-backfill',
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get<string>('REDIS_HOST') || 'localhost',
+          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
+        },
+      }),
+      inject: [ConfigService],
+    }),
     ScheduleModule.forRoot(),
     JobsModule,
     LoggerModule,
@@ -88,7 +101,9 @@ const onchainAdapterProvider: Provider = {
     onchainAdapterProvider,
     OnchainProcessor,
     OnchainService,
+    BackfillCheckpointService,
     LedgerBackfillService,
+    LedgerBackfillProcessor,
     LedgerReconciliationService,
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
@@ -99,6 +114,7 @@ const onchainAdapterProvider: Provider = {
   exports: [
     ONCHAIN_ADAPTER_TOKEN,
     OnchainService,
+    BackfillCheckpointService,
     LedgerBackfillService,
     LedgerReconciliationService,
     SorobanTransactionLifecycleService,
