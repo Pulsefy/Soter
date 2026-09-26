@@ -27,6 +27,7 @@ import { config } from '../config';
 import { structuredLogger } from '../services/logger';
 import { getSyncQueueState } from '../services/syncQueue';
 import { useTranslation } from '../i18n/useTranslation';
+import { useSyncDeferral } from '../contexts/SyncDeferralContext';
 
 // Derive environment label from config
 const getEnvLabel = (): string => config.envName;
@@ -56,6 +57,14 @@ export const HealthScreen = () => {
 
   const { colors } = useTheme();
   const { t } = useTranslation();
+
+  const {
+    batteryLevel,
+    isCharging,
+    deferralReason,
+  } = useSyncDeferral();
+  const batteryThreshold = config.batteryThreshold ?? 0.2;
+  const syncDeferredForBattery = deferralReason === 'low-battery';
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const envLabel = getEnvLabel();
@@ -202,6 +211,10 @@ export const HealthScreen = () => {
       );
     }
 
+    const formattedBatteryLevel =
+      batteryLevel < 0 ? 'Unavailable' : `${Math.round(batteryLevel * 100)}%`;
+    const formattedBatteryThreshold = `${Math.round(batteryThreshold * 100)}%`;
+
     const diagnosticsText = `Soter App Diagnostics
 ---------------------
 App Version: ${appVersion}
@@ -212,6 +225,11 @@ API Reachability: ${formattedApiReachable}
 Network Connected: ${netInfo?.isConnected ? 'Yes' : 'No'}
 Network Type: ${formattedNetworkType}
 Internet Reachable: ${formattedInternetReachable}
+Battery Level: ${formattedBatteryLevel}
+Battery Charging: ${isCharging ? 'Yes' : 'No'}
+Battery Threshold: ${formattedBatteryThreshold}
+Sync Deferred (Battery): ${syncDeferredForBattery ? 'Yes' : 'No'}
+Deferral Reason: ${deferralReason}
 Contract ID: ${config.sorobanContractId || 'None'}
 Correlation ID: ${structuredLogger.getCurrentCorrelationId()}
 Timestamp: ${new Date().toISOString()}
@@ -707,6 +725,46 @@ ${recentLogs}`;
                     : netInfo?.isInternetReachable === false
                       ? 'NO'
                       : 'UNKNOWN'}
+                </Text>
+              </View>
+
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Battery Level: ${
+                  batteryLevel < 0 ? 'Unavailable' : `${Math.round(batteryLevel * 100)}%`
+                }`}
+              >
+                <Text style={styles.infoLabel}>Battery Level:</Text>
+                <Text style={styles.infoValue}>
+                  {batteryLevel < 0 ? 'UNAVAILABLE' : `${Math.round(batteryLevel * 100)}%`}
+                </Text>
+              </View>
+
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Battery Threshold: ${Math.round(batteryThreshold * 100)}%`}
+              >
+                <Text style={styles.infoLabel}>Battery Threshold:</Text>
+                <Text style={styles.infoValue}>{`${Math.round(batteryThreshold * 100)}%`}</Text>
+              </View>
+
+              <View
+                style={styles.infoRow}
+                accessible
+                accessibilityLabel={`Sync Deferred for Battery: ${
+                  syncDeferredForBattery ? 'Yes' : 'No'
+                }`}
+              >
+                <Text style={styles.infoLabel}>Sync Deferred (Battery):</Text>
+                <Text
+                  style={[
+                    styles.infoValue,
+                    { color: syncDeferredForBattery ? colors.warning : colors.success },
+                  ]}
+                >
+                  {syncDeferredForBattery ? 'YES' : 'NO'}
                 </Text>
               </View>
             </View>

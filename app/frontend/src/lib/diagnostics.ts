@@ -16,11 +16,27 @@ export interface ClientDeviceState {
   };
 }
 
+export interface BatteryDiagnostics {
+  /** Battery level 0-1, or null if unavailable */
+  level: number | null;
+  /** Battery level as percent 0-100, or null if unavailable */
+  levelPercent: number | null;
+  /** Whether the device is charging, or null if unavailable */
+  charging: boolean | null;
+  /** Whether battery APIs reported usable data */
+  available: boolean;
+  /** Configured threshold (0-1) below which sync is deferred for battery */
+  batteryThreshold: number;
+  /** Whether sync would currently be deferred for low battery */
+  syncDeferredForBattery: boolean | null;
+}
+
 export interface SupportDiagnosticsBundle {
   timestamp: string;
   appVersion: string;
   environment: string;
   clientState: ClientDeviceState;
+  battery: BatteryDiagnostics;
   backendDiagnostics: Record<string, unknown> | null;
   queueHealth: Record<string, unknown> | null;
   walletNetworkStatus: Record<string, unknown> | null;
@@ -124,12 +140,81 @@ export function sanitizeClientData<T>(data: T): T {
   return result as T;
 }
 
+
+/**
+ * Default battery threshold matching mobile sync deferral (20%).
+ */
+export const DEFAULT_BATTERY_THRESHOLD = 0.2;
+
+/**
+ * Resolve configured battery threshold for diagnostics comparison.
+ */
+export function getBatteryThreshold(): number {
+  const raw = process.env.NEXT_PUBLIC_BATTERY_THRESHOLD;
+  if (raw === undefined || raw === '') return DEFAULT_BATTERY_THRESHOLD;
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : DEFAULT_BATTERY_THRESHOLD;
+}
+
+type NavigatorWithBattery = Navigator & {
+  getBattery?: () => Promise<{ level: number; charging: boolean }>;
+};
+
+/**
+ * Collect battery level and battery-aware deferral state for diagnostics export.
+ * Uses the browser Battery Status API when available; otherwise marks unavailable.
+ */
+export async function collectBatteryDiagnostics(): Promise<BatteryDiagnostics> {
+  const batteryThreshold = getBatteryThreshold();
+  const unavailable: BatteryDiagnostics = {
+    level: null,
+    levelPercent: null,
+    charging: null,
+    available: false,
+    batteryThreshold,
+    syncDeferredForBattery: null,
+  };
+
+  if (typeof navigator === 'undefined') {
+    return unavailable;
+  }
+
+  const nav = navigator as NavigatorWithBattery;
+  if (typeof nav.getBattery !== 'function') {
+    return unavailable;
+  }
+
+  try {
+    const battery = await nav.getBattery();
+    const level = typeof battery.level === 'number' ? battery.level : null;
+    const charging = typeof battery.charging === 'boolean' ? battery.charging : null;
+    if (level === null) {
+      return unavailable;
+    }
+
+    const syncDeferredForBattery =
+      charging === false && level >= 0 && level < batteryThreshold;
+
+    return {
+      level,
+      levelPercent: Math.round(level * 100),
+      charging,
+      available: true,
+      batteryThreshold,
+      syncDeferredForBattery,
+    };
+  } catch {
+    return unavailable;
+  }
+}
+
 /**
  * Gather full device diagnostics bundle including backend health/diagnostics if reachable
  */
 export async function generateDeviceDiagnostics(): Promise<SupportDiagnosticsBundle> {
   const isBrowser = typeof window !== 'undefined';
   const walletState = useWalletStore.getState();
+  const battery = await collectBatteryDiagnostics();
 
   const clientState: ClientDeviceState = {
     userAgent: isBrowser ? window.navigator.userAgent : 'Server environment',
@@ -174,6 +259,7 @@ export async function generateDeviceDiagnostics(): Promise<SupportDiagnosticsBun
     appVersion: process.env.NEXT_PUBLIC_APP_VERSION || '1.0.0',
     environment: process.env.NODE_ENV || 'development',
     clientState,
+    battery,
     backendDiagnostics,
     queueHealth: queueHealth || { status: 'unavailable', note: 'Backend diagnostics unreachable' },
     walletNetworkStatus: walletNetworkStatus || {

@@ -55,6 +55,25 @@ jest.mock('../services/healthCache', () => ({
 }));
 
 // Mock the config module
+
+// Mock sync deferral (battery-aware diagnostics)
+jest.mock('../contexts/SyncDeferralContext', () => ({
+  useSyncDeferral: () => ({
+    batteryLevel: 0.15,
+    isCharging: false,
+    isMetered: false,
+    meteredOptIn: false,
+    forceSyncOverride: false,
+    deferralReason: 'low-battery',
+    estimatedUploadSize: 0,
+    setMeteredOptIn: jest.fn(),
+    forceSync: jest.fn(),
+    clearForceSync: jest.fn(),
+    setEstimatedUploadSize: jest.fn(),
+    shouldDeferAction: () => ({ deferred: true, reason: 'low-battery' }),
+    getDeferralExplanation: () => 'Sync deferred: low battery',
+  }),
+}));
 jest.mock('../config', () => ({
   config: {
     apiUrl: 'http://localhost:3000',
@@ -64,6 +83,7 @@ jest.mock('../config', () => ({
     sorobanContractId: 'CC123...',
     isValid: true,
     errors: [],
+    batteryThreshold: 0.2,
   },
 }));
 
@@ -293,6 +313,11 @@ describe('HealthScreen', () => {
       expect(screen.getByText('WIFI')).toBeTruthy();
       expect(screen.getByText('Internet Reachable:')).toBeTruthy();
       expect(screen.getByText('YES')).toBeTruthy();
+      expect(screen.getByText('Battery Level:')).toBeTruthy();
+      expect(screen.getByText('15%')).toBeTruthy();
+      expect(screen.getByText('Battery Threshold:')).toBeTruthy();
+      expect(screen.getByText('20%')).toBeTruthy();
+      expect(screen.getByText('Sync Deferred (Battery):')).toBeTruthy();
     });
   });
 
@@ -325,6 +350,10 @@ describe('HealthScreen', () => {
     expect(copiedText).toContain('Network Type: WIFI');
     expect(copiedText).toContain('Internet Reachable: Yes');
     expect(copiedText).toContain('Contract ID: CC123...');
+    expect(copiedText).toContain('Battery Level: 15%');
+    expect(copiedText).toContain('Battery Threshold: 20%');
+    expect(copiedText).toContain('Sync Deferred (Battery): Yes');
+    expect(copiedText).toContain('Deferral Reason: low-battery');
 
     expect(copiedText).not.toContain('test-project-id');
 

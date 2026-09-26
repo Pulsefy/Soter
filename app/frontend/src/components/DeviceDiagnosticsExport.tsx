@@ -82,7 +82,7 @@ export function DeviceDiagnosticsExport() {
             </h2>
           </div>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Export sanitized application state, wallet status, queue metrics, and error logs to share with support.
+            Export sanitized application state, wallet status, battery/sync-deferral state, queue metrics, and error logs to share with support.
           </p>
         </div>
 
@@ -125,7 +125,7 @@ export function DeviceDiagnosticsExport() {
       ) : diagnostics ? (
         <div className="mt-6 space-y-6">
           {/* Diagnostic Metrics Grid */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
               <span className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 App Metadata
@@ -147,6 +147,27 @@ export function DeviceDiagnosticsExport() {
               </p>
               <p className="mt-0.5 text-xs text-slate-500">
                 Net: {diagnostics.clientState.wallet.network || 'Testnet'}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+              <span className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Battery & Sync Deferral
+              </span>
+              <p className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">
+                {diagnostics.battery.available
+                  ? `${diagnostics.battery.levelPercent}%${diagnostics.battery.charging ? ' (charging)' : ''}`
+                  : 'Unavailable'}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Threshold: {Math.round(diagnostics.battery.batteryThreshold * 100)}%
+                {' · '}
+                Deferred:{' '}
+                {diagnostics.battery.syncDeferredForBattery === null
+                  ? 'n/a'
+                  : diagnostics.battery.syncDeferredForBattery
+                    ? 'Yes'
+                    : 'No'}
               </p>
             </div>
 
