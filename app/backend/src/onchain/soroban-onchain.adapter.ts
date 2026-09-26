@@ -16,6 +16,8 @@ import {
   ClaimAidPackageResult,
   DisburseAidPackageParams,
   DisburseAidPackageResult,
+  ExtendAidPackageExpiryParams,
+  ExtendAidPackageExpiryResult,
   GetAidPackageParams,
   GetAidPackageResult,
   GetAidPackageCountParams,
@@ -227,6 +229,32 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       status: 'success',
       amountDisbursed: '0',
     };
+  }
+
+  async extendAidPackageExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    this.logger.log(
+      `extendAidPackageExpiry id=${params.packageId} newExpiresAt=${params.newExpiresAt}`,
+    );
+    await this.invokeContract('extend_expiry', [
+      params.packageId,
+      params.newExpiresAt,
+    ]);
+    return {
+      packageId: params.packageId,
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+      newExpiresAt: params.newExpiresAt,
+    };
+  }
+
+  // Alias for contract function naming alignment
+  async extendExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    return this.extendAidPackageExpiry(params);
   }
 
   async getAidPackage(

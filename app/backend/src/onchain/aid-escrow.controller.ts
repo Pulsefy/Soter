@@ -28,7 +28,10 @@ import {
   CreateAidPackageDto,
   BatchCreateAidPackagesDto,
   DryRunAidPackageResultDto,
+  ExtendAidPackageExpiryDto,
 } from './dto/aid-escrow.dto';
+import { Roles } from '../auth/roles.decorator';
+import { AppRole } from '../auth/app-role.enum';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { CacheResponse } from '../common/decorators/cache-response.decorator';
 import { getCacheTTL } from '../common/config/cache.config';
@@ -285,6 +288,61 @@ export class AidEscrowController {
       );
     } catch (error) {
       this.logger.error('Failed to disburse aid package:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Extend the expiration of an aid package (operator/admin action)
+   * POST /onchain/aid-escrow/packages/:id/extend-expiry
+   * POST /onchain/aid-escrow/packages/:id/extend
+   */
+  @Post(['packages/:id/extend-expiry', 'packages/:id/extend'])
+  @Roles(AppRole.operator, AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Extend aid package expiry',
+    description:
+      'Extends the expiration timestamp of an active aid package using an absolute timestamp (canonical extend_expiry convention). Only authorized operators or admins can extend package expiry.',
+  })
+  @ApiOkResponse({
+    description: 'Package expiry extended successfully.',
+    schema: {
+      example: {
+        packageId: 'pkg_123456789',
+        transactionHash:
+          'ABC123DEF456ABC123DEF456ABC123DEF456ABC123DEF456ABC123DEF456ABCD',
+        timestamp: '2026-03-30T12:30:00.000Z',
+        status: 'success',
+        oldExpiresAt: 1714406400,
+        newExpiresAt: 1717084800,
+        metadata: {
+          operator: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Package is not active (already claimed or expired) or invalid timestamp.',
+  })
+  @ApiNotFoundResponse({ description: 'Package does not exist.' })
+  @ApiInternalServerErrorResponse({
+    description: 'Blockchain transaction failed.',
+  })
+  async extendAidPackageExpiry(
+    @Param('id') packageId: string,
+    @Body() dto: ExtendAidPackageExpiryDto,
+    @Req() req: Request & { user?: { address?: string; id?: string } },
+  ): Promise<any> {
+    try {
+      const operatorAddress = req.user?.address || req.user?.id || 'admin';
+      return await this.aidEscrowService.extendAidPackageExpiry(
+        { ...dto, packageId },
+        operatorAddress,
+      );
+    } catch (error) {
+      this.logger.error('Failed to extend aid package expiry:', error);
       this.errorMapper.throwMappedError(error);
     }
   }

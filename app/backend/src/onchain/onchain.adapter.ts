@@ -209,6 +209,26 @@ export interface DisburseResult {
   metadata?: Record<string, any>;
 }
 
+export interface ExtendAidPackageExpiryParams {
+  packageId: string;
+  /**
+   * New unix timestamp (in seconds) when the package expires.
+   * Strictly greater than current package expiration.
+   */
+  newExpiresAt: number;
+  operatorAddress?: string;
+}
+
+export interface ExtendAidPackageExpiryResult {
+  packageId: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  oldExpiresAt?: number;
+  newExpiresAt: number;
+  metadata?: Record<string, any>;
+}
+
 /**
  * Interface for on-chain operations with Soroban AidEscrow contract
  */
@@ -245,6 +265,21 @@ export interface OnchainAdapter {
   disburseAidPackage(
     params: DisburseAidPackageParams,
   ): Promise<DisburseAidPackageResult>;
+
+  /**
+   * Extend the expiration timestamp of an active aid package.
+   *
+   * Design Decision:
+   * Canonical convention chosen: Absolute timestamp (`extend_expiry(id, new_expires_at)`).
+   * Rationale:
+   * 1. The smart contract explicitly deprecated relative `extend_expiration(id, additional_time)`
+   *    in favor of `extend_expiry(id, new_expires_at)`.
+   * 2. Absolute timestamps provide idempotency and protect against race conditions or retry-induced
+   *    expiration drift if operations are re-submitted.
+   */
+  extendAidPackageExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult>;
 
   /**
    * Get details of an aid package

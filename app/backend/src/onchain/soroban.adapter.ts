@@ -26,6 +26,8 @@ import {
   ClaimAidPackageResult,
   DisburseAidPackageParams,
   DisburseAidPackageResult,
+  ExtendAidPackageExpiryParams,
+  ExtendAidPackageExpiryResult,
   GetAidPackageParams,
   GetAidPackageResult,
   GetAidPackageCountParams,
@@ -559,6 +561,57 @@ export class SorobanAdapter implements OnchainAdapter {
         operator: params.operatorAddress,
       },
     };
+  }
+
+  async extendAidPackageExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(
+      `[${cid}] extendAidPackageExpiry id=${params.packageId} newExpiresAt=${params.newExpiresAt}`,
+    );
+
+    let oldExpiresAt: number | undefined;
+    try {
+      const current = await this.getAidPackage({ packageId: params.packageId });
+      if (current?.package) {
+        oldExpiresAt = current.package.expiresAt;
+      }
+    } catch {
+      // Contract will enforce validation checks during transaction simulation
+    }
+
+    const { hash } = await this.submitContractOp(
+      'extend_expiry',
+      [
+        this.scvU64(parseInt(params.packageId, 10)),
+        this.scvU64(params.newExpiresAt),
+      ],
+      cid,
+    );
+
+    return {
+      packageId: params.packageId,
+      transactionHash: hash,
+      timestamp: new Date(),
+      status: 'success',
+      oldExpiresAt,
+      newExpiresAt: params.newExpiresAt,
+      metadata: {
+        contractId: this.contractId,
+        operator: params.operatorAddress,
+        oldExpiresAt,
+        newExpiresAt: params.newExpiresAt,
+      },
+    };
+  }
+
+  // Alias for contract function naming alignment
+  async extendExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    return this.extendAidPackageExpiry(params);
   }
 
   async getAidPackage(

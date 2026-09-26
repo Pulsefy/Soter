@@ -1,5 +1,10 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { Inject } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  Inject,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OnchainAdapter, ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
 import {
@@ -7,12 +12,14 @@ import {
   BatchCreateAidPackagesDto,
   ClaimAidPackageDto,
   DisburseAidPackageDto,
+  ExtendAidPackageExpiryDto,
   GetAidPackageDto,
   GetAidPackageStatsDto,
   DryRunAidPackageResultDto,
   DryRunValidationErrorDto,
 } from './dto/aid-escrow.dto';
 import { BudgetService } from '../common/budget/budget.service';
+import { AuditService } from '../audit/audit.service';
 import { GetTransactionStatusResult } from './onchain.adapter';
 import { explorerTxUrl } from '../common/utils/explorer-url.util';
 
@@ -31,6 +38,8 @@ export class AidEscrowService {
     private readonly onchainAdapter: OnchainAdapter,
     private readonly budgetService: BudgetService,
     private readonly configService: ConfigService,
+    @Optional()
+    private readonly auditService?: AuditService,
   ) {
     this.network = this.configService.get<string>('SOROBAN_NETWORK', 'testnet');
   }
@@ -395,6 +404,72 @@ export class AidEscrowService {
     });
 
     return this.withTxExplorerUrl(result);
+  }
+
+  /**
+   * Extend an aid package's expiration (operator/admin action).
+   * Uses canonical absolute timestamp convention (extend_expiry).
+   * Performs pre-checks, invokes onchain adapter, and records audit trail.
+   */
+  async extendAidPackageExpiry(
+    dto: ExtendAidPackageExpiryDto & { packageId: string },
+    operatorAddress: string,
+  ) {
+    this.logger.debug('Extending aid package expiry:', {
+      packageId: dto.packageId,
+      newExpiresAt: dto.newExpiresAt,
+      operator: operatorAddress,
+    });
+
+    let oldExpiresAt: number | undefined;
+    try {
+      const existing = await this.onchainAdapter.getAidPackage({
+        packageId: dto.packageId,
+      });
+      if (existing?.package) {
+        oldExpiresAt = existing.package.expiresAt;
+        if (existing.package.status === 'Claimed') {
+          throw new BadRequestException('Aid package is already claimed');
+        }
+        if (existing.package.status !== 'Created') {
+          throw new BadRequestException(
+            `Aid package is in status ${existing.package.status}`,
+          );
+        }
+      }
+    } catch (err) {
+      if (err instanceof BadRequestException) {
+        throw err;
+      }
+      // Continue and allow adapter/contract to validate
+    }
+
+    const result = await this.onchainAdapter.extendAidPackageExpiry({
+      packageId: dto.packageId,
+      newExpiresAt: dto.newExpiresAt,
+      operatorAddress,
+    });
+
+    const finalOldExpiresAt = result.oldExpiresAt ?? oldExpiresAt;
+
+    if (this.auditService) {
+      await this.auditService.record({
+        actorId: operatorAddress,
+        entity: 'aid_package',
+        entityId: dto.packageId,
+        action: 'extend_expiry',
+        metadata: {
+          oldExpiresAt: finalOldExpiresAt,
+          newExpiresAt: result.newExpiresAt ?? dto.newExpiresAt,
+          transactionHash: result.transactionHash,
+        },
+      });
+    }
+
+    return this.withTxExplorerUrl({
+      ...result,
+      oldExpiresAt: finalOldExpiresAt,
+    });
   }
 
   /**

@@ -15,6 +15,8 @@ import {
   ClaimAidPackageResult,
   DisburseAidPackageParams,
   DisburseAidPackageResult,
+  ExtendAidPackageExpiryParams,
+  ExtendAidPackageExpiryResult,
   GetAidPackageParams,
   GetAidPackageResult,
   GetAidPackageCountParams,
@@ -275,6 +277,86 @@ export class MockOnchainAdapter implements OnchainAdapter {
         adapter: 'mock',
       },
     };
+  }
+
+  /**
+   * Extend the expiration of an aid package using absolute timestamp.
+   *
+   * Rejects if package is not active (e.g. claimed, cancelled, refunded) or already expired,
+   * or if newExpiresAt <= current expiresAt.
+   */
+  async extendAidPackageExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    await Promise.resolve();
+
+    let pkg = this.mockPackages.get(params.packageId);
+    if (!pkg) {
+      const defaultAmount = '1000000000';
+      pkg = {
+        id: params.packageId,
+        recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        amount: defaultAmount,
+        token: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+        status: 'Created',
+        createdAt: Math.floor(Date.now() / 1000),
+        expiresAt: Math.floor(Date.now() / 1000) + 86400 * 30,
+        claimedAmount: '0',
+        remainingAmount: defaultAmount,
+        metadata: {},
+      };
+      this.mockPackages.set(params.packageId, pkg);
+    }
+
+    if (pkg.status === 'Claimed') {
+      throw new BadRequestException('Aid package is already claimed');
+    }
+
+    if (pkg.status !== 'Created') {
+      throw new BadRequestException(`Aid package is in status ${pkg.status}`);
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (pkg.expiresAt <= nowSec) {
+      pkg.status = 'Expired';
+      throw new BadRequestException('Aid package has expired');
+    }
+
+    if (params.newExpiresAt <= pkg.expiresAt) {
+      throw new BadRequestException(
+        'New expiration timestamp must be strictly greater than current expiration timestamp',
+      );
+    }
+
+    const oldExpiresAt = pkg.expiresAt;
+    pkg.expiresAt = params.newExpiresAt;
+
+    const transactionHash = this.generateMockHash(
+      `extend-expiry-${params.packageId}-${params.newExpiresAt}-${Date.now()}`,
+    );
+
+    return {
+      packageId: params.packageId,
+      transactionHash,
+      timestamp: new Date(),
+      status: 'success',
+      oldExpiresAt,
+      newExpiresAt: params.newExpiresAt,
+      metadata: {
+        packageId: params.packageId,
+        oldExpiresAt,
+        newExpiresAt: params.newExpiresAt,
+        operatorAddress: params.operatorAddress,
+        adapter: 'mock',
+      },
+    };
+  }
+
+  // Alias for contract function naming alignment
+  async extendExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    return this.extendAidPackageExpiry(params);
   }
 
   async getAidPackage(

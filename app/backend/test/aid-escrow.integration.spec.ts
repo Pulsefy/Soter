@@ -9,11 +9,17 @@ import {
   CreateAidPackageDto,
   BatchCreateAidPackagesDto,
   ClaimAidPackageDto,
+  ExtendAidPackageExpiryDto,
 } from '../src/onchain/dto/aid-escrow.dto';
 import { ONCHAIN_ADAPTER_TOKEN } from '../src/onchain/onchain.adapter';
 import { BadRequestException } from '@nestjs/common';
 import { SorobanEventCorrelationService } from '../src/onchain/soroban-event-correlation.service';
+import { AuditService } from '../src/audit/audit.service';
 import { Request } from 'express';
+
+const mockAuditService = {
+  record: jest.fn().mockResolvedValue({ id: 'audit-1' }),
+};
 
 const mockEventCorrelationService = {
   getCorrelationsForPackage: jest.fn().mockResolvedValue([]),
@@ -99,8 +105,14 @@ describe('AidEscrow Integration Tests', () => {
           provide: SorobanEventCorrelationService,
           useValue: mockEventCorrelationService,
         },
+        {
+          provide: AuditService,
+          useValue: mockAuditService,
+        },
       ],
     }).compile();
+
+    mockAuditService.record.mockClear();
 
     service = module.get<AidEscrowService>(AidEscrowService);
     controller = module.get<AidEscrowController>(AidEscrowController);
@@ -390,6 +402,89 @@ describe('AidEscrow Integration Tests', () => {
     });
   });
 
+  describe('Service: extendAidPackageExpiry', () => {
+    it('should extend expiry of an active package and audit log old and new expiry', async () => {
+      const packageId = 'pkg-srv-extend';
+      const initialExpiresAt = Math.floor(Date.now() / 1000) + 3600;
+      const newExpiresAt = initialExpiresAt + 7200;
+      const operatorAddress = 'GOPERATOR123';
+
+      await service.createAidPackage(
+        {
+          packageId,
+          recipientAddress:
+            'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+          amount: '1000',
+          tokenAddress:
+            'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+          expiresAt: initialExpiresAt,
+        },
+        operatorAddress,
+      );
+
+      const result = await service.extendAidPackageExpiry(
+        {
+          packageId,
+          newExpiresAt,
+        },
+        operatorAddress,
+      );
+
+      expect(result).toBeDefined();
+      expect(result.status).toBe('success');
+      expect(result.packageId).toBe(packageId);
+      expect(result.oldExpiresAt).toBe(initialExpiresAt);
+      expect(result.newExpiresAt).toBe(newExpiresAt);
+      expect(result.transactionHash).toBeDefined();
+      expect(result.explorerUrl).toBeDefined();
+
+      expect(mockAuditService.record).toHaveBeenCalledTimes(1);
+      expect(mockAuditService.record).toHaveBeenCalledWith({
+        actorId: operatorAddress,
+        entity: 'aid_package',
+        entityId: packageId,
+        action: 'extend_expiry',
+        metadata: {
+          oldExpiresAt: initialExpiresAt,
+          newExpiresAt,
+          transactionHash: result.transactionHash,
+        },
+      });
+    });
+
+    it('should reject extension for an already-claimed package', async () => {
+      const packageId = 'pkg-srv-claimed';
+      const initialExpiresAt = Math.floor(Date.now() / 1000) + 3600;
+      const operatorAddress = 'GOPERATOR123';
+      const recipientAddress =
+        'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ';
+
+      await service.createAidPackage(
+        {
+          packageId,
+          recipientAddress,
+          amount: '1000',
+          tokenAddress:
+            'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+          expiresAt: initialExpiresAt,
+        },
+        operatorAddress,
+      );
+
+      await service.claimAidPackage({ packageId }, recipientAddress);
+
+      await expect(
+        service.extendAidPackageExpiry(
+          {
+            packageId,
+            newExpiresAt: initialExpiresAt + 7200,
+          },
+          operatorAddress,
+        ),
+      ).rejects.toThrow('Aid package is already claimed');
+    });
+  });
+
   describe('Controller: REST endpoints', () => {
     it('should handle POST /packages', async () => {
       const dto: CreateAidPackageDto = {
@@ -499,6 +594,75 @@ describe('AidEscrow Integration Tests', () => {
       await expect(
         controller.claimAidPackage('pkg-001', req as Request),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should handle POST /packages/:id/extend-expiry for authorized operator', async () => {
+      const packageId = 'pkg-ctrl-extend';
+      const initialExpiresAt = Math.floor(Date.now() / 1000) + 3600;
+      const newExpiresAt = initialExpiresAt + 86400;
+
+      await mockAdapter.createAidPackage({
+        operatorAddress:
+          'GOPER8TORADDRESS00000000000000000000000000000000000000',
+        packageId,
+        recipientAddress:
+          'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        amount: '1000000000',
+        tokenAddress:
+          'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+        expiresAt: initialExpiresAt,
+      });
+
+      const req = createMockRequest(
+        'GOPER8TORADDRESS00000000000000000000000000000000000000',
+      );
+      const dto: ExtendAidPackageExpiryDto = { newExpiresAt };
+      const result = await controller.extendAidPackageExpiry(
+        packageId,
+        dto,
+        req as Request,
+      );
+
+      expect(result).toBeDefined();
+      expect(result.packageId).toBe(packageId);
+      expect(result.status).toBe('success');
+      expect(result.oldExpiresAt).toBe(initialExpiresAt);
+      expect(result.newExpiresAt).toBe(newExpiresAt);
+    });
+
+    it('should reject controller POST /packages/:id/extend-expiry for already-claimed package', async () => {
+      const packageId = 'pkg-ctrl-claimed';
+      const initialExpiresAt = Math.floor(Date.now() / 1000) + 3600;
+
+      await mockAdapter.createAidPackage({
+        operatorAddress:
+          'GOPER8TORADDRESS00000000000000000000000000000000000000',
+        packageId,
+        recipientAddress:
+          'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        amount: '1000000000',
+        tokenAddress:
+          'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+        expiresAt: initialExpiresAt,
+      });
+
+      await mockAdapter.claimAidPackage({
+        packageId,
+        recipientAddress:
+          'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+      });
+
+      const req = createMockRequest(
+        'GOPER8TORADDRESS00000000000000000000000000000000000000',
+      );
+
+      await expect(
+        controller.extendAidPackageExpiry(
+          packageId,
+          { newExpiresAt: initialExpiresAt + 86400 },
+          req as Request,
+        ),
+      ).rejects.toThrow();
     });
   });
 

@@ -261,3 +261,19 @@ export class GetAidPackageStatsDto {
   @IsString()
   tokenAddress: string;
 }
+
+/**
+ * DTO for extending the expiry of an aid package.
+ * Follows the canonical absolute timestamp convention (`newExpiresAt`).
+ */
+export class ExtendAidPackageExpiryDto {
+  @ApiProperty({
+    description:
+      'New unix timestamp (in seconds) when the package expires. Must be strictly greater than current expiration timestamp.',
+    example: 1735689600,
+  })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  newExpiresAt: number;
+}

@@ -282,4 +282,127 @@ describe('MockOnchainAdapter', () => {
       ).rejects.toThrow('Aid package has expired');
     });
   });
+
+  describe('extendAidPackageExpiry', () => {
+    it('should extend expiry of an active package', async () => {
+      const packageId = 'pkg-extend-active';
+      const initialExpiresAt = Math.floor(Date.now() / 1000) + 3600;
+      const newExpiresAt = initialExpiresAt + 7200;
+
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId,
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '1000',
+        tokenAddress: MOCK_TOKEN_ADDRESS,
+        expiresAt: initialExpiresAt,
+      });
+
+      const result = await adapter.extendAidPackageExpiry({
+        packageId,
+        newExpiresAt,
+        operatorAddress: 'admin',
+      });
+
+      expect(result.status).toBe('success');
+      expect(result.packageId).toBe(packageId);
+      expect(result.oldExpiresAt).toBe(initialExpiresAt);
+      expect(result.newExpiresAt).toBe(newExpiresAt);
+      expect(result.transactionHash).toHaveLength(64);
+
+      // Verify package reflects updated expiry
+      const pkgResult = await adapter.getAidPackage({ packageId });
+      expect(pkgResult.package.expiresAt).toBe(newExpiresAt);
+    });
+
+    it('should reject extension for an already-claimed package', async () => {
+      const packageId = 'pkg-extend-claimed';
+      const initialExpiresAt = Math.floor(Date.now() / 1000) + 3600;
+
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId,
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '500',
+        tokenAddress: MOCK_TOKEN_ADDRESS,
+        expiresAt: initialExpiresAt,
+      });
+
+      // Claim the entire package
+      await adapter.claimAidPackage({
+        packageId,
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '500',
+      });
+
+      // Attempt to extend claimed package
+      await expect(
+        adapter.extendAidPackageExpiry({
+          packageId,
+          newExpiresAt: initialExpiresAt + 7200,
+          operatorAddress: 'admin',
+        }),
+      ).rejects.toThrow('Aid package is already claimed');
+    });
+
+    it('should reject extension if new expiresAt is not strictly greater than current expiresAt', async () => {
+      const packageId = 'pkg-extend-non-increasing';
+      const initialExpiresAt = Math.floor(Date.now() / 1000) + 3600;
+
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId,
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '500',
+        tokenAddress: MOCK_TOKEN_ADDRESS,
+        expiresAt: initialExpiresAt,
+      });
+
+      await expect(
+        adapter.extendAidPackageExpiry({
+          packageId,
+          newExpiresAt: initialExpiresAt,
+          operatorAddress: 'admin',
+        }),
+      ).rejects.toThrow(
+        'New expiration timestamp must be strictly greater than current expiration timestamp',
+      );
+
+      await expect(
+        adapter.extendAidPackageExpiry({
+          packageId,
+          newExpiresAt: initialExpiresAt - 100,
+          operatorAddress: 'admin',
+        }),
+      ).rejects.toThrow(
+        'New expiration timestamp must be strictly greater than current expiration timestamp',
+      );
+    });
+
+    it('should reject extension if package has already expired', async () => {
+      const packageId = 'pkg-extend-already-expired';
+
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId,
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '500',
+        tokenAddress: MOCK_TOKEN_ADDRESS,
+        expiresAt: Math.floor(Date.now() / 1000) - 60,
+      });
+
+      await expect(
+        adapter.extendAidPackageExpiry({
+          packageId,
+          newExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+          operatorAddress: 'admin',
+        }),
+      ).rejects.toThrow('Aid package has expired');
+    });
+  });
 });
