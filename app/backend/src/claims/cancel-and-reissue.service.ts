@@ -10,6 +10,7 @@ import { EncryptionService } from '../common/encryption/encryption.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
+import { CancelReasonCode } from './cancel-reason.enum';
 import { ClaimStatus } from '@prisma/client';
 import {
   CLAIM_EVENT,
@@ -80,6 +81,7 @@ export class CancelAndReissueService {
           cancelledAt: now,
           cancelledBy: dto.operatorId,
           cancelReason: dto.reason ?? null,
+          cancelReasonCode: dto.reasonCode,
         },
         include: { campaign: true },
       });
@@ -92,7 +94,9 @@ export class CancelAndReissueService {
           eventType: 'unlock',
           // Negative amount: this entry reduces the total locked balance
           amount: -claim.amount,
-          note: `Claim ${id} cancelled by ${dto.operatorId}. Reason: ${dto.reason ?? 'none'}`,
+          note: `Claim ${id} cancelled by ${dto.operatorId}. Reason: ${dto.reasonCode}${
+            dto.reason ? ` (${dto.reason})` : ''
+          }`,
         },
       });
 
@@ -105,6 +109,7 @@ export class CancelAndReissueService {
       claimId: id,
       campaignId: claim.campaignId,
       operatorId: dto.operatorId,
+      reasonCode: dto.reasonCode,
       reason: dto.reason,
       unlockedAmount: claim.amount,
       timestamp: now,
@@ -184,6 +189,7 @@ export class CancelAndReissueService {
             cancelledAt: now,
             cancelledBy: dto.operatorId,
             cancelReason: dto.reason ?? `Reissued as new claim`,
+            cancelReasonCode: dto.reasonCode ?? CancelReasonCode.reissued,
           },
         });
 
@@ -232,6 +238,7 @@ export class CancelAndReissueService {
       claimId: originalId,
       campaignId: original.campaignId,
       operatorId: dto.operatorId,
+      reasonCode: dto.reasonCode ?? CancelReasonCode.reissued,
       reason: dto.reason ?? `Reissued as ${newClaim.id}`,
       unlockedAmount: original.amount,
       timestamp: now,
@@ -243,6 +250,7 @@ export class CancelAndReissueService {
       originalClaimId: originalId,
       campaignId: original.campaignId,
       operatorId: dto.operatorId,
+      reasonCode: dto.reasonCode ?? CancelReasonCode.reissued,
       amount: newAmount,
       reason: dto.reason,
       timestamp: now,
@@ -361,6 +369,41 @@ export class CancelAndReissueService {
       disbursedAmount,
       availableBudget,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cancellation reporting
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Group cancelled claims by their enumerated reason code.
+   *
+   * Legacy rows that pre-date `cancelReasonCode` were backfilled to
+   * `unspecified` by the accompanying migration, so every cancelled claim
+   * lands in exactly one bucket. Known codes with zero occurrences are
+   * returned with `count: 0` so dashboards get a stable shape.
+   */
+  async cancellationReasonSummary() {
+    const grouped = await this.prisma.claim.groupBy({
+      by: ['cancelReasonCode'],
+      where: { status: ClaimStatus.cancelled, deletedAt: null },
+      _count: { _all: true },
+    });
+
+    const counts = new Map<string, number>();
+    for (const row of grouped) {
+      const code = row.cancelReasonCode ?? CancelReasonCode.unspecified;
+      counts.set(code, (counts.get(code) ?? 0) + row._count._all);
+    }
+
+    const reasons = Object.values(CancelReasonCode).map(code => ({
+      code,
+      count: counts.get(code) ?? 0,
+    }));
+
+    const total = reasons.reduce((sum, entry) => sum + entry.count, 0);
+
+    return { total, reasons };
   }
 
   // ---------------------------------------------------------------------------

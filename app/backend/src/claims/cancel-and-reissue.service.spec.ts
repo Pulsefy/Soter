@@ -7,6 +7,7 @@ import { EncryptionService } from '../common/encryption/encryption.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { ClaimStatus } from '@prisma/client';
 import { CLAIM_EVENT } from './claim.events';
+import { CancelReasonCode } from './cancel-reason.enum';
 
 describe('CancelAndReissueService', () => {
   let service: CancelAndReissueService;
@@ -35,6 +36,7 @@ describe('CancelAndReissueService', () => {
   const mockPrismaService = {
     claim: {
       findUnique: jest.fn(),
+      groupBy: jest.fn(),
     },
     $transaction: jest.fn(),
   };
@@ -95,6 +97,7 @@ describe('CancelAndReissueService', () => {
 
       await service.cancel('claim-123', {
         operatorId: 'operator-1',
+        reasonCode: CancelReasonCode.duplicate,
         reason: 'Test reason',
       });
 
@@ -138,13 +141,85 @@ describe('CancelAndReissueService', () => {
         },
       );
 
-      await service.cancel('claim-123', { operatorId: 'operator-1' });
+      await service.cancel('claim-123', {
+        operatorId: 'operator-1',
+        reasonCode: CancelReasonCode.unspecified,
+      });
 
       const metadata = (auditService.record as jest.Mock).mock.calls[0][0]
         .metadata;
       expect(metadata.claimId).toBe('claim-123');
+      expect(metadata.reasonCode).toBe(CancelReasonCode.unspecified);
       expect(metadata.reason).toBeUndefined();
       expect(metadata.unlockedAmount).toBe(100);
+    });
+
+    it('persists the reason code on the claim and in the audit event', async () => {
+      mockPrismaService.claim.findUnique.mockResolvedValue(mockClaim);
+      const update = jest.fn().mockResolvedValue({
+        ...mockClaim,
+        status: ClaimStatus.cancelled,
+        cancelledAt: new Date(),
+        cancelledBy: 'operator-1',
+        cancelReasonCode: CancelReasonCode.fraud_flag,
+      });
+      mockPrismaService.$transaction.mockImplementation(
+        (fn: (tx: any) => Promise<any>) => {
+          const tx = {
+            claim: { update },
+            balanceLedger: { create: jest.fn().mockResolvedValue({}) },
+          };
+          return fn(tx);
+        },
+      );
+
+      await service.cancel('claim-123', {
+        operatorId: 'operator-1',
+        reasonCode: CancelReasonCode.fraud_flag,
+        reason: 'Fraud signal confirmed',
+      });
+
+      expect(update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            cancelReasonCode: CancelReasonCode.fraud_flag,
+            cancelReason: 'Fraud signal confirmed',
+          }),
+        }),
+      );
+
+      const metadata = (auditService.record as jest.Mock).mock.calls[0][0]
+        .metadata;
+      expect(metadata.reasonCode).toBe(CancelReasonCode.fraud_flag);
+      expect(metadata.reason).toBe('Fraud signal confirmed');
+    });
+
+    it('groups cancellation counts by reason code, including zero buckets', async () => {
+      mockPrismaService.claim.groupBy.mockResolvedValue([
+        { cancelReasonCode: 'duplicate', _count: { _all: 3 } },
+        { cancelReasonCode: 'fraud_flag', _count: { _all: 1 } },
+        { cancelReasonCode: null, _count: { _all: 2 } },
+      ]);
+
+      const summary = await service.cancellationReasonSummary();
+
+      expect(mockPrismaService.claim.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          by: ['cancelReasonCode'],
+          where: { status: ClaimStatus.cancelled, deletedAt: null },
+        }),
+      );
+      expect(summary.total).toBe(6);
+
+      const byCode = Object.fromEntries(
+        summary.reasons.map(r => [r.code, r.count]),
+      );
+      expect(byCode.duplicate).toBe(3);
+      expect(byCode.fraud_flag).toBe(1);
+      expect(byCode.unspecified).toBe(2);
+      // Codes with no rows are still present so the report shape is stable.
+      expect(byCode.recipient_ineligible).toBe(0);
+      expect(summary.reasons).toHaveLength(Object.values(CancelReasonCode).length);
     });
   });
 
@@ -255,7 +330,7 @@ describe('CancelAndReissueService', () => {
       mockPrismaService.claim.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.cancel('nonexistent', { operatorId: 'op-1' }),
+        service.cancel('nonexistent', { operatorId: 'op-1', reasonCode: CancelReasonCode.unspecified }),
       ).rejects.toThrow(NotFoundException);
       expect(auditService.record).not.toHaveBeenCalled();
     });
@@ -267,7 +342,7 @@ describe('CancelAndReissueService', () => {
       });
 
       await expect(
-        service.cancel('claim-123', { operatorId: 'op-1' }),
+        service.cancel('claim-123', { operatorId: 'op-1', reasonCode: CancelReasonCode.unspecified }),
       ).rejects.toThrow(NotFoundException);
       expect(auditService.record).not.toHaveBeenCalled();
     });
@@ -279,7 +354,7 @@ describe('CancelAndReissueService', () => {
       });
 
       await expect(
-        service.cancel('claim-123', { operatorId: 'op-1' }),
+        service.cancel('claim-123', { operatorId: 'op-1', reasonCode: CancelReasonCode.unspecified }),
       ).rejects.toThrow(BadRequestException);
       expect(auditService.record).not.toHaveBeenCalled();
     });

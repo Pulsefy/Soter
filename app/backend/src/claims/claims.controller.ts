@@ -483,6 +483,39 @@ export class ClaimsController {
     return this.cancelAndReissueService.getReissueHistory(id);
   }
 
+  @Get('cancellations/by-reason')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Group cancelled claims by reason code',
+    description:
+      'Returns cancellation counts for each CancelReasonCode. Legacy claims ' +
+      'cancelled before reason codes existed are reported under `unspecified`.',
+  })
+  @ApiOkResponse({
+    description: 'Cancellation counts grouped by reason code.',
+    schema: {
+      properties: {
+        total: { type: 'number' },
+        reasons: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              code: { type: 'string' },
+              count: { type: 'number' },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - operator role required.',
+  })
+  cancellationReasonSummary() {
+    return this.cancelAndReissueService.cancellationReasonSummary();
+  }
+
   @Get('export')
   @Version('1')
   @Roles(AppRole.operator, AppRole.admin)

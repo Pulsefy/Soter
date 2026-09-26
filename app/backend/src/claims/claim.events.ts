@@ -5,6 +5,8 @@
  * every state change is traceable without an external message broker.
  */
 
+import { CancelReasonCode } from './cancel-reason.enum';
+
 export const CLAIM_EVENT = {
   CANCELLED: 'claim.cancelled',
   REISSUED: 'claim.reissued',
@@ -17,6 +19,8 @@ export interface ClaimCancelledEvent {
   claimId: string;
   campaignId: string;
   operatorId: string;
+  /** Enumerated cancellation reason (see CancelReasonCode). */
+  reasonCode?: CancelReasonCode;
   reason?: string;
   /** Amount that was unlocked from the campaign budget */
   unlockedAmount: number;
@@ -31,6 +35,8 @@ export interface ClaimReissuedEvent {
   originalClaimId: string;
   campaignId: string;
   operatorId: string;
+  /** Enumerated cancellation reason recorded on the original claim. */
+  reasonCode?: CancelReasonCode;
   amount: number;
   reason?: string;
   timestamp: Date;

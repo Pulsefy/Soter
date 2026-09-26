@@ -232,6 +232,9 @@ model Claim {
   cancelledAt    DateTime?
   cancelledBy    String?
   cancelReason   String?
+  /// Enumerated cancellation reason (see CancelReasonCode). Null unless the
+  /// claim was cancelled; backfilled to 'unspecified' for legacy rows.
+  cancelReasonCode String?
 
   /// Points to the original claim this one replaces (reissue chain)
   reissuedFromId String?
@@ -259,6 +262,7 @@ model Claim {
   @@index([deletedAt])
   @@index([reissuedFromId])
   @@index([expiresAt])
+  @@index([cancelReasonCode])
   @@unique([importJobId, importRowNumber])
 }
 

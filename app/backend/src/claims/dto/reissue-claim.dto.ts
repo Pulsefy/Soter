@@ -3,11 +3,13 @@ import {
   IsString,
   IsNotEmpty,
   IsOptional,
+  IsEnum,
   IsNumber,
   Min,
   MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { CancelReasonCode } from '../cancel-reason.enum';
 
 export class ReissueClaimDto {
   @ApiProperty({
@@ -38,6 +40,17 @@ export class ReissueClaimDto {
   @IsOptional()
   @IsString()
   recipientRef?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Enumerated reason code recorded on the cancelled original. Defaults to ' +
+      '`reissued` when omitted.',
+    enum: CancelReasonCode,
+    example: CancelReasonCode.reissued,
+  })
+  @IsOptional()
+  @IsEnum(CancelReasonCode)
+  reasonCode?: CancelReasonCode;
 
   @ApiPropertyOptional({
     description: 'Human-readable reason for the reissue.',

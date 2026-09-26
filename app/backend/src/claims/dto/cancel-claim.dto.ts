@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsEnum,
+  IsOptional,
+  MaxLength,
+} from 'class-validator';
+import { CancelReasonCode } from '../cancel-reason.enum';
 
 export class CancelClaimDto {
   @ApiProperty({
@@ -10,9 +17,21 @@ export class CancelClaimDto {
   @IsNotEmpty()
   operatorId!: string;
 
+  @ApiProperty({
+    description:
+      'Enumerated reason code for the cancellation. Required so cancellations ' +
+      'can be grouped and reported on without parsing free text.',
+    enum: CancelReasonCode,
+    example: CancelReasonCode.duplicate,
+  })
+  @IsEnum(CancelReasonCode)
+  reasonCode!: CancelReasonCode;
+
   @ApiPropertyOptional({
-    description: 'Human-readable reason for cancellation.',
-    example: 'Recipient relocated; package no longer applicable.',
+    description:
+      'Optional human-readable detail kept alongside the code ' +
+      '(e.g. which duplicate claim this supersedes).',
+    example: 'Duplicate of claim cm3xyz; recipient already paid.',
     maxLength: 500,
   })
   @IsOptional()
