@@ -141,6 +141,7 @@ describe('Claims -> verification pipeline integration', () => {
           provide: BudgetService,
           useValue: {
             assertWithinBudget: jest.fn().mockResolvedValue(undefined),
+            reserveBudget: jest.fn().mockResolvedValue(undefined),
           },
         },
         { provide: ONCHAIN_ADAPTER_TOKEN, useValue: null },
@@ -204,6 +205,10 @@ describe('Claims -> verification pipeline integration', () => {
     prismaMock.$transaction.mockImplementation(async (callback: unknown) =>
       (callback as (tx: unknown) => Promise<unknown>)({
         claim: prismaMock.claim,
+        balanceLedger: { create: jest.fn().mockResolvedValue({}) },
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValue([{ id: campaign.id, budget: 1_000_000 }]),
       }),
     );
   });
