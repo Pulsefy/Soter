@@ -149,6 +149,27 @@ async def lifespan(app: FastAPI):
     app.state.artifact_access_control = evidence_access_control
     app.state.humanitarian_verification_service = humanitarian_verification_service
     app.state.rate_limiter = rate_limiter
+
+    # Initialize organization rate limiting with configured tiers and key mappings
+    from services.org_rate_limiter import org_rate_limiter, api_key_org_mapping
+
+    # Load organization tier configuration from settings
+    if settings.org_rate_limit_tiers:
+        for org_id, limit_str in settings.org_rate_limit_tiers.items():
+            org_rate_limiter.set_organization_tier(org_id, limit_str)
+        logger.info(
+            f"Loaded {len(settings.org_rate_limit_tiers)} organization rate limit tiers"
+        )
+
+    # Load API key to organization mappings from settings
+    if settings.api_key_to_org_mapping:
+        api_key_org_mapping.set_batch_mapping(settings.api_key_to_org_mapping)
+        logger.info(
+            f"Loaded {len(settings.api_key_to_org_mapping)} API key to organization mappings"
+        )
+
+    app.state.org_rate_limiter = org_rate_limiter
+    app.state.api_key_org_mapping = api_key_org_mapping
     # Re-assert the decision audit store (issue #990) and apply the retention
     # policy once at startup, so an instance that was down past the retention
     # window compacts its log before it starts serving.
@@ -497,6 +518,12 @@ async def monitor_requests(request: Request, call_next):
     rate_limit_response = evaluate_rate_limit(request)
     if rate_limit_response is not None:
         return rate_limit_response
+
+    from services.org_rate_limiter import evaluate_org_rate_limit
+
+    org_rate_limit_response = evaluate_org_rate_limit(request)
+    if org_rate_limit_response is not None:
+        return org_rate_limit_response
 
     from services.load_shedder import evaluate_load_shed
 
