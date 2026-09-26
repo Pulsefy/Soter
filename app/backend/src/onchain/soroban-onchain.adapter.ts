@@ -32,6 +32,8 @@ import {
   PackageSummary,
   GetTransactionStatusParams,
   GetTransactionStatusResult,
+  MigrateContractParams,
+  MigrateContractResult,
   TxStatus,
 } from './onchain.adapter';
 
@@ -333,6 +335,38 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       claimedAmount: readString(summary.claimed_amount, '0'),
       status: readString(summary.status, 'Active'),
       timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Submit `migrate(new_version)` for this adapter's configured contract.
+   *
+   * Rejects a deployment that points at a different contract id, so a stale
+   * metadata record cannot migrate the wrong deployment.
+   */
+  async migrateContract(
+    params: MigrateContractParams,
+  ): Promise<MigrateContractResult> {
+    if (params.contractId !== this.contractId) {
+      throw new Error(
+        `Refusing to migrate contract ${params.contractId}: this adapter is configured for ` +
+          `${this.contractId} (SOROBAN_CONTRACT_ID).`,
+      );
+    }
+
+    this.logger.log(
+      `migrate newVersion=${params.newVersion} contract=${params.contractId}`,
+    );
+
+    const result = await this.invokeContract('migrate', [params.newVersion]);
+    const record = asRecord(result);
+
+    return {
+      contractId: params.contractId,
+      newVersion: params.newVersion,
+      transactionHash: readString(record.hash, readString(result, '')),
+      timestamp: new Date(),
+      status: 'success',
     };
   }
 
