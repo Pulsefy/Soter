@@ -9,6 +9,8 @@ import {
   InitEscrowResult,
   CreateClaimResult,
   DisburseResult,
+  AidPackage,
+  GetTransactionStatusResult,
 } from './onchain.adapter';
 import {
   SorobanTransactionStatus,
@@ -28,6 +30,15 @@ export interface CreateSorobanTransactionParams {
   correlationId?: string;
   metadata?: Record<string, any>;
   maxAttempts?: number;
+  /**
+   * Stable key tying one *logical* operation to a single transaction row.
+   *
+   * A retry after a partial failure must reuse the same row rather than
+   * inserting a second attempt, otherwise two rows can each submit the same
+   * disbursement (see the double-disbursement guard in `executeTransaction`).
+   * Left optional so existing callers keep the old insert-always behaviour.
+   */
+  idempotencyKey?: string;
 }
 
 export interface ExecuteTransactionParams {
@@ -67,6 +78,55 @@ export interface StuckTransactionDetectionResult {
   thresholdMs: number;
   byOperation: Record<string, number>;
   transactions: StuckTransactionSummary[];
+}
+
+/**
+ * What reconciling one transaction against on-chain state concluded.
+ *
+ * `confirmed` and `retryable` are the only outcomes that change a row into a
+ * state the retry scheduler may act on; everything else deliberately leaves the
+ * row alone, because acting on an inconclusive answer is how a disbursement
+ * gets submitted twice.
+ */
+export type ReconciliationOutcome =
+  /** On-chain state proves the operation landed; row marked confirmed. */
+  | 'confirmed'
+  /** On-chain state proves the operation did NOT land; safe to retry. */
+  | 'retryable'
+  /** On-chain state proves the operation can never succeed; needs an operator. */
+  | 'terminal'
+  /** On-chain state is inconclusive or still pending; must NOT retry. */
+  | 'in_flight'
+  /** Nothing on the row identifies an on-chain artefact to check. */
+  | 'unavailable'
+  /** The status lookup itself failed; must NOT retry on an unknown answer. */
+  | 'error';
+
+export interface ReconciliationResult {
+  transactionId: string;
+  operation: SorobanOperationType;
+  claimId: string | null;
+  previousStatus: SorobanTransactionStatus;
+  outcome: ReconciliationOutcome;
+  /** Human-readable evidence for the log line. */
+  detail: string;
+}
+
+export interface ReconciliationSummary {
+  scanned: number;
+  confirmed: number;
+  retryable: number;
+  terminal: number;
+  inFlight: number;
+  unavailable: number;
+  errored: number;
+  results: ReconciliationResult[];
+}
+
+export interface CreateOrReuseTransactionResult {
+  transaction: SorobanTransaction;
+  /** False when an existing row was reused via its idempotency key. */
+  created: boolean;
 }
 
 @Injectable()
@@ -116,31 +176,115 @@ export class SorobanTransactionLifecycleService {
   }
 
   /**
-   * Create a new Soroban transaction record with lifecycle tracking
+   * Stable idempotency key for a claim's disbursement.
+   *
+   * Derived from the claim id alone — deliberately *not* from a timestamp or a
+   * random value — so the second call for the same claim resolves to the same
+   * row instead of inserting a competing attempt.
    */
-  async createTransaction(params: CreateSorobanTransactionParams) {
+  static disbursementIdempotencyKey(claimId: string): string {
+    return `disburse_claim:${claimId}`;
+  }
+
+  /**
+   * Create a new Soroban transaction record with lifecycle tracking.
+   *
+   * Existing callers keep the original contract: a fresh row every call. Pass
+   * `idempotencyKey` (or use {@link createOrReuseTransaction}) when a logical
+   * operation must map to exactly one row.
+   */
+  async createTransaction(
+    params: CreateSorobanTransactionParams,
+  ): Promise<SorobanTransaction> {
+    const { transaction } = await this.createOrReuseTransaction(params);
+    return transaction;
+  }
+
+  /**
+   * Create the transaction row, or return the existing one for the same
+   * `idempotencyKey`.
+   *
+   * Two independent callers (a retried HTTP request, an overlapping worker, a
+   * double-tapped admin action) can reach `disburse` at the same time. The
+   * unique index on `idempotencyKey` decides the winner and the loser is
+   * handed the winner's row, so exactly one disbursement transacton exists per
+   * claim and the retry path has nothing new to submit.
+   */
+  async createOrReuseTransaction(
+    params: CreateSorobanTransactionParams,
+  ): Promise<CreateOrReuseTransactionResult> {
     this.logger.debug('Creating Soroban transaction with lifecycle tracking', {
       claimId: params.claimId,
       operation: params.operation,
       correlationId: params.correlationId,
+      idempotencyKey: params.idempotencyKey,
     });
 
-    const transaction = await this.prisma.sorobanTransaction.create({
-      data: {
-        claimId: params.claimId,
-        operation: params.operation,
-        packageId: params.packageId,
-        operatorAddress: params.operatorAddress,
-        recipientAddress: params.recipientAddress,
-        amount: params.amount,
-        tokenAddress: params.tokenAddress,
-        correlationId: params.correlationId,
-        metadata: params.metadata,
-        maxAttempts: params.maxAttempts || 5,
-        status: SorobanTransactionStatus.pending,
-        nextRetryAt: new Date(),
-      },
-    });
+    if (params.idempotencyKey) {
+      const existing = await this.prisma.sorobanTransaction.findUnique({
+        where: { idempotencyKey: params.idempotencyKey },
+      });
+
+      if (existing) {
+        this.logger.log(
+          'Reusing existing Soroban transaction for idempotency key',
+          {
+            idempotencyKey: params.idempotencyKey,
+            transactionId: existing.id,
+            status: existing.status,
+          },
+        );
+        this.metricsService.incrementCounter('soroban_transaction_reused', {
+          operation: params.operation,
+          status: existing.status,
+        });
+        return { transaction: existing, created: false };
+      }
+    }
+
+    let transaction: SorobanTransaction;
+    try {
+      transaction = await this.prisma.sorobanTransaction.create({
+        data: {
+          claimId: params.claimId,
+          operation: params.operation,
+          packageId: params.packageId,
+          operatorAddress: params.operatorAddress,
+          recipientAddress: params.recipientAddress,
+          amount: params.amount,
+          tokenAddress: params.tokenAddress,
+          correlationId: params.correlationId,
+          metadata: params.metadata,
+          idempotencyKey: params.idempotencyKey,
+          maxAttempts: params.maxAttempts || 5,
+          status: SorobanTransactionStatus.pending,
+          nextRetryAt: new Date(),
+        },
+      });
+    } catch (error: any) {
+      // Lost the race against a concurrent call for the same key: the other
+      // row is the canonical attempt, so adopt it rather than surfacing a 500.
+      if (params.idempotencyKey && error?.code === 'P2002') {
+        const winner = await this.prisma.sorobanTransaction.findUnique({
+          where: { idempotencyKey: params.idempotencyKey },
+        });
+        if (winner) {
+          this.logger.warn(
+            'Concurrent Soroban transaction creation lost the idempotency race; reusing winner',
+            {
+              idempotencyKey: params.idempotencyKey,
+              transactionId: winner.id,
+            },
+          );
+          this.metricsService.incrementCounter(
+            'soroban_transaction_idempotency_race',
+            { operation: params.operation },
+          );
+          return { transaction: winner, created: false };
+        }
+      }
+      throw error;
+    }
 
     // Emit metrics for transaction creation
     this.metricsService.incrementCounter('soroban_transaction_created', {
@@ -148,7 +292,7 @@ export class SorobanTransactionLifecycleService {
       claimId: params.claimId || 'none',
     });
 
-    return transaction;
+    return { transaction, created: true };
   }
 
   /**
@@ -162,6 +306,40 @@ export class SorobanTransactionLifecycleService {
 
     if (!transaction) {
       throw new Error(`Soroban transaction ${transactionId} not found`);
+    }
+
+    // -----------------------------------------------------------------------
+    // Idempotency / reconciliation guard (Pulsefy/Soter#1175)
+    //
+    // Two things make a recorded row ambiguous rather than actionable:
+    //   * a crash between the adapter submission returning and the local
+    //     confirmation write leaves the row in `submitted`;
+    //   * an attempt that recorded a `txHash` before failing leaves the hash
+    //     on a row that is no longer `submitted`.
+    // In both cases the on-chain side may already have moved, so the row is
+    // reconciled against the ledger *before* anything is resubmitted. Only a
+    // `retryable` verdict — the ledger proves nothing landed — falls through;
+    // an inconclusive or already-landed verdict must not submit again.
+    //
+    // This runs before the retry-budget check on purpose: resolving an
+    // ambiguous row is bookkeeping, not a new attempt, so it must still happen
+    // once the retry budget is spent.
+    // -----------------------------------------------------------------------
+    if (
+      transaction.status === SorobanTransactionStatus.submitted ||
+      transaction.txHash
+    ) {
+      const reconciliation = await this.reconcileTransaction(transaction);
+
+      this.logger.log('Pre-submit reconciliation for Soroban transaction', {
+        transactionId,
+        outcome: reconciliation.outcome,
+        detail: reconciliation.detail,
+      });
+
+      if (reconciliation.outcome !== 'retryable') {
+        return;
+      }
     }
 
     // Check if transaction should be retried
@@ -669,6 +847,336 @@ export class SorobanTransactionLifecycleService {
         },
       );
     }
+  }
+
+  /**
+   * Reconcile one transaction against authoritative on-chain state
+   * (Pulsefy/Soter#1175).
+   *
+   * The contract is the source of truth — see
+   * `app/onchain/contracts/aid_escrow/RECONCILIATION.md`. A disbursement has
+   * landed exactly when the package it targets has left `Created`. Two levels
+   * of evidence are consulted, strongest first:
+   *
+   * 1. The stored `txHash`, via `getTransactionStatus`. A definite `succeeded`
+   *    or `failed` is conclusive.
+   * 2. The target package's status, via `getAidPackage`. `Claimed` proves the
+   *    disbursement happened; `Created` proves it did not. Any other package
+   *    status (`Expired`/`Cancelled`/`Refunded`) means the contract would
+   *    reject a `disburse` with `PackageNotActive`, so a retry can never work.
+   *
+   * Everything else — a `pending`/`unknown` hash, or a failed lookup — is
+   * inconclusive, and an inconclusive answer must never be treated as
+   * permission to submit again.
+   */
+  async reconcileTransaction(
+    transaction: Pick<
+      SorobanTransaction,
+      'id' | 'operation' | 'claimId' | 'status' | 'txHash' | 'packageId'
+    >,
+  ): Promise<ReconciliationResult> {
+    const result = await this.classifyReconciliation(transaction);
+    this.recordReconciliation(result);
+    return result;
+  }
+
+  /**
+   * Count one reconciliation outcome.
+   *
+   * Emitted from {@link reconcileTransaction} rather than from the sweeps, so
+   * every reconciliation is counted — including the pre-submit check inside
+   * `executeTransaction`, which never reaches a sweep.
+   */
+  private recordReconciliation(result: ReconciliationResult): void {
+    this.metricsService.incrementCounter(
+      'soroban_transaction_reconciliation_total',
+      { operation: result.operation, outcome: result.outcome },
+    );
+
+    if (result.outcome === 'confirmed') {
+      // The one that matters: a disbursement that landed without the backend
+      // ever recording it. Counting these makes lost-confirmation drift
+      // visible instead of silent.
+      this.metricsService.incrementCounter(
+        'soroban_transaction_reconciliation_recovered',
+        { operation: result.operation },
+      );
+    }
+  }
+
+  /**
+   * Decide the reconciliation outcome, leaving all metric and gauge emission to
+   * the caller so both the guard and the sweep share one code path.
+   */
+  private async classifyReconciliation(
+    transaction: Pick<
+      SorobanTransaction,
+      'id' | 'operation' | 'claimId' | 'status' | 'txHash' | 'packageId'
+    >,
+  ): Promise<ReconciliationResult> {
+    const base = {
+      transactionId: transaction.id,
+      operation: transaction.operation,
+      claimId: transaction.claimId,
+      previousStatus: transaction.status,
+    };
+
+    if (transaction.status === SorobanTransactionStatus.confirmed) {
+      return { ...base, outcome: 'confirmed', detail: 'already confirmed' };
+    }
+
+    if (!this.onchainAdapter) {
+      const detail = 'no on-chain adapter available';
+      this.logger.warn('Cannot reconcile without an on-chain adapter', {
+        transactionId: transaction.id,
+      });
+      return { ...base, outcome: 'unavailable', detail };
+    }
+
+    if (!transaction.txHash && !transaction.packageId) {
+      const detail = 'neither a tx hash nor a package id is recorded';
+      this.logger.warn(
+        'Cannot reconcile a transaction with no on-chain identifier',
+        { transactionId: transaction.id },
+      );
+      return { ...base, outcome: 'unavailable', detail };
+    }
+
+    // 1. Hash evidence — the tightest signal when it is available.
+    if (transaction.txHash) {
+      let onchainStatus: GetTransactionStatusResult;
+      try {
+        onchainStatus = await this.onchainAdapter.getTransactionStatus({
+          hash: transaction.txHash,
+        });
+      } catch (error) {
+        const detail = `status lookup failed for ${transaction.txHash}`;
+        this.logger.error(
+          'Failed to read transaction status during reconciliation',
+          {
+            transactionId: transaction.id,
+            txHash: transaction.txHash,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+        return { ...base, outcome: 'error', detail };
+      }
+
+      if (onchainStatus.status === 'succeeded') {
+        await this.markReconciledConfirmed(transaction.id);
+        return {
+          ...base,
+          outcome: 'confirmed',
+          detail: `tx hash ${transaction.txHash} succeeded on-chain`,
+        };
+      }
+
+      if (onchainStatus.status === 'failed') {
+        const detail = `tx hash ${transaction.txHash} failed on-chain${
+          onchainStatus.errorMessage ? `: ${onchainStatus.errorMessage}` : ''
+        }`;
+        await this.markReconciledRetryable(transaction.id, detail);
+        return { ...base, outcome: 'retryable', detail };
+      }
+
+      const detail = `tx hash ${transaction.txHash} is ${onchainStatus.status}`;
+      this.logger.warn('Transaction hash is not yet conclusive on-chain', {
+        transactionId: transaction.id,
+        txHash: transaction.txHash,
+        onchainStatus: onchainStatus.status,
+      });
+      return { ...base, outcome: 'in_flight', detail };
+    }
+
+    // 2. Package evidence — covers the crash window where the submission never
+    //    got far enough to return a hash.
+    let aidPackage: AidPackage;
+    try {
+      const result = await this.onchainAdapter.getAidPackage({
+        packageId: transaction.packageId!,
+      });
+      aidPackage = result.package;
+    } catch (error) {
+      const detail = `package lookup failed for ${transaction.packageId}`;
+      this.logger.error(
+        'Failed to read package state during reconciliation',
+        {
+          transactionId: transaction.id,
+          packageId: transaction.packageId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      return { ...base, outcome: 'error', detail };
+    }
+
+    if (aidPackage.status === 'Claimed') {
+      await this.markReconciledConfirmed(transaction.id);
+      return {
+        ...base,
+        outcome: 'confirmed',
+        detail: `package ${transaction.packageId} is Claimed on-chain`,
+      };
+    }
+
+    if (aidPackage.status === 'Created') {
+      const detail = `package ${transaction.packageId} is still Created on-chain, so no disbursement landed`;
+      await this.markReconciledRetryable(transaction.id, detail);
+      return { ...base, outcome: 'retryable', detail };
+    }
+
+    const detail = `package ${transaction.packageId} is ${aidPackage.status} on-chain and can no longer be disbursed`;
+    await this.markReconciledTerminal(transaction.id, detail);
+    return { ...base, outcome: 'terminal', detail };
+  }
+
+  /**
+   * Reconcile every in-flight transaction against on-chain state.
+   *
+   * Run on scheduler start-up and before each retry sweep, so a worker that
+   * restarts mid-disbursement resolves what actually happened to its
+   * predecessor's submissions before it considers submitting anything. A
+   * crash can therefore never turn into a second disbursement: either the row
+   * is proven to have landed (`confirmed`) or it is left untouched pending
+   * manual review — never silently resubmitted.
+   *
+   * Every outcome is logged and counted, so divergence between the local table
+   * and the ledger is visible as a metric rather than only in hindsight.
+   */
+  async reconcileInFlightTransactions(): Promise<ReconciliationSummary> {
+    const inFlight = await this.prisma.sorobanTransaction.findMany({
+      where: { status: SorobanTransactionStatus.submitted },
+      orderBy: { updatedAt: 'asc' },
+      take: 200,
+    });
+
+    const summary: ReconciliationSummary = {
+      scanned: inFlight.length,
+      confirmed: 0,
+      retryable: 0,
+      terminal: 0,
+      inFlight: 0,
+      unavailable: 0,
+      errored: 0,
+      results: [],
+    };
+
+    for (const transaction of inFlight) {
+      const result = await this.reconcileTransaction(transaction);
+      summary.results.push(result);
+
+      switch (result.outcome) {
+        case 'confirmed':
+          summary.confirmed += 1;
+          break;
+        case 'retryable':
+          summary.retryable += 1;
+          break;
+        case 'terminal':
+          summary.terminal += 1;
+          break;
+        case 'in_flight':
+          summary.inFlight += 1;
+          break;
+        case 'unavailable':
+          summary.unavailable += 1;
+          break;
+        case 'error':
+          summary.errored += 1;
+          break;
+      }
+
+      this.logger.log('Reconciled in-flight Soroban transaction', {
+        transactionId: result.transactionId,
+        operation: result.operation,
+        claimId: result.claimId,
+        outcome: result.outcome,
+        detail: result.detail,
+      });
+    }
+
+    // Publish the backlog of unresolved in-flight rows on every pass,
+    // including zero, so a stale alert clears once reconciliation catches up.
+    this.metricsService.setGauge(
+      'soroban_transaction_in_flight',
+      summary.inFlight + summary.unavailable + summary.errored,
+    );
+
+    if (summary.scanned > 0) {
+      this.logger.log('In-flight reconciliation pass complete', {
+        scanned: summary.scanned,
+        confirmed: summary.confirmed,
+        retryable: summary.retryable,
+        terminal: summary.terminal,
+        inFlight: summary.inFlight,
+        unavailable: summary.unavailable,
+        errored: summary.errored,
+      });
+    }
+
+    return summary;
+  }
+
+  /**
+   * On-chain state proved the operation landed even though the row never
+   * recorded it. Settle the row so no retry can pick it up.
+   */
+  private async markReconciledConfirmed(transactionId: string): Promise<void> {
+    await this.prisma.sorobanTransaction.update({
+      where: { id: transactionId },
+      data: {
+        status: SorobanTransactionStatus.confirmed,
+        confirmedAt: new Date(),
+        lastRetryAt: new Date(),
+        nextRetryAt: null,
+        isRetryable: false,
+        lastError: null,
+        errorType: null,
+      },
+    });
+  }
+
+  /**
+   * On-chain state proved the operation did not happen, so the row goes back to
+   * `pending` and may be retried safely.
+   *
+   * `attemptCount` is deliberately not incremented: reconciliation is
+   * bookkeeping, not an attempt, and consuming retry budget for it would fail
+   * a recoverable disbursement.
+   */
+  private async markReconciledRetryable(
+    transactionId: string,
+    detail: string,
+  ): Promise<void> {
+    await this.prisma.sorobanTransaction.update({
+      where: { id: transactionId },
+      data: {
+        status: SorobanTransactionStatus.pending,
+        nextRetryAt: new Date(),
+        isRetryable: true,
+        failedAt: null,
+        lastError: `reconciled: ${detail}`,
+      },
+    });
+  }
+
+  /**
+   * On-chain state proved the operation can never succeed (the package left
+   * `Created` some other way). Stop retrying and hand it to an operator.
+   */
+  private async markReconciledTerminal(
+    transactionId: string,
+    detail: string,
+  ): Promise<void> {
+    await this.prisma.sorobanTransaction.update({
+      where: { id: transactionId },
+      data: {
+        status: SorobanTransactionStatus.failed,
+        failedAt: new Date(),
+        nextRetryAt: null,
+        isRetryable: false,
+        lastError: `reconciled: ${detail}`,
+      },
+    });
   }
 
   /**
