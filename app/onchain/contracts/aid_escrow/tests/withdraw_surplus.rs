@@ -1,6 +1,8 @@
 #![cfg(test)]
 
-use aid_escrow::{AidEscrow, AidEscrowClient, Error, PendingWithdrawal, SURPLUS_WITHDRAWAL_DELAY_SECS};
+use aid_escrow::{
+    AidEscrow, AidEscrowClient, Error, PendingWithdrawal, SURPLUS_WITHDRAWAL_DELAY_SECS,
+};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Ledger},
@@ -423,7 +425,9 @@ fn get_pending_withdrawal_returns_proposal_fields() {
 
     client.propose_surplus_withdrawal(&to, &(2 * UNIT), &token_client.address);
 
-    let p = client.get_pending_withdrawal().expect("should have proposal");
+    let p = client
+        .get_pending_withdrawal()
+        .expect("should have proposal");
     assert_eq!(p.to, to);
     assert_eq!(p.amount, 2 * UNIT);
     assert_eq!(p.token, token_client.address);

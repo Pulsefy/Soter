@@ -2353,8 +2353,7 @@ impl AidEscrow {
 
         // Validate token and verify sufficient surplus exists right now
         Self::validate_token(&env, &token)?;
-        let contract_balance =
-            Self::token_balance(&env, &token, &env.current_contract_address())?;
+        let contract_balance = Self::token_balance(&env, &token, &env.current_contract_address())?;
         let locked_map: Map<Address, i128> = env
             .storage()
             .instance()
