@@ -61,13 +61,10 @@ describe('ContractConfigCacheService', () => {
 
     jest.clearAllMocks();
 
-    // Redis set/del always succeeds by default
     mockRedis.set.mockResolvedValue(undefined);
     mockRedis.del.mockResolvedValue(undefined);
     mockRedis.delByPattern.mockResolvedValue(0);
   });
-
-  // ─── getAll ────────────────────────────────────────────────────────────────
 
   describe('getAll', () => {
     it('returns cached value on cache hit', async () => {
@@ -120,8 +117,6 @@ describe('ContractConfigCacheService', () => {
     });
   });
 
-  // ─── getByNetwork ──────────────────────────────────────────────────────────
-
   describe('getByNetwork', () => {
     it('returns cached value on cache hit', async () => {
       mockRedis.get.mockResolvedValue([record]);
@@ -149,8 +144,6 @@ describe('ContractConfigCacheService', () => {
       expect(result).toHaveLength(1);
     });
   });
-
-  // ─── getByNetworkAndContractName ───────────────────────────────────────────
 
   describe('getByNetworkAndContractName', () => {
     it('returns cached value on hit', async () => {
@@ -202,7 +195,6 @@ describe('ContractConfigCacheService', () => {
       );
 
       expect(result).toBeNull();
-
       expect(mockRedis.set).toHaveBeenCalledWith(
         'contract-config:contract:testnet:Missing',
         null,
@@ -210,8 +202,6 @@ describe('ContractConfigCacheService', () => {
       );
     });
   });
-
-  // ─── getByContractId ───────────────────────────────────────────────────────
 
   describe('getByContractId', () => {
     it('returns cached value on hit', async () => {
@@ -250,8 +240,6 @@ describe('ContractConfigCacheService', () => {
     });
   });
 
-  // ─── invalidateAll ─────────────────────────────────────────────────────────
-
   describe('invalidateAll', () => {
     it('deletes all contract-config:* keys via pattern', async () => {
       mockRedis.delByPattern.mockResolvedValue(5);
@@ -270,8 +258,6 @@ describe('ContractConfigCacheService', () => {
       expect(count).toBe(0);
     });
   });
-
-  // ─── refreshAll ────────────────────────────────────────────────────────────
 
   describe('refreshAll', () => {
     it('invalidates then re-warms all cache keys and returns stats', async () => {
@@ -306,12 +292,8 @@ describe('ContractConfigCacheService', () => {
         .mockRejectedValueOnce(transientError)
         .mockResolvedValueOnce([record]);
 
-      // Avoid waiting for the real 1s backoff in the unit test.
       jest
-        .spyOn(
-          service as unknown as { sleep: (delayMs: number) => Promise<void> },
-          'sleep',
-        )
+        .spyOn(service as any, 'sleep')
         .mockResolvedValue(undefined);
 
       const result = await service.refreshAll();
@@ -381,10 +363,7 @@ describe('ContractConfigCacheService', () => {
         .mockImplementation(() => undefined);
 
       jest
-        .spyOn(
-          service as unknown as { sleep: (delayMs: number) => Promise<void> },
-          'sleep',
-        )
+        .spyOn(service as any, 'sleep')
         .mockResolvedValue(undefined);
 
       await expect(service.refreshAll()).rejects.toThrow(
@@ -408,8 +387,6 @@ describe('ContractConfigCacheService', () => {
       );
     });
   });
-
-  // ─── safe behavior when Redis is unavailable ───────────────────────────────
 
   describe('safe fallback when Redis is unavailable', () => {
     it('getAll still returns DB data if Redis.get returns null', async () => {
