@@ -370,6 +370,21 @@ LLM_USAGE_UNAVAILABLE_TOTAL = Counter(
     "LLM requests where the provider did not report token usage (not counted as zero)",
     ["provider", "model", "endpoint"],
 )
+LLM_PROVIDER_COST_CEILING_USD = Gauge(
+    "llm_provider_cost_ceiling_usd",
+    "Configured estimated spend ceiling by provider and UTC window",
+    ["provider", "window"],
+)
+LLM_PROVIDER_CURRENT_SPEND_USD = Gauge(
+    "llm_provider_current_spend_usd",
+    "Estimated provider spend in the current UTC window",
+    ["provider", "window"],
+)
+LLM_PROVIDER_COST_CEILING_EXCEEDED_TOTAL = Counter(
+    "llm_provider_cost_ceiling_exceeded_total",
+    "Provider requests routed away because the current spend ceiling was reached",
+    ["provider"],
+)
 
 
 def estimate_llm_cost_usd(
