@@ -225,8 +225,7 @@ export class ContractConfigCacheService {
 
         this.metrics.setGauge(CACHE_STALENESS_METRIC, stalenessSeconds);
 
-        const message =
-          error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         const stack = error instanceof Error ? error.stack : undefined;
 
         this.logger.error(

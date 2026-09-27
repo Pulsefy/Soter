@@ -292,15 +292,11 @@ describe('ContractConfigCacheService', () => {
         .mockRejectedValueOnce(transientError)
         .mockResolvedValueOnce([record]);
 
-      jest
-        .spyOn(service as any, 'sleep')
-        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
 
       const result = await service.refreshAll();
 
-      expect(
-        mockPrisma.deploymentMetadata.findMany,
-      ).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.deploymentMetadata.findMany).toHaveBeenCalledTimes(2);
 
       expect(result.contractCount).toBe(1);
       expect(result.networkCount).toBe(1);
@@ -354,25 +350,19 @@ describe('ContractConfigCacheService', () => {
     it('logs persistent failure and exposes cache staleness after all retries fail', async () => {
       const persistentError = new Error('database unavailable');
 
-      mockPrisma.deploymentMetadata.findMany.mockRejectedValue(
-        persistentError,
-      );
+      mockPrisma.deploymentMetadata.findMany.mockRejectedValue(persistentError);
 
       const errorSpy = jest
         .spyOn((service as any).logger, 'error')
         .mockImplementation(() => undefined);
 
-      jest
-        .spyOn(service as any, 'sleep')
-        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
 
       await expect(service.refreshAll()).rejects.toThrow(
         'database unavailable',
       );
 
-      expect(
-        mockPrisma.deploymentMetadata.findMany,
-      ).toHaveBeenCalledTimes(3);
+      expect(mockPrisma.deploymentMetadata.findMany).toHaveBeenCalledTimes(3);
 
       expect(mockMetrics.setGauge).toHaveBeenCalledWith(
         'deployment_metadata_cache_staleness_seconds',
