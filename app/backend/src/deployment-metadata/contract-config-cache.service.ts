@@ -204,8 +204,7 @@ export class ContractConfigCacheService {
         lastError = error;
 
         if (attempt < MAX_REFRESH_ATTEMPTS) {
-          const delayMs =
-            INITIAL_RETRY_DELAY_MS * 2 ** (attempt - 1);
+          const delayMs = INITIAL_RETRY_DELAY_MS * 2 ** (attempt - 1);
 
           this.logger.warn(
             `contract-config cache refresh transient failure ` +
@@ -224,10 +223,7 @@ export class ContractConfigCacheService {
             )
           : this.ttl;
 
-        this.metrics.setGauge(
-          CACHE_STALENESS_METRIC,
-          stalenessSeconds,
-        );
+        this.metrics.setGauge(CACHE_STALENESS_METRIC, stalenessSeconds);
 
         const message =
           error instanceof Error ? error.message : String(error);
