@@ -86,6 +86,29 @@ export interface Aggregates {
 }
 
 /**
+ * A proposed but not-yet-executed surplus withdrawal, stored under
+ * `KEY_PENDING_WITHDRAWAL` in instance storage.
+ */
+export interface PendingWithdrawal {
+  /**
+   * Amount (in smallest token units) to withdraw.
+   */
+  amount: bigint;
+  /**
+   * Earliest ledger timestamp at which `execute_surplus_withdrawal` may be called.
+   */
+  executable_at: bigint;
+  /**
+   * Destination address for the transfer.
+   */
+  to: string;
+  /**
+   * Token address for the withdrawal.
+   */
+  token: string;
+}
+
+/**
  * Outcome of a single package claim attempt made as part of a `batch_claim`
  * call. `batch_claim` never fails a whole batch because one package could
  * not be claimed; instead each id resolves to one of these statuses.
@@ -232,4 +255,19 @@ export const Error = {
    * set size (see `get_max_distributors` / `set_max_distributors`).
    */
   25: { message: 'DistributorSetFull' },
+  /**
+   * `propose_surplus_withdrawal` was called while a withdrawal proposal
+   * is already pending.  Cancel the existing proposal first.
+   */
+  26: { message: 'SurplusWithdrawalPending' },
+  /**
+   * `cancel_surplus_withdrawal` or `execute_surplus_withdrawal` was called
+   * when no withdrawal proposal is currently pending.
+   */
+  27: { message: 'SurplusWithdrawalNotPending' },
+  /**
+   * `execute_surplus_withdrawal` was called before the timelock delay has
+   * elapsed.  Wait until `executable_at` and try again.
+   */
+  28: { message: 'SurplusWithdrawalTimelockActive' },
 };
