@@ -103,3 +103,22 @@ class TestRedactionPreviewRoute:
         for record in caplog.records:
             assert sensitive_text not in record.getMessage()
             assert "Mary Johnson" not in record.getMessage()
+
+    def test_preview_endpoint_supports_structured_ocr_fields(self):
+        payload = {
+            "fields": {
+                "full_name": {"value": "Jane Doe", "confidence": 0.96},
+                "date_of_birth": {"value": "15/03/1988", "confidence": 0.94},
+                "national_id": {"value": "AB12345678", "confidence": 0.92},
+            }
+        }
+
+        response = client.post("/v1/ai/redaction/preview", json=payload)
+        assert response.status_code == 200
+        result = response.json()["result"]
+
+        categories = {segment["category"] for segment in result["segments"]}
+        assert "RECIPIENT_NAME" in categories
+        assert "EVENT_DATE" in categories
+        assert "ID_NUMBER" in categories
+        assert result["pii_summary"]["total"] == 3
