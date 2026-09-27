@@ -262,27 +262,23 @@ export const CONTRACT_ERROR_CATALOG: readonly ContractErrorEntry[] = [
 /**
  * Lookup map for quick access by error code
  */
-export const CONTRACT_ERROR_BY_CODE: Record<
-  number,
-  ContractErrorEntry
-> = CONTRACT_ERROR_CATALOG.reduce(
-  (map, entry) => {
-    map[entry.code] = entry;
-    return map;
-  },
-  {} as Record<number, ContractErrorEntry>,
-);
+export const CONTRACT_ERROR_BY_CODE: Record<number, ContractErrorEntry> =
+  CONTRACT_ERROR_CATALOG.reduce(
+    (map, entry) => {
+      map[entry.code] = entry;
+      return map;
+    },
+    {} as Record<number, ContractErrorEntry>,
+  );
 
 /**
  * Lookup map for quick access by error name
  */
-export const CONTRACT_ERROR_BY_NAME: Record<
-  string,
-  ContractErrorEntry
-> = CONTRACT_ERROR_CATALOG.reduce(
-  (map, entry) => {
-    map[entry.name] = entry;
-    return map;
-  },
-  {} as Record<string, ContractErrorEntry>,
-);
+export const CONTRACT_ERROR_BY_NAME: Record<string, ContractErrorEntry> =
+  CONTRACT_ERROR_CATALOG.reduce(
+    (map, entry) => {
+      map[entry.name] = entry;
+      return map;
+    },
+    {} as Record<string, ContractErrorEntry>,
+  );
