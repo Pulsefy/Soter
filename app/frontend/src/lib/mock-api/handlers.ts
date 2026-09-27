@@ -2,13 +2,12 @@ import type { BackendHealthResponse } from '@/types/health';
 import type { AidPackage } from '@/types/aid-package';
 import type {
   VerificationInboxItem,
-  VerificationInboxResponse,
-  VerificationStats,
   InternalNote,
   VerificationStatus,
 } from '@/types/verification-review';
 import type { ContractRegistryResponse } from '@/types/contract-registry';
 import type { RunbookResponse } from '@/types/runbook';
+import type { ContractGlobalStats } from '@/lib/api-contract';
 
 export type MockHandler = (
   url: string,
@@ -50,18 +49,28 @@ const inboxItems: VerificationInboxItem[] = [
   {
     id: 'mock-1',
     status: 'pending_review' as VerificationStatus,
-    recipientName: 'Aisha Bello',
-    campaignName: 'Winter Relief 2026',
-    submittedAt: new Date(Date.now() - 1000 * 60 * 24).toISOString(),
-    riskScore: 0.15,
+    createdAt: new Date(Date.now() - 1000 * 60 * 24).toISOString(),
+    reviewedAt: null,
+    reviewedBy: null,
+    rejectionReason: null,
+    nextStepMessage: null,
+    deepLink: '/verification-review?requestId=mock-1',
+    aiScore: 0.15,
+    riskLevel: 'low',
+    documentType: 'national_id',
   },
   {
     id: 'mock-2',
     status: 'pending_review' as VerificationStatus,
-    recipientName: 'Ibrahim Musa',
-    campaignName: 'Medical Outreach',
-    submittedAt: new Date(Date.now() - 1000 * 60 * 48).toISOString(),
-    riskScore: 0.05,
+    createdAt: new Date(Date.now() - 1000 * 60 * 48).toISOString(),
+    reviewedAt: null,
+    reviewedBy: null,
+    rejectionReason: null,
+    nextStepMessage: null,
+    deepLink: '/verification-review?requestId=mock-2',
+    aiScore: 0.05,
+    riskLevel: 'low',
+    documentType: 'passport',
   },
 ];
 
@@ -249,13 +258,22 @@ const webauthnAuthVerifyHandler: MockHandler = async (_url, options) => {
 };
 
 const healthHandler: MockHandler = async () => {
+  // Shape mirrors the backend's LivenessResponse
+  // (app/backend/src/health/health.service.ts); validated against
+  // src/lib/api-contract.ts by src/lib/mock-api/contract.test.ts (issue #1143).
   const mockResponse: BackendHealthResponse = {
     status: 'ok',
     timestamp: new Date().toISOString(),
     version: '1.0.0-mock',
-    service: 'soter-backend-mock',
-    details: {
-      uptime: 12345,
+    service: 'backend',
+    environment: 'mock',
+    checks: {
+      process: {
+        status: 'up',
+        details: {
+          uptimeSeconds: 12345,
+        },
+      },
     },
   };
 
@@ -376,8 +394,8 @@ const aidPackagesHandler: MockHandler = async (url) => {
     results = results.filter(p => p.token === token);
   }
 
-  // Sort
-  if (sortBy && sortBy in results[0]) {
+  // Sort (guard the empty-result case: `in` on undefined throws)
+  if (sortBy && results.length > 0 && sortBy in results[0]) {
     results.sort((a, b) => {
       const aVal = a[sortBy as keyof AidPackage] ?? '';
       const bVal = b[sortBy as keyof AidPackage] ?? '';
@@ -439,7 +457,7 @@ const campaignsHandler: MockHandler = async () => {
 
 const campaignCreateHandler: MockHandler = async (_url, options) => {
   if (!options?.body) {
-    return new Response(JSON.stringify({ success: false, message: 'Request body missing' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ success: false, message: 'Request body missing', data: null }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
   const payload = JSON.parse(options.body.toString());
@@ -468,11 +486,11 @@ const campaignUpdateHandler: MockHandler = async (url, options) => {
   const campaign = campaignsStore.find(item => item.id === id);
 
   if (!campaign) {
-    return new Response(JSON.stringify({ success: false, message: 'Campaign not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ success: false, message: 'Campaign not found', data: null }), { status: 404, headers: { 'Content-Type': 'application/json' } });
   }
 
   if (!options?.body) {
-    return new Response(JSON.stringify({ success: false, message: 'Request body missing' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ success: false, message: 'Request body missing', data: null }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
   const payload = JSON.parse(options.body.toString());
@@ -499,7 +517,7 @@ const campaignGetHandler: MockHandler = async (url) => {
   const campaign = campaignsStore.find(item => item.id === id);
 
   if (!campaign) {
-    return new Response(JSON.stringify({ success: false, message: 'Campaign not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ success: false, message: 'Campaign not found', data: null }), { status: 404, headers: { 'Content-Type': 'application/json' } });
   }
 
   return new Response(JSON.stringify({ success: true, data: campaign, message: 'Campaign fetched successfully' }), {
@@ -514,7 +532,7 @@ const campaignTimelineHandler: MockHandler = async (url) => {
   const campaign = campaignsStore.find(item => item.id === id);
 
   if (!campaign) {
-    return new Response(JSON.stringify({ success: false, message: 'Campaign not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ success: false, message: 'Campaign not found', data: null }), { status: 404, headers: { 'Content-Type': 'application/json' } });
   }
 
   const now = Date.now();
@@ -631,7 +649,7 @@ function requireImportFormData(options?: RequestInit):
 
   if (!(body instanceof FormData)) {
     return {
-      error: new Response(JSON.stringify({ success: false, message: 'Form data is required' }), {
+      error: new Response(JSON.stringify({ success: false, message: 'Form data is required', data: null }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -641,7 +659,7 @@ function requireImportFormData(options?: RequestInit):
   const file = body.get('file');
   if (!(file instanceof File)) {
     return {
-      error: new Response(JSON.stringify({ success: false, message: 'CSV file is required' }), {
+      error: new Response(JSON.stringify({ success: false, message: 'CSV file is required', data: null }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -815,7 +833,7 @@ const recipientsImportConfirmHandler: MockHandler = async (_url, options) => {
   const body = options?.body;
 
   if (!(body instanceof FormData)) {
-    return new Response(JSON.stringify({ success: false, message: 'Form data is required' }), {
+    return new Response(JSON.stringify({ success: false, message: 'Form data is required', data: null }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -823,7 +841,7 @@ const recipientsImportConfirmHandler: MockHandler = async (_url, options) => {
 
   const file = body.get('file');
   if (!(file instanceof File)) {
-    return new Response(JSON.stringify({ success: false, message: 'CSV file is required' }), {
+    return new Response(JSON.stringify({ success: false, message: 'CSV file is required', data: null }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -884,15 +902,39 @@ const dashboardSummaryHandler: MockHandler = async () => {
     p => p.status === 'Claimed',
   ).length;
 
-  return new Response(
-    JSON.stringify({
-      totalClaims,
-      totalPackages,
-      pendingReviews,
-      totalDisbursements,
-    }),
-    { status: 200, headers: { 'Content-Type': 'application/json' } },
-  );
+  // Mirrors the backend GlobalStatsDto (app/backend/src/analytics/dto/index.ts),
+  // served by GET /analytics/global-stats.
+  const stats: ContractGlobalStats = {
+    totalClaims,
+    totalPackages,
+    pendingReviews,
+    totalDisbursements,
+    totalAidDisbursed: 87500,
+    totalRecipients: totalPackages,
+    activeCampaigns: ALL_PACKAGES.filter(p => p.status === 'Active').length,
+    byToken: [
+      { label: 'USDC', totalAmount: 85000, count: 3 },
+      { label: 'XLM', totalAmount: 50000, count: 2 },
+      { label: 'EURC', totalAmount: 30000, count: 2 },
+    ],
+    byRegion: [
+      { label: 'Eastern Region', totalAmount: 62500, count: 2 },
+      { label: 'Northern Zone', totalAmount: 33000, count: 2 },
+    ],
+    timeSeries: [
+      {
+        date: new Date().toISOString().slice(0, 10),
+        totalAmount: 87500,
+        count: totalClaims,
+      },
+    ],
+    computedAt: new Date().toISOString(),
+  };
+
+  return new Response(JSON.stringify(stats), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };
 
 const contractRegistryHandler: MockHandler = async () => {
@@ -1101,10 +1143,79 @@ const runbookHandler: MockHandler = async () => {
         },
       ],
     },
+    // Canonical registry locations, mirroring RunbookResponse.contractRegistry.
+    contractRegistry: {
+      canonicalSourcePath: 'app/onchain/deployments/contract-registry.json',
+      generatorScript: 'app/onchain/scripts/generate-registry.py',
+      deploymentRegistry: 'app/onchain/deployments/registry.json',
+    },
   };
 
   return new Response(JSON.stringify(runbook), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
+};
+
+/**
+ * Path → handler registry consumed by the fetch client (./client.ts).
+ *
+ * This map was dropped from handlers.ts while client.ts kept importing it,
+ * which left the mock client uncompilable. It is restored here (and covered by
+ * contract.test.ts) so every mock handler stays reachable — issue #1143.
+ */
+export const handlers: Record<string, MockHandler> = {
+  '/health': healthHandler,
+  '/aid-packages': aidPackagesHandler,
+  '/analytics/global-stats': dashboardSummaryHandler,
+  '/notifications/activity-feed': activityFeedHandler,
+  '/recipients/import/validate': recipientsImportValidateHandler,
+  '/recipients/import/report': recipientsImportReportHandler,
+  '/recipients/import/confirm': recipientsImportConfirmHandler,
+
+  '/auth/webauthn/register/options': webauthnRegisterOptionsHandler,
+  '/auth/webauthn/register/verify': webauthnRegisterVerifyHandler,
+  '/auth/webauthn/auth/options': webauthnAuthOptionsHandler,
+  '/auth/webauthn/auth/verify': webauthnAuthVerifyHandler,
+
+  '/v1/verification-inbox/:id': async (url, options) => {
+    const method = options?.method?.toUpperCase() ?? 'GET';
+    const path = url.split('?')[0];
+
+    if (path.endsWith('/notes') && method === 'POST') {
+      return inboxAddNoteHandler(url, options);
+    }
+
+    return new Response(
+      JSON.stringify({ success: false, message: 'Method not implemented in mock', data: null }),
+      { status: 405, headers: { 'Content-Type': 'application/json' } },
+    );
+  },
+
+  '/campaigns': async (url, options) => {
+    const method = options?.method?.toUpperCase() ?? 'GET';
+    if (method === 'POST') {
+      return campaignCreateHandler(url, options);
+    }
+    return campaignsHandler(url, options);
+  },
+  '/campaigns/:id': async (url, options) => {
+    const method = options?.method?.toUpperCase() ?? 'GET';
+    if (url.split('?')[0].endsWith('/timeline')) {
+      return campaignTimelineHandler(url, options);
+    }
+    if (method === 'PATCH') {
+      return campaignUpdateHandler(url, options);
+    }
+    if (method === 'GET') {
+      return campaignGetHandler(url, options);
+    }
+    return new Response(
+      JSON.stringify({ success: false, message: 'Method not implemented in mock', data: null }),
+      { status: 405, headers: { 'Content-Type': 'application/json' } },
+    );
+  },
+
+  '/contract-registry': contractRegistryHandler,
+  '/runbook': runbookHandler,
 };

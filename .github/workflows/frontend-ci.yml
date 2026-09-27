@@ -33,3 +33,30 @@ jobs:
             fi
           done
           exit $FAILED
+
+  # Contract tests: every mock handler in app/frontend/src/lib/mock-api/handlers.ts
+  # is validated against the shared API contract (src/lib/api-contract.ts) and,
+  # when the committed backend OpenAPI document covers an endpoint, against that
+  # schema too. Fails when a handler's response shape drifts (issue #1143).
+  contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile --engine-strict=false
+
+      - name: Mock handler contract tests
+        working-directory: app/frontend
+        run: pnpm exec jest src/lib/mock-api/contract.test.ts --runInBand
