@@ -25,6 +25,10 @@ expires and is refunded.
 
 ## Public Functions
 
+See the [backend coverage inventory](BACKEND_COVERAGE.md) for the current
+backend adapter status of every public contract function and the update process
+for adding coverage.
+
 ### Admin & Config
 
 | Function | Auth | Description |
