@@ -30,6 +30,7 @@ import {
   DryRunAidPackageResultDto,
   ExtendAidPackageExpiryDto,
 } from './dto/aid-escrow.dto';
+import { CONTRACT_ERROR_CATALOG } from './utils/contract-error-catalog';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
@@ -676,5 +677,50 @@ export class AidEscrowController {
       this.logger.error('Failed to get event correlations:', error);
       this.errorMapper.throwMappedError(error);
     }
+  }
+
+  /**
+   * Get contract error code catalog
+   * GET /onchain/aid-escrow/error-catalog
+   */
+  @Get('error-catalog')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get contract error code catalog',
+    description:
+      'Returns the complete catalog of AidEscrow contract error codes with their meanings, retryable status, and HTTP status codes. This is the single source of truth for contract error definitions.',
+  })
+  @ApiOkResponse({
+    description: 'Contract error catalog retrieved successfully.',
+    schema: {
+      example: {
+        errors: [
+          {
+            code: 1,
+            name: 'NotInitialized',
+            meaning: 'Escrow not initialized',
+            retryable: false,
+            httpStatusCode: 400,
+            integrationErrorCode: 'ONCHAIN_CONTRACT_ERROR',
+          },
+          {
+            code: 14,
+            name: 'ContractPaused',
+            meaning: 'Contract is paused',
+            retryable: true,
+            httpStatusCode: 503,
+            integrationErrorCode: 'ONCHAIN_CONTRACT_PAUSED',
+          },
+        ],
+        total: 28,
+      },
+    },
+  })
+  @CacheResponse({ ttl: getCacheTTL().CONTRACT_ERROR_CATALOG })
+  getErrorCatalog() {
+    return {
+      errors: CONTRACT_ERROR_CATALOG,
+      total: CONTRACT_ERROR_CATALOG.length,
+    };
   }
 }

@@ -35,6 +35,12 @@ fn error_discriminants_are_stable() {
     assert_eq!(Error::InvalidPendingAdmin as u32, 20);
     assert_eq!(Error::BatchTooLarge as u32, 21);
     assert_eq!(Error::ClaimCooldownActive as u32, 22);
+    assert_eq!(Error::DistributorAlreadyExists as u32, 23);
+    assert_eq!(Error::DistributorNotFound as u32, 24);
+    assert_eq!(Error::DistributorSetFull as u32, 25);
+    assert_eq!(Error::SurplusWithdrawalPending as u32, 26);
+    assert_eq!(Error::SurplusWithdrawalNotPending as u32, 27);
+    assert_eq!(Error::SurplusWithdrawalTimelockActive as u32, 28);
 }
 
 #[test]
@@ -64,10 +70,16 @@ fn error_discriminants_are_contiguous_and_unique() {
         Error::InvalidPendingAdmin as u32,
         Error::BatchTooLarge as u32,
         Error::ClaimCooldownActive as u32,
+        Error::DistributorAlreadyExists as u32,
+        Error::DistributorNotFound as u32,
+        Error::DistributorSetFull as u32,
+        Error::SurplusWithdrawalPending as u32,
+        Error::SurplusWithdrawalNotPending as u32,
+        Error::SurplusWithdrawalTimelockActive as u32,
     ];
     codes.sort_unstable();
     codes.dedup();
-    assert_eq!(codes.len(), 22, "error codes must be unique");
+    assert_eq!(codes.len(), 28, "error codes must be unique");
     for (i, code) in codes.iter().enumerate() {
         assert_eq!(
             *code,
