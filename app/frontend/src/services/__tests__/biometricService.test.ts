@@ -1,5 +1,5 @@
 /**
- * @jest-environment jsdom
+ * @jest-environment ./jest.environment.ts
  */
 
 import {
@@ -16,6 +16,13 @@ jest.mock('@/lib/mock-api/client', () => ({
 }));
 
 const mockedFetchClient = fetchClient as jest.MockedFunction<typeof fetchClient>;
+
+/**
+ * Credential ids travel as base64url strings (WebAuthn spec), so fixtures must
+ * be decodable — `base64UrlToArrayBuffer` rejects non-base64url input.
+ * `btoa('x')` without padding.
+ */
+const CREDENTIAL_ID = 'eA';
 
 function jsonResponse<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -374,7 +381,7 @@ describe('biometricService (WebAuthn)', () => {
       mockedFetchClient.mockResolvedValueOnce(jsonResponse({
         challenge: fakeChallenge(),
         rpId: 'localhost',
-        allowCredentials: [{ id: 'x', type: 'public-key' }],
+        allowCredentials: [{ id: CREDENTIAL_ID, type: 'public-key' }],
         userVerification: 'required',
       }));
 
@@ -421,7 +428,7 @@ describe('biometricService (WebAuthn)', () => {
       mockedFetchClient
         .mockResolvedValueOnce(jsonResponse({
           challenge: fakeChallenge(),
-          allowCredentials: [{ id: 'x', type: 'public-key' }],
+          allowCredentials: [{ id: CREDENTIAL_ID, type: 'public-key' }],
         }))
         .mockResolvedValueOnce(jsonResponse({ verified: false, message: 'Signature invalid' }));
 
@@ -469,7 +476,7 @@ describe('biometricService (WebAuthn)', () => {
       mockedFetchClient
         .mockResolvedValueOnce(jsonResponse({
           challenge: fakeChallenge(),
-          allowCredentials: [{ id: 'x', type: 'public-key' }],
+          allowCredentials: [{ id: CREDENTIAL_ID, type: 'public-key' }],
         }))
         .mockResolvedValueOnce(jsonResponse({ verified: true, credentialId: 'x', counter: 1 }));
 
@@ -498,16 +505,17 @@ describe('biometricService (WebAuthn)', () => {
     });
 
     it('returns "unknown" when checkBiometricAvailability throws', async () => {
-      jest.doMock('../biometricService', () => {
-        const actual = jest.requireActual('../biometricService');
-        return {
-          ...actual,
-          checkBiometricAvailability: jest.fn().mockRejectedValue(new Error('boom')),
-        };
+      // Feature detection itself is what can throw (e.g. a hostile
+      // `PublicKeyCredential` getter), and that happens before the internal
+      // try/catch of checkBiometricAvailability.
+      Object.defineProperty(window, 'PublicKeyCredential', {
+        configurable: true,
+        get() {
+          throw new Error('boom');
+        },
       });
-      jest.resetModules();
-      const { getBiometricStatus: gbs } = require('../biometricService');
-      expect(await gbs()).toBe('unknown');
+
+      expect(await getBiometricStatus()).toBe('unknown');
     });
   });
 });

@@ -226,6 +226,38 @@
     "verificationReviewPage": "Revisión de Verificación",
     "resetChecklist": "Reiniciar progreso de la lista"
   },
+  "emptyStates": {
+    "campaigns": {
+      "eyebrow": "Aún no hay campañas",
+      "title": "Crea tu primera campaña",
+      "description": "Tu organización todavía no tiene campañas. Crea una campaña para empezar a financiar distribuciones de ayuda, o carga valores de ejemplo para explorar primero el flujo de trabajo.",
+      "createAction": "Crear una campaña",
+      "sampleAction": "Cargar valores de ejemplo",
+      "helpAction": "Ver ayuda",
+      "sampleTip": "Carga valores de ejemplo en el formulario para generar contenido de prueba realista rápidamente.",
+      "helpTip": "Abre la Ayuda para ver notas de configuración, incluido el modo de simulación y las rutas según el rol.",
+      "filtered": "Ninguna campaña coincide con el filtro actual."
+    },
+    "dashboard": {
+      "noPackages": {
+        "eyebrow": "Aún no hay paquetes",
+        "operatorTitle": "Todavía no se han publicado paquetes de ayuda",
+        "operatorDescription": "Este espacio de trabajo aún no tiene datos de paquetes. Crea una campaña para publicar paquetes de ayuda y llenar este panel.",
+        "viewerTitle": "Todavía no hay paquetes de ayuda disponibles para explorar",
+        "viewerDescription": "Aún no hay datos de distribución en vivo en este entorno, pero los flujos de verificación y de ejemplo siguen disponibles.",
+        "operatorAction": "Crear una campaña",
+        "viewerAction": "Probar el flujo de verificación",
+        "secondaryAction": "Ver ayuda"
+      },
+      "noMatches": {
+        "eyebrow": "Sin coincidencias",
+        "title": "Ningún paquete de ayuda coincide con los filtros actuales",
+        "description": "Intenta ampliar la búsqueda, borrar los filtros o cambiar las selecciones de token y estado.",
+        "resetAction": "Restablecer filtros del panel",
+        "secondaryAction": "Ver ayuda"
+      }
+    }
+  },
   "faucet": {
     "title": "Asistente de Faucet Testnet",
     "subtitle": "Herramienta de Desarrollo Stellar / Soroban",

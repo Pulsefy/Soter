@@ -32,13 +32,26 @@ export default function ClaimReceiptPage() {
       ? 'package'
       : 'unknown';
 
-  const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  const [state, setState] = useState<LoadState>(() =>
+    identifier
+      ? { kind: 'loading' }
+      : { kind: 'not-found', identifierType: 'unknown' },
+  );
+
+  // Adjust state during render when the identifier changes (React-recommended
+  // alternative to mirroring props into state inside an effect).
+  const [prevIdentifier, setPrevIdentifier] = useState(identifier);
+  if (identifier !== prevIdentifier) {
+    setPrevIdentifier(identifier);
+    setState(
+      identifier
+        ? { kind: 'loading' }
+        : { kind: 'not-found', identifierType: 'unknown' },
+    );
+  }
 
   useEffect(() => {
-    if (!identifier) {
-      setState({ kind: 'not-found', identifierType: 'unknown' });
-      return;
-    }
+    if (!identifier) return;
 
     const abortCtrl = new AbortController();
 

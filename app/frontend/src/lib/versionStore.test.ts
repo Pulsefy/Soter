@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { useVersionStore, VersionService } from './versionStore';
 import { DEFAULT_VERSION_CONFIG } from './defaultVersionConfig';
 

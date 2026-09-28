@@ -7,10 +7,9 @@ import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { EvidenceArtifactViewer } from './EvidenceArtifactViewer';
 import { RedactionControls } from './RedactionControls';
 import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
-import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
+import { startEvidenceVerification } from '@/lib/verification-api';
 import { useToast } from '@/components/ToastProvider';
 import { normalizeError } from '@/lib/error-utils';
-import { useTranslations } from 'next-intl';
 import type {
     PiiDetectionResult,
     ValidationErrors,
@@ -127,7 +126,6 @@ export const EnhancedVerificationFlow: React.FC = () => {
     const role = getAppUserRole();
     const { isMismatch } = useNetworkGuard();
     const { toast } = useToast();
-    const tErrors = useTranslations('errors');
     const [restoredDraft] = useState<EnhancedVerificationDraft | null>(() =>
         readEnhancedVerificationDraftFromStorage(),
     );
@@ -315,7 +313,7 @@ export const EnhancedVerificationFlow: React.FC = () => {
 
                 setFlowState(prev => ({
                     ...prev,
-                    apiError: err as any,
+                    apiError: err instanceof Error ? err : String(err),
                     step: 'upload',
                 }));
                 pendingPayload.current = null;
@@ -324,7 +322,7 @@ export const EnhancedVerificationFlow: React.FC = () => {
         return () => {
             cancelled = true;
         };
-    }, [flowState.step]);
+    }, [flowState.step, toast]);
 
     /* ── Redaction Handlers ───────────────────────────────────────────────── */
 

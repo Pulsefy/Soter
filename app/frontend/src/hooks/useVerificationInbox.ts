@@ -84,15 +84,16 @@ export function useQueueRefreshStatus(
   const qc = useQueryClient();
 
   // Subscribe to latency store reactively
-  const latencyMs = useQuery({
-    queryKey: latencyStoreKey,
-    queryFn: () => null as number | null,
-    staleTime: Infinity,
-    gcTime: Infinity,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  }).data ?? null;
+  const latencyMs =
+    useQuery({
+      queryKey: latencyStoreKey,
+      queryFn: () => null as number | null,
+      staleTime: Infinity,
+      gcTime: Infinity,
+      refetchOnMount: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    }).data ?? null;
 
   // Observe the live inbox query state (owned by useInbox above)
   const state = qc.getQueryState(inboxKeys.list(filters));

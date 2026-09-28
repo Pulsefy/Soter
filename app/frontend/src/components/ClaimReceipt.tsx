@@ -2,7 +2,6 @@
 
 import React, { useMemo } from 'react';
 import { Share2, Download, Copy, Check, ExternalLink } from 'lucide-react';
-import { useTheme } from 'next-themes';
 import { format } from 'date-fns';
 import { buildExplorerUrl } from '../lib/explorer';
 
@@ -60,7 +59,6 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
   onShare,
   compact = false,
 }) => {
-  const { theme } = useTheme();
   const [copied, setCopied] = React.useState(false);
   const [sharing, setSharing] = React.useState(false);
 

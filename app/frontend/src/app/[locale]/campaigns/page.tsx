@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { ExportControls } from '@/components/dashboard/ExportControls';
 import { useNetworkGuard } from '@/hooks/useNetworkGuard';
@@ -32,6 +33,7 @@ function toCampaignStatus(value: string): CampaignStatus | '' {
 
 export default function CampaignsPage() {
   const searchParams = useSearchParams();
+  const t = useTranslations();
   const urlStatus = searchParams.get('status') ?? '';
   const userRole = getUserRole();
   const userRoleLabel = getUserRoleLabel(userRole);
@@ -40,6 +42,8 @@ export default function CampaignsPage() {
   const campaignAction = useCampaignAction();
 
   const { isMismatch, expectedNetwork } = useNetworkGuard();
+
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   const [name, setName] = useState('');
   const [budget, setBudget] = useState('');
@@ -65,6 +69,17 @@ export default function CampaignsPage() {
     setToken('USDC');
     setExpiry('2026-12-31');
     setFormMessage('Sample campaign values loaded. Review and create when ready.');
+  };
+
+  /**
+   * Primary next action for the empty state: move the reviewer straight into
+   * the create-campaign form rather than leaving them with a dead end.
+   */
+  const focusCreateForm = () => {
+    const input = nameInputRef.current;
+    if (!input) return;
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    input.focus();
   };
 
   if (!canManageCampaigns(userRole)) {
@@ -152,6 +167,7 @@ export default function CampaignsPage() {
               <label className="block">
                 <span className="font-medium">Name</span>
                 <input
+                  ref={nameInputRef}
                   value={name}
                   onChange={event => setName(event.target.value)}
                   className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-500"
@@ -217,30 +233,49 @@ export default function CampaignsPage() {
               <ExportControls context="Campaigns" filters={{ activeOnly: true }} />
             </div>
 
-            {isLoading && <p>Loading campaigns...</p>}
+            {isLoading && (
+              <p data-testid="campaigns-loading">{t('campaigns.loadingCampaigns')}</p>
+            )}
             {isError && (
-              <p className="text-red-500">
-                Error fetching campaigns: {(error as Error)?.message}
+              <p className="text-red-500" data-testid="campaigns-error">
+                {t('campaigns.errorFetchingCampaigns')}: {(error as Error)?.message}
               </p>
             )}
             {!isLoading && !isError && campaigns.length === 0 && (
-              <AppEmptyState
-                compact
-                eyebrow="No Campaigns Yet"
-                title="There are no active campaigns to review"
-                description="New contributors should still have a clear starting point here. Create a sample campaign, then use recipient import to explore the onboarding workflow."
-                tips={[
-                  'Load sample values in the form to generate realistic test content quickly.',
-                  'Open Help for contributor setup notes, including mock mode and role-aware paths.',
-                ]}
-                actions={[
-                  { onClick: loadSampleCampaign, label: 'Load sample campaign', icon: 'sample' },
-                  { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
-                ]}
-              />
+              <div data-testid="campaigns-empty-state">
+                <AppEmptyState
+                  compact
+                  eyebrow={t('emptyStates.campaigns.eyebrow')}
+                  title={t('emptyStates.campaigns.title')}
+                  description={t('emptyStates.campaigns.description')}
+                  tips={[
+                    t('emptyStates.campaigns.sampleTip'),
+                    t('emptyStates.campaigns.helpTip'),
+                  ]}
+                  actions={[
+                    {
+                      onClick: focusCreateForm,
+                      label: t('emptyStates.campaigns.createAction'),
+                      icon: 'next',
+                    },
+                    {
+                      onClick: loadSampleCampaign,
+                      label: t('emptyStates.campaigns.sampleAction'),
+                      icon: 'sample',
+                      variant: 'secondary',
+                    },
+                    {
+                      href: '/help',
+                      label: t('emptyStates.campaigns.helpAction'),
+                      icon: 'docs',
+                      variant: 'secondary',
+                    },
+                  ]}
+                />
+              </div>
             )}
             {!isLoading && !isError && campaigns.length > 0 && activeCampaigns.length === 0 && (
-              <p className="text-gray-500">No campaigns match the current filter.</p>
+              <p className="text-gray-500">{t('emptyStates.campaigns.filtered')}</p>
             )}
 
             {!isLoading && !isError && activeCampaigns.length > 0 && (

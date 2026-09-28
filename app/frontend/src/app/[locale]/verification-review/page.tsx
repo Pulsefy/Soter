@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { StatsBar } from '@/components/verification-review/StatsBar';
@@ -8,17 +8,6 @@ import { ReviewFiltersBar } from '@/components/verification-review/ReviewFilters
 import { ReviewFilterPresets } from '@/components/verification-review/ReviewFilterPresets';
 import { ReviewQueue } from '@/components/verification-review/ReviewQueue';
 import type { ReviewFilters, VerificationStatus, RiskLevel } from '@/types/verification-review';
-
-// ── Defaults ──────────────────────────────────────────────────────────────────
-
-const DEFAULT_FILTERS: ReviewFilters = {
-  status: '',
-  riskLevel: '',
-  campaignId: '',
-  dateFrom: '',
-  dateTo: '',
-  page: 1,
-};
 
 // ── URL ↔ state helpers ───────────────────────────────────────────────────────
 

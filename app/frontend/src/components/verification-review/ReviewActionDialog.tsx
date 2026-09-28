@@ -13,13 +13,20 @@ import {
 import { useToast } from '@/components/ToastProvider';
 import { normalizeError } from '@/lib/error-utils';
 
-type ActionType = 'approve' | 'reject' | 'resubmission';
+export type ReviewActionType = 'approve' | 'reject' | 'resubmission';
+
+type ActionType = ReviewActionType;
 
 interface ReviewActionDialogProps {
   verificationId: string;
   action: ActionType;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Called after the decision is accepted by the backend, before the dialog
+   * closes. Lets the queue move focus and announce the outcome.
+   */
+  onSuccess?: (action: ReviewActionType) => void;
 }
 
 const ACTION_CONFIG: Record<
@@ -58,6 +65,7 @@ export function ReviewActionDialog({
   action,
   open,
   onOpenChange,
+  onSuccess,
 }: ReviewActionDialogProps) {
   const cfg = ACTION_CONFIG[action];
 
@@ -131,6 +139,7 @@ export function ReviewActionDialog({
         });
       }
       reset();
+      onSuccess?.(action);
       onOpenChange(false);
     } catch (err) {
       const normalized = normalizeError(err);

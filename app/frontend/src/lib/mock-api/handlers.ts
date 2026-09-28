@@ -2,8 +2,10 @@ import type { BackendHealthResponse } from '@/types/health';
 import type { AidPackage } from '@/types/aid-package';
 import type {
   VerificationInboxItem,
-  InternalNote,
+  VerificationInboxResponse,
+  VerificationStats,
   VerificationStatus,
+  InternalNote,
 } from '@/types/verification-review';
 import type { ContractRegistryResponse } from '@/types/contract-registry';
 import type { RunbookResponse } from '@/types/runbook';
@@ -44,38 +46,179 @@ interface StoredCredential {
 
 const registeredCredentials: StoredCredential[] = [];
 
-// Mock in-memory state for verification inbox items and notes
+// ═══════════════════════════════════════════════════════════════════════════
+// Verification Inbox Mock Data & Handlers
+//
+// Restored from the original implementation (see #729) after a later merge
+// clobbered these handlers, leaving `/v1/verification-inbox` unhandled and
+// the mock-parity review page unusable in demo mode.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let inboxNoteCounter = 5;
+
 const inboxItems: VerificationInboxItem[] = [
   {
-    id: 'mock-1',
-    status: 'pending_review' as VerificationStatus,
-    createdAt: new Date(Date.now() - 1000 * 60 * 24).toISOString(),
+    id: 'vfy-001',
+    status: 'pending_review',
+    createdAt: new Date('2026-07-20T10:00:00.000Z').toISOString(),
     reviewedAt: null,
     reviewedBy: null,
     rejectionReason: null,
-    nextStepMessage: null,
-    deepLink: '/verification-review?requestId=mock-1',
+    nextStepMessage: 'Review identity documents for authenticity',
+    deepLink: '/verification/vfy-001',
+    aiScore: 0.42,
+    riskLevel: 'medium',
+    documentType: 'national_id',
+  },
+  {
+    id: 'vfy-002',
+    status: 'pending_review',
+    createdAt: new Date('2026-07-19T15:30:00.000Z').toISOString(),
+    reviewedAt: null,
+    reviewedBy: null,
+    rejectionReason: null,
+    nextStepMessage: 'Cross-reference proof-of-life with recipient registry',
+    deepLink: '/verification/vfy-002',
+    aiScore: 0.88,
+    riskLevel: 'high',
+    documentType: 'proof_of_life',
+  },
+  {
+    id: 'vfy-003',
+    status: 'approved',
+    createdAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
+    reviewedAt: new Date('2026-07-16T14:00:00.000Z').toISOString(),
+    reviewedBy: 'reviewer-demo',
+    rejectionReason: null,
+    nextStepMessage: 'Verification approved. Proceed to disbursement.',
+    deepLink: '/verification/vfy-003',
     aiScore: 0.15,
     riskLevel: 'low',
     documentType: 'national_id',
   },
   {
-    id: 'mock-2',
-    status: 'pending_review' as VerificationStatus,
-    createdAt: new Date(Date.now() - 1000 * 60 * 48).toISOString(),
+    id: 'vfy-004',
+    status: 'rejected',
+    createdAt: new Date('2026-07-14T12:00:00.000Z').toISOString(),
+    reviewedAt: new Date('2026-07-16T10:00:00.000Z').toISOString(),
+    reviewedBy: 'reviewer-demo',
+    rejectionReason: 'Document appears fraudulent',
+    nextStepMessage: 'Please resubmit with valid documentation',
+    deepLink: '/verification/vfy-004',
+    aiScore: 0.95,
+    riskLevel: 'high',
+    documentType: 'national_id',
+  },
+  {
+    id: 'vfy-005',
+    status: 'needs_resubmission',
+    createdAt: new Date('2026-07-13T09:00:00.000Z').toISOString(),
+    reviewedAt: new Date('2026-07-17T11:00:00.000Z').toISOString(),
+    reviewedBy: 'reviewer-demo',
+    rejectionReason: 'Document expired',
+    nextStepMessage: 'Please submit a current government-issued ID',
+    deepLink: '/verification/vfy-005',
+    aiScore: 0.55,
+    riskLevel: 'medium',
+    documentType: 'national_id',
+  },
+  {
+    id: 'vfy-006',
+    status: 'pending_review',
+    createdAt: new Date('2026-07-18T14:00:00.000Z').toISOString(),
     reviewedAt: null,
     reviewedBy: null,
     rejectionReason: null,
-    nextStepMessage: null,
-    deepLink: '/verification-review?requestId=mock-2',
-    aiScore: 0.05,
+    nextStepMessage: 'Verify biometric match score against threshold',
+    deepLink: '/verification/vfy-006',
+    aiScore: 0.62,
+    riskLevel: 'medium',
+    documentType: 'biometric',
+  },
+  {
+    id: 'vfy-007',
+    status: 'approved',
+    createdAt: new Date('2026-07-10T11:00:00.000Z').toISOString(),
+    reviewedAt: new Date('2026-07-12T16:00:00.000Z').toISOString(),
+    reviewedBy: 'reviewer-demo',
+    rejectionReason: null,
+    nextStepMessage: 'Verification approved. Ready for claim.',
+    deepLink: '/verification/vfy-007',
+    aiScore: 0.08,
     riskLevel: 'low',
-    documentType: 'passport',
+    documentType: 'proof_of_life',
+  },
+  {
+    id: 'vfy-008',
+    status: 'pending_review',
+    createdAt: new Date('2026-07-17T16:00:00.000Z').toISOString(),
+    reviewedAt: null,
+    reviewedBy: null,
+    rejectionReason: null,
+    nextStepMessage: 'Validate document expiry and issuer authority',
+    deepLink: '/verification/vfy-008',
+    aiScore: 0.73,
+    riskLevel: 'high',
+    documentType: 'national_id',
   },
 ];
 
-const inboxNotes: InternalNote[] = [];
-let inboxNoteCounter = 0;
+const inboxNotes: InternalNote[] = [
+  {
+    id: 'note-1',
+    entityType: 'verification',
+    entityId: 'vfy-001',
+    content: 'Document looks legitimate but need to verify issuer registry.',
+    authorId: 'reviewer-demo',
+    category: 'review',
+    createdAt: new Date('2026-07-21T11:00:00.000Z').toISOString(),
+    updatedAt: new Date('2026-07-21T11:00:00.000Z').toISOString(),
+  },
+  {
+    id: 'note-2',
+    entityType: 'verification',
+    entityId: 'vfy-002',
+    content: 'Cross-referenced with UNHCR registry — awaiting confirmation.',
+    authorId: 'reviewer-demo',
+    category: 'follow_up',
+    createdAt: new Date('2026-07-20T09:00:00.000Z').toISOString(),
+    updatedAt: new Date('2026-07-20T09:00:00.000Z').toISOString(),
+  },
+  {
+    id: 'note-3',
+    entityType: 'verification',
+    entityId: 'vfy-002',
+    content: 'Elevating to senior reviewer due to high AI risk score.',
+    authorId: 'reviewer-demo',
+    category: 'escalation',
+    createdAt: new Date('2026-07-21T08:00:00.000Z').toISOString(),
+    updatedAt: new Date('2026-07-21T08:00:00.000Z').toISOString(),
+  },
+  {
+    id: 'note-4',
+    entityType: 'verification',
+    entityId: 'vfy-003',
+    content: 'All documents verified — approved by consensus.',
+    authorId: 'reviewer-demo',
+    category: 'review_approved',
+    createdAt: new Date('2026-07-16T14:30:00.000Z').toISOString(),
+    updatedAt: new Date('2026-07-16T14:30:00.000Z').toISOString(),
+  },
+];
+
+function getInboxStats(): VerificationStats {
+  const stats: VerificationStats = {
+    pending_review: 0,
+    approved: 0,
+    rejected: 0,
+    needs_resubmission: 0,
+    total: inboxItems.length,
+  };
+  for (const item of inboxItems) {
+    stats[item.status] += 1;
+  }
+  return stats;
+}
 
 const webauthnRegisterOptionsHandler: MockHandler = async (url) => {
   const urlObj = new URL(url, 'http://localhost');
@@ -179,10 +322,7 @@ const webauthnRegisterVerifyHandler: MockHandler = async (_url, options) => {
   );
 };
 
-const webauthnAuthOptionsHandler: MockHandler = async (url) => {
-  const urlObj = new URL(url, 'http://localhost');
-  const userId = urlObj.searchParams.get('userId');
-
+const webauthnAuthOptionsHandler: MockHandler = async () => {
   const challenge = base64UrlEncode(randomBytes(32));
 
   const allowCredentials = registeredCredentials.map((cred) => ({
@@ -892,6 +1032,180 @@ const inboxAddNoteHandler: MockHandler = async (url, options) => {
   });
 };
 
+// GET /v1/verification-inbox
+const inboxListHandler: MockHandler = async (url) => {
+  let urlObj: URL;
+  try {
+    urlObj = new URL(url);
+  } catch {
+    urlObj = new URL(url, 'http://localhost');
+  }
+
+  const status = urlObj.searchParams.get('status') ?? '';
+  const riskLevel = urlObj.searchParams.get('riskLevel') ?? '';
+  const dateFrom = urlObj.searchParams.get('dateFrom') ?? '';
+  const dateTo = urlObj.searchParams.get('dateTo') ?? '';
+  const page = parseInt(urlObj.searchParams.get('page') ?? '1', 10) || 1;
+  const limit = parseInt(urlObj.searchParams.get('limit') ?? '20', 10) || 20;
+
+  let results = [...inboxItems];
+
+  if (status) {
+    results = results.filter(item => item.status === status);
+  }
+  if (riskLevel) {
+    results = results.filter(item => item.riskLevel === riskLevel);
+  }
+  // `campaignId` is accepted but ignored: mock items carry no campaignId yet,
+  // so filtering on it would always return an empty queue.
+  if (dateFrom) {
+    const from = new Date(dateFrom).getTime();
+    results = results.filter(item => new Date(item.createdAt).getTime() >= from);
+  }
+  if (dateTo) {
+    const to = new Date(dateTo).getTime();
+    results = results.filter(item => new Date(item.createdAt).getTime() <= to);
+  }
+
+  const total = results.length;
+  const totalPages = Math.ceil(total / limit) || 1;
+  const start = (page - 1) * limit;
+  const paged = results.slice(start, start + limit);
+
+  const body: VerificationInboxResponse = {
+    items: paged,
+    total,
+    page,
+    limit,
+    totalPages,
+  };
+
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// GET /v1/verification-inbox/stats
+const inboxStatsHandler: MockHandler = async () => {
+  const stats = getInboxStats();
+  return new Response(JSON.stringify(stats), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// GET /v1/verification-inbox/:id
+const inboxDetailHandler: MockHandler = async (url) => {
+  const id = url.split('?')[0].split('/').pop() ?? '';
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  return new Response(JSON.stringify(item), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+/** Shared review transition for approve/reject/request-resubmission. */
+function applyReviewDecision(
+  url: string,
+  options: RequestInit | undefined,
+  status: VerificationStatus,
+  noteCategory: string,
+  fallbackReason: boolean,
+): Response {
+  const id = url.split('?')[0].split('/').slice(-2)[0];
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (item.status === 'approved' || item.status === 'rejected') {
+    return new Response(JSON.stringify({ message: 'Verification already processed' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let payload: { rejectionReason?: string; nextStepMessage?: string; internalNote?: string } = {};
+  if (options?.body) {
+    try {
+      payload = JSON.parse(options.body.toString());
+    } catch { /* ignore */ }
+  }
+
+  const now = new Date().toISOString();
+  item.status = status;
+  item.reviewedAt = now;
+  item.reviewedBy = 'reviewer-demo';
+  if (fallbackReason) {
+    item.rejectionReason = payload.rejectionReason ?? null;
+  }
+  if (payload.nextStepMessage) {
+    item.nextStepMessage = payload.nextStepMessage;
+  }
+
+  if (payload.internalNote) {
+    inboxNotes.push({
+      id: `note-${++inboxNoteCounter}`,
+      entityType: 'verification',
+      entityId: id,
+      content: payload.internalNote,
+      authorId: 'reviewer-demo',
+      category: noteCategory,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return new Response(JSON.stringify(item), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+// POST /v1/verification-inbox/:id/approve
+const inboxApproveHandler: MockHandler = async (url, options) =>
+  applyReviewDecision(url, options, 'approved', 'review_approved', false);
+
+// POST /v1/verification-inbox/:id/reject
+const inboxRejectHandler: MockHandler = async (url, options) =>
+  applyReviewDecision(url, options, 'rejected', 'review_rejected', true);
+
+// POST /v1/verification-inbox/:id/request-resubmission
+const inboxResubmitHandler: MockHandler = async (url, options) =>
+  applyReviewDecision(url, options, 'needs_resubmission', 'review_needs_resubmission', true);
+
+// GET /v1/verification-inbox/:id/notes
+const inboxGetNotesHandler: MockHandler = async (url) => {
+  const id = url.split('?')[0].split('/').slice(-2)[0];
+  const item = inboxItems.find(i => i.id === id);
+
+  if (!item) {
+    return new Response(JSON.stringify({ message: 'Verification request not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const notes = inboxNotes.filter(n => n.entityId === id);
+  return new Response(JSON.stringify(notes), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
 const dashboardSummaryHandler: MockHandler = async () => {
   const totalClaims = inboxItems.length;
   const totalPackages = ALL_PACKAGES.length;
@@ -1178,12 +1492,29 @@ export const handlers: Record<string, MockHandler> = {
   '/auth/webauthn/auth/options': webauthnAuthOptionsHandler,
   '/auth/webauthn/auth/verify': webauthnAuthVerifyHandler,
 
+  '/v1/verification-inbox': inboxListHandler,
+  '/v1/verification-inbox/stats': inboxStatsHandler,
   '/v1/verification-inbox/:id': async (url, options) => {
     const method = options?.method?.toUpperCase() ?? 'GET';
     const path = url.split('?')[0];
 
+    if (path.endsWith('/approve') && method === 'POST') {
+      return inboxApproveHandler(url, options);
+    }
+    if (path.endsWith('/reject') && method === 'POST') {
+      return inboxRejectHandler(url, options);
+    }
+    if (path.endsWith('/request-resubmission') && method === 'POST') {
+      return inboxResubmitHandler(url, options);
+    }
+    if (path.endsWith('/notes') && method === 'GET') {
+      return inboxGetNotesHandler(url, options);
+    }
     if (path.endsWith('/notes') && method === 'POST') {
       return inboxAddNoteHandler(url, options);
+    }
+    if (method === 'GET') {
+      return inboxDetailHandler(url, options);
     }
 
     return new Response(
