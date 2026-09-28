@@ -114,6 +114,15 @@ Helpful starting points:
 - Mobile: `cd app/mobile && pnpm test && pnpm lint`
 - AI service: `cd app/ai-service && pytest`
 
+## Documentation
+
+Cross-cutting docs live in [`doc/`](doc/):
+
+- [Onboarding: the wave-based contribution workflow](doc/onboarding-wave-workflow.md) — how waves work, how to claim an issue, turnaround, and review expectations.
+- [Architecture decision log](doc/decisions/README.md) — append-only record of significant architecture decisions and why they were made.
+- [Claims-to-verification flow](doc/claims-verification-flow.md) — the claim and verification lifecycles, how they connect, and the target wiring state.
+- [Frontend & mobile API integration guide](doc/api-integration-guide.md) — how to call the backend from each client, demo/mock behavior, and the OpenAPI source of truth.
+
 ## Contributing
 
 We review contributor branches frequently. Keep PRs small and focused, and include:

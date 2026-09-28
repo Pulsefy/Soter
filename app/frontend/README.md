@@ -2,6 +2,8 @@
 
 The frontend for Soter, built with Next.js 15+, providing a modern, responsive interface for transparent humanitarian aid distribution on the Stellar blockchain.
 
+> **Calling the backend?** See the [Frontend & Mobile API Integration Guide](../../doc/api-integration-guide.md) for the intended client pattern, the mock-api layer and demo mode, and how the OpenAPI spec is the source of truth for request/response shapes.
+
 ## Overview
 
 This Next.js application serves as the user-facing interface for the Soter platform, enabling:
