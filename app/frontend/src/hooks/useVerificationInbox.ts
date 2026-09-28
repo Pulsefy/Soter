@@ -200,6 +200,28 @@ export function useOptimisticItemState(): OptimisticItemState {
 // Mutations — all with optimistic updates
 // ---------------------------------------------------------------------------
 
+/**
+ * `inboxKeys.all` is only a prefix: it also matches the virtual `__latency`
+ * (a number) and `__optimistic` (an `OptimisticItemState`) stores. Optimistic
+ * list updates and their rollback snapshots must therefore be restricted to
+ * caches that actually hold a list, or the updater runs against those values
+ * and throws on the first review action.
+ */
+function isInboxListData(
+  data: unknown,
+): data is { items: VerificationInboxItem[] } {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    Array.isArray((data as { items?: unknown }).items)
+  );
+}
+
+const inboxListFilters = {
+  queryKey: inboxKeys.all,
+  predicate: (query: { state: { data: unknown } }) => isInboxListData(query.state.data),
+} as const;
+
 function useReviewMutation(
   mutationFn: (
     id: string,
@@ -233,22 +255,19 @@ function useReviewMutation(
       });
 
       // Snapshot all list queries for rollback
-      const snapshots = qc.getQueriesData<{ items: VerificationInboxItem[] }>({
-        queryKey: inboxKeys.all,
-      });
-
-      qc.setQueriesData<{ items: VerificationInboxItem[] }>(
-        { queryKey: inboxKeys.all },
-        old => {
-          if (!old || !('items' in old)) return old;
-          return {
-            ...old,
-            items: old.items.map(item =>
-              item.id === id ? { ...item, status: targetStatus } : item,
-            ),
-          };
-        },
+      const snapshots = qc.getQueriesData<{ items: VerificationInboxItem[] }>(
+        inboxListFilters,
       );
+
+      qc.setQueriesData<{ items: VerificationInboxItem[] }>(inboxListFilters, old => {
+        if (!old) return old;
+        return {
+          ...old,
+          items: old.items.map(item =>
+            item.id === id ? { ...item, status: targetStatus } : item,
+          ),
+        };
+      });
 
       return { snapshots, id };
     },

@@ -382,6 +382,26 @@ Tests will be added as the project matures. Planned testing stack:
 - **E2E**: Playwright
 - **Integration**: Testing against local backend
 
+### Route smoke tests
+
+`src/integration/verification-review.smoke.test.tsx` is the smoke test for the
+reviewer-facing `/[locale]/verification-review` route. It renders the real page
+in jsdom against a real HTTP backend started in-process
+(`src/integration/support/verification-inbox-test-backend.ts`) and walks the
+reviewer flow: load the route, list the queue, approve a case, reject a case.
+Every step is its own test, named `[load]`, `[list]`, `[action:approve]` and
+`[action:reject]`, so a failure names the step that broke.
+
+```bash
+pnpm exec jest src/integration/verification-review.smoke.test.tsx --runInBand --verbose
+```
+
+It runs in CI via `.github/workflows/frontend-verification-review-smoke.yml`.
+No backend, database or outbound network access is needed: the test backend
+binds an ephemeral loopback port and demo mode is forced off so every request
+really leaves the process. Tests that need `fetch` under jsdom must opt into the
+`./jest.jsdom-fetch.environment.js` environment, since jsdom 20 ships none.
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow, commit conventions, and PR guidelines.
