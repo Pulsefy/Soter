@@ -25,9 +25,10 @@ expires and is refunded.
 
 ## Public Functions
 
-See the [backend coverage inventory](BACKEND_COVERAGE.md) for the current
-backend adapter status of every public contract function and the update process
-for adding coverage.
+See the complete [callable interface reference](INTERFACE.md) for every public
+entry point, including parameters, return types, authorization, errors, pause
+behavior, and emitted events. See the [backend coverage inventory](BACKEND_COVERAGE.md)
+for current adapter status and the update process for adding coverage.
 
 ### Admin & Config
 

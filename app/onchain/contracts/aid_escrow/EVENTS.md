@@ -55,26 +55,39 @@ When making event schema changes:
 
 ## Event catalog
 
-| Topic                     | Emitted by          | When                                                   |
-| ------------------------- | ------------------- | ------------------------------------------------------ |
-| `escrow_funded`           | `fund`              | Pool is funded by a funder.                            |
-| `package_created`         | `create_package`    | A single aid package is created (funds locked).        |
-| `package_created` (xN)    | batch create        | One per package created in a batch (see below).        |
-| `batch_created_event`     | batch create        | Summary event for a batch creation.                    |
-| `package_reassigned`      | `reassign_package`  | Admin changes an unclaimed package recipient.         |
-| `package_claimed`         | claim path          | Recipient claims a package (incl. Merkle-proof claim). |
-| `package_disbursed`       | `disburse`          | Admin disburses a package to its recipient.            |
-| `package_revoked`         | `revoke`            | Admin revokes a `Created` package (funds unlocked).    |
-| `package_refunded`        | `refund`            | Admin refunds an expired/cancelled package.            |
-| `package_swept`           | `sweep_expired_packages` | Sweep transitions an expired `Created` package to terminal `Expired` (funds released from locked). |
-| `extended_event`          | `extend_expiration` | Admin extends a package expiry.                        |
-| `surplus_withdrawn_event` | `withdraw_surplus`  | Admin withdraws unallocated surplus from the pool.     |
-| `contract_paused_event`   | `pause`             | Admin pauses the whole contract.                       |
-| `contract_unpaused_event` | `unpause`           | Admin unpauses the whole contract.                     |
-| `action_paused_event`     | `pause_action`      | Admin pauses a single action (create/claim/withdraw).  |
-| `action_unpaused_event`   | `unpause_action`    | Admin unpauses a single action.                        |
-| `campaign_paused_event`   | `pause_campaign`    | Admin pauses a single campaign (`campaign_ref`).       |
-| `campaign_unpaused_event` | `unpause_campaign`  | Admin unpauses a single campaign.                      |
+| Topic | Emitted by | When |
+| --- | --- | --- |
+| `escrow_funded` | `fund` | Pool receives a token transfer from a funder. |
+| `package_created` | `create_package`, `batch_create_packages` | One event per created package. |
+| `batch_created_event` | `batch_create_packages` | Summary of a batch creation. |
+| `package_reassigned` | `reassign_package` | Admin changes an unclaimed package recipient. |
+| `package_claimed` | `claim`, `claim_with_proof`, successful `batch_claim` items | Recipient or delegate claims a package. |
+| `package_claimed_by_relayer` | `claim_with_relayer` | A relayer submits a recipient/delegate claim. |
+| `package_disbursed` | `disburse` | Admin disburses a package to its recipient. |
+| `package_revoked` | `revoke`, `cancel_package`, successful `batch_revoke` items | Admin cancels a `Created` package and unlocks its funds. |
+| `package_refunded` | `refund`, successful `batch_refund` items | Admin refunds an expired or cancelled package. |
+| `package_swept` | `sweep_expired_packages` | Expired `Created` package becomes terminal `Expired`; locked funds are released. |
+| `extended_event` | `extend_expiry` (also deprecated `extend_expiration`) | Admin extends a package expiry. |
+| `surplus_withdrawal_proposed` | `propose_surplus_withdrawal` | Admin proposes a withdrawal and starts the timelock. |
+| `surplus_withdrawal_cancelled` | `cancel_surplus_withdrawal` | Admin cancels a pending withdrawal proposal. |
+| `surplus_withdrawn_event` | `execute_surplus_withdrawal` | Timelocked surplus is transferred to its destination. |
+| `contract_paused_event` | `pause` | Admin pauses the whole contract. |
+| `contract_unpaused_event` | `unpause` | Admin unpauses the whole contract. |
+| `action_paused_event` | `pause_action` | Admin pauses one supported action. |
+| `action_unpaused_event` | `unpause_action` | Admin unpauses one action. |
+| `campaign_paused_event` | `pause_campaign` | Admin pauses a campaign identified by `campaign_ref`. |
+| `campaign_unpaused_event` | `unpause_campaign` | Admin unpauses a campaign. |
+| `delegate_added` | `set_delegate`, `set_delegate_with_expiry` | Admin-supplied address registers or updates a package delegate. |
+| `delegate_revoked` | `revoke_delegate`, claims by delegates, `sweep_expired_delegates`, `cleanup_expired_delegates` | A delegate is removed, expires, or is cleared after claim. Emission is conditional where noted in the callable interface. |
+| `delegate_claimed` | Delegate claim via `claim` or `claim_with_proof` | Delegate claims on behalf of the package recipient. |
+| `admin_transfer_initiated` | `transfer_admin` | Current admin nominates a pending admin. |
+| `admin_transfer_accepted` | `accept_admin` | Pending admin accepts the role. |
+| `admin_transfer_cancelled` | `cancel_admin_transfer` | Current admin cancels a pending transfer. |
+| `token_added` | `add_allowed_token` | Admin adds a token to the configured allowlist. |
+| `token_removed` | `remove_allowed_token` | Admin removes a token from the configured allowlist. |
+| `distributor_added` | `add_distributor` | Admin grants distributor privileges. |
+| `distributor_removed` | `remove_distributor` | Admin revokes distributor privileges. |
+| `evidence_attached` | `attach_evidence_hash` | Admin attaches an evidence hash to a package. |
 
 > Function names refer to the public entrypoints in `src/lib.rs`.
 
