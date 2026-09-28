@@ -7,11 +7,9 @@ on:
       - 'app/frontend/**'
       - '.github/workflows/frontend-ci.yml'
 
-# Source-size proxy for the shipped JS bundle: compiled-bundle measurement
-# needs `next build`, which currently fails repo-wide on an unrelated
-# middleware.ts/proxy.ts conflict. Budget documents today's baseline
-# (largest route is ~41KB); ratchet down once the build is fixed and this
-# can measure real compiled chunk sizes instead.
+# Source-size proxy for the shipped JS bundle. The budget documents today's
+# baseline (largest route is ~41KB); ratchet down when this can measure real
+# compiled chunk sizes instead.
 env:
   ROUTE_BUDGET_BYTES: 65536
 
@@ -60,3 +58,31 @@ jobs:
       - name: Mock handler contract tests
         working-directory: app/frontend
         run: pnpm exec jest src/lib/mock-api/contract.test.ts --runInBand
+
+  visual-regression:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile --engine-strict=false
+
+      - name: Install Chromium
+        working-directory: app/frontend
+        run: pnpm exec playwright install chromium
+
+      - name: Compare dashboard screenshots
+        working-directory: app/frontend
+        run: pnpm run test:visual

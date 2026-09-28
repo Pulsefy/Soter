@@ -2,6 +2,8 @@
 
 The frontend for Soter, built with Next.js 15+, providing a modern, responsive interface for transparent humanitarian aid distribution on the Stellar blockchain.
 
+> **Calling the backend?** See the [Frontend & Mobile API Integration Guide](../../doc/api-integration-guide.md) for the intended client pattern, the mock-api layer and demo mode, and how the OpenAPI spec is the source of truth for request/response shapes.
+
 ## Overview
 
 This Next.js application serves as the user-facing interface for the Soter platform, enabling:
@@ -74,6 +76,25 @@ Run the large-fixture regression check with:
 ```bash
 pnpm test -- --runInBand src/components/dashboard/__tests__/AidDistributionMap.performance.test.ts
 ```
+
+### Dashboard visual regression
+
+The frontend CI workflow compares full-page Chromium screenshots of the dashboard in light and dark themes. It uses fixed API data and map tiles so the screenshots stay independent of backend and map-provider changes. CI runs on Windows to match the screenshot rendering platform used for the committed baselines.
+
+Run the visual check locally from this directory:
+
+```bash
+pnpm exec playwright install chromium
+pnpm run test:visual
+```
+
+When a dashboard change is intentional, update the reference images in the same pull request:
+
+```bash
+pnpm run test:visual:update
+```
+
+Review the PNG changes under `tests/visual/dashboard.visual.ts-snapshots/` before committing them with the UI change.
 
 ### Environment Setup
 
