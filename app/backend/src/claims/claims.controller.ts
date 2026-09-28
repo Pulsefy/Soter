@@ -26,6 +26,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { ClaimsService } from './claims.service';
+import { extractCorrelationId } from '../common/utils/correlation-id.util';
 import { CancelAndReissueService } from './cancel-and-reissue.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import {
@@ -222,7 +223,13 @@ export class ClaimsController {
   ) {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
-    return this.claimsService.disburse(id, dto.receiptPointer);
+    // Pass the request's correlation ID down so the Soroban transaction record,
+    // the queued job and every log line of the disbursement path share one ID.
+    return this.claimsService.disburse(
+      id,
+      dto.receiptPointer,
+      extractCorrelationId(req) ?? undefined,
+    );
   }
 
   @Patch(':id/archive')

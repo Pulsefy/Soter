@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -28,6 +29,7 @@ import {
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
+import { SorobanCorrelationTraceService } from './soroban-correlation-trace.service';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 
@@ -38,6 +40,7 @@ export class LedgerAdminController {
     private readonly backfillService: LedgerBackfillService,
     private readonly reconciliationService: LedgerReconciliationService,
     private readonly sorobanTransactionLifecycleService: SorobanTransactionLifecycleService,
+    private readonly sorobanCorrelationTraceService: SorobanCorrelationTraceService,
   ) {}
 
   @Post('backfill')
@@ -432,5 +435,95 @@ export class LedgerAdminController {
     const result =
       await this.sorobanTransactionLifecycleService.detectStuckTransactions();
     return { success: true, data: result };
+  }
+
+  @Get('soroban/trace/:correlationId')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'Trace a claim disbursement by correlation ID',
+    description:
+      'Returns the full claims-to-onchain chain for a single correlation ID: the Soroban transaction lifecycle records carrying it (claim, operation, status, attempts, transaction hash) plus every on-chain event correlated to those transactions or claims. Replaces manually cross-referencing application logs. The same ID is returned in the `x-correlation-id` response header of the request that started the disbursement.',
+  })
+  @ApiParam({
+    name: 'correlationId',
+    description:
+      'Correlation ID taken from the `x-correlation-id` response header of the request that initiated the claim (e.g. `3f1c9a6e-...`).',
+    example: '9b2f4c7e-2d64-4a6d-9c0e-8f1b5a7d3e21',
+  })
+  @ApiOkResponse({
+    description: 'Correlation chain retrieved successfully.',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          correlationId: '9b2f4c7e-2d64-4a6d-9c0e-8f1b5a7d3e21',
+          found: true,
+          claimIds: ['claim_456'],
+          txHashes: ['a1b2c3d4e5f6'],
+          transactions: [
+            {
+              id: 'tx_123',
+              claimId: 'claim_456',
+              operation: 'disburse_claim',
+              status: 'confirmed',
+              txHash: 'a1b2c3d4e5f6',
+              attemptCount: 1,
+              maxAttempts: 5,
+              correlationId: '9b2f4c7e-2d64-4a6d-9c0e-8f1b5a7d3e21',
+              claim: {
+                id: 'claim_456',
+                status: 'disbursed',
+                amount: 250,
+                campaignId: 'cmp_1',
+              },
+            },
+          ],
+          events: [
+            {
+              id: 'evt_1',
+              eventTopic: 'claim_disbursed',
+              txHash: 'a1b2c3d4e5f6',
+              ledger: 1234567,
+              eventIndex: 0,
+              claimId: 'claim_456',
+            },
+          ],
+          summary: {
+            transactionCount: 1,
+            confirmedTransactionCount: 1,
+            failedTransactionCount: 0,
+            pendingTransactionCount: 0,
+            eventCount: 1,
+            startedAt: '2026-08-25T19:50:00.000Z',
+            lastActivityAt: '2026-08-25T19:50:12.000Z',
+            durationMs: 12000,
+          },
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'Correlation ID is missing or too long.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - admin role required.',
+  })
+  async getSorobanCorrelationTrace(
+    @Param('correlationId') correlationId: string,
+  ) {
+    const normalized = correlationId?.trim();
+    if (!normalized || normalized.length > 128) {
+      throw new BadRequestException(
+        'correlationId must be between 1 and 128 characters',
+      );
+    }
+
+    const trace =
+      await this.sorobanCorrelationTraceService.getTrace(normalized);
+    return { success: true, data: trace };
   }
 }

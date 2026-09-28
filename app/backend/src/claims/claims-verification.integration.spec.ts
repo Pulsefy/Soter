@@ -127,6 +127,7 @@ describe('Claims -> verification pipeline integration', () => {
             error: jest.fn(),
             warn: jest.fn(),
             debug: jest.fn(),
+            getCorrelationId: jest.fn(),
           },
         },
         {

@@ -287,7 +287,18 @@ export class ClaimsService {
     );
   }
 
-  async disburse(id: string, receiptPointer?: string) {
+  /**
+   * Mark a claim as disbursed and, when on-chain execution is enabled, create
+   * the Soroban transaction that performs the transfer.
+   *
+   * `correlationId` is the trace ID of the request (or job) driving the
+   * disbursement. It is stored on the Soroban transaction record and on the
+   * queue job so every later log line, retry and correlated on-chain event can
+   * be traced back to the originating request. When it is not supplied the
+   * ambient correlation ID is used, falling back to a per-claim ID so that
+   * background callers still produce a traceable reference.
+   */
+  async disburse(id: string, receiptPointer?: string, correlationId?: string) {
     const claim = await this.prisma.claim.findUnique({
       where: { id },
       include: { campaign: true },
@@ -312,12 +323,16 @@ export class ClaimsService {
       });
     }
 
+    const traceId =
+      correlationId?.trim() ||
+      this.loggerService.getCorrelationId() ||
+      `disburse-${id}-${Date.now()}`;
+
     let sorobanTransaction: SorobanTransaction | undefined;
     if (this.onchainEnabled && this.onchainAdapter) {
       try {
         const packageId = await this.getPackageIdForClaim(id);
         const tokenAddress = this.getTokenAddressForClaim(claim);
-        const correlationId = `disburse-${id}-${Date.now()}`;
 
         sorobanTransaction =
           await this.sorobanTransactionService.createTransaction({
@@ -330,7 +345,7 @@ export class ClaimsService {
             ),
             amount: claim.amount.toString(),
             tokenAddress,
-            correlationId,
+            correlationId: traceId,
             metadata: {
               campaignId: claim.campaignId,
               claimAmount: claim.amount,
@@ -343,18 +358,19 @@ export class ClaimsService {
         await this.sorobanTransactionScheduler.scheduleTransaction(
           sorobanTransaction.id,
           {
-            correlationId,
+            correlationId: traceId,
             priority: 1,
           },
         );
 
-        this.logger.log(
+        this.loggerService.log(
           'Created Soroban transaction with lifecycle tracking for claim disbursement',
+          'ClaimsService',
           {
             claimId: id,
             transactionId: sorobanTransaction.id,
             packageId,
-            correlationId,
+            correlationId: traceId,
             receiptPointer,
           },
         );
@@ -366,7 +382,13 @@ export class ClaimsService {
       } catch (error) {
         this.loggerService.error(
           `Failed to create or schedule Soroban transaction for claim ${id}`,
-          error instanceof Error ? error.message : String(error),
+          error instanceof Error ? error.stack : undefined,
+          'ClaimsService',
+          {
+            claimId: id,
+            correlationId: traceId,
+            error: error instanceof Error ? error.message : String(error),
+          },
         );
       }
     }
@@ -377,11 +399,13 @@ export class ClaimsService {
       ClaimStatus.disbursed,
     );
 
-    this.logger.log(
+    this.loggerService.log(
       `Claim ${id} marked as disbursed with Soroban transaction tracking`,
+      'ClaimsService',
       {
         claimId: id,
         sorobanTransactionId: sorobanTransaction?.id,
+        correlationId: traceId,
         receiptPointer,
       },
     );
