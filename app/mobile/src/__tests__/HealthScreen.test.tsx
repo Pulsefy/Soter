@@ -4,6 +4,7 @@ import { Clipboard } from 'react-native';
 import { HealthScreen } from '../screens/HealthScreen';
 import { fetchHealthStatus } from '../services/api';
 import { config } from '../config';
+import { useSyncDeferral } from '../contexts/SyncDeferralContext';
 import {
   cacheHealthStatus,
   loadCachedHealthStatus,
@@ -54,6 +55,11 @@ jest.mock('../services/healthCache', () => ({
   clearHealthCache: jest.fn().mockResolvedValue(undefined),
 }));
 
+// Mock battery-aware sync deferral state surfaced by the diagnostics export
+jest.mock('../contexts/SyncDeferralContext', () => ({
+  useSyncDeferral: jest.fn(),
+}));
+
 // Mock the config module
 jest.mock('../config', () => ({
   config: {
@@ -62,6 +68,7 @@ jest.mock('../config', () => ({
     network: 'testnet',
     walletConnectProjectId: 'test-project-id',
     sorobanContractId: 'CC123...',
+    batteryThreshold: 0.25,
     isValid: true,
     errors: [],
   },
@@ -71,12 +78,31 @@ const mockFetchHealthStatus = fetchHealthStatus as jest.MockedFunction<typeof fe
 const mockCacheHealthStatus = cacheHealthStatus as jest.MockedFunction<typeof cacheHealthStatus>;
 const mockLoadCachedHealthStatus = loadCachedHealthStatus as jest.MockedFunction<typeof loadCachedHealthStatus>;
 const mockGetHealthCacheTimestamp = getHealthCacheTimestamp as jest.MockedFunction<typeof getHealthCacheTimestamp>;
+const mockUseSyncDeferral = useSyncDeferral as jest.Mock;
+
+const buildDeferralState = (overrides: Record<string, unknown> = {}) => ({
+  batteryLevel: -1,
+  isCharging: false,
+  isMetered: false,
+  meteredOptIn: false,
+  forceSyncOverride: false,
+  deferralReason: 'none',
+  estimatedUploadSize: 0,
+  setMeteredOptIn: jest.fn(),
+  forceSync: jest.fn(),
+  clearForceSync: jest.fn(),
+  setEstimatedUploadSize: jest.fn(),
+  shouldDeferAction: jest.fn(() => ({ deferred: false, reason: 'none' })),
+  getDeferralExplanation: jest.fn(() => 'Sync is active'),
+  ...overrides,
+});
 
 describe('HealthScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockLoadCachedHealthStatus.mockResolvedValue(null);
     mockGetHealthCacheTimestamp.mockResolvedValue(null);
+    mockUseSyncDeferral.mockReturnValue(buildDeferralState());
   });
 
   it('shows loading state initially', () => {
@@ -293,6 +319,10 @@ describe('HealthScreen', () => {
       expect(screen.getByText('WIFI')).toBeTruthy();
       expect(screen.getByText('Internet Reachable:')).toBeTruthy();
       expect(screen.getByText('YES')).toBeTruthy();
+      expect(screen.getByText('Battery Level:')).toBeTruthy();
+      expect(screen.getByText('Battery Charging:')).toBeTruthy();
+      expect(screen.getByText('Battery Threshold:')).toBeTruthy();
+      expect(screen.getByText('Sync Deferred (Battery):')).toBeTruthy();
     });
   });
 
@@ -324,6 +354,10 @@ describe('HealthScreen', () => {
     expect(copiedText).toContain('Network Connected: Yes');
     expect(copiedText).toContain('Network Type: WIFI');
     expect(copiedText).toContain('Internet Reachable: Yes');
+    expect(copiedText).toContain('Battery Level: Unavailable');
+    expect(copiedText).toContain('Battery Charging: No');
+    expect(copiedText).toContain('Battery Threshold: 25%');
+    expect(copiedText).toContain('Sync Deferred (Battery): No');
     expect(copiedText).toContain('Contract ID: CC123...');
 
     expect(copiedText).not.toContain('test-project-id');
@@ -331,5 +365,39 @@ describe('HealthScreen', () => {
     await waitFor(() => {
       expect(screen.getByText('✅ Diagnostics Copied!')).toBeTruthy();
     });
+  });
+
+  it('reports battery level and battery-driven sync deferral in the copied diagnostics export', async () => {
+    mockUseSyncDeferral.mockReturnValue(
+      buildDeferralState({
+        batteryLevel: 0.15,
+        isCharging: false,
+        deferralReason: 'low-battery',
+      }),
+    );
+    const clipboardSpy = jest.spyOn(Clipboard, 'setString').mockImplementation(() => {});
+
+    mockFetchHealthStatus.mockResolvedValueOnce({
+      status: 'ok',
+      service: 'backend',
+      version: '1.0.0',
+      environment: 'development',
+      timestamp: new Date().toISOString(),
+    });
+
+    render(<HealthScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByText('📋 Copy Diagnostics')).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByText('📋 Copy Diagnostics'));
+
+    const copiedText = clipboardSpy.mock.calls[0][0];
+    expect(copiedText).toContain('Battery Level: 15%');
+    expect(copiedText).toContain('Battery Charging: No');
+    expect(copiedText).toContain('Battery Threshold: 25%');
+    expect(copiedText).toContain('Sync Deferred (Battery): Yes');
+    expect(copiedText).toContain('Deferral Reason: low-battery');
   });
 });

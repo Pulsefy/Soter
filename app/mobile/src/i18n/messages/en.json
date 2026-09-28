@@ -305,6 +305,10 @@
     "networkStatus": "Network Status:",
     "networkType": "Network Type:",
     "internetReachable": "Internet Reachable:",
+    "batteryLevel": "Battery Level:",
+    "batteryCharging": "Battery Charging:",
+    "batteryThreshold": "Battery Threshold:",
+    "syncDeferredBattery": "Sync Deferred (Battery):",
     "environment": "Environment: "
   },
   "camera": {
