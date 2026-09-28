@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -22,6 +22,12 @@ import {
   buildEvidenceUploadPayload,
   EvidenceUploadRequest,
 } from '../services/verificationApi';
+import {
+  buildStorageWarningMessage,
+  formatBytes,
+  getStorageQuotaStatus,
+  StorageQuotaStatus,
+} from '../services/storageQuota';
 import { structuredLogger } from '../services/logger';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EvidenceUpload'>;
@@ -55,6 +61,112 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
   const [uploading, setUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [storageStatus, setStorageStatus] = useState<StorageQuotaStatus | null>(null);
+
+  const openSettings = useCallback(async () => {
+    try {
+      if (Platform.OS === 'ios') {
+        await Linking.openURL('app-settings:');
+      } else {
+        await Linking.openSettings();
+      }
+    } catch {
+      structuredLogger.warn(
+        'evidence_upload.open_settings_failed',
+        { platform: Platform.OS },
+        'evidenceUpload',
+      );
+    }
+  }, []);
+
+  /**
+   * Refresh the device storage snapshot (#1160). The pending-queue term in
+   * the service already reflects `uploadActions`, so this stays accurate as
+   * uploads complete. A low/critical result keeps a banner visible so the
+   * worker sees the risk even after dismissing the pre-capture alert.
+   */
+  const refreshStorageStatus = useCallback(async () => {
+    try {
+      const status = await getStorageQuotaStatus();
+      setStorageStatus(status);
+      return status;
+    } catch (quotaError) {
+      structuredLogger.warn(
+        'evidence_upload.storage_check_failed',
+        { error: quotaError instanceof Error ? quotaError.message : String(quotaError) },
+        'evidenceUpload',
+      );
+      return null;
+    }
+  }, []);
+
+  // Check once when the screen opens so low storage is visible before any
+  // capture attempt, and re-check whenever the pending upload set changes.
+  useEffect(() => {
+    void refreshStorageStatus();
+  }, [refreshStorageStatus, uploadActions]);
+
+  /**
+   * Storage gate run before starting any capture (#1160).
+   *
+   * - `ok`: capture proceeds immediately.
+   * - `low` / unreadable: warns first; the worker can continue or cancel.
+   * - `critical`: capture is blocked until space is freed.
+   *
+   * The check accounts for pending queued uploads via the storage service,
+   * so nearly-full devices are detected even when free space alone looks
+   * sufficient.
+   */
+  const ensureStorageForCapture = useCallback(async (): Promise<boolean> => {
+    const status = await refreshStorageStatus();
+
+    // Unreadable storage: show a non-blocking advisory once, then proceed.
+    if (!status) {
+      return true;
+    }
+
+    if (status.level === 'ok') {
+      return true;
+    }
+
+    const warning = buildStorageWarningMessage(status);
+    structuredLogger.warn(
+      'evidence_upload.low_storage_warning',
+      {
+        level: status.level,
+        freeDiskBytes: status.freeDiskBytes,
+        pendingUploadBytes: status.pendingUploadBytes,
+        effectiveFreeBytes: status.effectiveFreeBytes,
+      },
+      'evidenceUpload',
+    );
+
+    if (status.level === 'critical') {
+      Alert.alert(
+        t('evidence.storageCriticalTitle'),
+        warning ?? t('evidence.storageCriticalBody', { free: formatBytes(status.effectiveFreeBytes) }),
+        [{ text: t('common.ok') }],
+        { cancelable: true },
+      );
+      return false;
+    }
+
+    return new Promise<boolean>((resolve) => {
+      Alert.alert(
+        t('evidence.storageLowTitle'),
+        warning ?? t('evidence.storageLowBody', { free: formatBytes(status.effectiveFreeBytes) }),
+        [
+          { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
+          {
+            text: t('evidence.storageContinue'),
+            style: 'destructive',
+            onPress: () => resolve(true),
+          },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) },
+      );
+    });
+  }, [refreshStorageStatus, t]);
 
   const compressPhoto = useCallback(async (uri: string) => {
     const result = await ImageManipulator.manipulateAsync(
@@ -80,6 +192,11 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
     setStatusMessage(null);
     setError(null);
 
+    // #1160: check device storage (minus pending uploads) before capture.
+    if (!(await ensureStorageForCapture())) {
+      return;
+    }
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert(
@@ -100,27 +217,16 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
     }
 
     await compressPhoto(result.assets[0].uri);
-  }, [compressPhoto]);
-
-  const openSettings = useCallback(async () => {
-    try {
-      if (Platform.OS === 'ios') {
-        await Linking.openURL('app-settings:');
-      } else {
-        await Linking.openSettings();
-      }
-    } catch {
-      structuredLogger.warn(
-        'evidence_upload.open_settings_failed',
-        { platform: Platform.OS },
-        'evidenceUpload',
-      );
-    }
-  }, []);
+  }, [compressPhoto, ensureStorageForCapture]);
 
   const takePhoto = useCallback(async () => {
     setStatusMessage(null);
     setError(null);
+
+    // #1160: check device storage (minus pending uploads) before capture.
+    if (!(await ensureStorageForCapture())) {
+      return;
+    }
 
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
@@ -160,7 +266,7 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
     }
 
     await compressPhoto(result.assets[0].uri);
-  }, [compressPhoto, openSettings, pickImage]);
+  }, [compressPhoto, ensureStorageForCapture, openSettings, pickImage]);
 
   const handleUpload = useCallback(async () => {
     if (!compressedBase64) {
@@ -219,6 +325,32 @@ export const EvidenceUploadScreen: React.FC<Props> = ({
           Capture or select a document or photo to support your verification.
         </Text>
       </View>
+
+      {storageStatus && storageStatus.level !== 'ok' ? (
+        <View
+          style={[
+            styles.storageBanner,
+            storageStatus.level === 'critical'
+              ? styles.storageBannerCritical
+              : styles.storageBannerLow,
+          ]}
+          accessibilityRole="alert"
+          accessibilityLabel={t('evidence.storageBannerA11y')}
+          testID="storage-quota-warning"
+        >
+          <Text style={styles.storageBannerTitle}>
+            {storageStatus.level === 'critical'
+              ? t('evidence.storageCriticalTitle')
+              : t('evidence.storageLowTitle')}
+          </Text>
+          <Text style={styles.storageBannerText}>
+            {t('evidence.storageBannerBody', {
+              free: formatBytes(storageStatus.effectiveFreeBytes),
+              pending: formatBytes(storageStatus.pendingUploadBytes),
+            })}
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>{t('evidence.step1')}</Text>
@@ -524,5 +656,29 @@ const makeStyles = (colors: any) =>
       color: colors.error,
       marginTop: 4,
       lineHeight: 16,
+    },
+    storageBanner: {
+      borderRadius: 12,
+      borderWidth: 1,
+      padding: 14,
+      gap: 4,
+    },
+    storageBannerLow: {
+      backgroundColor: '#FEF3C7',
+      borderColor: '#F59E0B',
+    },
+    storageBannerCritical: {
+      backgroundColor: '#FEE2E2',
+      borderColor: '#EF4444',
+    },
+    storageBannerTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: '#92400E',
+    },
+    storageBannerText: {
+      fontSize: 13,
+      lineHeight: 18,
+      color: '#92400E',
     },
   });
