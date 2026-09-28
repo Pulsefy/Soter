@@ -33,7 +33,9 @@ async def preview_redaction(
             preview = service.preview_structured_fields(request.fields)
             result = RedactionPreviewResult(**preview)
             reasons = (
-                [f"Found {result.pii_summary.get('total', 0)} field(s) that would be redacted."]
+                [
+                    f"Found {result.pii_summary.get('total', 0)} field(s) that would be redacted."
+                ]
                 if result.pii_summary.get("total", 0) > 0
                 else ["No structured PII detected in OCR fields."]
             )

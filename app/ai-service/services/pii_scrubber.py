@@ -199,9 +199,7 @@ class PIIScrubberService:
 
         return segments
 
-    def preview_structured_fields(
-        self, fields: Dict[str, object]
-    ) -> Dict[str, object]:
+    def preview_structured_fields(self, fields: Dict[str, object]) -> Dict[str, object]:
         """Build a redaction preview for structured OCR field payloads."""
         if not fields:
             return {
@@ -284,7 +282,12 @@ class PIIScrubberService:
 
         if cursor < len(rendered_text):
             segments.append(
-                {"type": "kept", "start": cursor, "end": len(rendered_text), "category": None}
+                {
+                    "type": "kept",
+                    "start": cursor,
+                    "end": len(rendered_text),
+                    "category": None,
+                }
             )
 
         pii_summary["total"] = sum(pii_summary.values())

@@ -875,14 +875,22 @@ async def starlette_http_exception_handler(request, exc: StarletteHTTPException)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
-    logger.error(f"Validation error: {exc.errors()}")
+    errors = exc.errors()
+    for error in errors:
+        # Pydantic 2.x embeds the raw exception instance at ctx.error for
+        # ValueError-raising validators (e.g. model_validator). That's not
+        # JSON-serializable, so stringify it before it reaches JSONResponse.
+        ctx = error.get("ctx")
+        if ctx and "error" in ctx:
+            ctx["error"] = str(ctx["error"])
+    logger.error(f"Validation error: {errors}")
     return JSONResponse(
         status_code=422,
         content=ErrorEnvelope(
             error=ErrorDetail(
                 code="VALIDATION_ERROR",
                 message="Request validation failed",
-                details=exc.errors(),
+                details=errors,
             )
         ).model_dump(),
     )
