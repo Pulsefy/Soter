@@ -1,9 +1,5 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
@@ -42,7 +38,11 @@ export class EntityLinkingService {
 
     // Validate confidence score
     if (dto.confidenceScore < 0 || dto.confidenceScore > 1) {
-      throw new BadRequestException('Confidence score must be between 0 and 1');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Confidence score must be between 0 and 1',
+      );
     }
 
     // Find or create registry record
@@ -213,11 +213,17 @@ export class EntityLinkingService {
     });
 
     if (!link) {
-      throw new NotFoundException(`Entity link ${linkId} not found`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Entity link ${linkId} not found`,
+      );
     }
 
     if (link.reviewStatus !== EntityLinkReviewStatus.pending_review) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Entity link ${linkId} is not awaiting review (status: ${link.reviewStatus})`,
       );
     }
@@ -242,7 +248,9 @@ export class EntityLinkingService {
 
       case 'remap': {
         if (!dto.remapEntityType || !dto.remapRegistryId) {
-          throw new BadRequestException(
+          throw new AppException(
+            ERROR_CODES.BAD_REQUEST,
+            400,
             'remapEntityType and remapRegistryId are required for a remap decision',
           );
         }
@@ -285,7 +293,9 @@ export class EntityLinkingService {
         // dto arrives as an untyped HTTP body, so a client can send an
         // action outside the EntityLinkReviewAction union at runtime even
         // though the switch above is exhaustive at compile time.
-        throw new BadRequestException(
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
           `Unknown review action: ${String(dto.action)}`,
         );
     }
@@ -614,7 +624,9 @@ export class EntityLinkingService {
           where: { registryId },
         });
         if (!org) {
-          throw new NotFoundException(
+          throw new AppException(
+            ERROR_CODES.NOT_FOUND,
+            404,
             `Organization with registry ID ${registryId} not found`,
           );
         }
@@ -626,7 +638,9 @@ export class EntityLinkingService {
           where: { registryId },
         });
         if (!loc) {
-          throw new NotFoundException(
+          throw new AppException(
+            ERROR_CODES.NOT_FOUND,
+            404,
             `Location with registry ID ${registryId} not found`,
           );
         }
@@ -638,7 +652,9 @@ export class EntityLinkingService {
           where: { registryId },
         });
         if (!asset) {
-          throw new NotFoundException(
+          throw new AppException(
+            ERROR_CODES.NOT_FOUND,
+            404,
             `Asset with registry ID ${registryId} not found`,
           );
         }
@@ -650,7 +666,9 @@ export class EntityLinkingService {
           where: { registryId },
         });
         if (!proj) {
-          throw new NotFoundException(
+          throw new AppException(
+            ERROR_CODES.NOT_FOUND,
+            404,
             `Project with registry ID ${registryId} not found`,
           );
         }
@@ -658,7 +676,11 @@ export class EntityLinkingService {
       }
 
       default:
-        throw new BadRequestException(`Invalid entity type: ${entityType}`);
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Invalid entity type: ${entityType}`,
+        );
     }
   }
 

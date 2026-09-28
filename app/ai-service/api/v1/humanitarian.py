@@ -444,7 +444,9 @@ async def verify_humanitarian_claim(
         # when the model supplied it; otherwise the record still proves a
         # completed decision.
         eligible = verification.get("eligible")
-        if isinstance(eligible, bool):
+        if isinstance(raw, dict) and raw.get("manual_review") is True:
+            outcome = "manual_review"
+        elif isinstance(eligible, bool):
             outcome = "eligible" if eligible else "ineligible"
         else:
             outcome = "completed"

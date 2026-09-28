@@ -156,6 +156,22 @@ export interface ContractMetadata {
   timestamp: Date;
 }
 
+export interface ContractVersionParams {
+  contractId: string;
+}
+
+export interface MigrateContractParams extends ContractVersionParams {
+  newVersion: number;
+}
+
+export interface MigrateContractResult {
+  contractId: string;
+  transactionHash: string;
+  previousVersion: number;
+  newVersion: number;
+  timestamp: Date;
+}
+
 export interface PauseState {
   isPaused: boolean;
   timestamp: Date;
@@ -209,6 +225,26 @@ export interface DisburseResult {
   metadata?: Record<string, any>;
 }
 
+export interface ExtendAidPackageExpiryParams {
+  packageId: string;
+  /**
+   * New unix timestamp (in seconds) when the package expires.
+   * Strictly greater than current package expiration.
+   */
+  newExpiresAt: number;
+  operatorAddress?: string;
+}
+
+export interface ExtendAidPackageExpiryResult {
+  packageId: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  oldExpiresAt?: number;
+  newExpiresAt: number;
+  metadata?: Record<string, any>;
+}
+
 /**
  * Interface for on-chain operations with Soroban AidEscrow contract
  */
@@ -247,6 +283,21 @@ export interface OnchainAdapter {
   ): Promise<DisburseAidPackageResult>;
 
   /**
+   * Extend the expiration timestamp of an active aid package.
+   *
+   * Design Decision:
+   * Canonical convention chosen: Absolute timestamp (`extend_expiry(id, new_expires_at)`).
+   * Rationale:
+   * 1. The smart contract explicitly deprecated relative `extend_expiration(id, additional_time)`
+   *    in favor of `extend_expiry(id, new_expires_at)`.
+   * 2. Absolute timestamps provide idempotency and protect against race conditions or retry-induced
+   *    expiration drift if operations are re-submitted.
+   */
+  extendAidPackageExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult>;
+
+  /**
    * Get details of an aid package
    */
   getAidPackage(params: GetAidPackageParams): Promise<GetAidPackageResult>;
@@ -266,6 +317,10 @@ export interface OnchainAdapter {
   ): Promise<GetTokenBalanceResult>;
 
   getContractMetadata(): Promise<ContractMetadata>;
+  getContractVersion(params: ContractVersionParams): Promise<number>;
+  migrateContract(
+    params: MigrateContractParams,
+  ): Promise<MigrateContractResult>;
   getPauseState(): Promise<PauseState>;
   getFeeConfig(): Promise<FeeConfig>;
   getPackageSummary(packageId: string): Promise<PackageSummary>;

@@ -12,6 +12,12 @@ import { DlqService } from '../jobs/dlq.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { classifyNotificationFailure } from './notification-failure-classifier';
 import {
+  NotificationBackpressureService,
+  ProviderCircuitOpenError,
+  notificationBackoffStrategy,
+  providerForType,
+} from './notification-backpressure.service';
+import {
   DeliveryAdapter,
   EMAIL_ADAPTER,
   SMS_ADAPTER,
@@ -19,6 +25,10 @@ import {
 
 @Processor('notifications', {
   concurrency: parseInt(process.env.QUEUE_CONCURRENCY || '5'),
+  // Custom retry backoff (issue #1180): the strategy escalates with the
+  // attempt number and with consecutive provider failures, and refuses to
+  // become due while the provider circuit is cut off.
+  settings: { backoffStrategy: notificationBackoffStrategy },
 })
 export class NotificationProcessor extends WorkerHost {
   private readonly logger = new Logger(NotificationProcessor.name);
@@ -27,6 +37,7 @@ export class NotificationProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly dlqService: DlqService,
     private readonly metricsService: MetricsService,
+    private readonly backpressure: NotificationBackpressureService,
     @Inject(EMAIL_ADAPTER) private readonly emailAdapter: DeliveryAdapter,
     @Inject(SMS_ADAPTER) private readonly smsAdapter: DeliveryAdapter,
   ) {
@@ -36,6 +47,14 @@ export class NotificationProcessor extends WorkerHost {
   async process(
     job: Job<NotificationJobData, NotificationResult, string>,
   ): Promise<NotificationResult> {
+    const provider = providerForType(job.data.type);
+
+    // Circuit-breaker cutoff (issue #1180): while a provider is mid-outage we
+    // fail fast here instead of holding a worker slot open against a dead
+    // endpoint. The failure is retried through the escalating backoff, which
+    // cannot come due before the probe window opens.
+    this.backpressure.assertAttemptAllowed(provider);
+
     this.logger.log(
       `Processing ${job.data.type} notification for ${job.data.recipient} (attempt ${job.attemptsMade + 1})${job.data.correlationId ? ` [correlationId=${job.data.correlationId}]` : ''}`,
     );
@@ -77,11 +96,23 @@ export class NotificationProcessor extends WorkerHost {
         throw new Error(deliveryResult.error ?? 'Delivery failed');
       }
 
+      this.backpressure.recordSuccess(provider);
+
       return {
         success: true,
         messageId: deliveryResult.providerMessageId,
       };
     } catch (error) {
+      if (error instanceof ProviderCircuitOpenError) {
+        // No provider was contacted, so this is not a delivery failure: the
+        // circuit breaker held the attempt back on purpose.
+        this.logger.warn(
+          `Notification job ${job.id} held back by the ${error.provider} circuit breaker: ${error.message}`,
+        );
+        throw error;
+      }
+
+      this.backpressure.recordFailure(provider);
       this.logger.error(
         `Notification job ${job.id} failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
         error instanceof Error ? error.stack : undefined,
@@ -153,14 +184,24 @@ export class NotificationProcessor extends WorkerHost {
 
   @OnWorkerEvent('failed')
   async onFailed(job: Job<NotificationJobData> | undefined, error: Error) {
+    // Issue #1180: an attempt the circuit breaker held back never reached a
+    // provider, so it must not be counted as a delivery failure.
+    const heldByCircuitBreaker = error instanceof ProviderCircuitOpenError;
+
     if (job) {
-      this.logger.error(
-        `Notification job ${job.id} for ${job.data.recipient} failed: ${error.message}`,
-      );
-      this.metricsService.incrementCallbackFailure(
-        'notification_job',
-        error.message,
-      );
+      if (heldByCircuitBreaker) {
+        this.logger.warn(
+          `Notification job ${job.id} for ${job.data.recipient} paused by the circuit breaker: ${error.message}`,
+        );
+      } else {
+        this.logger.error(
+          `Notification job ${job.id} for ${job.data.recipient} failed: ${error.message}`,
+        );
+        this.metricsService.incrementCallbackFailure(
+          'notification_job',
+          error.message,
+        );
+      }
       await this.dlqService.moveToDlq('notifications', job, error);
     } else {
       this.logger.error(`Notification job failed: ${error.message}`);
@@ -206,6 +247,10 @@ export class NotificationProcessor extends WorkerHost {
           `Could not refresh notification dead-letter depth: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+    }
+
+    if (heldByCircuitBreaker) {
+      return;
     }
 
     const failureCategory = classifyNotificationFailure(error);

@@ -307,9 +307,6 @@
     "registryContractId": "Contract ID",
     "registryDeployedVersion": "Deployed Version",
     "registryDeployedAt": "Deployed Date",
-    "registrySourceCanonical": "Canonical Output File",
-    "registrySourceGenerator": "Generator Script",
-    "registrySourceDeployment": "Deployment Registry",
     "registryCopyId": "Copy Contract ID",
     "registryCopied": "Copied to clipboard",
     "registryViewSource": "View Source",
@@ -324,7 +321,40 @@
     "tabAllSteps": "All Steps",
     "sectionProgress": "Section progress",
     "autoVerified": "Auto-verified",
-    "manual": "Manual check"
+    "manual": "Manual check",
+    "registryWasmHash": "WASM Hash"
+  },
+  "emptyStates": {
+    "campaigns": {
+      "eyebrow": "No Campaigns Yet",
+      "title": "Create your first campaign",
+      "description": "Your organization does not have any campaigns yet. Create a campaign to start funding aid distributions, or load sample values to explore the contributor workflow first.",
+      "createAction": "Create a campaign",
+      "sampleAction": "Load sample values",
+      "helpAction": "View help",
+      "sampleTip": "Load sample values in the form to generate realistic test content quickly.",
+      "helpTip": "Open Help for contributor setup notes, including mock mode and role-aware paths.",
+      "filtered": "No campaigns match the current filter."
+    },
+    "dashboard": {
+      "noPackages": {
+        "eyebrow": "No Packages Yet",
+        "operatorTitle": "No aid packages have been published yet",
+        "operatorDescription": "This workspace does not have package data yet. Create a campaign to publish aid packages and populate this dashboard.",
+        "viewerTitle": "No aid packages are available to browse yet",
+        "viewerDescription": "There is no live distribution data in this environment yet, but the verification and sample workflows are still available.",
+        "operatorAction": "Create a campaign",
+        "viewerAction": "Try verification flow",
+        "secondaryAction": "View help"
+      },
+      "noMatches": {
+        "eyebrow": "No Matches",
+        "title": "No aid packages match the current filters",
+        "description": "Try widening the search, clearing filters, or switching token and status selections.",
+        "resetAction": "Reset dashboard filters",
+        "secondaryAction": "View help"
+      }
+    }
   },
   "faucet": {
     "title": "Testnet Faucet Helper",

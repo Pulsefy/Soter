@@ -89,6 +89,7 @@ export default async function RootLayout({
                     <DemoModeBanner mode={demoMode} />
                     <Navbar />
                     {children}
+                    <TestnetFaucetHelper />
                   </ToastProvider>
                 </QueryProvider>
               </VersionProvider>

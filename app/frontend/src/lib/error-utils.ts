@@ -1,12 +1,29 @@
 import { ErrorCategory } from '@/types/error';
 
+/**
+ * Error payloads come from arbitrary backend responses, so the shape is only
+ * known at the point of use — `unknown` forces consumers to narrow it.
+ */
+export type ErrorDetails = unknown;
+
+/** Loose shape of the Error-ish objects this module inspects. */
+interface ErrorLikeFields {
+  status?: unknown;
+  statusCode?: unknown;
+  code?: unknown;
+  errorCode?: unknown;
+  correlationId?: unknown;
+  traceId?: unknown;
+  details?: unknown;
+}
+
 export class ApiError extends Error {
   status?: number;
   code?: string;
   correlationId?: string;
-  details?: any;
+  details?: ErrorDetails;
 
-  constructor(message: string, status?: number, code?: string, correlationId?: string, details?: any) {
+  constructor(message: string, status?: number, code?: string, correlationId?: string, details?: ErrorDetails) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -22,7 +39,7 @@ export interface NormalizedError {
   code?: string;
   correlationId?: string;
   status?: number;
-  details?: any;
+  details?: ErrorDetails;
 }
 
 export function categorizeError(error: unknown): ErrorCategory {
@@ -79,7 +96,7 @@ export async function extractApiError(response: Response): Promise<ApiError> {
 
   let message = `API request failed with status ${status}`;
   let code: string | undefined;
-  let details: any = null;
+  let details: ErrorDetails = null;
   let bodyCorrelationId: string | undefined;
 
   try {
@@ -126,16 +143,17 @@ export function normalizeError(error: unknown): NormalizedError {
   }
 
   if (error instanceof Error) {
-    const status = (error as any).status || (error as any).statusCode;
-    const code = (error as any).code || (error as any).errorCode;
-    const correlationId = (error as any).correlationId || (error as any).traceId;
+    const fields = error as Error & ErrorLikeFields;
+    const status = fields.status ?? fields.statusCode;
+    const code = fields.code ?? fields.errorCode;
+    const correlationId = fields.correlationId ?? fields.traceId;
     return {
       message: error.message,
       category: categorizeError(error),
       code: typeof code === 'string' ? code : undefined,
       status: typeof status === 'number' ? status : undefined,
       correlationId: typeof correlationId === 'string' ? correlationId : undefined,
-      details: (error as any).details,
+      details: fields.details,
     };
   }
 
@@ -147,11 +165,11 @@ export function normalizeError(error: unknown): NormalizedError {
   }
 
   if (error && typeof error === 'object') {
-    const candidate = error as Record<string, any>;
+    const candidate = error as ErrorLikeFields & { message?: unknown };
     const message = typeof candidate.message === 'string' ? candidate.message : 'An unexpected error occurred.';
     const status = candidate.status;
-    const code = candidate.code || candidate.errorCode;
-    const correlationId = candidate.correlationId || candidate.traceId;
+    const code = candidate.code ?? candidate.errorCode;
+    const correlationId = candidate.correlationId ?? candidate.traceId;
     return {
       message,
       category: categorizeError(message),

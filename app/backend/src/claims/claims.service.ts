@@ -1,11 +1,5 @@
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-  Optional,
-  Inject,
-  Logger,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Optional, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
@@ -125,7 +119,7 @@ export class ClaimsService {
       where: { id: createClaimDto.campaignId },
     });
     if (!campaign) {
-      throw new NotFoundException('Campaign not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Campaign not found');
     }
 
     // Budget enforcement + claim creation + the ledger entry that records
@@ -231,7 +225,7 @@ export class ClaimsService {
     });
     const claim = claimResult;
     if (!claim || claim.deletedAt) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
     return {
       ...claim,
@@ -251,19 +245,23 @@ export class ClaimsService {
   async verify(id: string) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
     const verification = readPersistedVerificationResult(claim.anchorMetadata);
 
     if (!verification) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Claim ${id} has no completed verification record. Verification is queued automatically when a claim is created; wait for it to complete before verifying.`,
       );
     }
 
     if (!verification.passed) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Claim ${id} did not pass verification (score ${verification.score} below threshold ${verification.threshold}) and cannot be marked verified.`,
       );
     }
@@ -289,18 +287,31 @@ export class ClaimsService {
     );
   }
 
-  async disburse(id: string, receiptPointer?: string) {
+  /**
+   * Mark a claim as disbursed and, when on-chain execution is enabled, create
+   * the Soroban transaction that performs the transfer.
+   *
+   * `correlationId` is the trace ID of the request (or job) driving the
+   * disbursement. It is stored on the Soroban transaction record and on the
+   * queue job so every later log line, retry and correlated on-chain event can
+   * be traced back to the originating request. When it is not supplied the
+   * ambient correlation ID is used, falling back to a per-claim ID so that
+   * background callers still produce a traceable reference.
+   */
+  async disburse(id: string, receiptPointer?: string, correlationId?: string) {
     const claim = await this.prisma.claim.findUnique({
       where: { id },
       include: { campaign: true },
     });
 
     if (!claim) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
     if (claim.status !== ClaimStatus.approved) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Cannot transition from ${claim.status} to ${ClaimStatus.disbursed}`,
       );
     }
@@ -312,12 +323,16 @@ export class ClaimsService {
       });
     }
 
+    const traceId =
+      correlationId?.trim() ||
+      this.loggerService.getCorrelationId() ||
+      `disburse-${id}-${Date.now()}`;
+
     let sorobanTransaction: SorobanTransaction | undefined;
     if (this.onchainEnabled && this.onchainAdapter) {
       try {
         const packageId = await this.getPackageIdForClaim(id);
         const tokenAddress = this.getTokenAddressForClaim(claim);
-        const correlationId = `disburse-${id}-${Date.now()}`;
 
         sorobanTransaction =
           await this.sorobanTransactionService.createTransaction({
@@ -330,7 +345,7 @@ export class ClaimsService {
             ),
             amount: claim.amount.toString(),
             tokenAddress,
-            correlationId,
+            correlationId: traceId,
             metadata: {
               campaignId: claim.campaignId,
               claimAmount: claim.amount,
@@ -343,18 +358,19 @@ export class ClaimsService {
         await this.sorobanTransactionScheduler.scheduleTransaction(
           sorobanTransaction.id,
           {
-            correlationId,
+            correlationId: traceId,
             priority: 1,
           },
         );
 
-        this.logger.log(
+        this.loggerService.log(
           'Created Soroban transaction with lifecycle tracking for claim disbursement',
+          'ClaimsService',
           {
             claimId: id,
             transactionId: sorobanTransaction.id,
             packageId,
-            correlationId,
+            correlationId: traceId,
             receiptPointer,
           },
         );
@@ -366,7 +382,13 @@ export class ClaimsService {
       } catch (error) {
         this.loggerService.error(
           `Failed to create or schedule Soroban transaction for claim ${id}`,
-          error instanceof Error ? error.message : String(error),
+          error instanceof Error ? error.stack : undefined,
+          'ClaimsService',
+          {
+            claimId: id,
+            correlationId: traceId,
+            error: error instanceof Error ? error.message : String(error),
+          },
         );
       }
     }
@@ -377,11 +399,13 @@ export class ClaimsService {
       ClaimStatus.disbursed,
     );
 
-    this.logger.log(
+    this.loggerService.log(
       `Claim ${id} marked as disbursed with Soroban transaction tracking`,
+      'ClaimsService',
       {
         claimId: id,
         sorobanTransactionId: sorobanTransaction?.id,
+        correlationId: traceId,
         receiptPointer,
       },
     );
@@ -580,10 +604,12 @@ export class ClaimsService {
   ) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
     if (claim.status !== fromStatus) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Cannot transition from ${claim.status} to ${toStatus}`,
       );
     }
@@ -689,7 +715,7 @@ export class ClaimsService {
       };
     }
 
-    throw new NotFoundException('Claim not found');
+    throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
   }
 
   private async findDisbursementTransaction(
@@ -717,7 +743,7 @@ export class ClaimsService {
     const claim = await this.resolveClaimByIdentifier(identifier);
 
     if (!claim) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
     const tokenAddress = this.getTokenAddressForClaim(claim);
@@ -907,10 +933,18 @@ export class ClaimsService {
 
     if (query.from || query.to) {
       if (query.from && isNaN(Date.parse(query.from))) {
-        throw new BadRequestException(`Invalid 'from' date: ${query.from}`);
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Invalid 'from' date: ${query.from}`,
+        );
       }
       if (query.to && isNaN(Date.parse(query.to))) {
-        throw new BadRequestException(`Invalid 'to' date: ${query.to}`);
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Invalid 'to' date: ${query.to}`,
+        );
       }
       where.createdAt = {};
       if (query.from) where.createdAt.gte = new Date(query.from);
@@ -1004,4 +1038,3 @@ export class ClaimsService {
     }
   }
 }
-

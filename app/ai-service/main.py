@@ -142,6 +142,18 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Response caching disabled (Redis unavailable)")
 
+    cost_ceilings = getattr(settings, "llm_provider_cost_ceilings", {})
+    if cost_ceilings and not app.state.cache.enabled:
+        raise RuntimeError(
+            "LLM provider cost ceilings require Redis; refusing to start without shared spend tracking"
+        )
+    if cost_ceilings:
+        humanitarian_verification_service.cost_ceiling.set_redis_client(
+            app.state.cache.client
+        )
+        for provider in cost_ceilings:
+            humanitarian_verification_service.cost_ceiling.current_spend(provider)
+
     # Expose the long-lived collaboration/AIService collaborators on app state
     # so versioned routers can resolve them via ``request.app.state`` instead of
     # importing private globals from this module.  Tests inject Mocks onto the
@@ -578,6 +590,8 @@ async def get_metrics():
     """Endpoint for Prometheus metrics."""
     from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
+    for provider in settings.llm_provider_cost_ceilings:
+        humanitarian_verification_service.cost_ceiling.current_spend(provider)
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
@@ -875,14 +889,22 @@ async def starlette_http_exception_handler(request, exc: StarletteHTTPException)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
-    logger.error(f"Validation error: {exc.errors()}")
+    errors = exc.errors()
+    for error in errors:
+        # Pydantic 2.x embeds the raw exception instance at ctx.error for
+        # ValueError-raising validators (e.g. model_validator). That's not
+        # JSON-serializable, so stringify it before it reaches JSONResponse.
+        ctx = error.get("ctx")
+        if ctx and "error" in ctx:
+            ctx["error"] = str(ctx["error"])
+    logger.error(f"Validation error: {errors}")
     return JSONResponse(
         status_code=422,
         content=ErrorEnvelope(
             error=ErrorDetail(
                 code="VALIDATION_ERROR",
                 message="Request validation failed",
-                details=exc.errors(),
+                details=errors,
             )
         ).model_dump(),
     )

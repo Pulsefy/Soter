@@ -1,9 +1,10 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SandboxService } from './sandbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
 import { ConfigService } from '@nestjs/config';
-import { ForbiddenException } from '@nestjs/common';
+
 import {
   DEMO_TENANT_SEED,
   DEMO_CAMPAIGN_SEEDS,
@@ -71,9 +72,7 @@ describe('SandboxService', () => {
   describe('resetDemoState', () => {
     it('should throw ForbiddenException if NODE_ENV is production', async () => {
       mockConfigService.get.mockReturnValue('production');
-      await expect(service.resetDemoState()).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.resetDemoState()).rejects.toThrow(AppException);
       expect(mockLoggerService.warn).toHaveBeenCalledWith(
         'Attempted demo seed reset in disallowed environment: production',
         SandboxService.name,
@@ -83,9 +82,7 @@ describe('SandboxService', () => {
 
     it('should throw ForbiddenException if NODE_ENV is staging', async () => {
       mockConfigService.get.mockReturnValue('staging');
-      await expect(service.resetDemoState()).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.resetDemoState()).rejects.toThrow(AppException);
       expect(mockLoggerService.warn).toHaveBeenCalledWith(
         'Attempted demo seed reset in disallowed environment: staging',
         SandboxService.name,

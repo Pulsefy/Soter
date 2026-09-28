@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { format } from 'date-fns';
+import * as Dialog from '@radix-ui/react-dialog';
 import {
   ChevronLeft,
   ChevronRight,
@@ -9,10 +10,14 @@ import {
   Loader2,
   AlertCircle,
   RefreshCw,
+  Keyboard,
+  X,
 } from 'lucide-react';
 import { StatusBadge, RiskBadge } from './StatusBadge';
 import { VerificationDetailPanel } from './VerificationDetailPanel';
 import { QueueFreshnessBar } from './QueueFreshnessBar';
+import { ReviewActionDialog } from './ReviewActionDialog';
+import type { ReviewActionType } from './ReviewActionDialog';
 import {
   useInboxWithLatency,
   useQueueRefreshStatus,
@@ -25,11 +30,153 @@ interface ReviewQueueProps {
   onPageChange: (page: number) => void;
 }
 
+const DETAIL_PANEL_ID = 'verification-detail-panel';
+
+/** Keyboard shortcuts surfaced in the hint bar and the help overlay. */
+const SHORTCUTS: Array<{ keys: string; label: string }> = [
+  { keys: 'J / ↓', label: 'Next item' },
+  { keys: 'K / ↑', label: 'Previous item' },
+  { keys: 'E / Enter / Space', label: 'Expand details' },
+  { keys: 'A', label: 'Approve focused item' },
+  { keys: 'R', label: 'Reject focused item' },
+  { keys: '?', label: 'Show keyboard help' },
+  { keys: 'Esc', label: 'Close details or help' },
+];
+
+/** True when the keystroke belongs to a text field rather than a shortcut. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return (
+    el.tagName === 'INPUT' ||
+    el.tagName === 'TEXTAREA' ||
+    el.tagName === 'SELECT' ||
+    el.isContentEditable
+  );
+}
+
 export function ReviewQueue({ filters, onPageChange }: ReviewQueueProps) {
   const { data, isLoading, isError, error, isFetching } = useInboxWithLatency(filters);
   const refreshStatus = useQueueRefreshStatus(filters);
   const { pendingIds, failedIds } = useOptimisticItemState();
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [focusedIndex, setFocusedIndex] = useState(0);
+  const [announcement, setAnnouncement] = useState('');
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [quickAction, setQuickAction] = useState<{
+    id: string;
+    action: ReviewActionType;
+  } | null>(null);
+
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const announce = useCallback((message: string) => {
+    setAnnouncement(message);
+  }, []);
+
+  /** Moves both the roving tab index and DOM focus to `index`. */
+  const focusItem = useCallback(
+    (index: number, total: number) => {
+      if (total <= 0) return;
+      const clamped = Math.max(0, Math.min(index, total - 1));
+      setFocusedIndex(clamped);
+      // Focus after the ref settles so the target button is attached.
+      if (typeof window !== 'undefined') {
+        window.requestAnimationFrame(() => itemRefs.current[clamped]?.focus());
+      }
+    },
+    [],
+  );
+
+  /**
+   * Runs after any decision (approve / reject / resubmission) is accepted:
+   * announces the outcome to assistive tech and moves focus predictably to the
+   * next queue item, falling back to the previous one at the end of the list.
+   */
+  const handleDecisionComplete = useCallback(
+    (action: ReviewActionType, id: string) => {
+      const items = data?.items ?? [];
+      const decidedIndex = items.findIndex(item => item.id === id);
+      const verb =
+        action === 'approve'
+          ? 'Approved'
+          : action === 'reject'
+            ? 'Rejected'
+            : 'Requested resubmission for';
+      announce(`${verb} verification ${id}. Focus moved to the next item.`);
+
+      setSelectedId(null);
+      if (items.length === 0) return;
+      const targetIndex =
+        decidedIndex < 0
+          ? Math.min(focusedIndex, items.length - 1)
+          : decidedIndex + 1 < items.length
+            ? decidedIndex + 1
+            : Math.max(0, decidedIndex - 1);
+      focusItem(targetIndex, items.length);
+    },
+    [announce, data, focusItem, focusedIndex],
+  );
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (isTypingTarget(event.target)) return;
+      const items = data?.items ?? [];
+      if (items.length === 0) return;
+
+      const currentIndex = Math.max(0, Math.min(focusedIndex, items.length - 1));
+      const current = items[currentIndex];
+      if (!current) return;
+
+      const navigate = (nextIndex: number) => {
+        event.preventDefault();
+        const clamped = Math.max(0, Math.min(nextIndex, items.length - 1));
+        focusItem(clamped, items.length);
+        const target = items[clamped];
+        if (target) {
+          announce(
+            `Item ${clamped + 1} of ${items.length}, verification ${target.id}.`,
+          );
+        }
+      };
+
+      switch (event.key) {
+        case 'ArrowDown':
+        case 'j':
+        case 'J':
+          navigate(currentIndex + 1);
+          break;
+        case 'ArrowUp':
+        case 'k':
+        case 'K':
+          navigate(currentIndex - 1);
+          break;
+        case 'e':
+        case 'E':
+          event.preventDefault();
+          setSelectedId(prev => (prev === current.id ? null : current.id));
+          break;
+        case 'a':
+        case 'A':
+          event.preventDefault();
+          setQuickAction({ id: current.id, action: 'approve' });
+          break;
+        case 'r':
+        case 'R':
+          event.preventDefault();
+          setQuickAction({ id: current.id, action: 'reject' });
+          break;
+        case '?':
+          event.preventDefault();
+          setHelpOpen(true);
+          break;
+        default:
+          break;
+      }
+    },
+    [announce, data, focusItem, focusedIndex],
+  );
 
   // Initial hard load (no cached data yet)
   if (isLoading && !data) {
@@ -80,10 +227,61 @@ export function ReviewQueue({ filters, onPageChange }: ReviewQueueProps) {
     );
   }
 
+  const items = data.items;
+  const safeFocusedIndex = Math.max(0, Math.min(focusedIndex, items.length - 1));
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" onKeyDown={handleKeyDown}>
+      {/* Screen-reader announcement for queue navigation and decision outcomes */}
+      <div
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="review-queue-announcer"
+      >
+        {announcement}
+      </div>
+
       {/* ── Freshness bar ─────────────────────────────────────────────── */}
       <QueueFreshnessBar status={refreshStatus} />
+
+      {/* ── Keyboard shortcut hint + help trigger ─────────────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400"
+          data-testid="review-shortcuts-hint"
+        >
+          <Keyboard size={13} aria-hidden="true" />
+          <span>
+            <kbd className="font-mono font-semibold text-gray-700 dark:text-gray-200">J</kbd>/
+            <kbd className="font-mono font-semibold text-gray-700 dark:text-gray-200">K</kbd>{' '}
+            Navigate
+          </span>
+          <span>
+            <kbd className="font-mono font-semibold text-gray-700 dark:text-gray-200">A</kbd>{' '}
+            Approve
+          </span>
+          <span>
+            <kbd className="font-mono font-semibold text-gray-700 dark:text-gray-200">R</kbd>{' '}
+            Reject
+          </span>
+          <span>
+            <kbd className="font-mono font-semibold text-gray-700 dark:text-gray-200">E</kbd>{' '}
+            Details
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setHelpOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={helpOpen}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-[11px] font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          <Keyboard size={12} aria-hidden="true" />
+          Keyboard shortcuts
+        </button>
+      </div>
 
       {/* ── Background-refetch shimmer on the list ────────────────────── */}
       {isFetching && !isLoading && (
@@ -93,21 +291,31 @@ export function ReviewQueue({ filters, onPageChange }: ReviewQueueProps) {
         </div>
       )}
 
-      <div className="flex gap-4 min-h-0">
+      <div
+        className="flex gap-4 min-h-0"
+        role="group"
+        aria-label="Verification review queue"
+      >
         {/* ── Queue list ──────────────────────────────────────────────── */}
         <div className="flex-1 min-w-0 space-y-2">
-          {data.items.map(item => {
+          {items.map((item, index) => {
             const isItemPending = pendingIds.has(item.id);
             const isItemFailed = failedIds.has(item.id);
+            const isSelected = selectedId === item.id;
 
             return (
               <button
                 key={item.id}
-                onClick={() =>
-                  setSelectedId(item.id === selectedId ? null : item.id)
-                }
+                ref={el => {
+                  itemRefs.current[index] = el;
+                }}
+                onClick={() => setSelectedId(item.id === selectedId ? null : item.id)}
+                onFocus={() => setFocusedIndex(index)}
+                tabIndex={index === safeFocusedIndex ? 0 : -1}
                 disabled={isItemPending}
                 aria-busy={isItemPending}
+                aria-expanded={isSelected}
+                aria-controls={isSelected ? DETAIL_PANEL_ID : undefined}
                 aria-label={`Verification ${item.id}${isItemPending ? ' — action in progress' : ''}${isItemFailed ? ' — action failed' : ''}`}
                 className={[
                   'w-full text-left px-4 py-3 rounded-lg border transition-colors relative',
@@ -115,7 +323,7 @@ export function ReviewQueue({ filters, onPageChange }: ReviewQueueProps) {
                     ? 'border-blue-300 dark:border-blue-700 bg-blue-50/60 dark:bg-blue-900/15 cursor-wait opacity-85'
                     : isItemFailed
                       ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/15'
-                      : selectedId === item.id
+                      : isSelected
                         ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
                         : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-gray-200 dark:hover:border-gray-700',
                 ].join(' ')}
@@ -212,14 +420,76 @@ export function ReviewQueue({ filters, onPageChange }: ReviewQueueProps) {
 
         {/* Detail panel */}
         {selectedId && (
-          <div className="w-80 shrink-0 rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden flex flex-col">
+          <div
+            id={DETAIL_PANEL_ID}
+            className="w-80 shrink-0 rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden flex flex-col"
+          >
             <VerificationDetailPanel
               verificationId={selectedId}
               onClose={() => setSelectedId(null)}
+              onDecision={action => handleDecisionComplete(action, selectedId)}
             />
           </div>
         )}
       </div>
+
+      {/* ── Quick action dialog launched from the keyboard ────────────── */}
+      {quickAction && (
+        <ReviewActionDialog
+          verificationId={quickAction.id}
+          action={quickAction.action}
+          open={!!quickAction}
+          onOpenChange={open => {
+            if (!open) setQuickAction(null);
+          }}
+          onSuccess={action => handleDecisionComplete(action, quickAction.id)}
+        />
+      )}
+
+      {/* ── Keyboard shortcuts help overlay ───────────────────────────── */}
+      <Dialog.Root open={helpOpen} onOpenChange={setHelpOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
+          <Dialog.Content
+            aria-labelledby="review-shortcuts-title"
+            data-testid="review-shortcuts-help"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-sm bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4 focus:outline-none"
+          >
+            <div className="flex items-center justify-between">
+              <Dialog.Title
+                id="review-shortcuts-title"
+                className="text-base font-semibold text-gray-900 dark:text-gray-100"
+              >
+                Keyboard shortcuts
+              </Dialog.Title>
+              <Dialog.Close
+                aria-label="Close keyboard shortcuts"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+              >
+                <X size={18} aria-hidden="true" />
+              </Dialog.Close>
+            </div>
+            <dl className="space-y-2">
+              {SHORTCUTS.map(shortcut => (
+                <div
+                  key={shortcut.keys}
+                  className="flex items-center justify-between gap-4 text-sm"
+                >
+                  <dt className="font-mono text-xs font-semibold text-gray-700 dark:text-gray-200">
+                    {shortcut.keys}
+                  </dt>
+                  <dd className="text-gray-600 dark:text-gray-300 text-right">
+                    {shortcut.label}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              Shortcuts work while focus is inside the review queue.
+            </p>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   );
 }

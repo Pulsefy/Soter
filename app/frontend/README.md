@@ -2,6 +2,8 @@
 
 The frontend for Soter, built with Next.js 15+, providing a modern, responsive interface for transparent humanitarian aid distribution on the Stellar blockchain.
 
+> **Calling the backend?** See the [Frontend & Mobile API Integration Guide](../../doc/api-integration-guide.md) for the intended client pattern, the mock-api layer and demo mode, and how the OpenAPI spec is the source of truth for request/response shapes.
+
 ## Overview
 
 This Next.js application serves as the user-facing interface for the Soter platform, enabling:
@@ -74,6 +76,25 @@ Run the large-fixture regression check with:
 ```bash
 pnpm test -- --runInBand src/components/dashboard/__tests__/AidDistributionMap.performance.test.ts
 ```
+
+### Dashboard visual regression
+
+The frontend CI workflow compares full-page Chromium screenshots of the dashboard in light and dark themes. It uses fixed API data and map tiles so the screenshots stay independent of backend and map-provider changes. CI runs on Windows to match the screenshot rendering platform used for the committed baselines.
+
+Run the visual check locally from this directory:
+
+```bash
+pnpm exec playwright install chromium
+pnpm run test:visual
+```
+
+When a dashboard change is intentional, update the reference images in the same pull request:
+
+```bash
+pnpm run test:visual:update
+```
+
+Review the PNG changes under `tests/visual/dashboard.visual.ts-snapshots/` before committing them with the UI change.
 
 ### Environment Setup
 
@@ -381,6 +402,26 @@ Tests will be added as the project matures. Planned testing stack:
 - **Unit**: Jest + React Testing Library
 - **E2E**: Playwright
 - **Integration**: Testing against local backend
+
+### Route smoke tests
+
+`src/integration/verification-review.smoke.test.tsx` is the smoke test for the
+reviewer-facing `/[locale]/verification-review` route. It renders the real page
+in jsdom against a real HTTP backend started in-process
+(`src/integration/support/verification-inbox-test-backend.ts`) and walks the
+reviewer flow: load the route, list the queue, approve a case, reject a case.
+Every step is its own test, named `[load]`, `[list]`, `[action:approve]` and
+`[action:reject]`, so a failure names the step that broke.
+
+```bash
+pnpm exec jest src/integration/verification-review.smoke.test.tsx --runInBand --verbose
+```
+
+It runs in CI via `.github/workflows/frontend-verification-review-smoke.yml`.
+No backend, database or outbound network access is needed: the test backend
+binds an ephemeral loopback port and demo mode is forced off so every request
+really leaves the process. Tests that need `fetch` under jsdom must opt into the
+`./jest.jsdom-fetch.environment.js` environment, since jsdom 20 ships none.
 
 ## Contributing
 

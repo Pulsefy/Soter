@@ -41,9 +41,7 @@ function asStringArray(value: unknown): string[] {
     : [];
 }
 
-function asRiskLevel(
-  value: unknown,
-): PersistedVerificationResult['riskLevel'] {
+function asRiskLevel(value: unknown): PersistedVerificationResult['riskLevel'] {
   return value === 'low' || value === 'medium' || value === 'high'
     ? value
     : null;
@@ -124,5 +122,5 @@ export function mergeClaimAnchorMetadata(
     ...(asRecord(existing) ?? {}),
     ...(anchor ?? {}),
     [CLAIM_VERIFICATION_KEY]: verification,
-  } as Prisma.InputJsonObject;
+  };
 }

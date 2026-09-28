@@ -6,7 +6,7 @@
  * Linting is disabled because this module contains many stub providers and
  * imports that are necessary for metadata collection but not for actual runtime use.
  */
-import { Module } from '@nestjs/common';
+import {        Module        } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { AppController } from '../src/app.controller';
@@ -36,6 +36,7 @@ import { ClaimsController } from '../src/claims/claims.controller';
 import { ClaimsService } from '../src/claims/claims.service';
 import { InternalNotesService } from '../src/common/services/internal-notes.service';
 import { SorobanEventCorrelationService } from '../src/onchain/soroban-event-correlation.service';
+import { SorobanCorrelationTraceService } from '../src/onchain/soroban-correlation-trace.service';
 
 import { DeploymentMetadataController } from '../src/deployment-metadata/deployment-metadata.controller';
 import { DeploymentMetadataService } from '../src/deployment-metadata/deployment-metadata.service';
@@ -181,6 +182,7 @@ const stub = <T>(value: T) => ({ useValue: value });
     { provide: ClaimsService, ...stub({}) },
     { provide: InternalNotesService, ...stub({}) },
     { provide: SorobanEventCorrelationService, ...stub({}) },
+    { provide: SorobanCorrelationTraceService, ...stub({}) },
     { provide: DeploymentMetadataService, ...stub({}) },
     { provide: DeviceTokensService, ...stub({}) },
     { provide: DriftReportService, ...stub({}) },

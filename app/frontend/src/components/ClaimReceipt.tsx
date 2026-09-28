@@ -2,7 +2,6 @@
 
 import React, { useMemo } from 'react';
 import { Share2, Download, Copy, Check, ExternalLink } from 'lucide-react';
-import { useTheme } from 'next-themes';
 import { format } from 'date-fns';
 import { buildExplorerUrl } from '../lib/explorer';
 
@@ -29,6 +28,15 @@ interface ClaimReceiptProps {
   claim: ClaimReceiptData;
   onShare?: () => Promise<void>;
   compact?: boolean;
+  /**
+   * Network the contract/transaction addresses live on, sourced from the
+   * shared contract registry (falls back to the app's configured network
+   * when the receipt's contract isn't a recognized registry deployment).
+   * Ensures explorer links point at the correct network.
+   */
+  network?: string;
+  /** Deployment metadata for `claim.contractAddress`, resolved from the registry. */
+  contractDeployment?: { version: string; deployedAt: string };
 }
 
 /** Inline copy button with transient ✓ feedback for a single field value. */
@@ -59,8 +67,9 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
   claim,
   onShare,
   compact = false,
+  network,
+  contractDeployment,
 }) => {
-  const { theme } = useTheme();
   const [copied, setCopied] = React.useState(false);
   const [sharing, setSharing] = React.useState(false);
 
@@ -181,8 +190,20 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
     <div className={`border-2 rounded-lg p-6 ${statusColors[claim.status]}`}>
       {/* Header */}
       <div className="mb-4 pb-4 border-b border-current border-opacity-20">
-        <h2 className="text-2xl font-bold mb-1">Claim Receipt</h2>
-        <p className="text-sm opacity-75">Proof of claim completion</p>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h2 className="text-2xl font-bold mb-1">Claim Receipt</h2>
+            <p className="text-sm opacity-75">Proof of claim completion</p>
+          </div>
+          {network && (
+            <span
+              className="shrink-0 px-2 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-current bg-opacity-10 dark:bg-white/10"
+              title="Network"
+            >
+              {network}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Details Grid */}
@@ -214,7 +235,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
             <p className="text-xs font-semibold opacity-75 mb-1">TOKEN ADDRESS</p>
             <div className="flex items-center gap-1">
               <a
-                href={buildExplorerUrl('address', claim.tokenAddress)}
+                href={buildExplorerUrl('address', claim.tokenAddress, network)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1"
@@ -231,7 +252,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
             <p className="text-xs font-semibold opacity-75 mb-1">CONTRACT ADDRESS</p>
             <div className="flex items-center gap-1">
               <a
-                href={buildExplorerUrl('contract', claim.contractAddress)}
+                href={buildExplorerUrl('contract', claim.contractAddress, network)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1"
@@ -241,6 +262,11 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
               </a>
               <FieldCopyButton value={claim.contractAddress} label="contract address" />
             </div>
+            {contractDeployment && (
+              <p className="text-[11px] opacity-60 mt-0.5">
+                v{contractDeployment.version} · deployed {contractDeployment.deployedAt}
+              </p>
+            )}
           </div>
         )}
         {claim.transactionHash && (
@@ -248,7 +274,7 @@ export const ClaimReceipt: React.FC<ClaimReceiptProps> = ({
             <p className="text-xs font-semibold opacity-75 mb-1">TRANSACTION HASH</p>
             <div className="flex items-center gap-1">
               <a
-                href={buildExplorerUrl('tx', claim.transactionHash)}
+                href={buildExplorerUrl('tx', claim.transactionHash, network)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-mono text-xs break-all text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1"

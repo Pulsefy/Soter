@@ -1,16 +1,30 @@
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from schemas.common import AnchorMetadata
 
 
 class AnonymizeRequest(BaseModel):
-    text: str = Field(
-        min_length=1,
+    text: Optional[str] = Field(
+        None,
         description="Input text to anonymize before LLM processing",
         examples=["John Doe from New York on 2024-01-01 requested aid"],
     )
+    fields: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Structured OCR fields to preview or redact by field type.",
+    )
     anchor_metadata: Optional[AnchorMetadata] = None
+
+    @model_validator(mode="after")
+    def validate_text_or_fields(self):
+        if self.text is None and self.fields is None:
+            raise ValueError("Either 'text' or 'fields' must be provided.")
+        if self.text is not None and not self.text.strip() and self.fields is None:
+            raise ValueError("'text' must not be empty when provided without fields.")
+        if self.fields is not None and not self.fields:
+            raise ValueError("'fields' must not be empty when provided.")
+        return self
 
     model_config = {
         "json_schema_extra": {

@@ -334,14 +334,15 @@ export class VerificationService {
     const shouldVerify = enhancedResult.score >= this.verificationThreshold;
 
     // Build anchor metadata to persist
-    const anchorMetadataToPersist: Prisma.InputJsonObject | null = anchorMetadata
-      ? {
-          campaignRef: anchorMetadata.campaignRef ?? null,
-          claimId: anchorMetadata.claimId ?? null,
-          packageId: anchorMetadata.packageId ?? null,
-          contractId: anchorMetadata.contractId ?? null,
-        }
-      : null;
+    const anchorMetadataToPersist: Prisma.InputJsonObject | null =
+      anchorMetadata
+        ? {
+            campaignRef: anchorMetadata.campaignRef ?? null,
+            claimId: anchorMetadata.claimId ?? null,
+            packageId: anchorMetadata.packageId ?? null,
+            contractId: anchorMetadata.contractId ?? null,
+          }
+        : null;
 
     // Persist the outcome on the claim itself. The claim row - not the queue,
     // and not an in-flight job - is what operators read and what
@@ -1244,4 +1245,3 @@ the JSON verdict.
     }
   }
 }
-

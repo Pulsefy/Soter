@@ -22,6 +22,7 @@ from services.humanitarian_prompt import (
 from services.prompt_registry import PromptRegistry
 from services.circuit_breaker import CircuitBreaker
 from services.providers import ProviderRegistry, ModelProvider, LLMResponse
+from services.provider_cost_ceiling import ProviderCostCeiling
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +59,14 @@ class HumanitarianVerificationService:
         self,
         registry: Optional[ProviderRegistry] = None,
         prompt_registry: Optional[PromptRegistry] = None,
+        cost_ceiling: Optional[ProviderCostCeiling] = None,
     ):
         self.prompt_registry = prompt_registry or default_prompt_registry
         self._apply_settings_prompt_versions()
         self.prompt_engine = HumanitarianPromptEngine(registry=self.prompt_registry)
         self.registry = registry or ProviderRegistry()
         self.breakers: Dict[str, CircuitBreaker] = {}
+        self.cost_ceiling = cost_ceiling or ProviderCostCeiling()
 
     def _apply_settings_prompt_versions(self) -> None:
         """Apply active prompt versions configured in settings if registered."""
@@ -141,7 +144,43 @@ class HumanitarianVerificationService:
 
             errors: List[str] = []
 
-            for provider_name, provider in providers:
+            pending_providers = list(providers)
+            while pending_providers:
+                provider_name, provider = pending_providers.pop(0)
+                if self.cost_ceiling.is_exceeded(provider_name):
+                    metrics.LLM_PROVIDER_COST_CEILING_EXCEEDED_TOTAL.labels(
+                        provider=provider_name
+                    ).inc()
+                    errors.append(
+                        f"provider={provider_name}, error=cost ceiling reached"
+                    )
+                    fallback_name = settings.llm_provider_cost_ceilings.get(
+                        provider_name, {}
+                    ).get("fallback_provider")
+                    fallback = next(
+                        (
+                            candidate
+                            for candidate in pending_providers
+                            if candidate[0] == fallback_name
+                        ),
+                        None,
+                    )
+                    if fallback is None:
+                        return {
+                            "provider": None,
+                            "model": None,
+                            "verification": {
+                                "verdict": "inconclusive",
+                                "confidence": 0.0,
+                                "needs_review": True,
+                                "reason": "Provider cost ceiling reached; manual review required.",
+                            },
+                            "manual_review": True,
+                            "reason": "provider_cost_ceiling",
+                        }
+                    pending_providers.remove(fallback)
+                    pending_providers.insert(0, fallback)
+                    continue
                 breaker = self._get_breaker(provider_name)
                 if not breaker.allow_request():
                     logger.warning(
@@ -181,6 +220,18 @@ class HumanitarianVerificationService:
                             prompt_tokens=response.prompt_tokens,
                             completion_tokens=response.completion_tokens,
                         )
+                        cost_usd = None
+                        if (
+                            response.prompt_tokens is not None
+                            and response.completion_tokens is not None
+                        ):
+                            cost_usd = metrics.estimate_llm_cost_usd(
+                                model,
+                                response.prompt_tokens,
+                                response.completion_tokens,
+                            )
+                        if cost_usd is not None:
+                            self.cost_ceiling.record_spend(provider_name, cost_usd)
                         return {
                             "provider": provider_name,
                             "model": model,
@@ -227,6 +278,60 @@ class HumanitarianVerificationService:
             return False
 
         return all(not self._get_breaker(p).allow_request() for p in providers)
+
+    def flag_for_manual_review(
+        self,
+        aid_claim: str,
+        supporting_evidence: Optional[List[str]] = None,
+        context_factors: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Return a structured payload indicating a claim has been routed to manual review.
+
+        Called when ``all_providers_unavailable()`` is True. The payload
+        is surfaced directly to the caller (and therefore to the backend)
+        so the claim visibly enters the human-review queue rather than
+        being silently discarded.
+
+        Recovery is automatic: once the circuit-breaker ``recovery_timeout``
+        has elapsed, the next ``allow_request()`` call transitions the
+        breaker from OPEN -> HALF_OPEN and normal AI-assisted verification
+        resumes without manual intervention (see
+        :meth:`check_recovery`).
+        """
+        reason = (
+            "All AI providers are currently unavailable; "
+            "claim queued for human review."
+        )
+        logger.warning(
+            "manual_review_flagged: all providers unavailable, routing claim to human review. "
+            "aid_claim_preview=%s",
+            (aid_claim or "")[:80],
+        )
+        return {
+            "flagged_for_manual_review": True,
+            "manual_review_reason": reason,
+            "aid_claim": aid_claim,
+            "supporting_evidence": supporting_evidence or [],
+            "context_factors": context_factors or {},
+        }
+
+    def check_recovery(self) -> bool:
+        """Return True if at least one provider has recovered and can accept requests.
+
+        Recovery is automatic: the circuit breaker transitions from OPEN to
+        HALF_OPEN when ``recovery_timeout`` seconds have elapsed and
+        ``allow_request()`` is called. This method is a convenience probe
+        for callers that need to know whether normal routing can resume
+        without external intervention.
+        """
+        if settings.test_provider_mode:
+            return True
+
+        providers = self.registry.available_llm_providers()
+        if not providers:
+            return False
+
+        return any(self._get_breaker(p).allow_request() for p in providers)
 
     def get_model_version(self, provider_preference: str = "auto") -> str:
         providers = self.registry.resolve_llm(provider_preference)

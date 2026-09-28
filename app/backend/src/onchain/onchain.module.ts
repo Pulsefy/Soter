@@ -19,6 +19,7 @@ import { SorobanTransactionScheduler } from './soroban-transaction.scheduler';
 import { SorobanTransactionProcessor } from './soroban-transaction.processor';
 import { SorobanEventCorrelationService } from './soroban-event-correlation.service';
 import { SorobanEventCorrelationScheduler } from './soroban-event-correlation.scheduler';
+import { SorobanCorrelationTraceService } from './soroban-correlation-trace.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CommonServicesModule } from '../common/services/common-services.module';
 
@@ -105,6 +106,7 @@ const onchainAdapterProvider: Provider = {
     SorobanTransactionProcessor,
     SorobanEventCorrelationService,
     SorobanEventCorrelationScheduler,
+    SorobanCorrelationTraceService,
   ],
   exports: [
     ONCHAIN_ADAPTER_TOKEN,
@@ -114,6 +116,7 @@ const onchainAdapterProvider: Provider = {
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
     SorobanEventCorrelationService,
+    SorobanCorrelationTraceService,
   ],
 })
 export class OnchainModule {}

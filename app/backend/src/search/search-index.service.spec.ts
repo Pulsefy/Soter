@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { AppException } from '../common/dto/error-response.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { SearchIndexService } from './search-index.service';
@@ -292,7 +292,7 @@ describe('SearchIndexService', () => {
       const progress = await service.startRebuild({});
 
       await expect(service.startRebuild({})).rejects.toBeInstanceOf(
-        ConflictException,
+        AppException,
       );
 
       release?.([]);
@@ -320,7 +320,7 @@ describe('SearchIndexService', () => {
       });
 
       await expect(service.startRebuild({})).rejects.toBeInstanceOf(
-        ConflictException,
+        AppException,
       );
       expect(buildRows).toHaveLength(1);
     });
@@ -387,7 +387,7 @@ describe('SearchIndexService', () => {
     it('rejects resume when no interrupted build exists', async () => {
       await expect(
         service.startRebuild({ resume: true }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toBeInstanceOf(AppException);
     });
   });
 

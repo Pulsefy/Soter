@@ -1,10 +1,22 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { fetchClient } from '@/lib/mock-api/client';
+import { apiFetch } from '@/lib/api-client';
 import type { AidPackage, AidPackageFilters, PaginatedResponse, PaginationParams } from '@/types/aid-package';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+/**
+ * Lists aid packages from the live backend.
+ *
+ * The endpoint is `GET /api/v1/aid/packages` — `AidController` is declared with
+ * `@Controller('aid')` and the route as `@Get('packages')`, behind the global
+ * `api` prefix and URI versioning. The backend always answers with the
+ * paginated envelope declared by `ListAidPackagesDto` / `PaginatedResult<T>`
+ * (`AidService.listAidPackages`): `{ data, total, page, size, totalPages }`.
+ *
+ * Requests go through the real API client (`@/lib/api-client`), not the demo
+ * handler layer, so an unset `NEXT_PUBLIC_API_URL` can no longer serve
+ * fabricated packages.
+ */
 
 interface FetchAidPackagesParams {
   filters?: AidPackageFilters;
@@ -30,13 +42,11 @@ async function fetchAidPackages({ filters, pagination }: FetchAidPackagesParams)
   if (pagination?.sortDirection) params.set('sortDirection', pagination.sortDirection);
 
   const query = params.toString();
-  const url = `${API_URL}/aid-packages${query ? `?${query}` : ''}`;
-
-  const response = await fetchClient(url);
+  const response = await apiFetch(`/aid/packages${query ? `?${query}` : ''}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch aid packages: ${response.status}`);
   }
-  const json = await response.json();
+  const json = (await response.json()) as PaginatedResponse<AidPackage>;
 
   if (perfEnabled) {
     const end = performance.now();
@@ -49,19 +59,7 @@ async function fetchAidPackages({ filters, pagination }: FetchAidPackagesParams)
     });
   }
 
-  // Handle both paginated and legacy (array) responses
-  if (Array.isArray(json)) {
-    // Legacy non-paginated response from old backend
-    return {
-      data: json,
-      total: json.length,
-      page: pagination?.page ?? 1,
-      size: pagination?.size ?? json.length,
-      totalPages: 1,
-    };
-  }
-
-  return json as PaginatedResponse<AidPackage>;
+  return json;
 }
 
 export function useAidPackages(filters?: AidPackageFilters, pagination?: PaginationParams) {

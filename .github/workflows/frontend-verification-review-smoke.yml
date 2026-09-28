@@ -1,0 +1,45 @@
+name: Frontend Verification Review Smoke
+
+# Smoke test for the reviewer-facing verification-review route. The route is
+# the frontend's densest consumer of the verification-inbox backend API, so it
+# gets its own workflow: it renders the real page in jsdom against a real HTTP
+# backend (an in-process test backend on an ephemeral port) and walks the
+# reviewer flow — load, list, approve, reject.
+#
+# The suite names each step (`[load]`, `[list]`, `[action:approve]`,
+# `[action:reject]`) in both the test list and the failure message, so a red
+# build says which step of the flow broke.
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'app/frontend/**'
+      - '.github/workflows/frontend-verification-review-smoke.yml'
+
+jobs:
+  verification-review-smoke:
+    name: Verification review route smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile --engine-strict=false
+
+      # --runInBand: the suite owns a loopback port and is the only test in the
+      # run, so a single worker is both faster and easier to read.
+      - name: Load route, list queue, approve and reject
+        working-directory: app/frontend
+        run: pnpm exec jest src/integration/verification-review.smoke.test.tsx --runInBand --verbose

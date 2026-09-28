@@ -47,7 +47,11 @@ async function bootstrap() {
   app.use(
     json({
       limit: '10mb',
-      verify: (req: any, res, buf) => {
+      verify: (
+        req: import('express').Request & { rawBody?: Buffer },
+        res,
+        buf,
+      ) => {
         req.rawBody = buf;
       },
     }),

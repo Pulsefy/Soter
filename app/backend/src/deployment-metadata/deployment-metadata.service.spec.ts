@@ -2,11 +2,16 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DeploymentMetadataService } from './deployment-metadata.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ContractConfigCacheService } from './contract-config-cache.service';
+import { ONCHAIN_ADAPTER_TOKEN } from '../onchain/onchain.adapter';
 
 describe('DeploymentMetadataService', () => {
   let service: DeploymentMetadataService;
   let _prisma: jest.Mocked<PrismaService>;
   let _cache: jest.Mocked<ContractConfigCacheService>;
+  let onchain: {
+    getContractVersion: jest.Mock;
+    migrateContract: jest.Mock;
+  };
 
   const mockRecord = {
     id: 'test-id-1',
@@ -20,6 +25,7 @@ describe('DeploymentMetadataService', () => {
     deployer: 'GA5TBSBGERHVMEFBJGEM3KYMRLWO73Y2QRAV6P66GPEBOJ5ZMJUT7LLY',
     transactionHash:
       '292bf42f063310028456890e88861cd1650149ef0d4e66ba2a22ea5769964e64',
+    contractVersion: null,
     metadata: { version: '1.0.0' },
     createdAt: new Date('2026-06-03T12:00:00Z'),
     updatedAt: new Date('2026-06-03T12:00:00Z'),
@@ -51,6 +57,16 @@ describe('DeploymentMetadataService', () => {
         DeploymentMetadataService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: ContractConfigCacheService, useValue: mockCache },
+        {
+          provide: ONCHAIN_ADAPTER_TOKEN,
+          useFactory: () => {
+            onchain = {
+              getContractVersion: jest.fn(),
+              migrateContract: jest.fn(),
+            };
+            return onchain;
+          },
+        },
       ],
     }).compile();
 
@@ -232,6 +248,53 @@ describe('DeploymentMetadataService', () => {
       );
       expect(mockCache.invalidateAll).toHaveBeenCalledTimes(1);
       expect(result.commitSha).toBe('new-sha-123');
+    });
+  });
+
+  describe('migrate', () => {
+    it('updates metadata only after the requested version is verified on-chain', async () => {
+      mockPrisma.deploymentMetadata.findUnique.mockResolvedValue(mockRecord);
+      mockPrisma.deploymentMetadata.update.mockResolvedValue({
+        ...mockRecord,
+        contractVersion: 2,
+      });
+      onchain.getContractVersion
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(2);
+      onchain.migrateContract.mockResolvedValue({
+        contractId: mockRecord.contractId,
+        transactionHash: 'migration-hash',
+        previousVersion: 1,
+        newVersion: 2,
+        timestamp: new Date(),
+      });
+
+      const result = await service.migrate(mockRecord.id, 2);
+
+      expect(result.verifiedVersion).toBe(2);
+      expect(mockPrisma.deploymentMetadata.update).toHaveBeenCalledWith({
+        where: { id: mockRecord.id },
+        data: { contractVersion: 2 },
+      });
+    });
+
+    it('leaves metadata untouched when the post-migration version is wrong', async () => {
+      mockPrisma.deploymentMetadata.findUnique.mockResolvedValue(mockRecord);
+      onchain.getContractVersion
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(1);
+      onchain.migrateContract.mockResolvedValue({
+        contractId: mockRecord.contractId,
+        transactionHash: 'migration-hash',
+        previousVersion: 1,
+        newVersion: 2,
+        timestamp: new Date(),
+      });
+
+      await expect(service.migrate(mockRecord.id, 2)).rejects.toThrow(
+        'reported version 1',
+      );
+      expect(mockPrisma.deploymentMetadata.update).not.toHaveBeenCalled();
     });
   });
 

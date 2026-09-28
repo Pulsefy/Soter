@@ -1,8 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { ConfigService } from '@nestjs/config';
 import { Inject } from '@nestjs/common';
+import { LoggerService } from '../logger/logger.service';
+import { runWithCorrelationContext } from '../common/utils/correlation-context.util';
 import {
   OnchainAdapter,
   ONCHAIN_ADAPTER_TOKEN,
@@ -15,6 +17,7 @@ import {
   SorobanOperationType,
   RetryableErrorType,
   SorobanTransaction,
+  Claim,
 } from '@prisma/client';
 
 export interface CreateSorobanTransactionParams {
@@ -69,10 +72,10 @@ export interface StuckTransactionDetectionResult {
   transactions: StuckTransactionSummary[];
 }
 
+const LOG_CONTEXT = 'SorobanTransactionLifecycleService';
+
 @Injectable()
 export class SorobanTransactionLifecycleService {
-  private readonly logger = new Logger(SorobanTransactionLifecycleService.name);
-
   // Exponential backoff configuration
   private readonly BASE_RETRY_DELAY_MS = 2000; // 2 seconds
   private readonly MAX_RETRY_DELAY_MS = 300000; // 5 minutes
@@ -90,10 +93,27 @@ export class SorobanTransactionLifecycleService {
     private readonly prisma: PrismaService,
     private readonly metricsService: MetricsService,
     private readonly configService: ConfigService,
+    private readonly loggerService: LoggerService,
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
   ) {
     this.STUCK_TRANSACTION_THRESHOLD_MS = this.resolveStuckThresholdMs();
+  }
+
+  /**
+   * Bind a correlation ID to the async-local-storage slot the logger reads, so
+   * every line logged inside `fn` - including lines logged by services `fn`
+   * calls into - is stamped with it.
+   */
+  private runWithCorrelation<T>(
+    correlationId: string | null | undefined,
+    fn: () => T,
+  ): T {
+    return runWithCorrelationContext(
+      this.loggerService.getAsyncLocalStorage(),
+      correlationId,
+      fn,
+    );
   }
 
   /**
@@ -119,11 +139,21 @@ export class SorobanTransactionLifecycleService {
    * Create a new Soroban transaction record with lifecycle tracking
    */
   async createTransaction(params: CreateSorobanTransactionParams) {
-    this.logger.debug('Creating Soroban transaction with lifecycle tracking', {
-      claimId: params.claimId,
-      operation: params.operation,
-      correlationId: params.correlationId,
-    });
+    // Resolve the correlation ID up front so the creation line carries it even
+    // when the caller is not part of a request (and therefore has no ambient
+    // async-local-storage context).
+    const correlationId =
+      params.correlationId || this.loggerService.getCorrelationId();
+
+    this.loggerService.debug(
+      'Creating Soroban transaction with lifecycle tracking',
+      LOG_CONTEXT,
+      {
+        claimId: params.claimId,
+        operation: params.operation,
+        correlationId,
+      },
+    );
 
     const transaction = await this.prisma.sorobanTransaction.create({
       data: {
@@ -164,28 +194,58 @@ export class SorobanTransactionLifecycleService {
       throw new Error(`Soroban transaction ${transactionId} not found`);
     }
 
+    // The correlation ID that initiated this transaction travels with the
+    // record, so retries executed by a background worker long after the
+    // originating request has finished still log under the same trace.
+    const correlationId =
+      transaction.correlationId ||
+      this.loggerService.getCorrelationId() ||
+      `tx-${transactionId}`;
+
+    return this.runWithCorrelation(correlationId, () =>
+      this.executeTransactionInContext(
+        transactionId,
+        transaction,
+        correlationId,
+      ),
+    );
+  }
+
+  /**
+   * Body of {@link executeTransaction}. Always runs with `correlationId` bound
+   * to the logger's async-local-storage context.
+   */
+  private async executeTransactionInContext(
+    transactionId: string,
+    transaction: SorobanTransaction & { claim: Claim | null },
+    correlationId: string,
+  ): Promise<void> {
     // Check if transaction should be retried
     if (
       !transaction.isRetryable ||
       transaction.attemptCount >= transaction.maxAttempts
     ) {
-      this.logger.warn('Transaction cannot be retried', {
+      this.loggerService.warn('Transaction cannot be retried', LOG_CONTEXT, {
         transactionId,
         attemptCount: transaction.attemptCount,
         maxAttempts: transaction.maxAttempts,
         isRetryable: transaction.isRetryable,
+        correlationId,
       });
       return;
     }
 
     const attemptNumber = transaction.attemptCount + 1;
-    const correlationId = transaction.correlationId || `tx-${transactionId}`;
 
-    this.logger.log(`Executing Soroban transaction attempt ${attemptNumber}`, {
-      transactionId,
-      operation: transaction.operation,
-      correlationId,
-    });
+    this.loggerService.log(
+      `Executing Soroban transaction attempt ${attemptNumber}`,
+      LOG_CONTEXT,
+      {
+        transactionId,
+        operation: transaction.operation,
+        correlationId,
+      },
+    );
 
     const startTime = Date.now();
 
@@ -260,12 +320,17 @@ export class SorobanTransactionLifecycleService {
         attempt: attemptNumber.toString(),
       });
 
-      this.logger.log('Soroban transaction completed successfully', {
-        transactionId,
-        txHash: result.transactionHash,
-        duration,
-        attemptNumber,
-      });
+      this.loggerService.log(
+        'Soroban transaction completed successfully',
+        LOG_CONTEXT,
+        {
+          transactionId,
+          txHash: result.transactionHash,
+          duration,
+          attemptNumber,
+          correlationId,
+        },
+      );
     } catch (error) {
       await this.handleTransactionError(
         transactionId,
@@ -287,17 +352,26 @@ export class SorobanTransactionLifecycleService {
   ): Promise<void> {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const duration = (Date.now() - startTime) / 1000;
+    // Read the trace ID from the ambient context so the failure line is
+    // attributable even though this helper does not receive it as a parameter.
+    const correlationId = this.loggerService.getCorrelationId();
 
     // Classify error type for retry decisions
     const { errorType, isRetryable } = this.classifyError(errorMessage);
 
-    this.logger.error(`Soroban transaction attempt ${attemptNumber} failed`, {
-      transactionId,
-      error: errorMessage,
-      errorType,
-      isRetryable,
-      duration,
-    });
+    this.loggerService.error(
+      `Soroban transaction attempt ${attemptNumber} failed`,
+      undefined,
+      LOG_CONTEXT,
+      {
+        transactionId,
+        error: errorMessage,
+        errorType,
+        isRetryable,
+        duration,
+        correlationId,
+      },
+    );
 
     const transaction = await this.prisma.sorobanTransaction.findUnique({
       where: { id: transactionId },
@@ -321,18 +395,29 @@ export class SorobanTransactionLifecycleService {
       const delay = Math.min(baseDelay + jitter, this.MAX_RETRY_DELAY_MS);
       nextRetryAt = new Date(Date.now() + delay);
 
-      this.logger.log(`Scheduling retry for transaction ${transactionId}`, {
-        attemptNumber,
-        nextRetryAt,
-        delay: Math.round(delay / 1000) + 's',
-      });
+      this.loggerService.log(
+        `Scheduling retry for transaction ${transactionId}`,
+        LOG_CONTEXT,
+        {
+          attemptNumber,
+          nextRetryAt,
+          delay: Math.round(delay / 1000) + 's',
+          correlationId,
+        },
+      );
     } else {
-      this.logger.error(`Transaction ${transactionId} permanently failed`, {
-        attemptNumber,
-        maxAttempts: transaction.maxAttempts,
-        errorType,
-        isRetryable,
-      });
+      this.loggerService.error(
+        `Transaction ${transactionId} permanently failed`,
+        undefined,
+        LOG_CONTEXT,
+        {
+          attemptNumber,
+          maxAttempts: transaction.maxAttempts,
+          errorType,
+          isRetryable,
+          correlationId,
+        },
+      );
     }
 
     // Update transaction record with error details and retry info
@@ -508,7 +593,11 @@ export class SorobanTransactionLifecycleService {
     });
 
     if (result.count > 0) {
-      this.logger.warn(`Marked ${result.count} transactions as expired`);
+      this.loggerService.warn(
+        `Marked ${result.count} transactions as expired`,
+        LOG_CONTEXT,
+        { count: result.count },
+      );
       this.metricsService.incrementCounter('soroban_transaction_expired', {
         count: result.count.toString(),
       });
@@ -606,18 +695,29 @@ export class SorobanTransactionLifecycleService {
     const terminalCount = byClassification.terminal;
 
     if (stuckCount > 0) {
-      this.logger.warn(`Detected ${stuckCount} stuck Soroban transactions`, {
-        thresholdMs: this.STUCK_TRANSACTION_THRESHOLD_MS,
-        retryableCount,
-        terminalCount,
-        operations: transactions.map(tx => tx.operation),
-      });
+      this.loggerService.warn(
+        `Detected ${stuckCount} stuck Soroban transactions`,
+        LOG_CONTEXT,
+        {
+          thresholdMs: this.STUCK_TRANSACTION_THRESHOLD_MS,
+          retryableCount,
+          terminalCount,
+          operations: transactions.map(tx => tx.operation),
+          correlationIds: transactions
+            .map(tx => tx.correlationId)
+            .filter(
+              (id): id is string => typeof id === 'string' && id.length > 0,
+            ),
+        },
+      );
     }
 
     if (terminalCount > 0) {
       // Unlike retryable ones, these can never recover on their own.
-      this.logger.error(
+      this.loggerService.error(
         `Detected ${terminalCount} unrecoverable stuck Soroban transaction(s) requiring operator intervention`,
+        undefined,
+        LOG_CONTEXT,
         {
           transactionIds: transactions
             .filter(tx => tx.classification === 'terminal')
@@ -735,12 +835,24 @@ export class SorobanTransactionLifecycleService {
       },
     });
 
-    this.logger.log(`Manual retry scheduled for transaction ${transactionId}`, {
-      forceRetry,
-      currentAttempts: transaction.attemptCount,
-    });
+    const correlationId =
+      transaction.correlationId ||
+      this.loggerService.getCorrelationId() ||
+      `tx-${transactionId}`;
 
-    // Execute the retry immediately
+    this.loggerService.log(
+      `Manual retry scheduled for transaction ${transactionId}`,
+      LOG_CONTEXT,
+      {
+        forceRetry,
+        currentAttempts: transaction.attemptCount,
+        correlationId,
+      },
+    );
+
+    // Execute the retry immediately. The lookup inside executeTransaction
+    // recovers the record's correlation ID (or the ambient one) so the whole
+    // retry is logged under the originating trace.
     await this.executeTransaction(transactionId);
   }
 }

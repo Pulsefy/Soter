@@ -6,10 +6,19 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
 import { AuditService } from '../audit/audit.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import {
+  NotificationBackpressureService,
+  NOTIFICATION_MAX_ATTEMPTS,
+} from './notification-backpressure.service';
 
 describe('NotificationsService', () => {
   let service: NotificationsService;
   let queueMock: jest.Mocked<{ add: jest.Mock }>;
+  let backpressureMock: {
+    getInitialDelay: jest.Mock;
+    getRetryDelay: jest.Mock;
+    baseDelayMs: number;
+  };
   let loggerMock: { getCorrelationId: jest.Mock };
   let prismaMock: {
     notificationOutbox: {
@@ -44,6 +53,11 @@ describe('NotificationsService', () => {
   beforeEach(async () => {
     queueMock = {
       add: jest.fn().mockResolvedValue({ id: 'job-123' }),
+    };
+    backpressureMock = {
+      getInitialDelay: jest.fn().mockReturnValue(0),
+      getRetryDelay: jest.fn().mockReturnValue(5000),
+      baseDelayMs: 5000,
     };
     loggerMock = {
       getCorrelationId: jest.fn().mockReturnValue(undefined),
@@ -81,6 +95,10 @@ describe('NotificationsService', () => {
         {
           provide: LoggerService,
           useValue: loggerMock,
+        },
+        {
+          provide: NotificationBackpressureService,
+          useValue: backpressureMock,
         },
         {
           provide: AuditService,
@@ -175,17 +193,40 @@ describe('NotificationsService', () => {
       );
     });
 
-    it('should configure exponential backoff retries for email jobs', async () => {
+    it('should configure escalating backoff retries for email jobs', async () => {
       await service.sendEmail('test@example.com', 'Subject', 'Message');
 
       expect(queueMock.add).toHaveBeenCalledWith(
         'send-email',
         expect.any(Object),
         expect.objectContaining({
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5000 },
+          attempts: NOTIFICATION_MAX_ATTEMPTS,
+          backoff: { type: 'custom', delay: 5000 },
         }),
       );
+    });
+
+    it('should park a new email job until the probe window while the provider circuit is cut off', async () => {
+      backpressureMock.getInitialDelay.mockReturnValue(42_000);
+
+      await service.sendEmail('test@example.com', 'Subject', 'Message');
+
+      expect(queueMock.add).toHaveBeenCalledWith(
+        'send-email',
+        expect.any(Object),
+        expect.objectContaining({
+          delay: 42_000,
+          attempts: NOTIFICATION_MAX_ATTEMPTS,
+        }),
+      );
+      expect(backpressureMock.getInitialDelay).toHaveBeenCalledWith('email');
+    });
+
+    it('should not add an initial delay while the provider circuit is closed', async () => {
+      await service.sendEmail('test@example.com', 'Subject', 'Message');
+
+      const options = queueMock.add.mock.calls[0][2] as Record<string, unknown>;
+      expect(options).not.toHaveProperty('delay');
     });
 
     it('should update outbox record to enqueued with jobId after successful enqueue', async () => {
@@ -295,15 +336,15 @@ describe('NotificationsService', () => {
       );
     });
 
-    it('should configure exponential backoff retries for SMS jobs', async () => {
+    it('should configure escalating backoff retries for SMS jobs', async () => {
       await service.sendSms('+1234567890', 'Test SMS');
 
       expect(queueMock.add).toHaveBeenCalledWith(
         'send-sms',
         expect.any(Object),
         expect.objectContaining({
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5000 },
+          attempts: NOTIFICATION_MAX_ATTEMPTS,
+          backoff: { type: 'custom', delay: 5000 },
         }),
       );
     });

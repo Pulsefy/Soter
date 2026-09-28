@@ -1,3 +1,4 @@
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import {
   Controller,
   Get,
@@ -9,7 +10,6 @@ import {
   Request,
   Res,
   Version,
-  ForbiddenException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Request as ExpressRequest } from 'express';
@@ -26,6 +26,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { ClaimsService } from './claims.service';
+import { extractCorrelationId } from '../common/utils/correlation-id.util';
 import { CancelAndReissueService } from './cancel-and-reissue.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import {
@@ -57,7 +58,8 @@ export class ClaimsController {
   ) {}
 
   private ensureOrgAccess(user: any, claim: any) {
-    if (!user) throw new ForbiddenException('Not authenticated');
+    if (!user)
+      throw new AppException(ERROR_CODES.FORBIDDEN, 403, 'Not authenticated');
     // Admins bypass this check
     if (user.role === AppRole.admin) return;
     // Only NGO role is org-scoped for this guard
@@ -67,7 +69,9 @@ export class ClaimsController {
     if (!claimOrgId) return; // nothing to check
 
     if (!user.ngoId || user.ngoId !== claimOrgId) {
-      throw new ForbiddenException(
+      throw new AppException(
+        ERROR_CODES.FORBIDDEN,
+        403,
         'Access denied: resource belongs to a different organization',
       );
     }
@@ -219,7 +223,13 @@ export class ClaimsController {
   ) {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
-    return this.claimsService.disburse(id, dto.receiptPointer);
+    // Pass the request's correlation ID down so the Soroban transaction record,
+    // the queued job and every log line of the disbursement path share one ID.
+    return this.claimsService.disburse(
+      id,
+      dto.receiptPointer,
+      extractCorrelationId(req) ?? undefined,
+    );
   }
 
   @Patch(':id/archive')

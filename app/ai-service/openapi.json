@@ -100,19 +100,34 @@
               }
             ]
           },
+          "fields": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Structured OCR fields to preview or redact by field type.",
+            "title": "Fields"
+          },
           "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Input text to anonymize before LLM processing",
             "examples": [
               "John Doe from New York on 2024-01-01 requested aid"
             ],
-            "minLength": 1,
-            "title": "Text",
-            "type": "string"
+            "title": "Text"
           }
         },
-        "required": [
-          "text"
-        ],
         "title": "AnonymizeRequest",
         "type": "object"
       },

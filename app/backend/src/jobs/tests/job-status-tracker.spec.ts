@@ -15,6 +15,7 @@ describe('JobStatusTracker', () => {
   let service: JobStatusTracker;
   let broadcaster: JobStatusBroadcaster;
   let mockRedis: any;
+  let module: TestingModule;
 
   beforeEach(async () => {
     mockRedis = {
@@ -30,7 +31,7 @@ describe('JobStatusTracker', () => {
       expire: jest.fn().mockResolvedValue(1),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       imports: [EventEmitterModule.forRoot()],
       providers: [
         JobStatusTracker,
@@ -44,6 +45,12 @@ describe('JobStatusTracker', () => {
 
     service = module.get<JobStatusTracker>(JobStatusTracker);
     broadcaster = module.get<JobStatusBroadcaster>(JobStatusBroadcaster);
+  });
+
+  afterEach(async () => {
+    if (module) {
+      await module.close();
+    }
   });
 
   describe('emitJobStatus', () => {

@@ -10,7 +10,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { ERROR_METADATA, ErrorCategory } from '@/types/error';
-import { categorizeError, normalizeError } from '@/lib/error-utils';
+import { normalizeError } from '@/lib/error-utils';
 import { useTranslations } from 'next-intl';
 
 interface ErrorInlineProps {
@@ -36,15 +36,15 @@ export function ErrorInline({
   const category = manualCategory || normalized.category;
   const metadata = ERROR_METADATA[category];
   
-  let errorMessage = normalized.message;
-  if (normalized.code) {
-    if (t.has(normalized.code)) {
-      errorMessage = t(normalized.code);
-    } else {
-      console.warn(`[ErrorInline] Unknown error code: ${normalized.code}`);
-      errorMessage = t('generic');
-    }
-  }
+  let errorMessage = t('generic');
+
+if (normalized.code && t.has(normalized.code)) {
+  errorMessage = t(normalized.code);
+} else if (!normalized.code && normalized.message) {
+  errorMessage = normalized.message;
+} else if (normalized.code) {
+  console.warn(`[ErrorInline] Unknown error code: ${normalized.code}`);
+}
   
   const correlationId = normalized.correlationId;
 

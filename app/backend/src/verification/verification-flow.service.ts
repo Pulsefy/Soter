@@ -1,9 +1,5 @@
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-  Logger,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -62,7 +58,9 @@ export class VerificationFlowService {
   }> {
     const identifier = this.getIdentifier(dto);
     if (!identifier) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'email is required when channel is email, phone is required when channel is phone',
       );
     }
@@ -80,7 +78,9 @@ export class VerificationFlowService {
       this.logger.warn(
         `Rate limit: too many verification starts for identifier (${recentCount} in last hour)`,
       );
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Too many verification requests. Try again after some time.`,
       );
     }
@@ -121,10 +121,16 @@ export class VerificationFlowService {
     });
 
     if (!session) {
-      throw new NotFoundException('Verification session not found');
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Verification session not found',
+      );
     }
     if (session.status !== 'pending') {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Session is no longer active. Start a new verification.',
       );
     }
@@ -133,12 +139,16 @@ export class VerificationFlowService {
         where: { id: session.id },
         data: { status: 'expired' },
       });
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Session expired. Start a new verification.',
       );
     }
     if (session.resendCount >= this.maxResendsPerSession) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Maximum resend limit (${this.maxResendsPerSession}) reached. Request a new code by starting verification again.`,
       );
     }
@@ -160,7 +170,7 @@ export class VerificationFlowService {
     );
 
     await this.sendCode(
-      session.channel as unknown as VerificationChannelDto,
+      session.channel as VerificationChannelDto,
       decryptedIdentifier,
       code,
     );
@@ -184,10 +194,16 @@ export class VerificationFlowService {
     });
 
     if (!session) {
-      throw new NotFoundException('Verification session not found');
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Verification session not found',
+      );
     }
     if (session.status !== 'pending') {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Session is no longer active. Start a new verification.',
       );
     }
@@ -196,12 +212,16 @@ export class VerificationFlowService {
         where: { id: session.id },
         data: { status: 'expired' },
       });
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Session expired. Start a new verification.',
       );
     }
     if (session.attempts >= this.maxAttemptsPerSession) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Too many failed attempts. Start a new verification.',
       );
     }
@@ -212,7 +232,11 @@ export class VerificationFlowService {
         where: { id: session.id },
         data: { attempts: session.attempts + 1 },
       });
-      throw new BadRequestException('Invalid verification code.');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Invalid verification code.',
+      );
     }
 
     await this.prisma.verificationSession.update({

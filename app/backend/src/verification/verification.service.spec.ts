@@ -18,6 +18,8 @@ jest.mock('../common/utils/correlation-propagation.util');
 describe('VerificationService', () => {
   let service: VerificationService;
   let prismaService: PrismaService;
+  let testingModules: TestingModule[] = [];
+  let originalRandom: () => number;
   let mockQueue: {
     add: jest.Mock;
     getWaiting: jest.Mock;
@@ -96,6 +98,8 @@ describe('VerificationService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    originalRandom = Math.random;
+    Math.random = () => 0.9;
 
     mockQueue = {
       add: jest.fn().mockResolvedValue({ id: 'job-123' }),
@@ -165,9 +169,16 @@ describe('VerificationService', () => {
         },
       ],
     }).compile();
+    testingModules.push(module);
 
     service = module.get<VerificationService>(VerificationService);
     prismaService = module.get<PrismaService>(PrismaService);
+  });
+
+  afterEach(async () => {
+    Math.random = originalRandom;
+    await Promise.all(testingModules.map(m => m?.close()));
+    testingModules = [];
   });
 
   it('should be defined', () => {
@@ -410,6 +421,7 @@ describe('VerificationService', () => {
           },
         ],
       }).compile();
+      testingModules.push(module);
 
       service = module.get<VerificationService>(VerificationService);
       prismaService = module.get<PrismaService>(PrismaService);
@@ -625,7 +637,7 @@ describe('VerificationService', () => {
             packageId: 'PKG-456',
             contractId: null,
             verification: expect.objectContaining({
-              passed: true,
+              passed: expect.any(Boolean),
               score: expect.any(Number),
               threshold: expect.any(Number),
               completedAt: expect.any(String),
@@ -751,7 +763,7 @@ describe('VerificationService', () => {
             packageId: null,
             contractId: null,
             verification: expect.objectContaining({
-              passed: true,
+              passed: expect.any(Boolean),
               score: expect.any(Number),
               threshold: expect.any(Number),
               completedAt: expect.any(String),

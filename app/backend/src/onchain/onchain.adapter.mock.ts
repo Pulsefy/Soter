@@ -1,4 +1,5 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   OnchainAdapter,
   InitEscrowParams,
@@ -15,6 +16,8 @@ import {
   ClaimAidPackageResult,
   DisburseAidPackageParams,
   DisburseAidPackageResult,
+  ExtendAidPackageExpiryParams,
+  ExtendAidPackageExpiryResult,
   GetAidPackageParams,
   GetAidPackageResult,
   GetAidPackageCountParams,
@@ -29,6 +32,9 @@ import {
   GetTransactionStatusResult,
   TxStatus,
   AidPackage,
+  ContractVersionParams,
+  MigrateContractParams,
+  MigrateContractResult,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 
@@ -67,6 +73,7 @@ export class MockOnchainAdapter implements OnchainAdapter {
   private readonly mockPackages = new Map<string, MockAidPackage>();
   private readonly mockEscrowAddress =
     'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+  private readonly mockContractVersions = new Map<string, number>();
 
   /**
    * Generate a deterministic mock transaction hash from input
@@ -199,7 +206,11 @@ export class MockOnchainAdapter implements OnchainAdapter {
     const nowSec = Math.floor(Date.now() / 1000);
     if (pkg.expiresAt <= nowSec) {
       pkg.status = 'Expired';
-      throw new BadRequestException('Aid package has expired');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Aid package has expired',
+      );
     }
 
     if (
@@ -208,7 +219,11 @@ export class MockOnchainAdapter implements OnchainAdapter {
       pkg.status === 'Cancelled' ||
       pkg.status === 'Refunded'
     ) {
-      throw new BadRequestException(`Aid package is in status ${pkg.status}`);
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Aid package is in status ${pkg.status}`,
+      );
     }
 
     const amountToClaimStr = params.amount || pkg.remainingAmount;
@@ -217,11 +232,17 @@ export class MockOnchainAdapter implements OnchainAdapter {
     const remaining = BigInt(pkg.remainingAmount);
 
     if (amountToClaim <= BigInt(0)) {
-      throw new BadRequestException('Claim amount must be greater than zero');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Claim amount must be greater than zero',
+      );
     }
 
     if (amountToClaim > remaining) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Claim amount exceeds remaining package balance',
       );
     }
@@ -275,6 +296,86 @@ export class MockOnchainAdapter implements OnchainAdapter {
         adapter: 'mock',
       },
     };
+  }
+
+  /**
+   * Extend the expiration of an aid package using absolute timestamp.
+   *
+   * Rejects if package is not active (e.g. claimed, cancelled, refunded) or already expired,
+   * or if newExpiresAt <= current expiresAt.
+   */
+  async extendAidPackageExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    await Promise.resolve();
+
+    let pkg = this.mockPackages.get(params.packageId);
+    if (!pkg) {
+      const defaultAmount = '1000000000';
+      pkg = {
+        id: params.packageId,
+        recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        amount: defaultAmount,
+        token: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+        status: 'Created',
+        createdAt: Math.floor(Date.now() / 1000),
+        expiresAt: Math.floor(Date.now() / 1000) + 86400 * 30,
+        claimedAmount: '0',
+        remainingAmount: defaultAmount,
+        metadata: {},
+      };
+      this.mockPackages.set(params.packageId, pkg);
+    }
+
+    if (pkg.status === 'Claimed') {
+      throw new BadRequestException('Aid package is already claimed');
+    }
+
+    if (pkg.status !== 'Created') {
+      throw new BadRequestException(`Aid package is in status ${pkg.status}`);
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (pkg.expiresAt <= nowSec) {
+      pkg.status = 'Expired';
+      throw new BadRequestException('Aid package has expired');
+    }
+
+    if (params.newExpiresAt <= pkg.expiresAt) {
+      throw new BadRequestException(
+        'New expiration timestamp must be strictly greater than current expiration timestamp',
+      );
+    }
+
+    const oldExpiresAt = pkg.expiresAt;
+    pkg.expiresAt = params.newExpiresAt;
+
+    const transactionHash = this.generateMockHash(
+      `extend-expiry-${params.packageId}-${params.newExpiresAt}-${Date.now()}`,
+    );
+
+    return {
+      packageId: params.packageId,
+      transactionHash,
+      timestamp: new Date(),
+      status: 'success',
+      oldExpiresAt,
+      newExpiresAt: params.newExpiresAt,
+      metadata: {
+        packageId: params.packageId,
+        oldExpiresAt,
+        newExpiresAt: params.newExpiresAt,
+        operatorAddress: params.operatorAddress,
+        adapter: 'mock',
+      },
+    };
+  }
+
+  // Alias for contract function naming alignment
+  async extendExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    return this.extendAidPackageExpiry(params);
   }
 
   async getAidPackage(
@@ -363,6 +464,28 @@ export class MockOnchainAdapter implements OnchainAdapter {
     return {
       version: '1.0.0',
       name: 'Mock Contract',
+      timestamp: new Date(),
+    };
+  }
+
+  async getContractVersion(params: ContractVersionParams): Promise<number> {
+    await Promise.resolve();
+    return this.mockContractVersions.get(params.contractId) ?? 1;
+  }
+
+  async migrateContract(
+    params: MigrateContractParams,
+  ): Promise<MigrateContractResult> {
+    await Promise.resolve();
+    const previousVersion = await this.getContractVersion(params);
+    this.mockContractVersions.set(params.contractId, params.newVersion);
+    return {
+      contractId: params.contractId,
+      transactionHash: this.generateMockHash(
+        `migrate-${params.contractId}-${params.newVersion}`,
+      ),
+      previousVersion,
+      newVersion: params.newVersion,
       timestamp: new Date(),
     };
   }

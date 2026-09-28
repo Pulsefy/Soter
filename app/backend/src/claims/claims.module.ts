@@ -28,4 +28,3 @@ import { VerificationModule } from '../verification/verification.module';
   exports: [CancelAndReissueService],
 })
 export class ClaimsModule {}
-

@@ -24,7 +24,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U soter -d soter_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -45,6 +45,19 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Wait for PostgreSQL
+        env:
+          DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_test
+        run: |
+          for i in {1..30}; do
+            if pg_isready -d "$DATABASE_URL"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready"
+          exit 1
 
       - name: Run Prisma migrations
         working-directory: app/backend
@@ -101,7 +114,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U soter -d soter_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5

@@ -25,6 +25,11 @@ expires and is refunded.
 
 ## Public Functions
 
+See the complete [callable interface reference](INTERFACE.md) for every public
+entry point, including parameters, return types, authorization, errors, pause
+behavior, and emitted events. See the [backend coverage inventory](BACKEND_COVERAGE.md)
+for current adapter status and the update process for adding coverage.
+
 ### Admin & Config
 
 | Function | Auth | Description |

@@ -3,6 +3,11 @@ Load-shedding for the AI service under pressure (Issue #621).
 
 Rejects incoming work with HTTP 503 and a standardized error envelope when
 system memory, the Celery queue, or configured LLM providers are overloaded.
+
+When all LLM providers are down, humanitarian verification requests are NOT
+rejected with a bare 503.  Instead, the claim is flagged for manual review
+and a 200 response is returned so the claim visibly enters the review queue
+rather than being silently discarded (Issue #1199).
 """
 
 import logging
@@ -85,8 +90,38 @@ def build_shed_response(
     )
 
 
+def build_manual_review_response(
+    method: str,
+    endpoint: str,
+) -> JSONResponse:
+    """Return a 200 response that flags a humanitarian claim for manual review.
+
+    Used in place of a bare 503 rejection when all LLM providers are down
+    (Issue #1199). The backend receives a well-formed success envelope with
+    ``flagged_for_manual_review=True`` so the claim enters the human-review
+    queue rather than being silently discarded.
+    """
+    record_shed_request("provider_down", method, endpoint)
+    payload = {
+        "success": True,
+        "flagged_for_manual_review": True,
+        "manual_review_reason": (
+            "All AI providers are currently unavailable; "
+            "claim queued for human review."
+        ),
+        "provider": None,
+        "model": None,
+        "prompt_variant": None,
+        "verification": None,
+        "error": None,
+    }
+    return JSONResponse(
+        status_code=200,
+        content={"result": payload, "flagged_for_manual_review": True},
+    )
+
+
 def get_celery_queue_depth() -> Optional[int]:
-    """Return pending Celery queue depth, or None when the broker is unreachable."""
     try:
         import redis
 
@@ -289,7 +324,12 @@ def evaluate_load_shed(request: Request) -> Optional[JSONResponse]:
         provider_result = check_provider_pressure()
         if provider_result:
             reason, details = provider_result
-            # Provider degradation sheds all requests (no priority exemption)
+            if reason == "provider_down":
+                # When ALL providers are down, route to manual review instead of
+                # bare rejection so the claim enters the human-review queue
+                # (Issue #1199).
+                return build_manual_review_response(method, path)
+            # Degraded (some providers failing) still sheds with 503
             return build_shed_response(
                 reason,
                 method,

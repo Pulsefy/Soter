@@ -26,6 +26,16 @@ export interface WalletSessionState {
   noSession: boolean;
 
   /**
+   * True when the platform Keychain / Keystore was inaccessible during
+   * the restore bootstrap.  The user must unlock their device (biometrics
+   * or passcode) before wallet credentials can be read.
+   *
+   * When true, call `reauthenticate()` to prompt re-authentication and
+   * retry the session restore.
+   */
+  secureStorageUnavailable: boolean;
+
+  /**
    * Raw restore lifecycle status for cases that need fine-grained control.
    */
   restoreStatus: RestoreStatus;
@@ -40,6 +50,12 @@ export interface WalletSessionState {
    * allowing the user to attempt a fresh connection.
    */
   recoverSession: () => void;
+
+  /**
+   * Prompts the user for biometric / passcode re-authentication when secure
+   * storage is unavailable, then retries the session restore.
+   */
+  reauthenticate: () => Promise<void>;
 
   /**
    * True when a wallet is currently connected and the session is valid.
@@ -63,9 +79,10 @@ export interface WalletSessionState {
  *
  * @example
  * ```tsx
- * const { isRestoring, restoreFailed, recoverSession, isConnected } = useWalletSession();
+ * const { isRestoring, restoreFailed, secureStorageUnavailable, reauthenticate, isConnected } = useWalletSession();
  *
  * if (isRestoring) return <LoadingOverlay />;
+ * if (secureStorageUnavailable) return <ReauthPrompt onPress={reauthenticate} />;
  * if (restoreFailed) return <WalletSessionBanner />;
  * if (!isConnected) return <ConnectPrompt />;
  * ```
@@ -75,6 +92,8 @@ export const useWalletSession = (): WalletSessionState => {
     restoreStatus,
     error,
     recoverSession,
+    reauthenticate,
+    secureStorageUnavailable,
     status,
     publicKey,
     walletName,
@@ -85,9 +104,14 @@ export const useWalletSession = (): WalletSessionState => {
     isRestored: restoreStatus === 'restored',
     restoreFailed: restoreStatus === 'failed',
     noSession: restoreStatus === 'none',
+    secureStorageUnavailable,
     restoreStatus,
-    sessionError: restoreStatus === 'failed' ? (error ?? 'Session restore failed.') : null,
+    sessionError:
+      restoreStatus === 'failed' || restoreStatus === 'secure_unavailable'
+        ? (error ?? 'Session restore failed.')
+        : null,
     recoverSession,
+    reauthenticate,
     isConnected: status === 'connected',
     publicKey,
     walletName,

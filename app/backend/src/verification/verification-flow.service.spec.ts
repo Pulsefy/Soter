@@ -1,5 +1,6 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+
 import { ConfigService } from '@nestjs/config';
 import { VerificationFlowService } from './verification-flow.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -148,11 +149,11 @@ describe('VerificationFlowService', () => {
     it('should throw BadRequest when identifier is missing for channel', async () => {
       await expect(
         service.start({ channel: 'email' } as StartVerificationDto),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
 
       await expect(
         service.start({ channel: 'phone' } as StartVerificationDto),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
     });
 
     it('should throw BadRequest when rate limit exceeded', async () => {
@@ -163,7 +164,7 @@ describe('VerificationFlowService', () => {
         email: 'user@example.com',
       };
 
-      await expect(service.start(dto)).rejects.toThrow(BadRequestException);
+      await expect(service.start(dto)).rejects.toThrow(AppException);
       await expect(service.start(dto)).rejects.toThrow(
         'Too many verification requests',
       );
@@ -197,7 +198,7 @@ describe('VerificationFlowService', () => {
 
       await expect(
         service.resend({ sessionId: 'nonexistent' }),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(AppException);
     });
 
     it('should throw BadRequest when session is completed', async () => {
@@ -207,7 +208,7 @@ describe('VerificationFlowService', () => {
       });
 
       await expect(service.resend({ sessionId: 'session-1' })).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
     });
 
@@ -218,7 +219,7 @@ describe('VerificationFlowService', () => {
       });
 
       await expect(service.resend({ sessionId: 'session-1' })).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
       await expect(service.resend({ sessionId: 'session-1' })).rejects.toThrow(
         'Session expired',
@@ -232,7 +233,7 @@ describe('VerificationFlowService', () => {
       });
 
       await expect(service.resend({ sessionId: 'session-1' })).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
       await expect(service.resend({ sessionId: 'session-1' })).rejects.toThrow(
         'Maximum resend limit',
@@ -267,7 +268,7 @@ describe('VerificationFlowService', () => {
           sessionId: 'nonexistent',
           code: '123456',
         }),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(AppException);
     });
 
     it('should throw BadRequest when code is wrong', async () => {
@@ -278,7 +279,7 @@ describe('VerificationFlowService', () => {
           sessionId: 'session-1',
           code: '999999',
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
       await expect(
         service.complete({
           sessionId: 'session-1',
@@ -303,7 +304,7 @@ describe('VerificationFlowService', () => {
           sessionId: 'session-1',
           code: '123456',
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
       await expect(
         service.complete({
           sessionId: 'session-1',
@@ -323,7 +324,7 @@ describe('VerificationFlowService', () => {
           sessionId: 'session-1',
           code: '123456',
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
       await expect(
         service.complete({
           sessionId: 'session-1',

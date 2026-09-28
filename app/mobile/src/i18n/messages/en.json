@@ -200,7 +200,14 @@
     "step1": "Step 1: Choose a photo",
     "step2": "Step 2: Preview",
     "chooseAgain": "Choose Again",
-    "step3": "Step 3: Upload"
+    "step3": "Step 3: Upload",
+    "storageLowTitle": "Low Storage",
+    "storageLowBody": "Only about {free} of free storage remains after accounting for pending uploads. Capturing evidence may fail partway and the photo could be lost.",
+    "storageCriticalTitle": "Storage Almost Full",
+    "storageCriticalBody": "Only {free} of free storage remains. Free up space before capturing evidence.",
+    "storageBannerBody": "Free storage: about {free} (includes {pending} held by pending uploads). Capture may fail if space runs out.",
+    "storageBannerA11y": "Storage warning: free space is low, capturing evidence may fail",
+    "storageContinue": "Continue Anyway"
   },
   "errors": {
     "networkError": "Network error. Please check your connection.",

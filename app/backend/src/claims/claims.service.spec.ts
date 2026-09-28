@@ -1,5 +1,6 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+
 import { ConfigService } from '@nestjs/config';
 import { ClaimsService, ClaimExportRow } from './claims.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -103,6 +104,14 @@ describe('ClaimsService', () => {
       .mockResolvedValue({ jobId: 'job-1', priority: 0 }),
   };
 
+  const mockLoggerService = {
+    log: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    getCorrelationId: jest.fn((): string | undefined => undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -158,12 +167,7 @@ describe('ClaimsService', () => {
         },
         {
           provide: LoggerService,
-          useValue: {
-            log: jest.fn(),
-            error: jest.fn(),
-            warn: jest.fn(),
-            debug: jest.fn(),
-          },
+          useValue: mockLoggerService,
         },
         {
           provide: MetricsService,
@@ -260,12 +264,10 @@ describe('ClaimsService', () => {
         .mockResolvedValue(mockCampaign as any);
     });
 
-    it('throws NotFoundException when the campaign does not exist', async () => {
+    it('throws AppException when the campaign does not exist', async () => {
       jest.spyOn(prismaService.campaign, 'findUnique').mockResolvedValue(null);
 
-      await expect(service.create(createDto)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.create(createDto)).rejects.toThrow(AppException);
       expect(prismaService.$transaction).not.toHaveBeenCalled();
     });
 
@@ -297,8 +299,7 @@ describe('ClaimsService', () => {
       // written, so a rejection never leaves a partial claim behind.
       const reserveOrder = (budgetService.reserveBudget as jest.Mock).mock
         .invocationCallOrder[0];
-      const createOrder = (tx.claim.create as jest.Mock).mock
-        .invocationCallOrder[0];
+      const createOrder = tx.claim.create.mock.invocationCallOrder[0];
       expect(reserveOrder).toBeLessThan(createOrder);
 
       // A matching 'lock' ledger entry is written for the new claim so that
@@ -318,7 +319,7 @@ describe('ClaimsService', () => {
     it('rolls back (creates no claim) when the transaction-safe budget check rejects', async () => {
       const tx = mockTransaction();
       (budgetService.reserveBudget as jest.Mock).mockRejectedValue(
-        new BadRequestException('Campaign funding cap exceeded'),
+        new Error('Campaign funding cap exceeded'),
       );
 
       await expect(service.create(createDto)).rejects.toThrow(
@@ -331,6 +332,31 @@ describe('ClaimsService', () => {
   });
 
   describe('disburse', () => {
+    /**
+     * Wire the prisma spies needed for a disbursement that runs to completion,
+     * so each correlation test can focus on the ID it expects to be propagated.
+     */
+    function arrangeSuccessfulDisburse() {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+          return callback({
+            claim: {
+              update: jest.fn().mockResolvedValue({
+                ...mockClaim,
+                status: ClaimStatus.disbursed,
+              }),
+            },
+          });
+        });
+    }
+
     it('should create and schedule a Soroban transaction when onchain is enabled', async () => {
       const expectedClaim = {
         ...mockClaim,
@@ -369,6 +395,62 @@ describe('ClaimsService', () => {
 
       expect(result.status).toBe(ClaimStatus.disbursed);
       expect(result.campaign).toBeDefined();
+    });
+
+    it('propagates an explicit correlation ID to the transaction record and job', async () => {
+      arrangeSuccessfulDisburse();
+
+      await service.disburse('claim-123', undefined, 'corr-e2e-1');
+
+      expect(
+        mockSorobanTxLifecycleService.createTransaction,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          claimId: 'claim-123',
+          correlationId: 'corr-e2e-1',
+        }),
+      );
+      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalledWith(
+        'tx-123',
+        expect.objectContaining({ correlationId: 'corr-e2e-1' }),
+      );
+    });
+
+    it('reuses the ambient correlation ID when the caller does not supply one', async () => {
+      arrangeSuccessfulDisburse();
+      mockLoggerService.getCorrelationId.mockReturnValueOnce('corr-ambient-1');
+
+      await service.disburse('claim-123');
+
+      expect(
+        mockSorobanTxLifecycleService.createTransaction,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({ correlationId: 'corr-ambient-1' }),
+      );
+      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalledWith(
+        'tx-123',
+        expect.objectContaining({ correlationId: 'corr-ambient-1' }),
+      );
+    });
+
+    it('generates a traceable fallback correlation ID when no context exists', async () => {
+      arrangeSuccessfulDisburse();
+
+      await service.disburse('claim-123');
+
+      expect(
+        mockSorobanTxLifecycleService.createTransaction,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          correlationId: expect.stringMatching(/^disburse-claim-123-\d+$/),
+        }),
+      );
+      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalledWith(
+        'tx-123',
+        expect.objectContaining({
+          correlationId: expect.stringMatching(/^disburse-claim-123-\d+$/),
+        }),
+      );
     });
 
     it('should record metrics when Soroban transaction is scheduled', async () => {
@@ -483,12 +565,7 @@ describe('ClaimsService', () => {
           },
           {
             provide: LoggerService,
-            useValue: {
-              log: jest.fn(),
-              error: jest.fn(),
-              warn: jest.fn(),
-              debug: jest.fn(),
-            },
+            useValue: mockLoggerService,
           },
           {
             provide: MetricsService,
@@ -563,15 +640,15 @@ describe('ClaimsService', () => {
       expect(transactionSpy).toHaveBeenCalled();
     });
 
-    it('should throw NotFoundException if claim does not exist', async () => {
+    it('should throw AppException if claim does not exist', async () => {
       jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue(null);
 
       await expect(service.disburse('non-existent')).rejects.toThrow(
-        NotFoundException,
+        AppException,
       );
     });
 
-    it('should throw BadRequestException if claim is not in approved status', async () => {
+    it('should throw AppException if claim is not in approved status', async () => {
       const unapprovedClaim = {
         ...mockClaim,
         status: ClaimStatus.verified,
@@ -580,9 +657,7 @@ describe('ClaimsService', () => {
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(unapprovedClaim);
 
-      await expect(service.disburse('claim-123')).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.disburse('claim-123')).rejects.toThrow(AppException);
     });
   });
 
@@ -712,9 +787,9 @@ describe('ClaimsService', () => {
     });
 
     it('countExport(): rejects an invalid date filter', async () => {
-      await expect(
-        service.countExport({ from: 'not-a-date' }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.countExport({ from: 'not-a-date' })).rejects.toThrow(
+        AppException,
+      );
     });
 
     it('streamExportRows(): pages through results with cursor-based pagination', async () => {

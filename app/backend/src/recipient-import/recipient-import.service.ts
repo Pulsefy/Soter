@@ -1,10 +1,5 @@
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-  Logger,
-  OnModuleInit,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import {
@@ -45,11 +40,19 @@ export class RecipientImportService implements OnModuleInit {
       where: { id: campaignId },
     });
     if (!campaign) {
-      throw new BadRequestException('Campaign not found');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Campaign not found',
+      );
     }
 
     if (totalRows <= 0) {
-      throw new BadRequestException('CSV file contains no data rows');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'CSV file contains no data rows',
+      );
     }
 
     const job = await this.prisma.importJob.create({
@@ -97,7 +100,11 @@ export class RecipientImportService implements OnModuleInit {
     });
 
     if (!job) {
-      throw new NotFoundException(`Import job ${jobId} not found`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Import job ${jobId} not found`,
+      );
     }
 
     const progress =
@@ -194,7 +201,11 @@ export class RecipientImportService implements OnModuleInit {
       where: { id: jobId },
     });
     if (!job) {
-      throw new NotFoundException(`Import job ${jobId} not found`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Import job ${jobId} not found`,
+      );
     }
 
     return {
@@ -232,7 +243,11 @@ export class RecipientImportService implements OnModuleInit {
       where: { id: jobId },
     });
     if (!job) {
-      throw new NotFoundException(`Import job ${jobId} not found`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Import job ${jobId} not found`,
+      );
     }
 
     if (!['completed', 'failed', 'cancelled'].includes(job.status)) {
@@ -297,7 +312,7 @@ export class RecipientImportService implements OnModuleInit {
   parseCsv(content: string): { headers: string[]; rows: string[][] } {
     const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
     if (lines.length === 0) {
-      throw new BadRequestException('CSV file is empty');
+      throw new AppException(ERROR_CODES.BAD_REQUEST, 400, 'CSV file is empty');
     }
 
     const headers = this.parseCsvLine(lines[0]);
@@ -437,7 +452,11 @@ export class RecipientImportService implements OnModuleInit {
     });
 
     if (!job) {
-      throw new NotFoundException(`Import job ${jobId} not found`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Import job ${jobId} not found`,
+      );
     }
 
     const errors = this.parseErrors(job.errors);

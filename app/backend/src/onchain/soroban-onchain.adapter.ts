@@ -16,6 +16,8 @@ import {
   ClaimAidPackageResult,
   DisburseAidPackageParams,
   DisburseAidPackageResult,
+  ExtendAidPackageExpiryParams,
+  ExtendAidPackageExpiryResult,
   GetAidPackageParams,
   GetAidPackageResult,
   GetAidPackageCountParams,
@@ -33,6 +35,9 @@ import {
   GetTransactionStatusParams,
   GetTransactionStatusResult,
   TxStatus,
+  ContractVersionParams,
+  MigrateContractParams,
+  MigrateContractResult,
 } from './onchain.adapter';
 
 /**
@@ -116,10 +121,11 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
   private async invokeContract(
     method: string,
     args: unknown[],
+    contractId = this.contractId,
   ): Promise<unknown> {
     const sim = await rpcCall(this.http, this.rpcUrl, 'simulateTransaction', {
       transaction: JSON.stringify({
-        contractId: this.contractId,
+        contractId,
         method,
         args,
       }),
@@ -130,7 +136,7 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     }
     const result = await rpcCall(this.http, this.rpcUrl, 'sendTransaction', {
       transaction: JSON.stringify({
-        contractId: this.contractId,
+        contractId,
         method,
         args,
         networkPassphrase: this.networkPassphrase,
@@ -229,6 +235,32 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     };
   }
 
+  async extendAidPackageExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    this.logger.log(
+      `extendAidPackageExpiry id=${params.packageId} newExpiresAt=${params.newExpiresAt}`,
+    );
+    await this.invokeContract('extend_expiry', [
+      params.packageId,
+      params.newExpiresAt,
+    ]);
+    return {
+      packageId: params.packageId,
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+      newExpiresAt: params.newExpiresAt,
+    };
+  }
+
+  // Alias for contract function naming alignment
+  async extendExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    return this.extendAidPackageExpiry(params);
+  }
+
   async getAidPackage(
     params: GetAidPackageParams,
   ): Promise<GetAidPackageResult> {
@@ -293,6 +325,41 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     return {
       version: readString(meta.version, '1.0.0'),
       name: readString(meta.name, 'Soroban Contract'),
+      timestamp: new Date(),
+    };
+  }
+
+  async getContractVersion(params: ContractVersionParams): Promise<number> {
+    const result = await this.invokeContract(
+      'get_version',
+      [],
+      params.contractId,
+    );
+    const version = Number(result);
+    if (!Number.isInteger(version) || version < 0) {
+      throw new Error(
+        `Invalid contract version returned for ${params.contractId}`,
+      );
+    }
+    return version;
+  }
+
+  async migrateContract(
+    params: MigrateContractParams,
+  ): Promise<MigrateContractResult> {
+    const previousVersion = await this.getContractVersion({
+      contractId: params.contractId,
+    });
+    await this.invokeContract(
+      'migrate',
+      [params.newVersion],
+      params.contractId,
+    );
+    return {
+      contractId: params.contractId,
+      transactionHash: '',
+      previousVersion,
+      newVersion: params.newVersion,
       timestamp: new Date(),
     };
   }

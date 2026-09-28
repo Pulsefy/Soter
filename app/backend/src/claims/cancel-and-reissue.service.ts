@@ -1,9 +1,5 @@
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-  Logger,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
@@ -55,15 +51,21 @@ export class CancelAndReissueService {
     });
 
     if (!claim || claim.deletedAt) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
     if (claim.status === ClaimStatus.cancelled) {
-      throw new BadRequestException('Claim is already cancelled');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Claim is already cancelled',
+      );
     }
 
     if (!CANCELLABLE_STATUSES.includes(claim.status)) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Cannot cancel a claim in status "${claim.status}". ` +
           `Only ${CANCELLABLE_STATUSES.join(', ')} claims may be cancelled.`,
       );
@@ -153,15 +155,25 @@ export class CancelAndReissueService {
     });
 
     if (!original || original.deletedAt) {
-      throw new NotFoundException('Original claim not found');
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Original claim not found',
+      );
     }
 
     if (original.status === ClaimStatus.cancelled) {
-      throw new BadRequestException('Original claim is already cancelled');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Original claim is already cancelled',
+      );
     }
 
     if (!CANCELLABLE_STATUSES.includes(original.status)) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Cannot reissue from a claim in status "${original.status}". ` +
           `Only ${CANCELLABLE_STATUSES.join(', ')} claims may be reissued.`,
       );
@@ -302,7 +314,7 @@ export class CancelAndReissueService {
   async getReissueHistory(id: string) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim || claim.deletedAt) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
     // Walk backwards to find the root of the chain
@@ -311,10 +323,12 @@ export class CancelAndReissueService {
     // Walk forwards from root to collect all descendants
     const chain = await this.collectChain(root);
 
-    return chain.map(c => ({
-      ...c,
-      recipientRef: this.encryptionService.decrypt(c.recipientRef),
-    }));
+    return chain
+      .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined)
+      .map(c => ({
+        ...c,
+        recipientRef: this.encryptionService.decrypt(c.recipientRef),
+      }));
   }
 
   // ---------------------------------------------------------------------------
@@ -334,7 +348,7 @@ export class CancelAndReissueService {
       where: { id: campaignId },
     });
     if (!campaign || campaign.deletedAt) {
-      throw new NotFoundException('Campaign not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Campaign not found');
     }
 
     const ledger = await this.prisma.balanceLedger.findMany({
@@ -410,7 +424,7 @@ export class CancelAndReissueService {
       }
     }
 
-    return results.filter(Boolean) as NonNullable<(typeof results)[number]>[];
+    return results.filter(Boolean);
   }
 
   /**
