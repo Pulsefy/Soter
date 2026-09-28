@@ -13,7 +13,7 @@ import { BiometricGate } from '@/hooks/useBiometricGate';
 
 export interface BiometricProtectedAdminService {
   getKeys: typeof getKeys;
-  rotateKey: (id: string, biometricGate: BiometricGate) => Promise<void>;
+  rotateKey: (id: string, biometricGate: BiometricGate) => Promise<{ newSecret?: string }>;
   revokeKey: (id: string, biometricGate: BiometricGate) => Promise<void>;
   createKey: (biometricGate?: BiometricGate) => Promise<ReturnType<typeof createKey>>;
 }
@@ -22,14 +22,14 @@ export function createProtectedAdminService(): BiometricProtectedAdminService {
   return {
     getKeys,
 
-    async rotateKey(id: string, biometricGate: BiometricGate): Promise<void> {
+    async rotateKey(id: string, biometricGate: BiometricGate): Promise<{ newSecret?: string }> {
       if (!biometricGate || !biometricGate.confirmBeforeAction) {
         throw new Error('Biometric gate required for high-risk actions');
       }
 
-      await biometricGate.confirmBeforeAction(
+      return biometricGate.confirmBeforeAction(
         async () => {
-          await rotateKey(id);
+          return rotateKey(id);
         },
         {
           reason: 'Rotate API key',

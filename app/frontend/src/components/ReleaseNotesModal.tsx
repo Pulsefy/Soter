@@ -76,7 +76,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
 
                 <div>
                   <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                    What's new in this version
+                    What&apos;s new in this version
                   </h3>
                   <ul className="space-y-3">
                     {releaseNotes.changes.map((change, index) => (
