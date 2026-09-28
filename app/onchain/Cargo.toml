@@ -9,6 +9,7 @@ exclude = [
 
 [workspace.dependencies]
 soroban-sdk = "23"
+ethnum = "1.5.3"
 
 [profile.release]
 opt-level = "z"

@@ -26,6 +26,8 @@ import {
   ClaimAidPackageResult,
   DisburseAidPackageParams,
   DisburseAidPackageResult,
+  ExtendAidPackageExpiryParams,
+  ExtendAidPackageExpiryResult,
   GetAidPackageParams,
   GetAidPackageResult,
   GetAidPackageCountParams,
@@ -43,6 +45,33 @@ import {
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
+import {
+  Aggregates,
+  Package,
+  PackageStatus,
+} from './generated/aid-escrow.contract';
+import { getNetworkProfile } from 'src/config/network.config';
+
+/**
+ * Maps the contract's `PackageStatus` enum (generated from the on-chain spec)
+ * onto the backend's camel-cased status strings. Typed as a complete
+ * `Record`, so adding a status to the contract fails to compile here until the
+ * backend knows how to present it.
+ */
+const PACKAGE_STATUS_LABELS: Record<PackageStatus, AidPackage['status']> = {
+  [PackageStatus.Created]: 'Created',
+  [PackageStatus.Claimed]: 'Claimed',
+  [PackageStatus.Expired]: 'Expired',
+  [PackageStatus.Cancelled]: 'Cancelled',
+  [PackageStatus.Refunded]: 'Refunded',
+};
+
+function labelForStatusCode(code: number): AidPackage['status'] {
+  const match = Object.entries(PACKAGE_STATUS_LABELS).find(
+    ([statusCode]) => Number(statusCode) === code,
+  );
+  return match ? match[1] : 'Created';
+}
 
 @Injectable()
 export class SorobanAdapter implements OnchainAdapter {
@@ -62,13 +91,14 @@ export class SorobanAdapter implements OnchainAdapter {
       '',
     );
     this.network = this.configService.get<string>('SOROBAN_NETWORK', 'testnet');
+    const networkProfile = getNetworkProfile(this.network);
     this.rpcUrl = this.configService.get<string>(
       'STELLAR_RPC_URL',
-      'https://soroban-testnet.stellar.org',
+      networkProfile.defaultRpcUrl,
     );
     this.networkPassphrase = this.configService.get<string>(
       'STELLAR_NETWORK_PASSPHRASE',
-      'Test SDF Network ; September 2015',
+      networkProfile.passphrase,
     );
     this.adminSecretKey = this.configService.get<string>(
       'SOROBAN_ADMIN_SECRET_KEY',
@@ -92,14 +122,20 @@ export class SorobanAdapter implements OnchainAdapter {
         'SOROBAN_ADMIN_SECRET_KEY is not configured. Required for signing Soroban transactions.',
       );
     }
-    if (!this.rpcUrl.includes('testnet')) {
+    const expectedProfile = getNetworkProfile(this.network);
+    if (this.networkPassphrase !== expectedProfile.passphrase) {
       throw new Error(
-        `Cross-network mismatch: STELLAR_RPC_URL (${this.rpcUrl}) does not appear to be testnet.`,
+        `Cross-network mismatch: STELLAR_NETWORK_PASSPHRASE does not match the ` +
+          `${this.network} passphrase.`,
       );
     }
-    if (!this.networkPassphrase.includes('Test SDF Network')) {
+    const conflictingKeyword = expectedProfile.foreignRpcKeywords.find(
+      keyword => this.rpcUrl.toLowerCase().includes(keyword),
+    );
+    if (conflictingKeyword) {
       throw new Error(
-        'Cross-network mismatch: STELLAR_NETWORK_PASSPHRASE does not match testnet passphrase.',
+        `Cross-network mismatch: STELLAR_RPC_URL (${this.rpcUrl}) looks like a ` +
+          `${conflictingKeyword} endpoint, but SOROBAN_NETWORK is "${this.network}".`,
       );
     }
   }
@@ -214,7 +250,7 @@ export class SorobanAdapter implements OnchainAdapter {
         throw new Error(contractErr);
       }
 
-      const retval = receipt.returnValue
+      const retval: unknown = receipt.returnValue
         ? scValToNative(receipt.returnValue)
         : null;
 
@@ -230,7 +266,7 @@ export class SorobanAdapter implements OnchainAdapter {
     method: string,
     args: xdr.ScVal[],
     correlationId: string,
-  ): Promise<any> {
+  ): Promise<unknown> {
     const server = this.getServer();
     const kp = this.getKeypair();
     const contract = new Contract(this.contractId);
@@ -268,7 +304,7 @@ export class SorobanAdapter implements OnchainAdapter {
 
     if (SorobanRpc.Api.isSimulationSuccess(simulation)) {
       if (simulation.result?.retval) {
-        return scValToNative(simulation.result.retval);
+        return scValToNative(simulation.result.retval) as unknown;
       }
     }
 
@@ -278,7 +314,7 @@ export class SorobanAdapter implements OnchainAdapter {
   private extractContractError(receipt: any): string {
     if (receipt?.result?.retval) {
       try {
-        const val = scValToNative(receipt.result.retval);
+        const val: unknown = scValToNative(receipt.result.retval);
         if (typeof val === 'object' && val !== null) {
           return JSON.stringify(val);
         }
@@ -329,30 +365,37 @@ export class SorobanAdapter implements OnchainAdapter {
     return nativeToScVal(mapVal, { type: 'map' });
   }
 
-  private parsePackage(scv: any): AidPackage | null {
+  private parsePackage(scv: unknown): AidPackage | null {
     if (!scv || typeof scv !== 'object') return null;
+    const data = scv as Partial<Package>;
     return {
-      id: String(scv.id ?? ''),
-      recipient: scv.recipient ?? '',
-      amount: String(scv.amount ?? '0'),
-      token: scv.token ?? '',
-      status: this.parseStatus(scv.status),
-      createdAt: Number(scv.created_at ?? 0),
-      expiresAt: Number(scv.expires_at ?? 0),
-      metadata: scv.metadata ?? undefined,
+      id: String(data.id ?? ''),
+      recipient: String(data.recipient ?? ''),
+      amount: String(data.amount ?? '0'),
+      token: String(data.token ?? ''),
+      status: this.parseStatus(data.status),
+      createdAt: Number(data.created_at ?? 0),
+      expiresAt: Number(data.expires_at ?? 0),
+      metadata: this.parseMetadata(data.metadata),
     };
   }
 
-  private parseStatus(status: any): AidPackage['status'] {
+  private parseMetadata(
+    metadata: Package['metadata'] | undefined,
+  ): Record<string, string> | undefined {
+    if (metadata === undefined) return undefined;
+    const entries =
+      metadata instanceof Map
+        ? Array.from(metadata.entries())
+        : Object.entries(metadata);
+    return Object.fromEntries(
+      entries.map(([key, value]) => [String(key), String(value)]),
+    );
+  }
+
+  private parseStatus(status: unknown): AidPackage['status'] {
     if (typeof status === 'number') {
-      const map: Record<number, AidPackage['status']> = {
-        0: 'Created',
-        1: 'Claimed',
-        2: 'Expired',
-        3: 'Cancelled',
-        4: 'Refunded',
-      };
-      return map[status] ?? 'Created';
+      return labelForStatusCode(status);
     }
     if (typeof status === 'string') {
       if (
@@ -520,6 +563,57 @@ export class SorobanAdapter implements OnchainAdapter {
     };
   }
 
+  async extendAidPackageExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(
+      `[${cid}] extendAidPackageExpiry id=${params.packageId} newExpiresAt=${params.newExpiresAt}`,
+    );
+
+    let oldExpiresAt: number | undefined;
+    try {
+      const current = await this.getAidPackage({ packageId: params.packageId });
+      if (current?.package) {
+        oldExpiresAt = current.package.expiresAt;
+      }
+    } catch {
+      // Contract will enforce validation checks during transaction simulation
+    }
+
+    const { hash } = await this.submitContractOp(
+      'extend_expiry',
+      [
+        this.scvU64(parseInt(params.packageId, 10)),
+        this.scvU64(params.newExpiresAt),
+      ],
+      cid,
+    );
+
+    return {
+      packageId: params.packageId,
+      transactionHash: hash,
+      timestamp: new Date(),
+      status: 'success',
+      oldExpiresAt,
+      newExpiresAt: params.newExpiresAt,
+      metadata: {
+        contractId: this.contractId,
+        operator: params.operatorAddress,
+        oldExpiresAt,
+        newExpiresAt: params.newExpiresAt,
+      },
+    };
+  }
+
+  // Alias for contract function naming alignment
+  async extendExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    return this.extendAidPackageExpiry(params);
+  }
+
   async getAidPackage(
     params: GetAidPackageParams,
   ): Promise<GetAidPackageResult> {
@@ -562,11 +656,12 @@ export class SorobanAdapter implements OnchainAdapter {
       cid,
     );
 
+    const data = (result as Partial<Aggregates> | undefined) ?? {};
     return {
       aggregates: {
-        totalCommitted: String(result?.total_committed ?? '0'),
-        totalClaimed: String(result?.total_claimed ?? '0'),
-        totalExpiredCancelled: String(result?.total_expired_cancelled ?? '0'),
+        totalCommitted: String(data.total_committed ?? '0'),
+        totalClaimed: String(data.total_claimed ?? '0'),
+        totalExpiredCancelled: String(data.total_expired_cancelled ?? '0'),
       },
       timestamp: new Date(),
     };
@@ -622,7 +717,7 @@ export class SorobanAdapter implements OnchainAdapter {
     const version = await this.simulateReadOnly('get_version', [], cid);
 
     return {
-      version: String(version ?? '0'),
+      version: String((version as string | number) ?? '0'),
       name: 'Soroban AidEscrow Contract',
       timestamp: new Date(),
     };

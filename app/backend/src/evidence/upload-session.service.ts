@@ -1,11 +1,5 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-  ForbiddenException,
-  ConflictException,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { AuditService } from '../audit/audit.service';
@@ -15,19 +9,22 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { UploadSessionStatus } from '@prisma/client';
 import { CreateUploadSessionDto } from './upload-session.dto';
+import { UploadSessionStore } from './upload-session.store';
 import {
   ALLOWED_MIME_TYPES,
   MAX_FILE_SIZE,
   isSafeFilename,
+  validateExtensionForMime,
+  validateFileContent,
 } from './file-validation';
 
 /** Sessions expire after 24 hours of inactivity. */
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const SESSION_TTL_SECONDS = Math.ceil(SESSION_TTL_MS / 1000);
 
 @Injectable()
 export class UploadSessionService {
   private readonly logger = new Logger(UploadSessionService.name);
-  private readonly chunksDir = path.join(process.cwd(), 'uploads', 'chunks');
   private readonly evidenceDir = path.join(
     process.cwd(),
     'uploads',
@@ -38,39 +35,51 @@ export class UploadSessionService {
     private readonly prisma: PrismaService,
     private readonly encryptionService: EncryptionService,
     private readonly auditService: AuditService,
+    private readonly store: UploadSessionStore,
   ) {
-    for (const dir of [this.chunksDir, this.evidenceDir]) {
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    }
+    if (!existsSync(this.evidenceDir))
+      mkdirSync(this.evidenceDir, { recursive: true });
   }
 
   async create(dto: CreateUploadSessionDto, ownerId: string, orgId?: string) {
     if (!isSafeFilename(dto.fileName)) {
-      throw new BadRequestException('Invalid fileName');
+      throw new AppException(ERROR_CODES.BAD_REQUEST, 400, 'Invalid fileName');
     }
     if (!(ALLOWED_MIME_TYPES as readonly string[]).includes(dto.mimeType)) {
-      throw new BadRequestException(`Disallowed mimeType: ${dto.mimeType}`);
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Disallowed mimeType: ${dto.mimeType}`,
+      );
     }
+    // Extension must be on the allow-list and consistent with the declared
+    // mimeType (e.g. rejects "evil.txt" declared as "application/pdf").
+    // Content itself can't be checked yet since no bytes have arrived.
+    validateExtensionForMime(dto.fileName, dto.mimeType);
     if (dto.totalSize > MAX_FILE_SIZE) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `totalSize exceeds maximum of ${MAX_FILE_SIZE} bytes`,
       );
     }
 
     const totalChunks = Math.ceil(dto.totalSize / dto.chunkSize);
 
-    const session = await this.prisma.uploadSession.create({
-      data: {
+    const session = await this.store.createSession(
+      {
         ownerId,
-        orgId,
+        orgId: orgId ?? null,
         fileName: dto.fileName,
         mimeType: dto.mimeType,
         totalSize: dto.totalSize,
         chunkSize: dto.chunkSize,
         totalChunks,
+        status: UploadSessionStatus.active,
         expiresAt: new Date(Date.now() + SESSION_TTL_MS),
       },
-    });
+      SESSION_TTL_SECONDS,
+    );
 
     await this.auditService.record({
       actorId: ownerId,
@@ -97,18 +106,23 @@ export class UploadSessionService {
     const session = await this.getActiveSession(sessionId, ownerId);
 
     if (index < 0 || index >= session.totalChunks) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Chunk index ${index} out of range [0, ${session.totalChunks - 1}]`,
       );
     }
 
     // Idempotency: if this chunk was already received, return it as-is.
-    const existing = await this.prisma.uploadChunk.findUnique({
-      where: { sessionId_index: { sessionId, index } },
-    });
-    if (existing) {
-      if (existing.checksum !== checksum) {
-        throw new ConflictException(
+    const existingChecksum = await this.store.getExistingChunkChecksum(
+      sessionId,
+      index,
+    );
+    if (existingChecksum) {
+      if (existingChecksum !== checksum) {
+        throw new AppException(
+          ERROR_CODES.CONFLICT,
+          409,
           `Chunk ${index} already uploaded with a different checksum`,
         );
       }
@@ -122,7 +136,9 @@ export class UploadSessionService {
       : session.chunkSize;
 
     if (buffer.length !== expectedSize) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Chunk ${index} size mismatch: expected ${expectedSize}, got ${buffer.length}`,
       );
     }
@@ -133,22 +149,26 @@ export class UploadSessionService {
       .update(buffer)
       .digest('hex');
     if (actualChecksum !== checksum) {
-      throw new BadRequestException(`Chunk ${index} checksum mismatch`);
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Chunk ${index} checksum mismatch`,
+      );
     }
 
-    // Persist chunk to disk
-    const chunkFile = path.join(this.chunksDir, `${sessionId}-${index}`);
-    await fs.writeFile(chunkFile, buffer);
-
-    await this.prisma.uploadChunk.create({
-      data: {
+    // Persist chunk to Redis and record in Prisma
+    const chunkPath = `redis:chunk:${sessionId}:${index}`;
+    await Promise.all([
+      this.store.storeChunk(sessionId, index, buffer, SESSION_TTL_SECONDS),
+      this.store.addReceivedChunk(
         sessionId,
         index,
-        size: buffer.length,
+        buffer.length,
         checksum,
-        filePath: chunkFile,
-      },
-    });
+        chunkPath,
+        SESSION_TTL_SECONDS,
+      ),
+    ]);
 
     return { sessionId, index, received: true, duplicate: false };
   }
@@ -156,22 +176,56 @@ export class UploadSessionService {
   async finalize(sessionId: string, ownerId: string) {
     const session = await this.getActiveSession(sessionId, ownerId);
 
-    const chunks = await this.prisma.uploadChunk.findMany({
-      where: { sessionId },
-      orderBy: { index: 'asc' },
-    });
+    const receivedIndices = await this.store.getReceivedChunks(sessionId);
 
-    if (chunks.length !== session.totalChunks) {
+    if (receivedIndices.length !== session.totalChunks) {
       const missing = Array.from(
         { length: session.totalChunks },
         (_, i) => i,
-      ).filter(i => !chunks.find(c => c.index === i));
-      throw new BadRequestException(`Missing chunks: [${missing.join(', ')}]`);
+      ).filter(i => !receivedIndices.includes(i));
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Missing chunks: [${missing.join(', ')}]`,
+      );
     }
 
-    // Reassemble
-    const parts = await Promise.all(chunks.map(c => fs.readFile(c.filePath)));
+    // Reassemble from Redis
+    const parts = await this.store.getAllChunks(sessionId, session.totalChunks);
     const assembled = Buffer.concat(parts);
+
+    // Deep, content-aware re-validation of the assembled bytes. `create()`
+    // only checked client-declared metadata (fileName/mimeType/totalSize);
+    // this confirms the actual uploaded content matches what was declared
+    // (size, extension/MIME consistency, magic-byte signature) before it is
+    // ever written to disk or queued. A session whose content fails this
+    // check can't be salvaged, so it's aborted rather than left retryable.
+    try {
+      validateFileContent({
+        filename: session.fileName,
+        mimetype: session.mimeType,
+        size: assembled.length,
+        buffer: assembled,
+      });
+    } catch (error: unknown) {
+      await this.store.updateSessionStatus(
+        sessionId,
+        UploadSessionStatus.aborted,
+      );
+      await this.store.cleanupSession(sessionId, session.totalChunks);
+      await this.auditService.record({
+        actorId: ownerId,
+        entity: 'upload_session',
+        entityId: sessionId,
+        action: 'session_content_rejected',
+        metadata: {
+          fileName: session.fileName,
+          mimeType: session.mimeType,
+          reason: error instanceof Error ? error.message : 'unknown',
+        },
+      });
+      throw error;
+    }
 
     // Encrypt and persist as a regular evidence file
     const encrypted = this.encryptionService.encryptBuffer(assembled);
@@ -192,9 +246,16 @@ export class UploadSessionService {
     });
     if (duplicate) {
       await fs.unlink(evidenceFile);
-      await this.markSessionCompleted(sessionId);
-      await this.cleanupChunks(chunks.map(c => c.filePath));
-      throw new ConflictException('File already exists in evidence queue');
+      await this.store.updateSessionStatus(
+        sessionId,
+        UploadSessionStatus.completed,
+      );
+      await this.store.cleanupSession(sessionId, session.totalChunks);
+      throw new AppException(
+        ERROR_CODES.CONFLICT,
+        409,
+        'File already exists in evidence queue',
+      );
     }
 
     const item = await this.prisma.evidenceQueueItem.create({
@@ -210,8 +271,11 @@ export class UploadSessionService {
       },
     });
 
-    await this.markSessionCompleted(sessionId);
-    await this.cleanupChunks(chunks.map(c => c.filePath));
+    await this.store.updateSessionStatus(
+      sessionId,
+      UploadSessionStatus.completed,
+    );
+    await this.store.cleanupSession(sessionId, session.totalChunks);
 
     await this.auditService.record({
       actorId: ownerId,
@@ -227,47 +291,49 @@ export class UploadSessionService {
   /** Returns the upload status so clients can resume after a disconnect. */
   async getStatus(sessionId: string, ownerId: string) {
     const session = await this.getActiveSession(sessionId, ownerId);
-    const chunks = await this.prisma.uploadChunk.findMany({
-      where: { sessionId },
-      select: { index: true },
-      orderBy: { index: 'asc' },
-    });
+    const receivedChunks = await this.store.getReceivedChunks(sessionId);
     return {
       sessionId,
       totalChunks: session.totalChunks,
-      receivedChunks: chunks.map(c => c.index),
+      receivedChunks,
     };
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
   private async getActiveSession(sessionId: string, ownerId: string) {
-    const session = await this.prisma.uploadSession.findUnique({
-      where: { id: sessionId },
-    });
-    if (!session) throw new NotFoundException('Upload session not found');
-    if (session.ownerId !== ownerId) throw new ForbiddenException();
+    const session = await this.store.getSession(sessionId);
+    if (!session)
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Upload session not found',
+      );
+    if (session.ownerId !== ownerId) {
+      throw new AppException(
+        ERROR_CODES.FORBIDDEN,
+        403,
+        'You do not have access to this upload session',
+      );
+    }
     if (session.status !== UploadSessionStatus.active) {
-      throw new BadRequestException(`Session is ${session.status}`);
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Session is ${session.status}`,
+      );
     }
     if (session.expiresAt < new Date()) {
-      await this.prisma.uploadSession.update({
-        where: { id: sessionId },
-        data: { status: UploadSessionStatus.expired },
-      });
-      throw new BadRequestException('Session has expired');
+      await this.store.updateSessionStatus(
+        sessionId,
+        UploadSessionStatus.expired,
+      );
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Session has expired',
+      );
     }
     return session;
-  }
-
-  private async markSessionCompleted(sessionId: string) {
-    await this.prisma.uploadSession.update({
-      where: { id: sessionId },
-      data: { status: UploadSessionStatus.completed },
-    });
-  }
-
-  private async cleanupChunks(filePaths: string[]) {
-    await Promise.allSettled(filePaths.map(p => fs.unlink(p)));
   }
 }

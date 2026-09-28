@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   OnchainAdapter,
   InitEscrowParams,
@@ -15,11 +16,12 @@ import {
   ClaimAidPackageResult,
   DisburseAidPackageParams,
   DisburseAidPackageResult,
+  ExtendAidPackageExpiryParams,
+  ExtendAidPackageExpiryResult,
   GetAidPackageParams,
   GetAidPackageResult,
   GetAidPackageCountParams,
   GetAidPackageCountResult,
-  AidPackage,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
   ContractMetadata,
@@ -29,8 +31,35 @@ import {
   GetTransactionStatusParams,
   GetTransactionStatusResult,
   TxStatus,
+  AidPackage,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
+
+/**
+ * Lifecycle states a mock aid package can occupy.
+ *
+ * Derived from AidPackage so the mock cannot drift from the adapter contract.
+ */
+type MockPackageStatus = AidPackage['status'];
+
+/**
+ * Shape of the in-memory aid packages the mock adapter tracks.
+ *
+ * Amounts are stringified stroops, matching CreateAidPackageParams, and
+ * timestamps are unix seconds, matching the contract's time representation.
+ */
+interface MockAidPackage {
+  id: string;
+  recipient: string;
+  amount: string;
+  token: string;
+  status: MockPackageStatus;
+  createdAt: number;
+  expiresAt: number;
+  claimedAmount: string;
+  remainingAmount: string;
+  metadata: Record<string, string>;
+}
 
 /**
  * Mock implementation of OnchainAdapter for development and testing
@@ -38,6 +67,7 @@ import { createHash } from 'crypto';
  */
 @Injectable()
 export class MockOnchainAdapter implements OnchainAdapter {
+  private readonly mockPackages = new Map<string, MockAidPackage>();
   private readonly mockEscrowAddress =
     'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
@@ -87,6 +117,20 @@ export class MockOnchainAdapter implements OnchainAdapter {
       `create-package-${params.packageId}-${Date.now()}`,
     );
 
+    const pkg: MockAidPackage = {
+      id: params.packageId,
+      recipient: params.recipientAddress,
+      amount: params.amount,
+      token: params.tokenAddress,
+      status: 'Created',
+      createdAt: Math.floor(Date.now() / 1000),
+      expiresAt: params.expiresAt,
+      claimedAmount: '0',
+      remainingAmount: params.amount,
+      metadata: {},
+    };
+    this.mockPackages.set(params.packageId, pkg);
+
     return {
       packageId: params.packageId,
       transactionHash,
@@ -135,16 +179,94 @@ export class MockOnchainAdapter implements OnchainAdapter {
       `claim-package-${params.packageId}-${params.recipientAddress}-${Date.now()}`,
     );
 
+    let pkg = this.mockPackages.get(params.packageId);
+    if (!pkg) {
+      const defaultAmount = '1000000000';
+      pkg = {
+        id: params.packageId,
+        recipient:
+          params.recipientAddress ||
+          'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        amount: defaultAmount,
+        token: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+        status: 'Created',
+        createdAt: Math.floor(Date.now() / 1000),
+        expiresAt: Math.floor(Date.now() / 1000) + 86400 * 30,
+        claimedAmount: '0',
+        remainingAmount: defaultAmount,
+        metadata: {},
+      };
+      this.mockPackages.set(params.packageId, pkg);
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (pkg.expiresAt <= nowSec) {
+      pkg.status = 'Expired';
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Aid package has expired',
+      );
+    }
+
+    if (
+      pkg.status === 'Claimed' ||
+      pkg.status === 'Expired' ||
+      pkg.status === 'Cancelled' ||
+      pkg.status === 'Refunded'
+    ) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Aid package is in status ${pkg.status}`,
+      );
+    }
+
+    const amountToClaimStr = params.amount || pkg.remainingAmount;
+
+    const amountToClaim = BigInt(amountToClaimStr);
+    const remaining = BigInt(pkg.remainingAmount);
+
+    if (amountToClaim <= BigInt(0)) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Claim amount must be greater than zero',
+      );
+    }
+
+    if (amountToClaim > remaining) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Claim amount exceeds remaining package balance',
+      );
+    }
+
+    const newRemaining = remaining - amountToClaim;
+    const newClaimed = BigInt(pkg.claimedAmount) + amountToClaim;
+
+    pkg.claimedAmount = newClaimed.toString();
+    pkg.remainingAmount = newRemaining.toString();
+
+    if (newRemaining === BigInt(0)) {
+      pkg.status = 'Claimed';
+    }
+
     return {
       packageId: params.packageId,
       transactionHash,
       timestamp: new Date(),
       status: 'success',
-      amountClaimed: '1000000000', // Mock amount
+      amountClaimed: amountToClaimStr,
       metadata: {
         packageId: params.packageId,
         recipientAddress: params.recipientAddress,
+        receiptPointer: params.receiptPointer,
         adapter: 'mock',
+        remainingAmount: pkg.remainingAmount,
+        claimedAmount: pkg.claimedAmount,
+        status: pkg.status,
       },
     };
   }
@@ -166,9 +288,90 @@ export class MockOnchainAdapter implements OnchainAdapter {
       metadata: {
         packageId: params.packageId,
         operatorAddress: params.operatorAddress,
+        receiptPointer: params.receiptPointer,
         adapter: 'mock',
       },
     };
+  }
+
+  /**
+   * Extend the expiration of an aid package using absolute timestamp.
+   *
+   * Rejects if package is not active (e.g. claimed, cancelled, refunded) or already expired,
+   * or if newExpiresAt <= current expiresAt.
+   */
+  async extendAidPackageExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    await Promise.resolve();
+
+    let pkg = this.mockPackages.get(params.packageId);
+    if (!pkg) {
+      const defaultAmount = '1000000000';
+      pkg = {
+        id: params.packageId,
+        recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        amount: defaultAmount,
+        token: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+        status: 'Created',
+        createdAt: Math.floor(Date.now() / 1000),
+        expiresAt: Math.floor(Date.now() / 1000) + 86400 * 30,
+        claimedAmount: '0',
+        remainingAmount: defaultAmount,
+        metadata: {},
+      };
+      this.mockPackages.set(params.packageId, pkg);
+    }
+
+    if (pkg.status === 'Claimed') {
+      throw new BadRequestException('Aid package is already claimed');
+    }
+
+    if (pkg.status !== 'Created') {
+      throw new BadRequestException(`Aid package is in status ${pkg.status}`);
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (pkg.expiresAt <= nowSec) {
+      pkg.status = 'Expired';
+      throw new BadRequestException('Aid package has expired');
+    }
+
+    if (params.newExpiresAt <= pkg.expiresAt) {
+      throw new BadRequestException(
+        'New expiration timestamp must be strictly greater than current expiration timestamp',
+      );
+    }
+
+    const oldExpiresAt = pkg.expiresAt;
+    pkg.expiresAt = params.newExpiresAt;
+
+    const transactionHash = this.generateMockHash(
+      `extend-expiry-${params.packageId}-${params.newExpiresAt}-${Date.now()}`,
+    );
+
+    return {
+      packageId: params.packageId,
+      transactionHash,
+      timestamp: new Date(),
+      status: 'success',
+      oldExpiresAt,
+      newExpiresAt: params.newExpiresAt,
+      metadata: {
+        packageId: params.packageId,
+        oldExpiresAt,
+        newExpiresAt: params.newExpiresAt,
+        operatorAddress: params.operatorAddress,
+        adapter: 'mock',
+      },
+    };
+  }
+
+  // Alias for contract function naming alignment
+  async extendExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    return this.extendAidPackageExpiry(params);
   }
 
   async getAidPackage(
@@ -176,21 +379,37 @@ export class MockOnchainAdapter implements OnchainAdapter {
   ): Promise<GetAidPackageResult> {
     await Promise.resolve();
 
-    const mockPackage: AidPackage = {
-      id: params.packageId,
-      recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
-      amount: '1000000000',
-      token: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
-      status: 'Created',
-      createdAt: Math.floor(Date.now() / 1000),
-      expiresAt: Math.floor(Date.now() / 1000) + 86400 * 30,
-      metadata: {
-        campaign_ref: 'campaign-123',
-      },
-    };
+    let pkg = this.mockPackages.get(params.packageId);
+    if (!pkg) {
+      pkg = {
+        id: params.packageId,
+        recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        amount: '1000000000',
+        token: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+        status: 'Created',
+        createdAt: Math.floor(Date.now() / 1000),
+        expiresAt: Math.floor(Date.now() / 1000) + 86400 * 30,
+        claimedAmount: '0',
+        remainingAmount: '1000000000',
+        metadata: {
+          campaign_ref: 'campaign-123',
+        },
+      };
+    }
 
     return {
-      package: mockPackage,
+      package: {
+        id: pkg.id,
+        recipient: pkg.recipient,
+        amount: pkg.amount,
+        token: pkg.token,
+        status: pkg.status,
+        createdAt: pkg.createdAt,
+        expiresAt: pkg.expiresAt,
+        metadata: pkg.metadata,
+        claimedAmount: pkg.claimedAmount,
+        remainingAmount: pkg.remainingAmount,
+      },
       timestamp: new Date(),
     };
   }
@@ -344,6 +563,7 @@ export class MockOnchainAdapter implements OnchainAdapter {
         claimId: params.claimId,
         packageId: params.packageId,
         recipientAddress: params.recipientAddress,
+        receiptPointer: params.receiptPointer,
         adapter: 'mock',
       },
     };

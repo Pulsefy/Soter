@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useAidPackages } from '@/hooks/useAidPackages';
+import { Pagination } from '@/components/Pagination';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { getAppUserRole, isOperationsRole } from '@/lib/app-role';
 import type { AidPackage, AidPackageFilters, AidPackageStatus } from '@/types/aid-package';
@@ -17,15 +18,15 @@ const STATUS_STYLES: Record<AidPackageStatus, string> = {
 
 const TABLE_HEADERS = ['ID', 'Title', 'Region', 'Amount', 'Recipients', 'Status', 'Token'];
 
-function StatusBadge({ status }: { status: AidPackageStatus }) {
+const StatusBadge = React.memo(function StatusBadge({ status }: { status: AidPackageStatus }) {
   return (
     <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[status]}`}>
       {status}
     </span>
   );
-}
+});
 
-function SkeletonRow() {
+const SkeletonRow = React.memo(function SkeletonRow() {
   return (
     <tr>
       {TABLE_HEADERS.map(h => (
@@ -35,9 +36,9 @@ function SkeletonRow() {
       ))}
     </tr>
   );
-}
+});
 
-function PackageCard({ pkg }: { pkg: AidPackage }) {
+const PackageCard = React.memo(function PackageCard({ pkg }: { pkg: AidPackage }) {
   return (
     <div className="p-4 rounded-lg border border-gray-100 dark:border-gray-800 space-y-1.5">
       <div className="flex items-start justify-between gap-2">
@@ -55,14 +56,20 @@ function PackageCard({ pkg }: { pkg: AidPackage }) {
       <p className="text-xs font-mono text-gray-400">{pkg.id}</p>
     </div>
   );
-}
+});
 
 interface FilteredPackageListProps {
   filters: AidPackageFilters;
+  page?: number;
+  size?: number;
+  onPageChange?: (page: number) => void;
 }
 
-export function FilteredPackageList({ filters }: FilteredPackageListProps) {
-  const { data: packages, isLoading, error } = useAidPackages(filters);
+export const FilteredPackageList = React.memo(function FilteredPackageList({ filters, page = 1, size = 10, onPageChange }: FilteredPackageListProps) {
+  const { data: response, isLoading, error } = useAidPackages(filters, { page, size });
+  const packages = response?.data ?? [];
+  const totalItems = response?.total ?? 0;
+  const totalPages = response?.totalPages ?? 1;
   const role = getAppUserRole();
   const hasFilters = Boolean(filters.search || filters.status || filters.token);
 
@@ -214,6 +221,17 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
           />
         )}
       </div>
+
+      {/* Pagination */}
+      {!isLoading && totalItems > 0 && (
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={size}
+          totalItems={totalItems}
+          onPageChange={onPageChange ?? (() => {})}
+        />
+      )}
     </>
   );
-}
+});

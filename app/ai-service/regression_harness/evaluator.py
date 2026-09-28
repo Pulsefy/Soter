@@ -10,9 +10,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.ocr import OCRService
 from regression_harness.models import (
-    EvaluationSample, SampleResult, FieldEvaluation, 
-    RegressionReport, BoundingBox
+    EvaluationSample,
+    SampleResult,
+    FieldEvaluation,
+    RegressionReport,
+    BoundingBox,
 )
+
 
 class OCREvaluator:
     def __init__(self, tolerance_threshold: float = 0.8, iou_threshold: float = 0.5):
@@ -31,71 +35,77 @@ class OCREvaluator:
                         expected_value=None,
                         actual_value=None,
                         is_match=False,
-                        error_type="image_not_found"
+                        error_type="image_not_found",
                     )
                 ],
                 passed=False,
                 raw_text="",
-                processing_time_ms=0
+                processing_time_ms=0,
             )
 
         image = Image.open(image_path)
         result = self.ocr_service.process_image(image)
-        
+
         field_evals = []
         all_passed = True
 
         # Check expected fields
         for field_name, expected_value in sample.expected_fields.items():
             actual_match = result.fields.get(field_name)
-            
+
             if not actual_match:
-                field_evals.append(FieldEvaluation(
-                    field_name=field_name,
-                    expected_value=expected_value,
-                    actual_value=None,
-                    is_match=False,
-                    error_type="missing_field"
-                ))
+                field_evals.append(
+                    FieldEvaluation(
+                        field_name=field_name,
+                        expected_value=expected_value,
+                        actual_value=None,
+                        is_match=False,
+                        error_type="missing_field",
+                    )
+                )
                 all_passed = False
             else:
                 actual_value = actual_match.value
                 is_match = self._compare_values(expected_value, actual_value)
-                
+
                 error_type = None
                 if not is_match:
                     error_type = "incorrect_value"
                     all_passed = False
-                
+
                 # Note: Simplified bbox check as current OCRService doesn't return bboxes per field in OCRResult yet.
                 # If it did, we would use _calculate_iou here.
-                
-                field_evals.append(FieldEvaluation(
-                    field_name=field_name,
-                    expected_value=expected_value,
-                    actual_value=actual_value,
-                    is_match=is_match,
-                    error_type=error_type,
-                    confidence=actual_match.confidence
-                ))
+
+                field_evals.append(
+                    FieldEvaluation(
+                        field_name=field_name,
+                        expected_value=expected_value,
+                        actual_value=actual_value,
+                        is_match=is_match,
+                        error_type=error_type,
+                        confidence=actual_match.confidence,
+                    )
+                )
 
         # Check for unexpected fields
         for field_name in result.fields.keys():
             if field_name not in sample.expected_fields:
-                field_evals.append(FieldEvaluation(
-                    field_name=field_name,
-                    expected_value=None,
-                    actual_value=result.fields[field_name].value,
-                    is_match=False,
-                    error_type="unexpected_field"
-                ))
+                field_evals.append(
+                    FieldEvaluation(
+                        field_name=field_name,
+                        expected_value=None,
+                        actual_value=result.fields[field_name].value,
+                        is_match=False,
+                        error_type="unexpected_field",
+                    )
+                )
 
         return SampleResult(
             sample_id=sample.id,
             field_evaluations=field_evals,
             passed=all_passed,
             raw_text=result.raw_text,
-            processing_time_ms=result.processing_time_ms
+            processing_time_ms=result.processing_time_ms,
         )
 
     def _calculate_iou(self, box1: BoundingBox, box2: BoundingBox) -> float:
@@ -118,7 +128,9 @@ class OCREvaluator:
         norm_actual = actual.strip().lower()
         return norm_expected == norm_actual
 
-    def run_suite(self, samples: List[EvaluationSample], base_dir: str) -> RegressionReport:
+    def run_suite(
+        self, samples: List[EvaluationSample], base_dir: str
+    ) -> RegressionReport:
         results = []
         error_counts = {
             "missing_field": 0,
@@ -126,18 +138,21 @@ class OCREvaluator:
             "unexpected_field": 0,
             "image_not_found": 0,
             "low_confidence": 0,
-            "bbox_mismatch": 0
+            "bbox_mismatch": 0,
         }
 
         for sample in samples:
             res = self.evaluate_sample(sample, base_dir)
             results.append(res)
-            
+
             for eval_item in res.field_evaluations:
                 if eval_item.error_type in error_counts:
                     error_counts[eval_item.error_type] += 1
-                
-                if eval_item.is_match and eval_item.confidence < self.tolerance_threshold:
+
+                if (
+                    eval_item.is_match
+                    and eval_item.confidence < self.tolerance_threshold
+                ):
                     error_counts["low_confidence"] += 1
 
         passed_count = sum(1 for r in results if r.passed)
@@ -150,5 +165,5 @@ class OCREvaluator:
             failed_samples=total_count - passed_count,
             accuracy_percentage=accuracy,
             error_counts=error_counts,
-            sample_results=results
+            sample_results=results,
         )

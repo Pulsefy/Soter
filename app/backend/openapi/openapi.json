@@ -1,0 +1,40 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Pulsefy/Soter API",
+    "description": "API documentation for Pulsefy/Soter platform - Emergency aid and verification system\n\n## API Versioning\n\nThis API uses URI-based versioning. The current version is **v1**.\n\n### Version Format\nAll endpoints are prefixed with the version number: `/api/v1/...`\n\n### Supported Versions\n| Version | Status | Description |\n|---------|--------|-------------|\n| v1 | Current | Active version with full support |\n\n### Auth Schemes\nTwo authentication methods are supported:\n\n| Scheme | Header | Description |\n|--------|--------|-------------|\n| JWT Bearer | `Authorization: Bearer <token>` | Issued JWTs for user/service auth |\n| API Key | `x-api-key: <key>` | Long-lived API keys with scopes |\n\n### API Key Scopes\n| Scope | Description |\n|-------|-------------|\n| `read` | Read-only access to resources |\n| `write` | Create and update resources |\n| `admin` | Administrative operations including key management |\n| `webhook` | Webhook delivery and management |\n\n### Roles\n| Role | Description |\n|------|-------------|\n| `admin` | Full platform access |\n| `operator` | Can verify, approve, and manage claims/campaigns |\n| `ngo` | Scoped to their own organization's resources |",
+    "version": "1.0",
+    "contact": {}
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local Development"
+    },
+    {
+      "url": "https://api.pulsefy.dev",
+      "description": "Staging"
+    },
+    {
+      "url": "https://api.pulsefy.com",
+      "description": "Production"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "JWT-auth": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http",
+        "description": "Enter JWT token obtained from the authentication service"
+      },
+      "api-key": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "API key for external/service access. Scopes: read | write | admin | webhook"
+      }
+    }
+  },
+  "paths": {}
+}

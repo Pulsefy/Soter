@@ -1,8 +1,21 @@
-import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  HttpException,
+  HttpStatus,
+  Param,
+  Query,
+  Req,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { ApiTags, ApiOperation, ApiOkResponse } from '@nestjs/swagger';
 import { RETENTION_PURGE_QUEUE } from '../retention-policy/retention-purge.processor';
+import { DlqService } from './dlq.service';
+import { Roles } from '../auth/roles.decorator';
+import { AppRole } from '../auth/app-role.enum';
+import { Request } from 'express';
 
 @ApiTags('Jobs')
 @Controller('jobs')
@@ -13,6 +26,7 @@ export class JobsController {
     @InjectQueue('onchain') private onchainQueue: Queue,
     @InjectQueue(RETENTION_PURGE_QUEUE) private retentionPurgeQueue: Queue,
     @InjectQueue('dead-letter') private deadLetterQueue: Queue,
+    private readonly dlqService: DlqService,
   ) {}
 
   @ApiOperation({
@@ -110,5 +124,48 @@ export class JobsController {
       failed,
       delayed,
     };
+  }
+
+  @ApiOperation({ summary: 'List queues and their current depth (Admin only)' })
+  @Roles(AppRole.admin)
+  @Get('queues')
+  async getQueues() {
+    return {
+      verification: await this.getQueueStatus(this.verificationQueue),
+      notifications: await this.getQueueStatus(this.notificationsQueue),
+      onchain: await this.getQueueStatus(this.onchainQueue),
+      'retention-purge': await this.getQueueStatus(this.retentionPurgeQueue),
+      'dead-letter': await this.getQueueStatus(this.deadLetterQueue),
+    };
+  }
+
+  @ApiOperation({ summary: 'List dead-letter jobs (Admin only)' })
+  @Roles(AppRole.admin)
+  @Get('dlq')
+  async getDlqJobs(
+    @Query('offset') offset?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const off = offset ? parseInt(offset, 10) : 0;
+    const lim = limit ? parseInt(limit, 10) : 50;
+    return this.dlqService.getDlqJobs(off, lim);
+  }
+
+  @ApiOperation({ summary: 'Get retry history for a DLQ job (Admin only)' })
+  @Roles(AppRole.admin)
+  @Get('dlq/:id/history')
+  async getDlqJobHistory(@Param('id') id: string) {
+    return this.dlqService.getJobHistory(id);
+  }
+
+  @ApiOperation({ summary: 'Replay a dead-letter job (Admin only)' })
+  @Roles(AppRole.admin)
+  @Post('dlq/:id/replay')
+  async replayDlqJob(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as any;
+    if (!user || !user.id) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+    return this.dlqService.replayJob(id, user.id);
   }
 }

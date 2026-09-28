@@ -1,3 +1,4 @@
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import {
   Controller,
   Post,
@@ -7,7 +8,6 @@ import {
   Request,
   UseInterceptors,
   UploadedFile,
-  BadRequestException,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -57,12 +57,20 @@ export class UploadSessionController {
     @Request() req: ExpressRequest,
   ) {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('No chunk data uploaded');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'No chunk data uploaded',
+      );
     }
     const ownerId = req.user?.apiKeyId ?? req.user?.authType ?? 'system';
     const index = Number(dto.index);
     if (!Number.isInteger(index) || index < 0) {
-      throw new BadRequestException('index must be a non-negative integer');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'index must be a non-negative integer',
+      );
     }
     return this.uploadSessionService.uploadChunk(
       id,

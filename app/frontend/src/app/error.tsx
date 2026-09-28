@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
-import { ErrorState } from '@/components/ErrorState';
+import React, { useEffect } from 'react';
+import { reportClientError } from '@/utils/reportClientError';
 
-export default function Error({
+export default function ErrorBoundary({
   error,
   reset,
 }: {
@@ -11,17 +11,21 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('Route segment error.', error);
-    }
+    reportClientError(error, error.digest);
   }, [error]);
 
   return (
-    <ErrorState
-      title="We couldn't load this page"
-      description="Soter ran into a temporary problem while preparing this route. Try again or return home to continue."
-      error={error}
-      onTryAgain={reset}
-    />
+    <div className="flex flex-col items-center justify-center min-h-[50vh] p-6 text-center">
+      <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Something went wrong</h2>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 mb-4">
+        We have automatically logged this issue. Please try reloading the view.
+      </p>
+      <button
+        onClick={() => reset()}
+        className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 transition-colors"
+      >
+        Try again
+      </button>
+    </div>
   );
 }

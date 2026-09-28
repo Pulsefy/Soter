@@ -6,7 +6,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
+  Linking,
+  Alert,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
@@ -14,21 +17,30 @@ import { AppColors } from '../theme/useAppTheme';
 import { useBiometric } from '../contexts/BiometricContext';
 import {
   AidDetails,
+  ClaimTimelineStatus,
   ClaimStatus,
   fetchAidDetails,
-  getMockAidDetails,
 } from '../services/aidApi';
+import {
+  cacheAidDetails,
+  loadCachedAidDetails,
+  getAidDetailsCacheTimestamp,
+} from '../services/aidCache';
 import { useSync } from '../contexts/SyncContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { SaverModeBanner } from '../components/SaverModeBanner';
+import { getTxExplorerUrl } from '../explorerUtils';
+import { DataFreshnessIndicator } from '../components/DataFreshnessIndicator';
+import { useTranslation } from '../i18n/useTranslation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AidDetails'>;
 
 export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const { aidId } = route.params;
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { biometricEnabled, authenticate } = useBiometric();
+  const { biometricEnabled, authenticate, confirmValueAction } = useBiometric();
   const { active: saverModeActive, source: saverModeSource } = useSaverMode();
 
   // null = not yet attempted, true = granted, false = denied
@@ -39,6 +51,8 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [isCached, setIsCached] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const {
     getActionsForAid,
@@ -80,13 +94,28 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       try {
         const data = await fetchAidDetails(aidId);
         setDetails(data);
+        setIsCached(false);
         setError(null);
-      } catch {
-        setError('Unable to reach the server. Showing last known data.');
-        setDetails((current) => current ?? getMockAidDetails(aidId));
-      } finally {
+        await cacheAidDetails(aidId, data);
         const now = new Date().toISOString();
         setLastUpdated(now);
+        if (isRefresh) setRefreshMessage('Data refreshed successfully.');
+      } catch {
+        const cached = await loadCachedAidDetails(aidId);
+        if (cached) {
+          setDetails(cached);
+          setIsCached(true);
+          const ts = await getAidDetailsCacheTimestamp(aidId);
+          setLastUpdated(ts || new Date().toISOString());
+          setError('Unable to reach the server. Showing last known cached data.');
+          if (isRefresh) setRefreshMessage('Refresh failed. Showing the last cached data.');
+        } else {
+          setDetails(null);
+          setIsCached(false);
+          setError('Unable to reach the server. Aid details are unavailable offline.');
+          if (isRefresh) setRefreshMessage('Refresh failed. Server is unreachable.');
+        }
+      } finally {
         setLoading(false);
         setRefreshing(false);
       }
@@ -166,6 +195,11 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
 
+    const confirmed = await confirmValueAction('Confirm claim submission');
+    if (!confirmed) {
+      return;
+    }
+
     setConfirming(true);
 
     try {
@@ -189,7 +223,15 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       setConfirming(false);
     }
-  }, [aidId, details, isConnected, loadDetails, navigation, queueClaimConfirmation]);
+  }, [
+    aidId,
+    confirmValueAction,
+    details,
+    isConnected,
+    loadDetails,
+    navigation,
+    queueClaimConfirmation,
+  ]);
 
   // ── Auth states ──────────────────────────────────────────────────────────
 
@@ -206,7 +248,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           color={colors.brand.primary}
           accessibilityElementsHidden
         />
-        <Text style={styles.subtitle}>Verifying identity…</Text>
+        <Text style={styles.subtitle}>{t('aidDetails.verifyingIdentity')}</Text>
       </View>
     );
   }
@@ -219,7 +261,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         accessibilityLabel="Authentication required. Biometric verification is needed to view this screen."
       >
         <Text style={styles.lockIcon} accessibilityElementsHidden>🔒</Text>
-        <Text style={styles.title}>Authentication Required</Text>
+        <Text style={styles.title}>{t('aidDetails.authRequired')}</Text>
         <Text style={styles.subtitle}>
           Biometric verification is needed to view this screen.
         </Text>
@@ -230,14 +272,14 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           onPress={requestAuth}
           activeOpacity={0.8}
         >
-          <Text style={styles.buttonText}>Try Again</Text>
+          <Text style={styles.buttonText}>{t('aidDetails.tryAgain')}</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   // authState === 'granted'
-  if (loading || !details) {
+  if (loading) {
     return (
       <View
         style={styles.centered}
@@ -250,7 +292,44 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           color={colors.brand.primary}
           accessibilityElementsHidden
         />
-        <Text style={styles.subtitle}>Loading aid details...</Text>
+        <Text style={styles.subtitle}>{t('aidDetails.loading')}</Text>
+      </View>
+    );
+  }
+
+  if (!details) {
+    return (
+      <View
+        style={styles.centered}
+        accessible
+        accessibilityLabel="Aid details unavailable. Unable to connect to the server and no cached details exist."
+        accessibilityRole="alert"
+      >
+        <Text style={styles.unavailableIcon} accessibilityElementsHidden>
+          ⚠️
+        </Text>
+        <Text style={styles.title}>{t('aidDetails.title')}</Text>
+        <Text style={styles.unavailableText}>
+          {error ?? 'Unable to retrieve package details from the server and no cached data is available on this device.'}
+        </Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading aid details"
+          style={[styles.button, { backgroundColor: colors.brand.primary }]}
+          onPress={() => loadDetails(false)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.buttonText}>🔄 Retry Connection</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Back to aid operations"
+          style={[styles.button, styles.secondaryButton]}
+          onPress={() => navigation.goBack()}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.secondaryButtonText}>{t('aidDetails.backToOverview')}</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -264,6 +343,8 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       <SaverModeBanner visible={saverModeActive} source={saverModeSource} />
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
+      <DataFreshnessIndicator isCached={isCached} isConnected={isConnected} cachedAt={lastUpdated} refreshing={refreshing} refreshMessage={refreshMessage} onRefresh={() => loadDetails(true)} />
+
       <View style={styles.header}>
         <Text style={styles.title} accessibilityRole="header">
           {details.title}
@@ -305,7 +386,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
 
       {pendingActions.length > 0 ? (
         <View style={styles.syncCard}>
-          <Text style={styles.sectionTitle}>Sync Status</Text>
+          <Text style={styles.sectionTitle}>{t('aidDetails.syncStatus')}</Text>
           <Text style={styles.syncCardText}>
             {pendingActions.length} pending action{pendingActions.length === 1 ? '' : 's'}
             {isSyncing ? ' are syncing now.' : ' saved locally.'}
@@ -329,9 +410,9 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           Recipient
         </Text>
         <View style={styles.card}>
-          <InfoRow label="Name" value={details.recipient.name} colors={colors} />
-          <InfoRow label="Recipient ID" value={details.recipient.id} colors={colors} />
-          <InfoRow label="Wallet" value={details.recipient.wallet} colors={colors} />
+          <InfoRow label={t('aidDetails.name')} value={details.recipient.name} colors={colors} />
+          <InfoRow label={t('aidDetails.recipientId')} value={details.recipient.id} colors={colors} />
+          <InfoRow label={t('aidDetails.wallet')} value={details.recipient.wallet} colors={colors} />
         </View>
       </View>
 
@@ -341,14 +422,14 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
           Package Details
         </Text>
         <View style={styles.card}>
-          <InfoRow label="Token Type" value={details.tokenType} colors={colors} />
+          <InfoRow label={t('aidDetails.tokenType')} value={details.tokenType} colors={colors} />
           <InfoRow
-            label="Amount"
+            label={t('aidDetails.amount')}
             value={`${details.amount} ${details.tokenType}`}
             colors={colors}
           />
-          <InfoRow label="Expiry Date" value={formatDate(details.expiryDate)} colors={colors} />
-          <InfoRow label="Claim ID" value={details.claimId} colors={colors} />
+          <InfoRow label={t('aidDetails.expiryDate')} value={formatDate(details.expiryDate)} colors={colors} />
+          <InfoRow label={t('aidDetails.claimId')} value={details.claimId} colors={colors} />
         </View>
       </View>
 
@@ -363,9 +444,11 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         </Text>
       </View>
 
+      <ClaimStatusTimeline details={details} colors={colors} styles={styles} />
+
       {details.status === 'disbursed' ? (
-        <View style={styles.claimCompleteCard} accessibilityRole="status">
-          <Text style={styles.claimCompleteTitle}>Claim completed</Text>
+        <View style={styles.claimCompleteCard} accessibilityLiveRegion="polite">
+          <Text style={styles.claimCompleteTitle}>{t('aidDetails.claimCompleted')}</Text>
           <Text style={styles.claimCompleteText}>
             This package has been disbursed. You can view your claim receipt now.
           </Text>
@@ -390,7 +473,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         {refreshing ? (
           <ActivityIndicator
             size="small"
-            color="#FFFFFF"
+            color={colors.background}
             accessibilityElementsHidden
           />
         ) : (
@@ -430,10 +513,16 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         <TouchableOpacity
           accessibilityRole="button"
           style={[styles.button, { backgroundColor: colors.success }]}
-          onPress={() => navigation.navigate('ClaimReceipt', { claimId: details.claimId })}
+          onPress={async () => {
+            const confirmed = await confirmValueAction('Confirm receipt access');
+            if (!confirmed) {
+              return;
+            }
+            navigation.navigate('ClaimReceipt', { claimId: details.claimId });
+          }}
           activeOpacity={0.8}
         >
-          <Text style={styles.buttonText}>View Receipt</Text>
+          <Text style={styles.buttonText}>{t('aidDetails.viewReceipt')}</Text>
         </TouchableOpacity>
       ) : null}
 
@@ -443,7 +532,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         onPress={() => navigation.navigate('EvidenceUpload', { aidId })}
         activeOpacity={0.8}
       >
-        <Text style={styles.buttonText}>Upload Evidence</Text>
+        <Text style={styles.buttonText}>{t('aidDetails.uploadEvidence')}</Text>
       </TouchableOpacity>
 
       {lastUpdated ? (
@@ -489,6 +578,156 @@ const InfoRow = ({
   </View>
 );
 
+type TimelineMilestone = {
+  key: ClaimTimelineStatus;
+  title: string;
+  description: string;
+  timestamp?: string;
+  transactionHash?: string;
+  explorerUrl?: string;
+  completed: boolean;
+};
+
+const ClaimStatusTimeline = ({
+  details,
+  colors,
+  styles,
+}: {
+  details: AidDetails;
+  colors: AppColors;
+  styles: ReturnType<typeof makeStyles>;
+}) => {
+  const milestones = useMemo(() => buildTimelineMilestones(details), [details]);
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle} accessibilityRole="header">
+        Status Timeline
+      </Text>
+      <View style={styles.timelineCard}>
+        {milestones.map((milestone, index) => (
+          <TimelineMilestoneRow
+            key={milestone.key}
+            milestone={milestone}
+            colors={colors}
+            styles={styles}
+            isLast={index === milestones.length - 1}
+          />
+        ))}
+      </View>
+    </View>
+  );
+};
+
+const TimelineMilestoneRow = ({
+  milestone,
+  colors,
+  styles,
+  isLast,
+}: {
+  milestone: TimelineMilestone;
+  colors: AppColors;
+  styles: ReturnType<typeof makeStyles>;
+  isLast: boolean;
+}) => {
+  const dateLabel = milestone.timestamp
+    ? formatDateTime(milestone.timestamp)
+    : milestone.completed
+    ? 'Confirmed, waiting for onchain timestamp'
+    : 'Pending onchain update';
+  const hashPreview = milestone.transactionHash
+    ? shortenHash(milestone.transactionHash)
+    : null;
+
+  const handleOpenExplorer = async () => {
+    if (!milestone.transactionHash) return;
+    await Linking.openURL(milestone.explorerUrl ?? getTxExplorerUrl(milestone.transactionHash));
+  };
+
+  const handleCopyHash = async () => {
+    if (!milestone.transactionHash) return;
+    try {
+      await Clipboard.setStringAsync(milestone.transactionHash);
+    } catch {
+      Alert.alert('Error', 'Failed to copy transaction hash');
+    }
+  };
+
+  return (
+    <View
+      style={styles.timelineRow}
+      accessible
+      accessibilityLabel={`${milestone.title}: ${dateLabel}`}
+    >
+      <View style={styles.timelineMarkerColumn} accessibilityElementsHidden>
+        <View
+          style={[
+            styles.timelineMarker,
+            {
+              backgroundColor: milestone.completed ? colors.brand.primary : colors.surface,
+              borderColor: milestone.completed ? colors.brand.primary : colors.border,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.timelineMarkerText,
+              { color: milestone.completed ? '#FFFFFF' : colors.textSecondary },
+            ]}
+          >
+            {milestone.completed ? 'OK' : '--'}
+          </Text>
+        </View>
+        {!isLast ? (
+          <View
+            style={[
+              styles.timelineConnector,
+              { backgroundColor: milestone.completed ? colors.brand.primary : colors.border },
+            ]}
+          />
+        ) : null}
+      </View>
+      <View style={styles.timelineContent}>
+        <View style={styles.timelineHeaderRow}>
+          <Text style={styles.timelineTitle}>{milestone.title}</Text>
+          <Text
+            style={[
+              styles.timelineState,
+              { color: milestone.completed ? colors.success : colors.textMuted },
+            ]}
+          >
+            {milestone.completed ? 'Done' : 'Waiting'}
+          </Text>
+        </View>
+        <Text style={styles.timelineDescription}>{milestone.description}</Text>
+        <Text style={styles.timelineDate}>{dateLabel}</Text>
+        {hashPreview ? (
+          <View style={styles.timelineActions}>
+            <TouchableOpacity
+              accessibilityRole="link"
+              accessibilityLabel={`Open explorer for ${milestone.title} transaction`}
+              style={styles.timelineActionButton}
+              onPress={handleOpenExplorer}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.timelineActionText}>Explorer {hashPreview}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Copy ${milestone.title} transaction hash`}
+              style={styles.timelineActionButton}
+              onPress={handleCopyHash}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.timelineActionText}>{t('aidDetails.copyHash')}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+};
+
 const StepProgress = ({
   status,
   colors,
@@ -499,6 +738,7 @@ const StepProgress = ({
   const steps: Array<{ key: ClaimStatus; label: string }> = [
     { key: 'requested', label: 'Requested' },
     { key: 'verified', label: 'Verified' },
+    { key: 'approved', label: 'Approved' },
     { key: 'disbursed', label: 'Disbursed' },
   ];
   const activeIndex = steps.findIndex((step) => step.key === status);
@@ -536,7 +776,7 @@ const StepProgress = ({
               <Text
                 style={[
                   stylesShared.progressText,
-                  { color: isComplete ? '#FFFFFF' : colors.textSecondary },
+                  { color: isComplete ? colors.background : colors.textSecondary },
                 ]}
               >
                 {index + 1}
@@ -569,6 +809,96 @@ const StepProgress = ({
 const formatStatus = (status: ClaimStatus) =>
   status.charAt(0).toUpperCase() + status.slice(1);
 
+const timelineDefinitions: Array<{
+  key: ClaimTimelineStatus;
+  title: string;
+  description: string;
+}> = [
+  {
+    key: 'verification',
+    title: 'Verification',
+    description: 'Recipient and package details were checked.',
+  },
+  {
+    key: 'approval',
+    title: 'Approval',
+    description: 'The aid package was approved for claiming.',
+  },
+  {
+    key: 'claim',
+    title: 'Claim',
+    description: 'The beneficiary claim was submitted.',
+  },
+  {
+    key: 'disbursement',
+    title: 'Disbursement',
+    description: 'Funds were released to the recipient.',
+  },
+];
+
+const statusRank: Record<ClaimStatus, number> = {
+  requested: 0,
+  verified: 1,
+  approved: 2,
+  disbursed: 3,
+};
+
+const buildTimelineMilestones = (details: AidDetails): TimelineMilestone[] => {
+  const timelineByStatus = new Map(
+    (details.timeline ?? []).map((event) => [event.status, event]),
+  );
+  const currentRank = statusRank[details.status] ?? 0;
+
+  return timelineDefinitions.map((definition, index) => {
+    const event = timelineByStatus.get(definition.key);
+    const fallbackTimestamp = getTimelineTimestamp(details, definition.key);
+    const transactionHash = event?.transactionHash ?? getTimelineHash(details, definition.key);
+
+    return {
+      key: definition.key,
+      title: event?.label ?? definition.title,
+      description: definition.description,
+      timestamp: event?.timestamp ?? fallbackTimestamp,
+      transactionHash,
+      explorerUrl: event?.explorerUrl,
+      completed: Boolean(event?.timestamp || transactionHash) || currentRank >= index,
+    };
+  });
+};
+
+const getTimelineTimestamp = (details: AidDetails, key: ClaimTimelineStatus) => {
+  switch (key) {
+    case 'verification':
+      return details.verifiedAt;
+    case 'approval':
+      return details.approvedAt;
+    case 'claim':
+      return details.claimedAt ?? details.createdAt;
+    case 'disbursement':
+      return details.disbursedAt;
+    default:
+      return undefined;
+  }
+};
+
+const getTimelineHash = (details: AidDetails, key: ClaimTimelineStatus) => {
+  switch (key) {
+    case 'verification':
+      return details.verificationTransactionHash;
+    case 'approval':
+      return details.approvalTransactionHash;
+    case 'claim':
+      return details.claimTransactionHash;
+    case 'disbursement':
+      return details.disbursementTransactionHash;
+    default:
+      return undefined;
+  }
+};
+
+const shortenHash = (value: string) =>
+  value.length > 16 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
+
 const formatDate = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -594,8 +924,10 @@ const statusPillStyle = (status: ClaimStatus, colors: AppColors) => {
   switch (status) {
     case 'verified':
       return { backgroundColor: colors.infoBg, textColor: colors.info };
+    case 'approved':
+      return { backgroundColor: colors.successBg, textColor: colors.success };
     case 'disbursed':
-      return { backgroundColor: colors.success, textColor: '#FFFFFF' };
+      return { backgroundColor: colors.success, textColor: colors.background };
     case 'requested':
     default:
       return { backgroundColor: colors.warningBg, textColor: colors.warning };
@@ -675,6 +1007,18 @@ const makeStyles = (colors: AppColors) =>
       padding: 32,
       gap: 16,
     },
+    unavailableIcon: {
+      fontSize: 48,
+      marginBottom: 8,
+    },
+    unavailableText: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      lineHeight: 20,
+      marginHorizontal: 16,
+      marginBottom: 8,
+    },
     lockIcon: {
       fontSize: 48,
     },
@@ -701,7 +1045,7 @@ const makeStyles = (colors: AppColors) =>
     statusText: {
       fontSize: 12,
       fontWeight: '700',
-      color: '#FFFFFF',
+      color: colors.background,
     },
     section: {
       gap: 8,
@@ -728,6 +1072,90 @@ const makeStyles = (colors: AppColors) =>
       fontSize: 13,
       color: colors.textSecondary,
       marginTop: 4,
+    },
+    timelineCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 0,
+    },
+    timelineRow: {
+      flexDirection: 'row',
+      alignItems: 'stretch',
+    },
+    timelineMarkerColumn: {
+      alignItems: 'center',
+      marginRight: 12,
+    },
+    timelineMarker: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      borderWidth: 2,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    timelineMarkerText: {
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    timelineConnector: {
+      width: 2,
+      flex: 1,
+      minHeight: 42,
+      marginVertical: 4,
+    },
+    timelineContent: {
+      flex: 1,
+      paddingBottom: 18,
+    },
+    timelineHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 12,
+    },
+    timelineTitle: {
+      flex: 1,
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    timelineState: {
+      fontSize: 12,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+    },
+    timelineDescription: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      lineHeight: 18,
+      marginTop: 3,
+    },
+    timelineDate: {
+      fontSize: 12,
+      color: colors.textMuted,
+      marginTop: 5,
+    },
+    timelineActions: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 10,
+    },
+    timelineActionButton: {
+      borderWidth: 1,
+      borderColor: colors.brand.primary,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+    },
+    timelineActionText: {
+      color: colors.brand.primary,
+      fontSize: 12,
+      fontWeight: '700',
     },
     notice: {
       backgroundColor: colors.warningBg,
@@ -778,7 +1206,7 @@ const makeStyles = (colors: AppColors) =>
       opacity: 0.7,
     },
     buttonText: {
-      color: '#FFFFFF',
+      color: colors.background,
       fontSize: 16,
       fontWeight: '700',
     },

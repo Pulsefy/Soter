@@ -1,8 +1,11 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { useAidPackages } from '@/hooks/useAidPackages';
+import { Pagination } from '@/components/Pagination';
 import type { AidPackage, AidPackageStatus } from '@/types/aid-package';
+
+const PAGE_SIZE = 10;
 
 const STATUS_STYLES: Record<AidPackageStatus, string> = {
   Active: 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300',
@@ -28,7 +31,24 @@ function PackageCard({ pkg }: { pkg: AidPackage }) {
 }
 
 export const AidPackageList: React.FC = () => {
-  const { data: packages = [], isLoading, error } = useAidPackages();
+  const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState<'id' | 'title' | 'status' | 'amount'>('id');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const { data: response, isLoading, isFetching, error } = useAidPackages(undefined, {
+    page,
+    size: PAGE_SIZE,
+    sortBy,
+    sortDirection,
+  });
+
+  const packages = response?.data ?? [];
+  const totalItems = response?.total ?? 0;
+  const totalPages = response?.totalPages ?? 1;
+
+  const handlePageChange = useCallback((next: number) => {
+    setPage(next);
+  }, []);
 
   if (isLoading) {
     return (
@@ -47,18 +67,54 @@ export const AidPackageList: React.FC = () => {
     );
   }
 
-  if (packages.length === 0) {
+  if (totalItems === 0) {
     return <div className="text-gray-500 dark:text-gray-400">No aid packages found.</div>;
   }
 
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Available Aid Packages</h3>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+          Available Aid Packages
+        </h3>
+        <label className="text-sm text-gray-600 dark:text-gray-400">
+          Sort{' '}
+          <select
+            value={`${sortBy}:${sortDirection}`}
+            onChange={e => {
+              const [nextSort, nextDir] = e.target.value.split(':') as [
+                typeof sortBy,
+                typeof sortDirection,
+              ];
+              setSortBy(nextSort);
+              setSortDirection(nextDir);
+              setPage(1);
+            }}
+            className="rounded border border-gray-200 bg-white px-2 py-1 dark:border-gray-700 dark:bg-gray-800"
+          >
+            <option value="id:asc">ID ↑</option>
+            <option value="id:desc">ID ↓</option>
+            <option value="title:asc">Title ↑</option>
+            <option value="title:desc">Title ↓</option>
+            <option value="status:asc">Status ↑</option>
+            <option value="status:desc">Status ↓</option>
+            <option value="amount:asc">Amount ↑</option>
+            <option value="amount:desc">Amount ↓</option>
+          </select>
+        </label>
+      </div>
+      <div className={`grid gap-4 md:grid-cols-2 ${isFetching ? 'opacity-70' : ''}`}>
         {packages.map(pkg => (
           <PackageCard key={pkg.id} pkg={pkg} />
         ))}
       </div>
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        pageSize={PAGE_SIZE}
+        totalItems={totalItems}
+        onPageChange={handlePageChange}
+      />
     </div>
   );
 };

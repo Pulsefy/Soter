@@ -49,6 +49,9 @@ describe('AnalyticsService', () => {
       redisMock.get.mockResolvedValue(null);
       prismaMock.claim.findMany.mockResolvedValue([]);
       prismaMock.campaign.count.mockResolvedValue(0);
+      prismaMock.claim.count.mockResolvedValue(0);
+      prismaMock.aidPackage.count.mockResolvedValue(0);
+      prismaMock.verificationRequest.count.mockResolvedValue(0);
 
       await service.getGlobalStats({});
 
@@ -57,6 +60,28 @@ describe('AnalyticsService', () => {
         'miss',
       );
       expect(redisMock.set).toHaveBeenCalled();
+    });
+
+    it('returns dashboard summary card totals from database counts', async () => {
+      redisMock.get.mockResolvedValue(null);
+      prismaMock.claim.findMany.mockResolvedValue([]);
+      prismaMock.campaign.count.mockResolvedValue(3);
+
+      // Mock the four parallel count queries used by summary cards:
+      // totalClaims, totalPackages, pendingReviews, totalDisbursements
+      prismaMock.claim.count
+        .mockResolvedValueOnce(42) // totalClaims
+        .mockResolvedValueOnce(15); // totalDisbursements (disbursed claims)
+      prismaMock.aidPackage.count.mockResolvedValue(18);
+      prismaMock.verificationRequest.count.mockResolvedValue(7);
+
+      const result = await service.getGlobalStats({});
+
+      expect(result.totalClaims).toBe(42);
+      expect(result.totalPackages).toBe(18);
+      expect(result.pendingReviews).toBe(7);
+      expect(result.totalDisbursements).toBe(15);
+      expect(result.activeCampaigns).toBe(3);
     });
   });
 

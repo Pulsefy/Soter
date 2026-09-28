@@ -30,7 +30,12 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-// 3. Force Metro to resolve (sub)dependencies only from nodeModulesPaths
-config.resolver.disableHierarchicalLookup = true;
+// 3. pnpm keeps most packages out of the two directories above, reachable
+// only via symlinks nested inside their dependents' own node_modules (e.g.
+// expo-modules-core lives under node_modules/.pnpm/expo@.../node_modules,
+// not hoisted anywhere flat). Metro needs hierarchical lookup enabled to
+// walk up and find those, and needs to actually follow the symlinks pnpm
+// uses to place them there.
+config.resolver.unstable_enableSymlinks = true;
 
 module.exports = config;

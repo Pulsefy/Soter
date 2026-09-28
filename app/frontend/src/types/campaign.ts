@@ -37,3 +37,14 @@ export interface CampaignUpdatePayload {
   status?: CampaignStatus;
   metadata?: Record<string, unknown>;
 }
+
+export interface CampaignTimelineMilestone {
+  id: string;
+  label: string;
+  status: 'completed' | 'pending' | 'delayed' | 'failed';
+  occurredAt?: string;
+  description: string;
+  transactionHash?: string;
+  explorerUrl?: string;
+  correlationId?: string;
+}

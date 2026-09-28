@@ -1,0 +1,4365 @@
+{
+  "components": {
+    "schemas": {
+      "AccessModeRequest": {
+        "properties": {
+          "mode": {
+            "default": "signed_url",
+            "enum": [
+              "signed_url",
+              "proxy"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "title": "AccessModeRequest",
+        "type": "object"
+      },
+      "AnchorMetadata": {
+        "examples": [
+          {
+            "campaign_ref": "campaign-2024-001",
+            "claim_id": "claim-abc123"
+          }
+        ],
+        "properties": {
+          "campaign_ref": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-zA-Z0-9_-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "campaign-2024-001"
+            ],
+            "title": "Campaign Ref"
+          },
+          "claim_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-zA-Z0-9_-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "claim-abc123"
+            ],
+            "title": "Claim Id"
+          },
+          "package_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-zA-Z0-9_-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "package-x7y8z9"
+            ],
+            "title": "Package Id"
+          }
+        },
+        "title": "AnchorMetadata",
+        "type": "object"
+      },
+      "AnonymizeRequest": {
+        "examples": [
+          {
+            "anchor_metadata": {
+              "campaign_ref": "campaign-2024-001",
+              "claim_id": "claim-abc123"
+            },
+            "text": "John Doe from New York on 2024-01-01 requested aid"
+          }
+        ],
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "description": "Input text to anonymize before LLM processing",
+            "examples": [
+              "John Doe from New York on 2024-01-01 requested aid"
+            ],
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "AnonymizeRequest",
+        "type": "object"
+      },
+      "AnonymizeResult": {
+        "description": "Payload nested inside the ResultEnvelope for anonymization responses.",
+        "examples": [
+          {
+            "anonymized_text": "[NAME] from [LOCATION] on [DATE] requested aid",
+            "original_length": 50,
+            "pii_summary": {
+              "dates": 1,
+              "locations": 1,
+              "names": 1,
+              "total": 3
+            },
+            "token_counts": {
+              "[EVENT_DATE]": 1,
+              "[LOCATION]": 1,
+              "[RECIPIENT_NAME]": 1
+            }
+          }
+        ],
+        "properties": {
+          "anonymized_text": {
+            "examples": [
+              "[NAME] from [LOCATION] on [DATE] requested aid"
+            ],
+            "title": "Anonymized Text",
+            "type": "string"
+          },
+          "original_length": {
+            "examples": [
+              50
+            ],
+            "title": "Original Length",
+            "type": "integer"
+          },
+          "pii_summary": {
+            "examples": [
+              {
+                "dates": 1,
+                "locations": 1,
+                "names": 1,
+                "total": 3
+              }
+            ],
+            "title": "Pii Summary",
+            "type": "object"
+          },
+          "token_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "examples": [
+              {
+                "anonymized": 10,
+                "original": 10
+              }
+            ],
+            "title": "Token Counts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "anonymized_text",
+          "original_length"
+        ],
+        "title": "AnonymizeResult",
+        "type": "object"
+      },
+      "BatchOCRDocumentStatus": {
+        "properties": {
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable id of this document within the batch; address retries with it so duplicate filenames stay unambiguous.",
+            "title": "Document Id"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Failure reason when status is failed.",
+            "title": "Error"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "retry_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present only while the document is failed and its upload is still retained; POST here to requeue just this document.",
+            "title": "Retry Url"
+          },
+          "status": {
+            "description": "Outcome for this document: pending, processing, succeeded or failed.",
+            "enum": [
+              "pending",
+              "processing",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "status_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Poll URL for this document's queued OCR job.",
+            "title": "Status Url"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "BatchOCRDocumentStatus",
+        "type": "object"
+      },
+      "BatchOCRResponse": {
+        "properties": {
+          "batch_id": {
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/BatchOCRDocumentStatus"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "processing",
+              "succeeded",
+              "failed",
+              "partially_failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "status_url": {
+            "description": "Poll for the per-document outcome breakdown of this batch.",
+            "title": "Status Url",
+            "type": "string"
+          },
+          "success": {
+            "examples": [
+              true
+            ],
+            "title": "Success",
+            "type": "boolean"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/BatchOCRSummary"
+          }
+        },
+        "required": [
+          "success",
+          "batch_id",
+          "status",
+          "status_url",
+          "summary",
+          "documents"
+        ],
+        "title": "BatchOCRResponse",
+        "type": "object"
+      },
+      "BatchOCRStatusResponse": {
+        "description": "Pollable per-document breakdown of a batch.",
+        "properties": {
+          "batch_id": {
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/BatchOCRDocumentStatus"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "status": {
+            "description": "processing while documents are still running, then succeeded, failed, or partially_failed once every document reached a terminal state.",
+            "enum": [
+              "processing",
+              "succeeded",
+              "failed",
+              "partially_failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "status_url": {
+            "title": "Status Url",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/BatchOCRSummary"
+          }
+        },
+        "required": [
+          "batch_id",
+          "status",
+          "status_url",
+          "summary",
+          "documents"
+        ],
+        "title": "BatchOCRStatusResponse",
+        "type": "object"
+      },
+      "BatchOCRSummary": {
+        "description": "Per-state document counts for a batch.",
+        "properties": {
+          "failed": {
+            "default": 0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "pending": {
+            "default": 0,
+            "title": "Pending",
+            "type": "integer"
+          },
+          "processing": {
+            "default": 0,
+            "title": "Processing",
+            "type": "integer"
+          },
+          "succeeded": {
+            "default": 0,
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "total": {
+            "examples": [
+              10
+            ],
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total"
+        ],
+        "title": "BatchOCRSummary",
+        "type": "object"
+      },
+      "Body_process_ocr_ai_ocr_post": {
+        "properties": {
+          "document_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional document type (e.g. id_card, passport) used to pick a per-document-type review threshold",
+            "title": "Document Type"
+          },
+          "image": {
+            "description": "Image file to process",
+            "format": "binary",
+            "title": "Image",
+            "type": "string"
+          },
+          "language_hint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LanguageHint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Language hint for OCR"
+          }
+        },
+        "required": [
+          "image"
+        ],
+        "title": "Body_process_ocr_ai_ocr_post",
+        "type": "object"
+      },
+      "Body_process_ocr_v1_ai_ocr_post": {
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "JSON encoded AnchorMetadata",
+            "title": "Anchor Metadata"
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional document type (e.g. id_card, passport) used to pick a per-document-type review threshold",
+            "title": "Document Type"
+          },
+          "image": {
+            "description": "Image file to process",
+            "format": "binary",
+            "title": "Image",
+            "type": "string"
+          },
+          "language_hint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LanguageHint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Language hint for OCR"
+          }
+        },
+        "required": [
+          "image"
+        ],
+        "title": "Body_process_ocr_v1_ai_ocr_post",
+        "type": "object"
+      },
+      "Body_queue_batch_ocr_jobs_v1_ai_ocr_batch_post": {
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "JSON encoded AnchorMetadata",
+            "title": "Anchor Metadata"
+          },
+          "files": {
+            "description": "One or more image files to process",
+            "items": {
+              "format": "binary",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "language_hint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LanguageHint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Language hint for OCR"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "Body_queue_batch_ocr_jobs_v1_ai_ocr_batch_post",
+        "type": "object"
+      },
+      "Body_queue_ocr_job_v1_ai_ocr_jobs_post": {
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "JSON encoded AnchorMetadata",
+            "title": "Anchor Metadata"
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional document type (e.g. id_card, passport) used to pick a per-document-type review threshold",
+            "title": "Document Type"
+          },
+          "image": {
+            "description": "Image file to process",
+            "format": "binary",
+            "title": "Image",
+            "type": "string"
+          },
+          "language_hint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LanguageHint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Language hint for OCR"
+          }
+        },
+        "required": [
+          "image"
+        ],
+        "title": "Body_queue_ocr_job_v1_ai_ocr_jobs_post",
+        "type": "object"
+      },
+      "Body_upload_chunk_v1_ai_evidence_uploads_sessions__session_id__chunks__chunk_index__put": {
+        "properties": {
+          "chunk": {
+            "description": "Raw bytes for this chunk",
+            "format": "binary",
+            "title": "Chunk",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunk"
+        ],
+        "title": "Body_upload_chunk_v1_ai_evidence_uploads_sessions__session_id__chunks__chunk_index__put",
+        "type": "object"
+      },
+      "CacheInvalidationResponse": {
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "invalidated_entries": {
+            "title": "Invalidated Entries",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "invalidated_entries"
+        ],
+        "title": "CacheInvalidationResponse",
+        "type": "object"
+      },
+      "ChunkUploadResponse": {
+        "description": "Result of uploading a single chunk.",
+        "examples": [
+          {
+            "chunk_index": 3,
+            "received_chunks": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "remaining_chunks": 6,
+            "session_id": "sess_abc123def456",
+            "status": "in_progress"
+          }
+        ],
+        "properties": {
+          "chunk_index": {
+            "examples": [
+              3
+            ],
+            "title": "Chunk Index",
+            "type": "integer"
+          },
+          "received_chunks": {
+            "examples": [
+              [
+                0,
+                1,
+                2,
+                3
+              ]
+            ],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Received Chunks",
+            "type": "array"
+          },
+          "remaining_chunks": {
+            "examples": [
+              6
+            ],
+            "title": "Remaining Chunks",
+            "type": "integer"
+          },
+          "session_id": {
+            "examples": [
+              "sess_abc123def456"
+            ],
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "examples": [
+              "in_progress"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "chunk_index",
+          "received_chunks",
+          "remaining_chunks",
+          "status"
+        ],
+        "title": "ChunkUploadResponse",
+        "type": "object"
+      },
+      "ClaimFraudResult": {
+        "examples": [
+          {
+            "claim_id": "claim-abc123",
+            "fraud_risk_score": 0.15,
+            "is_flagged": false
+          },
+          {
+            "claim_id": "claim-def456",
+            "code": "ANOMALY_DETECTED",
+            "fraud_risk_score": 0.95,
+            "is_flagged": true,
+            "reason": "Statistical outlier in amount"
+          }
+        ],
+        "properties": {
+          "band": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FraudBand"
+              }
+            ],
+            "examples": [
+              "PASS",
+              "REJECT"
+            ]
+          },
+          "claim_id": {
+            "examples": [
+              "claim-abc123"
+            ],
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FraudExplanationCode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "ANOMALY_DETECTED"
+            ]
+          },
+          "fraud_risk_score": {
+            "examples": [
+              0.15,
+              0.95
+            ],
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Fraud Risk Score",
+            "type": "number"
+          },
+          "is_flagged": {
+            "examples": [
+              false,
+              true
+            ],
+            "title": "Is Flagged",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "Statistical outlier in amount"
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "claim_id",
+          "fraud_risk_score",
+          "is_flagged",
+          "band"
+        ],
+        "title": "ClaimFraudResult",
+        "type": "object"
+      },
+      "ClaimMetadata": {
+        "examples": [
+          {
+            "amount": 100.0,
+            "claim_id": "claim-abc123",
+            "ip_address": "192.168.1.1",
+            "location": "Kano, Nigeria"
+          }
+        ],
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              100.0
+            ],
+            "title": "Amount"
+          },
+          "claim_id": {
+            "examples": [
+              "claim-abc123"
+            ],
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "evidence_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "abc123def456"
+            ],
+            "title": "Evidence Hash"
+          },
+          "extra": {
+            "examples": [
+              {
+                "source": "mobile_app"
+              }
+            ],
+            "title": "Extra",
+            "type": "object"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "192.168.1.1"
+            ],
+            "title": "Ip Address"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "Kano, Nigeria"
+            ],
+            "title": "Location"
+          }
+        },
+        "required": [
+          "claim_id"
+        ],
+        "title": "ClaimMetadata",
+        "type": "object"
+      },
+      "ContractMetadata": {
+        "description": "Contract-aware metadata for verification results.",
+        "properties": {
+          "campaign_id": {
+            "description": "Campaign identifier (UUID)",
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "chain_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "testnet",
+            "description": "Chain identifier",
+            "title": "Chain Id"
+          },
+          "claim_id": {
+            "description": "Claim identifier (UUID)",
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "contract_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Smart contract address",
+            "title": "Contract Address"
+          },
+          "network": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "testnet",
+            "description": "Stellar network (testnet/mainnet)",
+            "title": "Network"
+          },
+          "package_id": {
+            "description": "Package identifier for on-chain anchoring",
+            "title": "Package Id",
+            "type": "string"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata timestamp",
+            "title": "Timestamp"
+          },
+          "transaction_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On-chain transaction hash",
+            "title": "Transaction Hash"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "1.0.0",
+            "description": "Metadata version",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "claim_id",
+          "package_id"
+        ],
+        "title": "ContractMetadata",
+        "type": "object"
+      },
+      "CreateUploadSessionRequest": {
+        "description": "Request body for starting a new resumable upload session.",
+        "examples": [
+          {
+            "content_type": "image/jpeg",
+            "filename": "evidence_photo.jpg",
+            "total_chunks": 10,
+            "total_size": 1048576
+          }
+        ],
+        "properties": {
+          "content_type": {
+            "examples": [
+              "image/jpeg"
+            ],
+            "minLength": 1,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "filename": {
+            "examples": [
+              "evidence_photo.jpg"
+            ],
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "total_chunks": {
+            "description": "Number of chunks to be sent",
+            "examples": [
+              10
+            ],
+            "exclusiveMinimum": 0.0,
+            "title": "Total Chunks",
+            "type": "integer"
+          },
+          "total_size": {
+            "description": "Total file size in bytes",
+            "examples": [
+              1048576
+            ],
+            "exclusiveMinimum": 0.0,
+            "title": "Total Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename",
+          "content_type",
+          "total_size",
+          "total_chunks"
+        ],
+        "title": "CreateUploadSessionRequest",
+        "type": "object"
+      },
+      "FinalizeUploadResponse": {
+        "description": "Result of finalizing an assembled upload.",
+        "examples": [
+          {
+            "artifact_id": "art_xyz789",
+            "content_type": "image/jpeg",
+            "filename": "evidence_photo.jpg",
+            "session_id": "sess_abc123def456",
+            "status": "completed",
+            "total_size": 1048576
+          }
+        ],
+        "properties": {
+          "artifact_id": {
+            "examples": [
+              "art_xyz789"
+            ],
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "content_type": {
+            "examples": [
+              "image/jpeg"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "filename": {
+            "examples": [
+              "evidence_photo.jpg"
+            ],
+            "title": "Filename",
+            "type": "string"
+          },
+          "session_id": {
+            "examples": [
+              "sess_abc123def456"
+            ],
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "examples": [
+              "completed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total_size": {
+            "examples": [
+              1048576
+            ],
+            "title": "Total Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "artifact_id",
+          "filename",
+          "content_type",
+          "total_size",
+          "status"
+        ],
+        "title": "FinalizeUploadResponse",
+        "type": "object"
+      },
+      "FraudBand": {
+        "description": "Decision band derived from a claim's fraud_risk_score.\n\nPASS: score below FRAUD_PASS_MAX_SCORE - no action needed.\nREVIEW: score between the pass and review thresholds - a human should\n    look at the claim before it proceeds.\nREJECT: score at/above FRAUD_REVIEW_MAX_SCORE - treat as fraudulent\n    pending appeal.",
+        "enum": [
+          "PASS",
+          "REVIEW",
+          "REJECT"
+        ],
+        "title": "FraudBand",
+        "type": "string"
+      },
+      "FraudDetectionRequest": {
+        "examples": [
+          {
+            "anchor_metadata": {
+              "campaign_ref": "campaign-2024-001"
+            },
+            "claims": [
+              {
+                "amount": 100.0,
+                "claim_id": "claim-abc123",
+                "ip_address": "192.168.1.1",
+                "location": "Kano, Nigeria"
+              },
+              {
+                "amount": 100.0,
+                "claim_id": "claim-def456",
+                "ip_address": "192.168.1.2",
+                "location": "Kano, Nigeria"
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimMetadata"
+            },
+            "minItems": 1,
+            "title": "Claims",
+            "type": "array"
+          }
+        },
+        "required": [
+          "claims"
+        ],
+        "title": "FraudDetectionRequest",
+        "type": "object"
+      },
+      "FraudExplanationCode": {
+        "const": "ANOMALY_DETECTED",
+        "title": "FraudExplanationCode",
+        "type": "string"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HumanitarianVerificationRequest": {
+        "examples": [
+          {
+            "aid_claim": "Family of 5 displaced by flood needs food and shelter",
+            "anchor_metadata": {
+              "campaign_ref": "campaign-2024-001",
+              "claim_id": "claim-abc123"
+            },
+            "context_factors": {
+              "disaster_type": "flood",
+              "location": "Kano, Nigeria"
+            },
+            "prompt_version": "v1",
+            "provider_preference": "auto",
+            "supporting_evidence": [
+              "photo of damaged home"
+            ],
+            "timeout": 30.0
+          }
+        ],
+        "properties": {
+          "aid_claim": {
+            "description": "Aid claim to verify",
+            "examples": [
+              "Family of 5 displaced by flood needs food and shelter"
+            ],
+            "minLength": 10,
+            "title": "Aid Claim",
+            "type": "string"
+          },
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "artifact_ids": {
+            "description": "IDs of evidence artifacts (see /ai/verification-artifacts) referenced by this claim. Used to key the response cache so it can be explicitly invalidated when an artifact is updated. The cache additionally stores a content-hash key, so re-uploading identical bytes under a new artifact ID reuses the cached result.",
+            "examples": [
+              [
+                "artifact_abc123"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifact Ids",
+            "type": "array"
+          },
+          "context_factors": {
+            "examples": [
+              {
+                "disaster_type": "flood",
+                "location": "Kano, Nigeria"
+              }
+            ],
+            "title": "Context Factors",
+            "type": "object"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit prompt version to use from registry (defaults to configured active version)",
+            "examples": [
+              "v1"
+            ],
+            "title": "Prompt Version"
+          },
+          "provider_preference": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "test",
+              "openai",
+              "groq"
+            ],
+            "examples": [
+              "auto"
+            ],
+            "title": "Provider Preference",
+            "type": "string"
+          },
+          "supporting_evidence": {
+            "examples": [
+              [
+                "photo of damaged home",
+                "local report"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Supporting Evidence",
+            "type": "array"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Request-level timeout in seconds for provider call",
+            "examples": [
+              30.0
+            ],
+            "title": "Timeout"
+          }
+        },
+        "required": [
+          "aid_claim"
+        ],
+        "title": "HumanitarianVerificationRequest",
+        "type": "object"
+      },
+      "InferenceRequest": {
+        "description": "Request model for AI inference endpoints.",
+        "example": {
+          "campaign_id": "123e4567-e89b-12d3-a456-426614174000",
+          "claim_id": "123e4567-e89b-12d3-a456-426614174001",
+          "data": {
+            "document_url": "https://example.com/doc.pdf"
+          },
+          "network": "testnet",
+          "package_id": "pkg_abc123def",
+          "type": "verification"
+        },
+        "properties": {
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
+          },
+          "claim_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Id"
+          },
+          "contract_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Address"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "network": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "testnet",
+            "title": "Network"
+          },
+          "package_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package Id"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "normal",
+            "title": "Priority"
+          },
+          "transaction_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transaction Hash"
+          },
+          "type": {
+            "default": "inference",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "InferenceRequest",
+        "type": "object"
+      },
+      "LanguageHint": {
+        "enum": [
+          "eng",
+          "spa",
+          "fra",
+          "deu",
+          "ita",
+          "por",
+          "chi_sim",
+          "ara",
+          "hin",
+          "jpn"
+        ],
+        "title": "LanguageHint",
+        "type": "string"
+      },
+      "OCRConfidenceBand": {
+        "description": "Reliability band derived from the configured OCR thresholds.",
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "title": "OCRConfidenceBand",
+        "type": "string"
+      },
+      "OCRData": {
+        "examples": [
+          {
+            "confidence": 0.925,
+            "confidence_band": "high",
+            "document_type": "id_card",
+            "fields": {
+              "full_name": {
+                "confidence": 0.95,
+                "value": "John Doe"
+              },
+              "id_number": {
+                "confidence": 0.9,
+                "value": "123456789"
+              }
+            },
+            "needs_review": false,
+            "processing_time_ms": 1500,
+            "raw_text": "John Doe\nID: 123456789",
+            "review_threshold": 0.75
+          }
+        ],
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean confidence across the detected fields, or null when no field carried a confidence value.",
+            "examples": [
+              0.91
+            ],
+            "title": "Confidence"
+          },
+          "confidence_band": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OCRConfidenceBand"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "high/medium/low band derived from the configured thresholds.",
+            "examples": [
+              "high"
+            ]
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Document type used to select the review threshold, when supplied.",
+            "examples": [
+              "id_card"
+            ],
+            "title": "Document Type"
+          },
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OCRFieldResult"
+            },
+            "examples": [
+              {
+                "full_name": {
+                  "confidence": 0.95,
+                  "value": "John Doe"
+                },
+                "id_number": {
+                  "confidence": 0.9,
+                  "value": "123456789"
+                }
+              }
+            ],
+            "title": "Fields",
+            "type": "object"
+          },
+          "needs_review": {
+            "default": false,
+            "description": "True when the extraction is missing confidence or falls below the review threshold; a human should verify the document.",
+            "examples": [
+              false
+            ],
+            "title": "Needs Review",
+            "type": "boolean"
+          },
+          "processing_time_ms": {
+            "examples": [
+              1500
+            ],
+            "title": "Processing Time Ms",
+            "type": "integer"
+          },
+          "raw_text": {
+            "examples": [
+              "John Doe\nID: 123456789"
+            ],
+            "title": "Raw Text",
+            "type": "string"
+          },
+          "review_threshold": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Review threshold in force for this document type.",
+            "examples": [
+              0.75
+            ],
+            "title": "Review Threshold"
+          }
+        },
+        "required": [
+          "fields",
+          "raw_text",
+          "processing_time_ms"
+        ],
+        "title": "OCRData",
+        "type": "object"
+      },
+      "OCRFieldResult": {
+        "examples": [
+          {
+            "confidence": 0.95,
+            "value": "John Doe"
+          }
+        ],
+        "properties": {
+          "confidence": {
+            "default": 0.0,
+            "examples": [
+              0.95
+            ],
+            "title": "Confidence",
+            "type": "number"
+          },
+          "value": {
+            "examples": [
+              "John Doe"
+            ],
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "OCRFieldResult",
+        "type": "object"
+      },
+      "OCRResponse": {
+        "examples": [
+          {
+            "anchor_metadata": {
+              "campaign_ref": "campaign-2024-001",
+              "claim_id": "claim-abc123"
+            },
+            "data": {
+              "fields": {
+                "full_name": {
+                  "confidence": 0.95,
+                  "value": "John Doe"
+                },
+                "id_number": {
+                  "confidence": 0.9,
+                  "value": "123456789"
+                }
+              },
+              "processing_time_ms": 1500,
+              "raw_text": "John Doe\nID: 123456789"
+            },
+            "processing_time_ms": 1500,
+            "success": true
+          },
+          {
+            "error": {
+              "code": "invalid_image",
+              "message": "Could not decode image"
+            },
+            "processing_time_ms": 500,
+            "success": false
+          }
+        ],
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OCRData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              {
+                "code": "invalid_image",
+                "message": "Could not decode image"
+              }
+            ],
+            "title": "Error"
+          },
+          "processing_time_ms": {
+            "examples": [
+              1500
+            ],
+            "title": "Processing Time Ms",
+            "type": "integer"
+          },
+          "success": {
+            "examples": [
+              true
+            ],
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "processing_time_ms"
+        ],
+        "title": "OCRResponse",
+        "type": "object"
+      },
+      "ProofOfLifeRequest": {
+        "description": "Request model for proof-of-life selfie and optional burst frames.",
+        "examples": [
+          {
+            "anchor_metadata": {
+              "campaign_ref": "campaign-2024-001",
+              "claim_id": "claim-abc123"
+            },
+            "confidence_threshold": 0.8,
+            "selfie_image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+          }
+        ],
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "burst_images_base64": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              [
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+              ]
+            ],
+            "title": "Burst Images Base64"
+          },
+          "confidence_threshold": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              0.8
+            ],
+            "title": "Confidence Threshold"
+          },
+          "selfie_image_base64": {
+            "examples": [
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+            ],
+            "title": "Selfie Image Base64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selfie_image_base64"
+        ],
+        "title": "ProofOfLifeRequest",
+        "type": "object"
+      },
+      "ProofOfLifeResult": {
+        "description": "Core proof-of-life payload nested inside the ResultEnvelope.\n\n``confidence`` and ``reason`` are promoted to the envelope level;\nthis model carries the remaining domain-specific fields.",
+        "examples": [
+          {
+            "checks": {
+              "face_detected": true,
+              "liveness_check": "passed"
+            },
+            "is_real_person": true,
+            "threshold": 0.8
+          }
+        ],
+        "properties": {
+          "checks": {
+            "examples": [
+              {
+                "face_detected": true,
+                "liveness_check": "passed"
+              }
+            ],
+            "title": "Checks",
+            "type": "object"
+          },
+          "is_real_person": {
+            "examples": [
+              true
+            ],
+            "title": "Is Real Person",
+            "type": "boolean"
+          },
+          "threshold": {
+            "examples": [
+              0.8
+            ],
+            "title": "Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "is_real_person",
+          "threshold",
+          "checks"
+        ],
+        "title": "ProofOfLifeResult",
+        "type": "object"
+      },
+      "QueuedOCRResponse": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "status_url": {
+            "title": "Status Url",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "task_id",
+          "status",
+          "message",
+          "status_url"
+        ],
+        "title": "QueuedOCRResponse",
+        "type": "object"
+      },
+      "RedactionPreviewResult": {
+        "description": "Payload nested inside the ResultEnvelope for the redaction preview diff.",
+        "examples": [
+          {
+            "original_length": 60,
+            "pii_summary": {
+              "dates": 1,
+              "locations": 1,
+              "names": 1,
+              "total": 3
+            },
+            "segments": [
+              {
+                "end": 3,
+                "start": 0,
+                "type": "kept"
+              },
+              {
+                "category": "RECIPIENT_NAME",
+                "end": 15,
+                "start": 3,
+                "type": "redacted"
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "original_length": {
+            "examples": [
+              60
+            ],
+            "title": "Original Length",
+            "type": "integer"
+          },
+          "pii_summary": {
+            "examples": [
+              {
+                "dates": 1,
+                "locations": 1,
+                "names": 1,
+                "total": 3
+              }
+            ],
+            "title": "Pii Summary",
+            "type": "object"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/RedactionSegment"
+            },
+            "title": "Segments",
+            "type": "array"
+          }
+        },
+        "required": [
+          "original_length"
+        ],
+        "title": "RedactionPreviewResult",
+        "type": "object"
+      },
+      "RedactionSegment": {
+        "description": "One contiguous span of the original text, marked kept or redacted.",
+        "examples": [
+          {
+            "category": "RECIPIENT_NAME",
+            "end": 8,
+            "start": 0,
+            "type": "redacted"
+          }
+        ],
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "PII category label, present only when type == 'redacted'",
+            "examples": [
+              "RECIPIENT_NAME"
+            ],
+            "title": "Category"
+          },
+          "end": {
+            "examples": [
+              8
+            ],
+            "title": "End",
+            "type": "integer"
+          },
+          "start": {
+            "examples": [
+              0
+            ],
+            "title": "Start",
+            "type": "integer"
+          },
+          "type": {
+            "examples": [
+              "kept",
+              "redacted"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "start",
+          "end"
+        ],
+        "title": "RedactionSegment",
+        "type": "object"
+      },
+      "ResultEnvelope_AnonymizeResult_": {
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Aggregate confidence score in [0, 1].",
+            "examples": [
+              0.92
+            ],
+            "title": "Confidence"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version of the prompt template used for verification.",
+            "examples": [
+              "v1"
+            ],
+            "title": "Prompt Version"
+          },
+          "reasons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable explanations or reasons for the result.",
+            "examples": [
+              [
+                "Liveness verification passed"
+              ]
+            ],
+            "title": "Reasons"
+          },
+          "result": {
+            "$ref": "#/components/schemas/AnonymizeResult"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Request-scoped correlation ID for distributed tracing.",
+            "examples": [
+              "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ResultEnvelope[AnonymizeResult]",
+        "type": "object"
+      },
+      "ResultEnvelope_Dict_str__Any__": {
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Aggregate confidence score in [0, 1].",
+            "examples": [
+              0.92
+            ],
+            "title": "Confidence"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version of the prompt template used for verification.",
+            "examples": [
+              "v1"
+            ],
+            "title": "Prompt Version"
+          },
+          "reasons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable explanations or reasons for the result.",
+            "examples": [
+              [
+                "Liveness verification passed"
+              ]
+            ],
+            "title": "Reasons"
+          },
+          "result": {
+            "title": "Result",
+            "type": "object"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Request-scoped correlation ID for distributed tracing.",
+            "examples": [
+              "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ResultEnvelope[Dict[str, Any]]",
+        "type": "object"
+      },
+      "ResultEnvelope_List_ClaimFraudResult__": {
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Aggregate confidence score in [0, 1].",
+            "examples": [
+              0.92
+            ],
+            "title": "Confidence"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version of the prompt template used for verification.",
+            "examples": [
+              "v1"
+            ],
+            "title": "Prompt Version"
+          },
+          "reasons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable explanations or reasons for the result.",
+            "examples": [
+              [
+                "Liveness verification passed"
+              ]
+            ],
+            "title": "Reasons"
+          },
+          "result": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimFraudResult"
+            },
+            "title": "Result",
+            "type": "array"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Request-scoped correlation ID for distributed tracing.",
+            "examples": [
+              "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ResultEnvelope[List[ClaimFraudResult]]",
+        "type": "object"
+      },
+      "ResultEnvelope_List_Dict_str__Any___": {
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Aggregate confidence score in [0, 1].",
+            "examples": [
+              0.92
+            ],
+            "title": "Confidence"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version of the prompt template used for verification.",
+            "examples": [
+              "v1"
+            ],
+            "title": "Prompt Version"
+          },
+          "reasons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable explanations or reasons for the result.",
+            "examples": [
+              [
+                "Liveness verification passed"
+              ]
+            ],
+            "title": "Reasons"
+          },
+          "result": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Request-scoped correlation ID for distributed tracing.",
+            "examples": [
+              "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ResultEnvelope[List[Dict[str, Any]]]",
+        "type": "object"
+      },
+      "ResultEnvelope_OCRData_": {
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Aggregate confidence score in [0, 1].",
+            "examples": [
+              0.92
+            ],
+            "title": "Confidence"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version of the prompt template used for verification.",
+            "examples": [
+              "v1"
+            ],
+            "title": "Prompt Version"
+          },
+          "reasons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable explanations or reasons for the result.",
+            "examples": [
+              [
+                "Liveness verification passed"
+              ]
+            ],
+            "title": "Reasons"
+          },
+          "result": {
+            "$ref": "#/components/schemas/OCRData"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Request-scoped correlation ID for distributed tracing.",
+            "examples": [
+              "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ResultEnvelope[OCRData]",
+        "type": "object"
+      },
+      "ResultEnvelope_ProofOfLifeResult_": {
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Aggregate confidence score in [0, 1].",
+            "examples": [
+              0.92
+            ],
+            "title": "Confidence"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version of the prompt template used for verification.",
+            "examples": [
+              "v1"
+            ],
+            "title": "Prompt Version"
+          },
+          "reasons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable explanations or reasons for the result.",
+            "examples": [
+              [
+                "Liveness verification passed"
+              ]
+            ],
+            "title": "Reasons"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ProofOfLifeResult"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Request-scoped correlation ID for distributed tracing.",
+            "examples": [
+              "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ResultEnvelope[ProofOfLifeResult]",
+        "type": "object"
+      },
+      "ResultEnvelope_RedactionPreviewResult_": {
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Aggregate confidence score in [0, 1].",
+            "examples": [
+              0.92
+            ],
+            "title": "Confidence"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version of the prompt template used for verification.",
+            "examples": [
+              "v1"
+            ],
+            "title": "Prompt Version"
+          },
+          "reasons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable explanations or reasons for the result.",
+            "examples": [
+              [
+                "Liveness verification passed"
+              ]
+            ],
+            "title": "Reasons"
+          },
+          "result": {
+            "$ref": "#/components/schemas/RedactionPreviewResult"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Request-scoped correlation ID for distributed tracing.",
+            "examples": [
+              "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ResultEnvelope[RedactionPreviewResult]",
+        "type": "object"
+      },
+      "TaskStatusResponse": {
+        "description": "Response model for task status.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContractMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "title": "TaskStatusResponse",
+        "type": "object"
+      },
+      "UploadSessionResponse": {
+        "description": "Current state of an upload session.",
+        "examples": [
+          {
+            "completed": false,
+            "content_type": "image/jpeg",
+            "expires_at": 1719784800.0,
+            "filename": "evidence_photo.jpg",
+            "received_chunks": [
+              0,
+              1,
+              2
+            ],
+            "session_id": "sess_abc123def456",
+            "status": "in_progress",
+            "total_chunks": 10,
+            "total_size": 1048576
+          }
+        ],
+        "properties": {
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "art_xyz789"
+            ],
+            "title": "Artifact Id"
+          },
+          "completed": {
+            "default": false,
+            "examples": [
+              false
+            ],
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "content_type": {
+            "examples": [
+              "image/jpeg"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "expires_at": {
+            "examples": [
+              1719784800.0
+            ],
+            "title": "Expires At",
+            "type": "number"
+          },
+          "filename": {
+            "examples": [
+              "evidence_photo.jpg"
+            ],
+            "title": "Filename",
+            "type": "string"
+          },
+          "received_chunks": {
+            "examples": [
+              [
+                0,
+                1,
+                2
+              ]
+            ],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Received Chunks",
+            "type": "array"
+          },
+          "session_id": {
+            "examples": [
+              "sess_abc123def456"
+            ],
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "examples": [
+              "in_progress"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total_chunks": {
+            "examples": [
+              10
+            ],
+            "title": "Total Chunks",
+            "type": "integer"
+          },
+          "total_size": {
+            "examples": [
+              1048576
+            ],
+            "title": "Total Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "filename",
+          "content_type",
+          "total_size",
+          "total_chunks",
+          "received_chunks",
+          "status",
+          "expires_at"
+        ],
+        "title": "UploadSessionResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "AI service layer for Soter platform using FastAPI",
+    "title": "Soter AI Service",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Root"
+      }
+    },
+    "/ai/metrics": {
+      "get": {
+        "description": "Endpoint for Prometheus metrics.",
+        "operationId": "get_metrics_ai_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Metrics"
+      }
+    },
+    "/ai/ocr": {
+      "post": {
+        "operationId": "process_ocr_ai_ocr_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_process_ocr_ai_ocr_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OCRResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Process Ocr",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check"
+      }
+    },
+    "/health/dependencies": {
+      "get": {
+        "description": "Lightweight dependency probe for staging and CI.\n\nChecks Redis connectivity, provider configuration readiness, and\nfilesystem/temp access.  Never exposes secrets or PII.",
+        "operationId": "health_dependencies_health_dependencies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Dependencies"
+      }
+    },
+    "/health/mode": {
+      "get": {
+        "description": "Returns the current AI provider mode so contributors and the frontend\ncan detect demo/degraded states explicitly.\n\nResponse fields:\n- ``demo_mode``          \u2014 one of ``fixture``, ``deterministic``, or ``live``\n- ``test_provider_mode`` \u2014 whether TEST_PROVIDER_MODE is enabled\n- ``deterministic_mode`` \u2014 whether AI_DETERMINISTIC_MODE is enabled\n- ``active_provider``    \u2014 resolved provider name (``test``, ``openai``, ``groq``, or ``null``)\n- ``app_env``            \u2014 current APP_ENV value",
+        "operationId": "health_mode_health_mode_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Mode"
+      }
+    },
+    "/v1/ai/anonymize": {
+      "post": {
+        "description": "Anonymize names, locations, and dates before text is sent to external LLMs.",
+        "operationId": "anonymize_text_v1_ai_anonymize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnonymizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope_AnonymizeResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Anonymize Text",
+        "tags": [
+          "anonymization"
+        ]
+      }
+    },
+    "/v1/ai/dead-letter": {
+      "get": {
+        "description": "List dead-letter items, optionally filtered by kind and/or status.",
+        "operationId": "list_dead_letter_items_v1_ai_dead_letter_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Role",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Role",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Dead Letter Items",
+        "tags": [
+          "dead-letter"
+        ]
+      }
+    },
+    "/v1/ai/dead-letter/{item_id}": {
+      "get": {
+        "description": "Get a single dead-letter item with its full replay audit log.",
+        "operationId": "get_dead_letter_item_v1_ai_dead_letter__item_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Role",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Role",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dead Letter Item",
+        "tags": [
+          "dead-letter"
+        ]
+      }
+    },
+    "/v1/ai/dead-letter/{item_id}/replay": {
+      "post": {
+        "description": "Replay a single dead-letter item (resend a callback or re-run an async job).\n\nReturns 404 if the item doesn't exist, 409 if it has already succeeded or\nexhausted its retry budget, and 429 if replayed again before the\nper-item cooldown elapses.",
+        "operationId": "replay_dead_letter_item_v1_ai_dead_letter__item_id__replay_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Role",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Role",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replay Dead Letter Item",
+        "tags": [
+          "dead-letter"
+        ]
+      }
+    },
+    "/v1/ai/decision-audit": {
+      "get": {
+        "description": "Return decision audit records matching the supplied identifiers.\n\nAt least one of ``trace_id``, ``claim_id``, or ``campaign_ref`` is\nrequired: an unfiltered dump of every decision is neither a useful\ninvestigation tool nor a safe default. Supplying several narrows the\nresult (logical AND). Records come back newest first.",
+        "operationId": "query_decision_audit_v1_ai_decision_audit_get",
+        "parameters": [
+          {
+            "description": "Correlation/trace ID echoed on the original response.",
+            "in": "query",
+            "name": "trace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Correlation/trace ID echoed on the original response.",
+              "title": "Trace Id"
+            }
+          },
+          {
+            "description": "Claim ID from anchor_metadata or fraud claim metadata.",
+            "in": "query",
+            "name": "claim_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Claim ID from anchor_metadata or fraud claim metadata.",
+              "title": "Claim Id"
+            }
+          },
+          {
+            "description": "Campaign reference from anchor_metadata.",
+            "in": "query",
+            "name": "campaign_ref",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Campaign reference from anchor_metadata.",
+              "title": "Campaign Ref"
+            }
+          },
+          {
+            "description": "Filter by decision type, e.g. humanitarian_verification or fraud_detection.",
+            "in": "query",
+            "name": "decision_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by decision type, e.g. humanitarian_verification or fraud_detection.",
+              "title": "Decision Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope_List_Dict_str__Any___"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Query Decision Audit",
+        "tags": [
+          "decision-audit"
+        ]
+      }
+    },
+    "/v1/ai/decision-audit/{record_id}": {
+      "get": {
+        "description": "Return a single decision audit record by its ``record_id``.",
+        "operationId": "get_decision_audit_record_v1_ai_decision_audit__record_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "title": "Record Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope_Dict_str__Any__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Decision Audit Record",
+        "tags": [
+          "decision-audit"
+        ]
+      }
+    },
+    "/v1/ai/evidence-uploads/sessions": {
+      "post": {
+        "description": "Create a resumable upload session after validating type and size.",
+        "operationId": "create_upload_session_v1_ai_evidence_uploads_sessions_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-User-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUploadSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Upload Session",
+        "tags": [
+          "evidence-uploads"
+        ]
+      }
+    },
+    "/v1/ai/evidence-uploads/sessions/{session_id}": {
+      "get": {
+        "description": "Return the current state of an upload session (for resuming).",
+        "operationId": "get_upload_session_v1_ai_evidence_uploads_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Upload Session",
+        "tags": [
+          "evidence-uploads"
+        ]
+      }
+    },
+    "/v1/ai/evidence-uploads/sessions/{session_id}/chunks/{chunk_index}": {
+      "put": {
+        "description": "Upload a single chunk for an existing session.",
+        "operationId": "upload_chunk_v1_ai_evidence_uploads_sessions__session_id__chunks__chunk_index__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "chunk_index",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Chunk Index",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_chunk_v1_ai_evidence_uploads_sessions__session_id__chunks__chunk_index__put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChunkUploadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Chunk",
+        "tags": [
+          "evidence-uploads"
+        ]
+      }
+    },
+    "/v1/ai/evidence-uploads/sessions/{session_id}/finalize": {
+      "post": {
+        "description": "Validate all chunks and ownership, then assemble the final file.",
+        "operationId": "finalize_upload_session_v1_ai_evidence_uploads_sessions__session_id__finalize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalizeUploadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Finalize Upload Session",
+        "tags": [
+          "evidence-uploads"
+        ]
+      }
+    },
+    "/v1/ai/humanitarian/verify": {
+      "post": {
+        "description": "Verify an aid claim against standardised humanitarian criteria.\n\nValidates that all referenced evidence artifacts belong to the requesting\norganization before processing.  Maintains audit logs for access attempts.\n\n``artifact_access_control`` and ``humanitarian_verification_service`` are\nresolved from ``request.app.state``.  Production wires them up in the\nlifespan of ``main.app``; tests inject lightweight Mocks via the same\nstate so we never have to monkeypatch ``main`` module globals.",
+        "operationId": "verify_humanitarian_claim_v1_ai_humanitarian_verify_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Org-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Role",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Role",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HumanitarianVerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope_Dict_str__Any__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Humanitarian Claim",
+        "tags": [
+          "humanitarian"
+        ]
+      }
+    },
+    "/v1/ai/inference": {
+      "post": {
+        "description": "Create a background task for heavy AI inference.\n\nOffloads time-consuming AI tasks to background workers. Use the\nreturned ``task_id`` to poll for results via ``GET /ai/status/{task_id}``.\n\nContract-aware metadata fields are used to anchor verification results\nto on-chain events during Testnet demos.",
+        "operationId": "create_inference_task_v1_ai_inference_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Inference Task",
+        "tags": [
+          "inference"
+        ]
+      }
+    },
+    "/v1/ai/jobs/{task_id}": {
+      "get": {
+        "description": "Get the current status of a queued AI job.\n\nThis is the canonical poll endpoint for backend clients. Possible\nstatus values: ``pending``, ``processing``, ``retrying``, ``completed``,\n``failed``, ``cancelled``, ``expired``, ``timed_out``. A job that never\nreceived a worker within the configured idle window reports\n``timed_out`` with an explanatory ``error``.",
+        "operationId": "get_job_status_v1_ai_jobs__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job Status",
+        "tags": [
+          "inference"
+        ]
+      }
+    },
+    "/v1/ai/ocr": {
+      "post": {
+        "description": "Extract text fields from an uploaded document image.",
+        "operationId": "process_ocr_v1_ai_ocr_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_process_ocr_v1_ai_ocr_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope_OCRData_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Process Ocr",
+        "tags": [
+          "ocr"
+        ]
+      }
+    },
+    "/v1/ai/ocr/batch": {
+      "post": {
+        "description": "Queue OCR processing for a batch of uploaded document images.\n\nEvery document is tracked on its own: documents that pass validation\nare queued (``pending``), rejected ones come back as ``failed`` with a\nreason, and one bad document never hides a sibling's outcome.  The\nbatch-level ``status`` is ``processing`` while jobs are outstanding,\nthen ``succeeded``, ``failed`` or ``partially_failed``.  Poll\n``status_url`` for the per-document breakdown; failed documents expose\na ``retry_url`` so they can be requeued individually.",
+        "operationId": "queue_batch_ocr_jobs_v1_ai_ocr_batch_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_queue_batch_ocr_jobs_v1_ai_ocr_batch_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchOCRResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Queue Batch Ocr Jobs",
+        "tags": [
+          "ocr"
+        ]
+      }
+    },
+    "/v1/ai/ocr/batch/{batch_id}": {
+      "get": {
+        "description": "Per-document outcome breakdown for a queued batch.\n\nEach document reports ``pending``, ``processing``, ``succeeded`` or\n``failed`` (with the failure reason) - so a caller that submitted ten\ndocuments where two failed sees exactly which two and why.  The\nbatch-level ``status`` is ``processing`` while any document is still\nrunning, then ``succeeded`` (all succeeded), ``failed`` (all failed) or\n``partially_failed`` (a mix), keeping a partially failed batch\ndistinguishable from the fully failed and fully succeeded cases.\nFailed documents include a ``retry_url`` to requeue them individually.",
+        "operationId": "get_batch_ocr_status_v1_ai_ocr_batch__batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchOCRStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Batch Ocr Status",
+        "tags": [
+          "ocr"
+        ]
+      }
+    },
+    "/v1/ai/ocr/batch/{batch_id}/documents/{document_id}/retry": {
+      "post": {
+        "description": "Requeue a single failed document without resubmitting the batch.\n\nOnly the named document is re-validated and queued again; its siblings\nkeep their existing task ids and outcomes.  Returns 404 for an unknown\nbatch/document and 409 when the document is not failed or its upload is\nno longer retained.",
+        "operationId": "retry_batch_ocr_document_v1_ai_ocr_batch__batch_id__documents__document_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchOCRStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Batch Ocr Document",
+        "tags": [
+          "ocr"
+        ]
+      }
+    },
+    "/v1/ai/ocr/jobs": {
+      "post": {
+        "description": "Queue OCR processing and return immediately with a pollable job URL.",
+        "operationId": "queue_ocr_job_v1_ai_ocr_jobs_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_queue_ocr_job_v1_ai_ocr_jobs_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedOCRResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Queue Ocr Job",
+        "tags": [
+          "ocr"
+        ]
+      }
+    },
+    "/v1/ai/proof-of-life": {
+      "post": {
+        "description": "Analyse a selfie image (with optional burst frames) for proof-of-life.\n\nReturns ``is_real_person`` and a confidence score inside a standardized\nresult envelope.  When burst frames are provided, the service additionally\nchecks for liveness signals such as blink detection and head movement.",
+        "operationId": "analyze_proof_of_life_v1_ai_proof_of_life_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProofOfLifeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope_ProofOfLifeResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Proof Of Life",
+        "tags": [
+          "proof-of-life"
+        ]
+      }
+    },
+    "/v1/ai/redaction/preview": {
+      "post": {
+        "description": "Return a redaction diff (kept vs. redacted segments) without masking the text.",
+        "operationId": "preview_redaction_v1_ai_redaction_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnonymizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope_RedactionPreviewResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Redaction",
+        "tags": [
+          "anonymization"
+        ]
+      }
+    },
+    "/v1/ai/status/{task_id}": {
+      "get": {
+        "description": "Get the current status of a background inference task.\n\nPoll this endpoint after creating a task. Possible status values:\n``pending``, ``processing``, ``completed``, ``failed``, ``cancelled``,\n``expired``, ``timed_out``. A job still queued past the configured\nidle window reports ``timed_out`` rather than ``pending`` forever.\n\nWhen completed, the result will include contract-aware metadata\nthat can be anchored to on-chain events.",
+        "operationId": "get_task_status_v1_ai_status__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Task Status",
+        "tags": [
+          "inference"
+        ]
+      }
+    },
+    "/v1/ai/task/{task_id}/cancel": {
+      "post": {
+        "description": "Cancel a pending or in-progress inference task.",
+        "operationId": "cancel_task_v1_ai_task__task_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Task",
+        "tags": [
+          "inference"
+        ]
+      }
+    },
+    "/v1/ai/task/{task_id}/expire": {
+      "post": {
+        "description": "Expire a pending or in-progress inference task.",
+        "operationId": "expire_task_v1_ai_task__task_id__expire_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Expire Task",
+        "tags": [
+          "inference"
+        ]
+      }
+    },
+    "/v1/ai/verification-artifacts/download": {
+      "get": {
+        "description": "Download an artifact using a short-lived signed URL token.\n\nThe token is generated by the /access endpoint and contains:\n- Artifact ID\n- Organization ID\n- User ID\n- Expiration timestamp\n\nThe token is HMAC-SHA256 signed for integrity verification.\n\nReturns 403 if token is invalid, expired, or org mismatch detected.\nReturns 404 if artifact not found.",
+        "operationId": "download_artifact_with_token_v1_ai_verification_artifacts_download_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "minLength": 10,
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Artifact With Token",
+        "tags": [
+          "verification-artifacts"
+        ]
+      }
+    },
+    "/v1/ai/verification-artifacts/{artifact_id}/access": {
+      "post": {
+        "description": "Request access to a verification artifact.\n\nValidates user authorization and can return either:\n- A short-lived signed URL for secure download\n- Direct file access (proxy mode) for authorized users\n\nReturns 403 if unauthorized, 404 if artifact not found.",
+        "operationId": "request_artifact_access_v1_ai_verification_artifacts__artifact_id__access_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Role",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Role",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Org-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Org-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Artifact Access",
+        "tags": [
+          "verification-artifacts"
+        ]
+      }
+    },
+    "/v1/ai/verification-artifacts/{artifact_id}/invalidate-cache": {
+      "post": {
+        "description": "Explicitly invalidate cached data tied to a verification artifact.\n\nCall this after an artifact's content has been updated in place (same\nartifact_id, new bytes) so stale artifact-access checks and AI\nverification responses that referenced it aren't served from cache.\nRestricted to admin/operator roles since it's a mutating operation.",
+        "operationId": "invalidate_artifact_cache_v1_ai_verification_artifacts__artifact_id__invalidate_cache_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Role",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-User-Role",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheInvalidationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invalidate Artifact Cache",
+        "tags": [
+          "verification-artifacts"
+        ]
+      }
+    },
+    "/v1/fraud/detect": {
+      "post": {
+        "description": "Analyse a batch of claims for suspicious patterns.\n\nReturns a ``fraud_risk_score`` (0-1) for each claim.  Claims that are\nstatistical outliers relative to the batch are flagged with\n``is_flagged=true``.\n\nEvery scored claim also produces a durable decision audit record (issue\n#990) so the score can be explained after the fact; see\n``services/decision_audit.py``.",
+        "operationId": "detect_fraud_endpoint_v1_fraud_detect_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FraudDetectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope_List_ClaimFraudResult__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Detect Fraud Endpoint",
+        "tags": [
+          "fraud"
+        ]
+      }
+    }
+  }
+}

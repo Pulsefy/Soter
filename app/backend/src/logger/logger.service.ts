@@ -233,7 +233,12 @@ export class LoggerService implements NestLoggerService {
           };
         }
 
-        return target[prop as keyof LoggerService];
+        const value = (target as unknown as Record<string, unknown>)[
+          prop as string
+        ];
+        return typeof value === 'function'
+          ? (value as (...args: unknown[]) => unknown).bind(target)
+          : value;
       },
     });
 

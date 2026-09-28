@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -8,15 +8,35 @@ export interface BackfillJobData {
   endLedger: number;
   campaignId?: string;
   batchSize: number;
+  checkpointId: string;
 }
 
 export interface BackfillResult {
   jobId: string;
+  checkpointId: string;
+  jobKey: string;
   startLedger: number;
   endLedger: number;
   status: 'queued' | 'processing' | 'completed' | 'failed';
   processedCount: number;
+  skippedCount: number;
+  errorCount: number;
   totalCount: number;
+  resumeFrom?: number;
+}
+
+/**
+ * Builds a deterministic job key for a backfill range so that re-triggering
+ * the same range either resumes an existing run or is rejected when one is
+ * already in progress.
+ */
+function buildJobKey(
+  startLedger: number,
+  endLedger: number,
+  campaignId?: string,
+): string {
+  const suffix = campaignId ? `:${campaignId}` : '';
+  return `backfill:${startLedger}:${endLedger}${suffix}`;
 }
 
 @Injectable()
@@ -28,17 +48,126 @@ export class LedgerBackfillService {
     @InjectQueue('onchain') private readonly onchainQueue: Queue,
   ) {}
 
+  /**
+   * Trigger (or resume) a backfill for a ledger range.
+   *
+   * - If no checkpoint exists, a new one is created and the job is enqueued.
+   * - If a `failed` or `cancelled` checkpoint exists, it is reset and re-enqueued
+   *   from `lastProcessedLedger` so processing resumes rather than restarts.
+   * - If a `running` checkpoint exists, a ConflictException is thrown.
+   * - If a `completed` checkpoint exists, the existing result is returned directly.
+   */
   async triggerBackfill(
     startLedger: number,
     endLedger: number,
     campaignId?: string,
     batchSize: number = 100,
+    triggeredBy?: string,
   ): Promise<BackfillResult> {
+    const jobKey = buildJobKey(startLedger, endLedger, campaignId);
+    const totalCount = endLedger - startLedger + 1;
+
     this.logger.log(
-      `Triggering backfill for ledgers ${startLedger} to ${endLedger}`,
+      `[backfill] Trigger request — range=${startLedger}-${endLedger} key=${jobKey}`,
     );
 
-    const totalCount = endLedger - startLedger + 1;
+    // Look up an existing checkpoint for this range.
+    const existing = await this.prisma.backfillCheckpoint.findUnique({
+      where: { jobKey },
+    });
+
+    if (existing) {
+      if (existing.status === 'running') {
+        this.logger.warn(
+          `[backfill] Job already running — key=${jobKey} id=${existing.id}`,
+        );
+        throw new ConflictException(
+          `A backfill job for ledger range ${startLedger}-${endLedger} is already running (id: ${existing.id}). ` +
+            `Use GET /admin/ledger/backfill/checkpoint/${existing.id} to monitor progress.`,
+        );
+      }
+
+      if (existing.status === 'completed') {
+        this.logger.log(
+          `[backfill] Already completed — key=${jobKey} id=${existing.id}`,
+        );
+        return {
+          jobId: 'completed',
+          checkpointId: existing.id,
+          jobKey,
+          startLedger,
+          endLedger,
+          status: 'completed',
+          processedCount: existing.processedCount,
+          skippedCount: existing.skippedCount,
+          errorCount: existing.errorCount,
+          totalCount,
+        };
+      }
+
+      // Resume from the last successful ledger.
+      const resumeFrom = existing.lastProcessedLedger || startLedger;
+      this.logger.log(
+        `[backfill] Resuming — key=${jobKey} id=${existing.id} from=${resumeFrom} status=${existing.status}`,
+      );
+
+      const checkpoint = await this.prisma.backfillCheckpoint.update({
+        where: { id: existing.id },
+        data: {
+          status: 'running',
+          lastError: null,
+          triggeredBy: triggeredBy ?? existing.triggeredBy,
+          startedAt: new Date(),
+          completedAt: null,
+          heartbeatAt: new Date(),
+        },
+      });
+
+      const job = await this.onchainQueue.add(
+        'ledger-backfill',
+        {
+          startLedger: resumeFrom,
+          endLedger,
+          campaignId,
+          batchSize,
+          checkpointId: checkpoint.id,
+        } satisfies BackfillJobData,
+        this.jobOptions(),
+      );
+
+      return {
+        jobId: job.id ?? 'unknown',
+        checkpointId: checkpoint.id,
+        jobKey,
+        startLedger,
+        endLedger,
+        status: 'queued',
+        processedCount: existing.processedCount,
+        skippedCount: existing.skippedCount,
+        errorCount: existing.errorCount,
+        totalCount,
+        resumeFrom,
+      };
+    }
+
+    // Fresh run — create a checkpoint record first.
+    const checkpoint = await this.prisma.backfillCheckpoint.create({
+      data: {
+        jobKey,
+        startLedger,
+        endLedger,
+        lastProcessedLedger: startLedger,
+        status: 'running',
+        campaignId,
+        batchSize,
+        triggeredBy,
+        heartbeatAt: new Date(),
+      },
+    });
+
+    this.logger.log(
+      `[backfill] Created checkpoint — id=${checkpoint.id} key=${jobKey} range=${startLedger}-${endLedger}`,
+    );
 
     const job = await this.onchainQueue.add(
       'ledger-backfill',
@@ -47,50 +176,55 @@ export class LedgerBackfillService {
         endLedger,
         campaignId,
         batchSize,
-      } as BackfillJobData,
-      {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 5000,
-        },
-        removeOnComplete: {
-          count: 10,
-          age: 3600,
-        },
-        removeOnFail: {
-          count: 5,
-          age: 7200,
-        },
-      },
+        checkpointId: checkpoint.id,
+      } satisfies BackfillJobData,
+      this.jobOptions(),
+    );
+
+    this.logger.log(
+      `[backfill] Enqueued — jobId=${job.id} checkpointId=${checkpoint.id}`,
     );
 
     return {
-      jobId: job.id || 'unknown',
+      jobId: job.id ?? 'unknown',
+      checkpointId: checkpoint.id,
+      jobKey,
       startLedger,
       endLedger,
       status: 'queued',
       processedCount: 0,
+      skippedCount: 0,
+      errorCount: 0,
       totalCount,
     };
   }
 
+  /**
+   * Called by the BullMQ worker to process a backfill job.
+   * Updates the checkpoint with progress after every batch so the job can
+   * be safely resumed after a crash.
+   */
   async processBackfillBatch(data: BackfillJobData): Promise<{
     processed: number;
     skipped: number;
     errors: string[];
   }> {
-    const { startLedger, endLedger, campaignId, batchSize } = data;
+    const { startLedger, endLedger, campaignId, batchSize, checkpointId } =
+      data;
     const errors: string[] = [];
     let processed = 0;
     let skipped = 0;
 
     this.logger.log(
-      `Processing backfill batch: ledgers ${startLedger}-${endLedger}`,
+      `[backfill] Processing — checkpointId=${checkpointId} range=${startLedger}-${endLedger} batchSize=${batchSize}`,
     );
+
+    const totalBatches = Math.ceil((endLedger - startLedger + 1) / batchSize);
+    let batchIndex = 0;
 
     for (let ledger = startLedger; ledger <= endLedger; ledger += batchSize) {
       const batchEnd = Math.min(ledger + batchSize - 1, endLedger);
+      batchIndex++;
 
       try {
         const result = await this.processLedgerRange(
@@ -101,14 +235,141 @@ export class LedgerBackfillService {
         processed += result.processed;
         skipped += result.skipped;
       } catch (error) {
-        const errorMsg = `Failed to process ledgers ${ledger}-${batchEnd}: ${error.message}`;
-        this.logger.error(errorMsg);
+        const errorMsg = `Failed to process ledgers ${ledger}-${batchEnd}: ${(error as Error).message}`;
+        this.logger.error(`[backfill] ${errorMsg}`);
         errors.push(errorMsg);
       }
+
+      // Persist progress after every batch (safe resume point).
+      await this.prisma.backfillCheckpoint.update({
+        where: { id: checkpointId },
+        data: {
+          lastProcessedLedger: batchEnd,
+          processedCount: { increment: processed },
+          skippedCount: { increment: skipped },
+          errorCount: { increment: errors.length },
+          lastError: errors.length > 0 ? errors[errors.length - 1] : undefined,
+          heartbeatAt: new Date(),
+        },
+      });
+
+      // Emit progress log at each batch boundary.
+      const percentDone = Math.round((batchIndex / totalBatches) * 100);
+      this.logger.log(
+        `[backfill] Progress — checkpointId=${checkpointId} batch=${batchIndex}/${totalBatches} (${percentDone}%) ` +
+          `processed=${processed} skipped=${skipped} errors=${errors.length} ledger=${batchEnd}/${endLedger}`,
+      );
     }
+
+    // Mark as completed or failed based on error count.
+    const finalStatus = errors.length > 0 ? 'failed' : 'completed';
+    await this.prisma.backfillCheckpoint.update({
+      where: { id: checkpointId },
+      data: {
+        status: finalStatus,
+        completedAt: new Date(),
+        heartbeatAt: new Date(),
+      },
+    });
+
+    this.logger.log(
+      `[backfill] Done — checkpointId=${checkpointId} status=${finalStatus} ` +
+        `processed=${processed} skipped=${skipped} errors=${errors.length}`,
+    );
 
     return { processed, skipped, errors };
   }
+
+  /**
+   * Retrieve status for a backfill job by BullMQ job ID (legacy) or by
+   * checkpoint ID.
+   */
+  async getBackfillStatus(jobId: string): Promise<BackfillResult | null> {
+    const job = await this.onchainQueue.getJob(jobId);
+
+    if (!job) {
+      return null;
+    }
+
+    const state = await job.getState();
+    const jobData = job.data as Partial<BackfillJobData>;
+
+    // Fetch live checkpoint if present.
+    const checkpoint = jobData.checkpointId
+      ? await this.prisma.backfillCheckpoint.findUnique({
+          where: { id: jobData.checkpointId },
+        })
+      : null;
+
+    return {
+      jobId: job.id ?? 'unknown',
+      checkpointId: checkpoint?.id ?? '',
+      jobKey: checkpoint?.jobKey ?? '',
+      startLedger: checkpoint?.startLedger ?? jobData.startLedger ?? 0,
+      endLedger: checkpoint?.endLedger ?? jobData.endLedger ?? 0,
+      status: this.mapJobStateToStatus(state),
+      processedCount: checkpoint?.processedCount ?? 0,
+      skippedCount: checkpoint?.skippedCount ?? 0,
+      errorCount: checkpoint?.errorCount ?? 0,
+      totalCount: checkpoint
+        ? checkpoint.endLedger - checkpoint.startLedger + 1
+        : 0,
+    };
+  }
+
+  /**
+   * Retrieve a checkpoint record directly by its ID.
+   */
+  async getCheckpoint(checkpointId: string) {
+    return this.prisma.backfillCheckpoint.findUnique({
+      where: { id: checkpointId },
+    });
+  }
+
+  /**
+   * List recent backfill checkpoints, newest first.
+   */
+  async listCheckpoints(limit: number = 20) {
+    return this.prisma.backfillCheckpoint.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  /**
+   * Cancel a running backfill. The job may still complete its current batch;
+   * the checkpoint is marked `cancelled` so future enqueueing will offer to
+   * resume rather than restart.
+   */
+  async cancelBackfill(checkpointId: string): Promise<void> {
+    const checkpoint = await this.prisma.backfillCheckpoint.findUnique({
+      where: { id: checkpointId },
+    });
+
+    if (!checkpoint) {
+      throw new Error(`Backfill checkpoint ${checkpointId} not found`);
+    }
+
+    if (checkpoint.status !== 'running') {
+      this.logger.warn(
+        `[backfill] Cancel requested for non-running checkpoint — id=${checkpointId} status=${checkpoint.status}`,
+      );
+      return;
+    }
+
+    await this.prisma.backfillCheckpoint.update({
+      where: { id: checkpointId },
+      data: { status: 'cancelled', completedAt: new Date() },
+    });
+
+    this.logger.log(
+      `[backfill] Cancelled — checkpointId=${checkpointId} lastProcessedLedger=${checkpoint.lastProcessedLedger}`,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
 
   private async processLedgerRange(
     startLedger: number,
@@ -118,7 +379,7 @@ export class LedgerBackfillService {
     let processed = 0;
     let skipped = 0;
 
-    // Check for existing ledger entries to ensure idempotency
+    // Check for existing ledger entries to ensure idempotency.
     const existingEntries = await this.prisma.balanceLedger.findMany({
       where: {
         createdAt: {
@@ -130,8 +391,7 @@ export class LedgerBackfillService {
 
     const existingIds = new Set(existingEntries.map(e => e.id));
 
-    // Simulate fetching ledger data from on-chain
-    // In production, this would call the Stellar Horizon API
+    // Fetch ledger data from on-chain (stubbed; real impl calls Horizon API).
     const ledgerData = this.fetchLedgerRange(startLedger, endLedger);
 
     for (const entry of ledgerData) {
@@ -143,7 +403,7 @@ export class LedgerBackfillService {
       await this.prisma.balanceLedger.create({
         data: {
           id: entry.id,
-          campaignId: entry.campaignId || campaignId,
+          campaignId: entry.campaignId ?? campaignId,
           claimId: entry.claimId,
           eventType: entry.eventType,
           amount: entry.amount,
@@ -155,37 +415,16 @@ export class LedgerBackfillService {
       processed++;
     }
 
-    this.logger.log(
-      `Processed ledger range ${startLedger}-${endLedger}: ${processed} new, ${skipped} skipped`,
+    this.logger.debug(
+      `[backfill] Ledger range ${startLedger}-${endLedger}: ${processed} new, ${skipped} skipped`,
     );
 
     return { processed, skipped };
   }
 
+  /** Placeholder for a real Stellar Horizon API call. */
   private fetchLedgerRange(_startLedger: number, _endLedger: number): any[] {
-    // Placeholder for actual Horizon API call
-    // In production, this would query the Stellar Horizon API
     return [];
-  }
-
-  async getBackfillStatus(jobId: string): Promise<BackfillResult | null> {
-    const job = await this.onchainQueue.getJob(jobId);
-
-    if (!job) {
-      return null;
-    }
-
-    const state = await job.getState();
-    const progress = job.progress as any;
-
-    return {
-      jobId: job.id || 'unknown',
-      startLedger: progress?.startLedger || 0,
-      endLedger: progress?.endLedger || 0,
-      status: this.mapJobStateToStatus(state),
-      processedCount: progress?.processed || 0,
-      totalCount: progress?.total || 0,
-    };
   }
 
   private mapJobStateToStatus(state: string): BackfillResult['status'] {
@@ -199,5 +438,14 @@ export class LedgerBackfillService {
       default:
         return 'queued';
     }
+  }
+
+  private jobOptions() {
+    return {
+      attempts: 3,
+      backoff: { type: 'exponential' as const, delay: 5000 },
+      removeOnComplete: { count: 10, age: 3600 },
+      removeOnFail: { count: 5, age: 7200 },
+    };
   }
 }

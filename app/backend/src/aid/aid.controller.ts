@@ -6,11 +6,13 @@ import {
   Patch,
   Delete,
   Put,
-  UseGuards,
+  Get,
+  Query,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { AidService } from './aid.service';
-import { AiTaskWebhookDto } from './dto/ai-task-webhook.dto';
-import { WebhookHmacGuard } from '../common/guards/webhook-hmac.guard';
+import { ListAidPackagesDto } from './dto/list-aid-packages.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -27,6 +29,18 @@ import {
 export class AidController {
   constructor(private readonly aidService: AidService) {}
 
+  @Get('packages')
+  @ApiOperation({
+    summary: 'List aid packages with pagination',
+    description:
+      'Returns a paginated list of aid packages. Supports filtering by status, search text, and sorting.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of aid packages.' })
+  @ApiBadRequestResponse({ description: 'Invalid query parameters.' })
+  async listPackages(@Query() query: ListAidPackagesDto) {
+    return this.aidService.listAidPackages(query);
+  }
+
   @Post('campaigns')
   @ApiOperation({
     summary: 'Create a new campaign',
@@ -35,8 +49,11 @@ export class AidController {
   })
   @ApiCreatedResponse({ description: 'Campaign created successfully.' })
   @ApiBadRequestResponse({ description: 'Invalid input parameters.' })
-  async createCampaign(@Body() data: Record<string, unknown>) {
-    return this.aidService.createCampaign(data);
+  async createCampaign(
+    @Body() data: Record<string, unknown>,
+    @Req() req: Request,
+  ) {
+    return this.aidService.createCampaign(data, req.user);
   }
 
   @Patch('campaigns/:id')
@@ -84,18 +101,5 @@ export class AidController {
     @Body('to') to: string,
   ) {
     return this.aidService.transitionClaim(id, from, to);
-  }
-
-  @ApiOperation({
-    summary: 'Webhook for AI task notifications',
-    description:
-      'Receives notifications from the AI service when background tasks complete.',
-  })
-  @ApiOkResponse({ description: 'Webhook received successfully.' })
-  @ApiBadRequestResponse({ description: 'Invalid webhook payload.' })
-  @UseGuards(WebhookHmacGuard)
-  @Post('webhook')
-  async handleTaskWebhook(@Body() payload: AiTaskWebhookDto) {
-    return this.aidService.handleTaskWebhook(payload);
   }
 }

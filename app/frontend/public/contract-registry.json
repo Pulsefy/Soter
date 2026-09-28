@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-09-26T22:36:47.016860+00:00",
+  "contracts": {
+    "aid_escrow": {
+      "version": "0.2.0",
+      "networks": {
+        "testnet": {
+          "contract_id": "CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG",
+          "wasm_hash": "24328e15b7c11c7ff07caeaf0328da591b3b63e84af57fa03623c10126eabc8d",
+          "version": "0.1.0",
+          "deployed_at": "2026-06-03"
+        }
+      }
+    }
+  }
+}

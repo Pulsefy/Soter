@@ -36,6 +36,16 @@ export const apiUrl: string =
 export const enableDemoChecklist: boolean =
   process.env.NEXT_PUBLIC_ENABLE_DEMO_CHECKLIST === 'true';
 
+/**
+ * Explicitly enable demo/mock mode banner from the environment.
+ * Set NEXT_PUBLIC_DEMO_MODE=true to always show the demo banner
+ * regardless of what the API health endpoint reports.
+ * The banner is also shown automatically when the API returns
+ * X-Demo-Mode: fixture or X-Demo-Mode: deterministic.
+ */
+export const demoModeEnabled: boolean =
+  process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------

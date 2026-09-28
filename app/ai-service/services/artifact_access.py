@@ -29,9 +29,7 @@ class ArtifactAccessError(Exception):
 class ArtifactAccessService:
     """Manages secure artifact access with signed URLs and authorization."""
 
-    def __init__(
-        self, artifacts_dir: str, signing_secret: str, ttl_seconds: int
-    ):
+    def __init__(self, artifacts_dir: str, signing_secret: str, ttl_seconds: int):
         self.artifacts_dir = os.path.abspath(artifacts_dir)
         self.signing_secret = signing_secret.encode("utf-8")
         self.ttl_seconds = ttl_seconds
@@ -63,14 +61,10 @@ class ArtifactAccessService:
         Raises:
             ArtifactAccessError: If artifact invalid or not found
         """
-        if not artifact_id or any(
-            ch in artifact_id for ch in ("/", "\\", "..")
-        ):
+        if not artifact_id or any(ch in artifact_id for ch in ("/", "\\", "..")):
             raise ArtifactAccessError("invalid_artifact_id")
 
-        artifact_path = os.path.abspath(
-            os.path.join(self.artifacts_dir, artifact_id)
-        )
+        artifact_path = os.path.abspath(os.path.join(self.artifacts_dir, artifact_id))
         metadata_path = artifact_path + ".meta.json"
 
         # Prevent directory traversal
@@ -78,9 +72,7 @@ class ArtifactAccessService:
             raise ArtifactAccessError("invalid_artifact_path")
 
         # Both artifact and metadata file must exist
-        if not os.path.isfile(artifact_path) or not os.path.isfile(
-            metadata_path
-        ):
+        if not os.path.isfile(artifact_path) or not os.path.isfile(metadata_path):
             raise ArtifactAccessError("artifact_not_found")
 
         # Parse and validate metadata
@@ -99,9 +91,7 @@ class ArtifactAccessService:
 
         return artifact_path, metadata
 
-    def enforce_org_ownership(
-        self, metadata: Dict, org_id: str
-    ) -> None:
+    def enforce_org_ownership(self, metadata: Dict, org_id: str) -> None:
         """
         Validate that artifact belongs to the requesting organization.
 
@@ -115,9 +105,7 @@ class ArtifactAccessService:
         if not artifact_org or artifact_org != org_id:
             raise ArtifactAccessError("forbidden_org")
 
-    def create_signed_token(
-        self, artifact_id: str, org_id: str, user_id: str
-    ) -> str:
+    def create_signed_token(self, artifact_id: str, org_id: str, user_id: str) -> str:
         """
         Create a short-lived, HMAC-SHA256 signed token.
 
@@ -153,9 +141,7 @@ class ArtifactAccessService:
             payload, separators=(",", ":"), sort_keys=True
         ).encode("utf-8")
         payload_b64 = (
-            base64.urlsafe_b64encode(payload_bytes)
-            .decode("utf-8")
-            .rstrip("=")
+            base64.urlsafe_b64encode(payload_bytes).decode("utf-8").rstrip("=")
         )
 
         # Create HMAC-SHA256 signature
@@ -165,9 +151,7 @@ class ArtifactAccessService:
             hashlib.sha256,
         )
         signature_b64 = (
-            base64.urlsafe_b64encode(sig.digest())
-            .decode("utf-8")
-            .rstrip("=")
+            base64.urlsafe_b64encode(sig.digest()).decode("utf-8").rstrip("=")
         )
 
         token = f"{payload_b64}.{signature_b64}"
@@ -218,9 +202,7 @@ class ArtifactAccessService:
         if not hmac.compare_digest(expected_sig, supplied_sig):
             logger.warning(
                 "token_signature_mismatch",
-                extra={
-                    "event": "token_signature_verification_failed"
-                },
+                extra={"event": "token_signature_verification_failed"},
             )
             raise ArtifactAccessError("invalid_token_signature")
 

@@ -1,6 +1,9 @@
-
-
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import Redis from 'ioredis';
 
 @Injectable()
@@ -13,11 +16,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       host: process.env.REDIS_HOST ?? 'localhost',
       port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
       maxRetriesPerRequest: 3,
-      retryStrategy: (times) => (times <= 3 ? 200 : null),
+      retryStrategy: times => (times <= 3 ? 200 : null),
     });
 
     this.client.on('connect', () => this.logger.log('Redis connected'));
-    this.client.on('error', (err) => this.logger.error('Redis error', err));
+    this.client.on('error', err => this.logger.error('Redis error', err));
   }
 
   onModuleDestroy() {
@@ -53,6 +56,89 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Store raw binary data with a TTL.
+   */
+  async setBuffer(
+    key: string,
+    value: Buffer,
+    ttlSeconds: number,
+  ): Promise<void> {
+    try {
+      await this.client.set(key, value, 'EX', ttlSeconds);
+    } catch (err) {
+      this.logger.warn(
+        `Redis SET buffer failed for key "${key}": ${String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Retrieve raw binary data. Returns `null` on miss or error.
+   */
+  async getBuffer(key: string): Promise<Buffer | null> {
+    try {
+      const raw = await this.client.getBuffer(key);
+      return raw ?? null;
+    } catch (err) {
+      this.logger.warn(
+        `Redis GET buffer failed for key "${key}": ${String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Add one or more members to a Redis Set.
+   */
+  async sadd(key: string, ...members: string[]): Promise<number> {
+    try {
+      return await this.client.sadd(key, ...members);
+    } catch (err) {
+      this.logger.warn(`Redis SADD failed for key "${key}": ${String(err)}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Return all members of a Redis Set.
+   */
+  async smembers(key: string): Promise<string[]> {
+    try {
+      return await this.client.smembers(key);
+    } catch (err) {
+      this.logger.warn(
+        `Redis SMEMBERS failed for key "${key}": ${String(err)}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Check if a value is a member of a Redis Set.
+   */
+  async sismember(key: string, member: string): Promise<boolean> {
+    try {
+      const result = await this.client.sismember(key, member);
+      return result === 1;
+    } catch (err) {
+      this.logger.warn(
+        `Redis SISMEMBER failed for key "${key}": ${String(err)}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Set a TTL on an existing key.
+   */
+  async expire(key: string, ttlSeconds: number): Promise<void> {
+    try {
+      await this.client.expire(key, ttlSeconds);
+    } catch (err) {
+      this.logger.warn(`Redis EXPIRE failed for key "${key}": ${String(err)}`);
+    }
+  }
 
   async del(key: string): Promise<void> {
     try {
@@ -63,25 +149,32 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Enumerate all keys matching a glob pattern using SCAN (non-blocking).
+   */
+  private async scanKeys(pattern: string): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, batch] = await this.client.scan(
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        100,
+      );
+      cursor = nextCursor;
+      keys.push(...batch);
+    } while (cursor !== '0');
+    return keys;
+  }
+
+  /**
    * Delete all keys matching a glob pattern using SCAN (non-blocking).
    * Returns the number of keys deleted.
    */
   async delByPattern(pattern: string): Promise<number> {
     try {
-      const keys: string[] = [];
-      let cursor = '0';
-      do {
-        const [nextCursor, batch] = await this.client.scan(
-          cursor,
-          'MATCH',
-          pattern,
-          'COUNT',
-          100,
-        );
-        cursor = nextCursor;
-        keys.push(...batch);
-      } while (cursor !== '0');
-
+      const keys = await this.scanKeys(pattern);
       if (keys.length > 0) {
         await this.client.del(...keys);
       }
@@ -89,6 +182,21 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(
         `Redis SCAN/DEL failed for pattern "${pattern}": ${String(err)}`,
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * Count keys matching a glob pattern using SCAN (non-blocking, non-destructive).
+   */
+  async countKeysByPattern(pattern: string): Promise<number> {
+    try {
+      const keys = await this.scanKeys(pattern);
+      return keys.length;
+    } catch (err) {
+      this.logger.warn(
+        `Redis SCAN failed for pattern "${pattern}": ${String(err)}`,
       );
       return 0;
     }

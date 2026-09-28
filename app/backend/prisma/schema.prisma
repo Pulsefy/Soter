@@ -3,8 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider = "postgresql"
 }
 
 enum CampaignStatus {
@@ -37,6 +36,8 @@ model AidPackage {
   totalAmount     Float @default(0)
   claimedAmount   Float @default(0)
   remainingAmount Float @default(0)
+
+  sorobanEventCorrelations SorobanEventCorrelation[]
 
   @@index([campaignId])
   @@index([campaignId, status])
@@ -237,15 +238,28 @@ model Claim {
   reissuedFrom   Claim?    @relation("ReissueChain", fields: [reissuedFromId], references: [id])
   reissuedTo     Claim[]   @relation("ReissueChain")
 
+  /// Stores AI verification anchor metadata (campaign_ref, claim_id, package_id)
+  anchorMetadata Json?
+
+  /// Optional receipt metadata pointer (URI/hash) emitted on on-chain claim/disbursement events
+  /// for off-chain receipt discovery. Set at disbursement time.
+  receiptPointer String?
+
+  importJobId    String?
+  importRowNumber Int?
+
   balanceLedger     BalanceLedger[]
   sorobanTransactions SorobanTransaction[]
+  sorobanEventCorrelations SorobanEventCorrelation[]
 
   @@index([status])
   @@index([campaignId])
+  @@index([importJobId])
   @@index([createdAt])
   @@index([deletedAt])
   @@index([reissuedFromId])
   @@index([expiresAt])
+  @@unique([importJobId, importRowNumber])
 }
 
 enum SorobanTransactionStatus {
@@ -353,6 +367,16 @@ model AuditLog {
   metadata  Json?
   deletedAt DateTime?
 
+  // Tamper-evident hash chain (see docs/audit-log-integrity.md).
+  // `sequence` orders the chain; `prevHash` links each entry to its
+  // predecessor; `entryHash` covers the entry content; `metadataCanonical`
+  // is the canonical JSON serialization of `metadata` covered by the hash.
+  // Legacy rows predating the chain keep all four fields null.
+  sequence          BigInt?  @unique
+  prevHash          String?
+  entryHash         String?
+  metadataCanonical String?
+
   @@index([entity, entityId])
   @@index([timestamp])
   @@index([deletedAt])
@@ -373,6 +397,7 @@ model Organization {
   verificationSessions VerificationSession[]
   verificationRequests VerificationRequest[]
   evidenceQueueItems EvidenceQueueItem[] @relation("OrganizationEvidenceQueueItems")
+  deviceNotificationTokens DeviceNotificationToken[]
 
   @@index([deletedAt])
 }
@@ -385,6 +410,8 @@ model User {
   organization Organization? @relation(fields: [orgId], references: [id])
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  deviceNotificationTokens DeviceNotificationToken[]
 
   @@index([orgId])
 }
@@ -465,6 +492,7 @@ model ApiKey {
   keyHash     String?  @unique
   keyPreview  String?
   role        AppRole
+  scopes      String   @default("[\"admin\"]") // JSON array of ApiKeyScope values
   ngoId       String?
   orgId       String?
   organization Organization? @relation(fields: [orgId], references: [id])
@@ -479,11 +507,20 @@ model ApiKey {
   replacedById String?
   replacedBy   ApiKey?  @relation("ApiKeyReplacement", fields: [replacedById], references: [id])
   replacedFrom ApiKey[] @relation("ApiKeyReplacement")
+  /// Optional absolute expiry. Null means no scheduled expiry.
+  expiresAt     DateTime?
+  /// While set and in the future, a rotated-out predecessor key remains
+  /// valid alongside its replacement (rotation overlap window).
+  graceExpiresAt DateTime?
+  /// Last time an expiry/rotation reminder was surfaced for this key.
+  lastRemindedAt DateTime?
 
   @@index([ngoId])
   @@index([orgId])
   @@index([revokedAt])
   @@index([lastUsedAt])
+  @@index([expiresAt])
+  @@index([graceExpiresAt])
 }
 
 model InternalNote {
@@ -510,7 +547,8 @@ enum EvidenceStatus {
 model EvidenceQueueItem {
   id            String         @id @default(cuid())
   fileName      String
-  filePath      String?        // Path to local encrypted file
+  filePath      String?        // Staging path of the encrypted file before durable upload; null once stored
+  storageKey    String?        // Retrievable key in the selected StorageDriver (local path/key or S3 object key)
   fileHash      String         @unique // To prevent duplicate uploads globally
   fingerprint   String?        // Stable fingerprint for near-duplicate detection
   mimeType      String
@@ -532,6 +570,7 @@ model EvidenceQueueItem {
   @@index([orgId])
   @@index([fingerprint])
   @@index([nearDuplicateOf])
+  @@index([storageKey])
 }
 
 enum UploadSessionStatus {
@@ -577,11 +616,31 @@ model UploadChunk {
   @@index([sessionId])
 }
 
+model ArtifactAccessToken {
+  id            String   @id @default(cuid())
+  artifactId    String
+  orgId         String
+  userId        String
+  role          String
+  tokenHash     String   @unique // SHA-256 hash of the token for revocation tracking
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String?
+  createdAt     DateTime @default(now())
+
+  @@index([artifactId])
+  @@index([orgId])
+  @@index([tokenHash])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
 enum NotificationOutboxStatus {
   pending
   enqueued
   sent
   failed
+  dead_letter
 }
 
 model NotificationOutbox {
@@ -601,10 +660,39 @@ model NotificationOutbox {
   createdAt     DateTime                 @default(now())
   updatedAt     DateTime                 @updatedAt
 
+  attempts      NotificationDeliveryAttempt[]
+
   @@index([status])
   @@index([recipient])
   @@index([scheduledFor])
   @@index([createdAt])
+}
+
+/// Records every individual delivery attempt for a NotificationOutbox
+/// record (issue #716). NotificationOutbox only ever holds the *latest*
+/// attempt (lastAttemptAt/lastError get overwritten on each retry), so
+/// this table is what actually makes a status timeline possible.
+enum DeliveryAttemptOutcome {
+  success
+  failed
+}
+
+model NotificationDeliveryAttempt {
+  id              String                 @id @default(cuid())
+  outboxId        String
+  outbox          NotificationOutbox     @relation(fields: [outboxId], references: [id])
+  attemptNumber   Int
+  outcome         DeliveryAttemptOutcome
+  failureCategory String?
+  errorMessage    String?
+  startedAt       DateTime
+  completedAt     DateTime               @default(now())
+  durationMs      Int?
+
+  @@index([outboxId])
+  @@index([outcome])
+  @@index([failureCategory])
+  @@index([startedAt])
 }
 
 /// Stores idempotency keys to prevent duplicate requests
@@ -716,6 +804,18 @@ enum EntityLinkSourceType {
   verification
 }
 
+/// Lifecycle state of an EntityLink relative to the confidence-banding
+/// review queue (issue #949). `pending_review` is the queue: links land
+/// there instead of being auto-applied when `confidenceScore` is below
+/// the configured threshold (see `common/config/entity-link-confidence.config.ts`).
+enum EntityLinkReviewStatus {
+  auto_accepted
+  pending_review
+  accepted
+  rejected
+  remapped
+}
+
 /// Links extracted entities to canonical registry records
 model EntityLink {
   id              String             @id @default(cuid())
@@ -742,6 +842,8 @@ model EntityLink {
   // Confidence & auditability
   confidenceScore Float              // 0.0 to 1.0
   matchMethod     String?            // e.g., "exact", "fuzzy", "manual"
+  reviewStatus    EntityLinkReviewStatus @default(auto_accepted)
+  queuedAt        DateTime?          // Set when reviewStatus becomes pending_review; used to compute decision latency
   reviewedBy      String?            // User ID if manually reviewed
   reviewedAt      DateTime?
   reviewNotes     String?
@@ -756,6 +858,7 @@ model EntityLink {
   @@index([projectId])
   @@index([confidenceScore])
   @@index([isActive])
+  @@index([reviewStatus])
 }
 
 // ============================================================================
@@ -781,4 +884,300 @@ model DeploymentMetadata {
   @@index([network])
   @@index([contractId])
   @@index([deployedAt])
+}
+
+enum ImportJobStatus {
+  pending
+  processing
+  completed
+  failed
+  cancelled
+}
+
+model ImportJob {
+  id            String          @id @default(cuid())
+  status        ImportJobStatus @default(pending)
+  campaignId    String
+  totalRows     Int             @default(0)
+  processedRows Int             @default(0)
+  errorRows     Int             @default(0)
+  errors        String?
+  reportUrl     String?
+  fileName      String
+  filePath      String?
+  checkpointRow Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  startedAt     DateTime?
+  completedAt   DateTime?
+  cancelledAt   DateTime?
+
+  @@index([campaignId])
+  @@index([status])
+  @@index([checkpointRow])
+}
+
+enum SorobanEventTopic {
+  package_created
+  package_claimed
+  package_disbursed
+  package_cancelled
+  package_expired
+  package_refunded
+  package_revoked
+  claim_created
+  claim_verified
+  claim_approved
+  claim_disbursed
+  claim_cancelled
+  claim_archived
+  escrow_initialized
+  escrow_funded
+  batch_created_event
+  extended_event
+  surplus_withdrawn_event
+  contract_paused_event
+  contract_unpaused_event
+  action_paused_event
+  action_unpaused_event
+  config_updated
+  admin_updated
+  tokens_allowed
+  tokens_removed
+}
+
+/// Stores correlation between Soroban on-chain events and internal records
+/// Maps event topics, transaction hashes, ledger numbers to internal claim/package IDs
+model SorobanEventCorrelation {
+  id              String              @id @default(cuid())
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  // Event identification
+  eventTopic      SorobanEventTopic
+  txHash          String              // Transaction hash from Soroban
+  ledger          Int                 // Ledger sequence number
+  eventIndex      Int                 // Index of event within transaction
+
+  // Internal record references
+  claimId         String?             // Reference to internal Claim
+  claim           Claim?              @relation(fields: [claimId], references: [id])
+  packageId       String?             // Soroban package ID (on-chain)
+  aidPackageId    String?             // Reference to internal AidPackage
+  aidPackage      AidPackage?         @relation(fields: [aidPackageId], references: [id])
+
+  // Event payload (JSON for flexibility)
+  payload         Json                // Full event payload from contract
+
+  // Processing metadata
+  processedAt     DateTime            @default(now())
+  correlationSource String            @default("scheduled") // "scheduled" | "on_demand" | "manual"
+
+  @@index([claimId])
+  @@index([packageId])
+  @@index([aidPackageId])
+  @@index([txHash])
+  @@index([ledger])
+  @@index([eventTopic])
+  @@index([createdAt])
+  @@index([correlationSource])
+  @@unique([txHash, eventIndex]) // Each event in a transaction is unique
+}
+
+enum DevicePlatform {
+  ios
+  android
+}
+
+enum LockStatus {
+  active
+  released
+  expired
+  force_expired
+}
+
+model ReviewLock {
+  id            String    @id @default(cuid())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  /// Entity being locked (e.g., "verification", "claim")
+  entityType    String
+
+  /// ID of the locked entity
+  entityId      String
+
+  /// User who acquired the lock
+  lockedBy      String
+
+  /// Timestamp when lock was acquired
+  lockedAt      DateTime  @default(now())
+
+  /// Timestamp when lock expires (stale lock recovery)
+  expiresAt     DateTime
+
+  /// Current lock status
+  status        LockStatus @default(active)
+
+  /// Timestamp when lock was released
+  releasedAt    DateTime?
+
+  /// Optional reason for release (manual, expired, force)
+  releaseReason String?
+
+  /// Version for optimistic locking (prevents race conditions)
+  version       Int       @default(1)
+
+  @@index([entityType, entityId, status])
+  @@index([lockedBy])
+  @@index([expiresAt])
+  @@index([status, expiresAt])
+}
+
+model DeviceNotificationToken {
+  id          String          @id @default(cuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  orgId       String?
+  organization Organization?  @relation(fields: [orgId], references: [id])
+  
+  // Device identification
+  platform    DevicePlatform
+  deviceId    String          // Unique device identifier (e.g., UUID from mobile app)
+  
+  // Push notification token
+  token       String          // The actual push notification token from APNS/FCM
+  
+  // Metadata
+  deviceName  String?         // Optional human-readable device name
+  appVersion  String?         // App version when token was registered
+  
+  // Lifecycle
+  isActive    Boolean         @default(true)
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  revokedBy   String?
+  revokedReason String?
+  
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([userId, deviceId, platform])
+  @@index([userId])
+  @@index([orgId])
+  @@index([token])
+  @@index([isActive])
+  @@index([revokedAt])
+}
+
+// ============================================================================
+// SEARCH INDEX
+// ============================================================================
+
+/// Entities that can be materialized into the search index
+enum SearchIndexEntityType {
+  campaign
+  claim
+  recipient
+  verification
+}
+
+/// Lifecycle state of a search index (re)build run
+enum SearchIndexBuildStatus {
+  running
+  completed
+  failed
+}
+
+/// Denormalized, searchable document backing `AdminSearchService.search`.
+/// Populated by SearchIndexService; rebuilt by an admin-triggered rebuild so
+/// a schema change or a bad partial write can be recovered without manual
+/// intervention. `buildId` marks which build last wrote an entry so stale
+/// entries are purged at the end of a successful rebuild.
+model SearchIndexEntry {
+  id         String                @id @default(cuid())
+  entityType SearchIndexEntityType
+  entityId   String
+  orgId      String
+  label      String
+  status     String
+  searchText String
+  buildId    String
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+
+  @@unique([entityType, entityId, orgId])
+  @@index([orgId, entityType])
+  @@index([buildId])
+}
+
+/// Durable checkpoint for a search index (re)build run. Progress is persisted
+/// here so an interrupted rebuild can be resumed from its last batch instead
+/// of starting over. Only one `running` build is allowed at a time;
+/// concurrent requests are rejected by SearchIndexService.
+model SearchIndexBuild {
+
+  id                 String                @id @default(cuid())
+  status             SearchIndexBuildStatus @default(running)
+  mode               String                @default("rebuild") /// "rebuild" | "dry_run"
+  entityTypes        Json
+  batchSize          Int                   @default(100)
+  triggeredBy        String?
+  totalDocuments     Int                   @default(0)
+  processedDocuments Int                   @default(0)
+  checkpoint         Json?
+  statistics         Json?
+  error              String?
+  heartbeatAt        DateTime?
+  startedAt          DateTime              @default(now())
+  completedAt        DateTime?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// LEDGER BACKFILL
+// ============================================================================
+
+enum BackfillStatus {
+  running
+  completed
+  failed
+  cancelled
+}
+
+/// Durable checkpoint for a range-based ledger backfill job. Progress is
+/// persisted here so an interrupted or failed backfill can resume from
+/// `lastProcessedLedger` instead of restarting from the beginning.
+/// `jobKey` is a deterministic key (e.g. "backfill:{start}:{end}") so that
+/// re-triggering the same range either resumes or is rejected if already running.
+model BackfillCheckpoint {
+  id                  String         @id @default(cuid())
+  /// Deterministic key — prevents duplicate concurrent runs for the same range.
+  jobKey              String         @unique
+  startLedger         Int
+  endLedger           Int
+  /// The last ledger sequence fully processed. Resume point on restart.
+  lastProcessedLedger Int            @default(0)
+  status              BackfillStatus @default(running)
+  campaignId          String?
+  batchSize           Int            @default(100)
+  processedCount      Int            @default(0)
+  skippedCount        Int            @default(0)
+  errorCount          Int            @default(0)
+  lastError           String?
+  triggeredBy         String?
+  startedAt           DateTime       @default(now())
+  completedAt         DateTime?
+  /// Heartbeat updated by the worker on each batch so stale jobs can be detected.
+  heartbeatAt         DateTime?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@index([status])
+  @@index([startLedger, endLedger])
+  @@index([createdAt])
 }

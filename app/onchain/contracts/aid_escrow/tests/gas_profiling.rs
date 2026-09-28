@@ -1,10 +1,13 @@
 #![cfg(test)]
 
+use std::path::Path;
+
 use aid_escrow::{AidEscrow, AidEscrowClient, Config};
+use serde_json::json;
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
     token::StellarAssetClient,
-    Address, Env, Map, Vec,
+    Address, Env, Map, Symbol, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -56,6 +59,7 @@ impl TestSetup {
             min_amount: 1,
             max_expires_in: 0,
             allowed_tokens: Vec::new(&env),
+            claim_cooldown: 0,
         });
 
         Self {
@@ -94,11 +98,108 @@ fn capture_budget(env: &Env) -> BudgetMetrics {
     }
 }
 
+fn diff_budget(before: &BudgetMetrics, after: &BudgetMetrics) -> BudgetMetrics {
+    BudgetMetrics {
+        cpu_instructions: after
+            .cpu_instructions
+            .saturating_sub(before.cpu_instructions),
+        memory_bytes: after.memory_bytes.saturating_sub(before.memory_bytes),
+    }
+}
+
 fn print_budget_metrics(operation: &str, metrics: &BudgetMetrics) {
     println!("=== {} ===", operation);
     println!("  CPU Instructions: {}", metrics.cpu_instructions);
     println!("  Memory Bytes: {}", metrics.memory_bytes);
     println!();
+}
+
+// ---------------------------------------------------------------------------
+// Budget gate artifacts + deliberate budget updates
+// ---------------------------------------------------------------------------
+
+/// Artifacts are written into the workspace `target` dir so they are gitignored
+/// and discoverable by the CI budget-gate script (`scripts/check_gas_budgets.py`).
+fn metrics_dir() -> std::path::PathBuf {
+    // CARGO_MANIFEST_DIR is the package dir (app/onchain/contracts/aid_escrow);
+    // walk up two levels to the workspace (app/onchain) and into its target.
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("target/gas_metrics")
+}
+
+/// Persist a measured cost for one entry point so the CI budget-gate can
+/// compare it against the committed budgets in `gas_budgets.json`.
+fn record_metrics(operation: &str, size: u32, metrics: &BudgetMetrics) {
+    let dir = metrics_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let file_name = format!("{}.json", operation);
+    let record = json!({
+        "operation": operation,
+        "size": size,
+        "cpu_instructions": metrics.cpu_instructions,
+        "memory_bytes": metrics.memory_bytes,
+    });
+    if let Ok(contents) = serde_json::to_string_pretty(&record) {
+        let _ = std::fs::write(dir.join(file_name), contents);
+    }
+    maybe_update_budgets(operation, metrics);
+}
+
+/// When `SOTER_UPDATE_GAS_BUDGETS=1` is set, rewrite `gas_budgets.json` with
+/// the just-measured values. This is the deliberate, reviewable way to bump a
+/// budget after an intentional cost change (commit the result in a reviewed PR).
+fn maybe_update_budgets(operation: &str, metrics: &BudgetMetrics) {
+    if std::env::var("SOTER_UPDATE_GAS_BUDGETS").is_err() {
+        return;
+    }
+    let budgets_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("gas_budgets.json");
+    let mut budgets: serde_json::Value = if budgets_path.exists() {
+        serde_json::from_str(&std::fs::read_to_string(&budgets_path).unwrap_or_default())
+            .unwrap_or_else(|_| json!({ "tolerance": default_tolerance(), "budgets": {} }))
+    } else {
+        json!({ "tolerance": default_tolerance(), "budgets": {} })
+    };
+    budgets["budgets"][operation] = json!({
+        "cpu_instructions": metrics.cpu_instructions,
+        "memory_bytes": metrics.memory_bytes,
+    });
+    if let Ok(contents) = serde_json::to_string_pretty(&budgets) {
+        let _ = std::fs::write(&budgets_path, contents);
+    }
+}
+
+fn default_tolerance() -> serde_json::Value {
+    json!({ "cpu_instructions_pct": 15, "memory_bytes_pct": 15 })
+}
+
+fn new_metadata(env: &Env) -> Map<Symbol, soroban_sdk::String> {
+    Map::new(env)
+}
+
+fn create_profiled_package(t: &TestSetup, id: u64, recipient: &Address) {
+    t.fund_contract(ONE_TOKEN);
+    let expires_at = t.now() + 3_600;
+    t.client.create_package(
+        &t.admin,
+        &id,
+        recipient,
+        &ONE_TOKEN,
+        &t.token,
+        &expires_at,
+        &new_metadata(&t.env),
+    );
+}
+
+fn profile_ids(t: &TestSetup, count: u64) -> Vec<u64> {
+    let mut ids: Vec<u64> = Vec::new(&t.env);
+    for id in 1..=count {
+        ids.push_back(id);
+    }
+    ids
 }
 
 // ===========================================================================
@@ -110,15 +211,12 @@ fn profile_single_create_package() {
     let t = TestSetup::new();
     let recipient = Address::generate(&t.env);
 
-    // Fund contract
     t.fund_contract(ONE_TOKEN);
 
-    // Capture initial budget
     let before = capture_budget(&t.env);
 
-    // Create package
     let expires_at = t.now() + 3_600;
-    let metadata = Map::new(&t.env);
+    let metadata = new_metadata(&t.env);
     let _package_id = t.client.create_package(
         &t.admin,
         &1u64,
@@ -129,17 +227,220 @@ fn profile_single_create_package() {
         &metadata,
     );
 
-    // Capture final budget
     let after = capture_budget(&t.env);
-
-    let metrics = BudgetMetrics {
-        cpu_instructions: after
-            .cpu_instructions
-            .saturating_sub(before.cpu_instructions),
-        memory_bytes: after.memory_bytes.saturating_sub(before.memory_bytes),
-    };
+    let metrics = diff_budget(&before, &after);
 
     print_budget_metrics("Single create_package", &metrics);
+    record_metrics("create_package", 1, &metrics);
+}
+
+#[test]
+fn profile_single_claim() {
+    let t = TestSetup::new();
+    let recipient = Address::generate(&t.env);
+
+    t.fund_contract(ONE_TOKEN);
+    let expires_at = t.now() + 3_600;
+    let metadata = new_metadata(&t.env);
+    let package_id = t.client.create_package(
+        &t.admin,
+        &1u64,
+        &recipient,
+        &ONE_TOKEN,
+        &t.token,
+        &expires_at,
+        &metadata,
+    );
+
+    let before = capture_budget(&t.env);
+    t.client.claim(&package_id);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
+
+    print_budget_metrics("Single claim", &metrics);
+    record_metrics("claim", 1, &metrics);
+}
+
+#[test]
+fn profile_single_refund() {
+    let t = TestSetup::new();
+    let recipient = Address::generate(&t.env);
+
+    t.fund_contract(ONE_TOKEN);
+    let expires_at = t.now() + 3_600;
+    let metadata = new_metadata(&t.env);
+    let package_id = t.client.create_package(
+        &t.admin,
+        &1u64,
+        &recipient,
+        &ONE_TOKEN,
+        &t.token,
+        &expires_at,
+        &metadata,
+    );
+
+    t.env.ledger().with_mut(|li| li.timestamp = expires_at + 1);
+
+    let before = capture_budget(&t.env);
+    t.client.refund(&package_id);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
+
+    print_budget_metrics("Single refund", &metrics);
+    record_metrics("refund", 1, &metrics);
+}
+
+// ---------------------------------------------------------------------------
+// Delegate operations
+// ---------------------------------------------------------------------------
+
+#[test]
+fn profile_single_set_delegate() {
+    let t = TestSetup::new();
+    let recipient = Address::generate(&t.env);
+    let delegate = Address::generate(&t.env);
+    create_profiled_package(&t, 1, &recipient);
+
+    let before = capture_budget(&t.env);
+    t.client.set_delegate(&t.admin, &1u64, &delegate);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
+
+    print_budget_metrics("Single set_delegate", &metrics);
+    record_metrics("set_delegate", 1, &metrics);
+}
+
+#[test]
+fn profile_single_set_delegate_with_expiry() {
+    let t = TestSetup::new();
+    let recipient = Address::generate(&t.env);
+    let delegate = Address::generate(&t.env);
+    create_profiled_package(&t, 1, &recipient);
+
+    let before = capture_budget(&t.env);
+    t.client
+        .set_delegate_with_expiry(&t.admin, &1u64, &delegate, &(t.now() + 3_600));
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
+
+    print_budget_metrics("Single set_delegate_with_expiry", &metrics);
+    record_metrics("set_delegate_with_expiry", 1, &metrics);
+}
+
+#[test]
+fn profile_single_revoke_delegate() {
+    let t = TestSetup::new();
+    let recipient = Address::generate(&t.env);
+    let delegate = Address::generate(&t.env);
+    create_profiled_package(&t, 1, &recipient);
+    t.client.set_delegate(&t.admin, &1u64, &delegate);
+
+    let before = capture_budget(&t.env);
+    t.client.revoke_delegate(&t.admin, &1u64);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
+
+    print_budget_metrics("Single revoke_delegate", &metrics);
+    record_metrics("revoke_delegate", 1, &metrics);
+}
+
+#[test]
+fn profile_get_delegate() {
+    let t = TestSetup::new();
+    let recipient = Address::generate(&t.env);
+    let delegate = Address::generate(&t.env);
+    create_profiled_package(&t, 1, &recipient);
+    t.client.set_delegate(&t.admin, &1u64, &delegate);
+
+    let before = capture_budget(&t.env);
+    let _delegate = t.client.get_delegate(&1u64);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
+
+    print_budget_metrics("Get delegate", &metrics);
+    record_metrics("get_delegate", 1, &metrics);
+}
+
+#[test]
+fn profile_get_delegate_info() {
+    let t = TestSetup::new();
+    let recipient = Address::generate(&t.env);
+    let delegate = Address::generate(&t.env);
+    create_profiled_package(&t, 1, &recipient);
+    t.client.set_delegate(&t.admin, &1u64, &delegate);
+
+    let before = capture_budget(&t.env);
+    let _info = t.client.get_delegate_info(&1u64);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
+
+    print_budget_metrics("Get delegate info", &metrics);
+    record_metrics("get_delegate_info", 1, &metrics);
+}
+
+#[test]
+fn profile_get_delegate_history() {
+    let t = TestSetup::new();
+    let recipient = Address::generate(&t.env);
+    let delegate = Address::generate(&t.env);
+    let delegate2 = Address::generate(&t.env);
+    create_profiled_package(&t, 1, &recipient);
+    t.client.set_delegate(&t.admin, &1u64, &delegate);
+    t.client.set_delegate(&t.admin, &1u64, &delegate2);
+
+    let before = capture_budget(&t.env);
+    let _history = t.client.get_delegate_history(&1u64);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
+
+    print_budget_metrics("Get delegate history", &metrics);
+    record_metrics("get_delegate_history", 1, &metrics);
+}
+
+#[test]
+fn profile_sweep_expired_delegates() {
+    let t = TestSetup::new();
+
+    for id in 1..=10u64 {
+        let recipient = Address::generate(&t.env);
+        let delegate = Address::generate(&t.env);
+        create_profiled_package(&t, id, &recipient);
+        t.client
+            .set_delegate_with_expiry(&t.admin, &id, &delegate, &(t.now() + 1));
+    }
+
+    t.env.ledger().with_mut(|li| li.timestamp += 2);
+
+    let before = capture_budget(&t.env);
+    let _swept = t.client.sweep_expired_delegates(&10u32);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
+
+    print_budget_metrics("Sweep expired delegates (limit: 10)", &metrics);
+    record_metrics("sweep_expired_delegates", 1, &metrics);
+}
+
+#[test]
+fn profile_cleanup_expired_delegates() {
+    let t = TestSetup::new();
+
+    for id in 1..=10u64 {
+        let recipient = Address::generate(&t.env);
+        let delegate = Address::generate(&t.env);
+        create_profiled_package(&t, id, &recipient);
+        t.client
+            .set_delegate_with_expiry(&t.admin, &id, &delegate, &(t.now() + 1));
+    }
+
+    t.env.ledger().with_mut(|li| li.timestamp += 2);
+
+    let before = capture_budget(&t.env);
+    let _cleaned = t.client.cleanup_expired_delegates(&t.admin);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
+
+    print_budget_metrics("Cleanup expired delegates (10)", &metrics);
+    record_metrics("cleanup_expired_delegates", 1, &metrics);
 }
 
 #[test]
@@ -170,123 +471,106 @@ fn profile_batch_create_packages_200() {
 fn profile_batch_create(batch_size: u32) {
     let t = TestSetup::new();
 
-    // Prepare recipients and amounts
     let mut recipients: Vec<Address> = Vec::new(&t.env);
     let mut amounts: Vec<i128> = Vec::new(&t.env);
-    let mut metadatas: Vec<Map<soroban_sdk::Symbol, soroban_sdk::String>> = Vec::new(&t.env);
+    let mut metadatas: Vec<Map<Symbol, soroban_sdk::String>> = Vec::new(&t.env);
 
     for _ in 0..batch_size {
         recipients.push_back(Address::generate(&t.env));
         amounts.push_back(ONE_TOKEN);
-        metadatas.push_back(Map::new(&t.env));
+        metadatas.push_back(new_metadata(&t.env));
     }
 
-    // Fund contract with enough tokens
     let total_amount = ONE_TOKEN * batch_size as i128;
     t.fund_contract(total_amount);
 
-    // Capture initial budget
     let before = capture_budget(&t.env);
 
-    // Batch create packages
     t.client
         .batch_create_packages(&t.admin, &recipients, &amounts, &t.token, &3600, &metadatas);
 
-    // Capture final budget
     let after = capture_budget(&t.env);
-
-    let metrics = BudgetMetrics {
-        cpu_instructions: after
-            .cpu_instructions
-            .saturating_sub(before.cpu_instructions),
-        memory_bytes: after.memory_bytes.saturating_sub(before.memory_bytes),
-    };
+    let metrics = diff_budget(&before, &after);
 
     print_budget_metrics(
         &format!("Batch create_packages (size: {})", batch_size),
         &metrics,
     );
 
-    // Calculate per-package metrics
     let per_package_cpu = metrics.cpu_instructions / batch_size as u64;
     let per_package_memory = metrics.memory_bytes / batch_size as u64;
 
     println!("  Per-package CPU: {}", per_package_cpu);
     println!("  Per-package Memory: {}", per_package_memory);
     println!();
+
+    record_metrics(
+        &format!("batch_create_packages_{}", batch_size),
+        batch_size,
+        &metrics,
+    );
 }
 
+// ---------------------------------------------------------------------------
+// Batch claim / revoke / refund (bounded at MAX size 25)
+// ---------------------------------------------------------------------------
+
 #[test]
-fn profile_single_claim() {
+fn profile_batch_claim_25() {
     let t = TestSetup::new();
     let recipient = Address::generate(&t.env);
 
-    // Create a package
-    t.fund_contract(ONE_TOKEN);
-    let expires_at = t.now() + 3_600;
-    let metadata = Map::new(&t.env);
-    let _package_id = t.client.create_package(
-        &t.admin,
-        &1u64,
-        &recipient,
-        &ONE_TOKEN,
-        &t.token,
-        &expires_at,
-        &metadata,
-    );
+    for id in 1..=25u64 {
+        create_profiled_package(&t, id, &recipient);
+    }
+    let ids = profile_ids(&t, 25);
 
-    // Reset budget for claim operation
-    let env = Env::default();
-    env.ledger().set(default_ledger_info());
-    env.mock_all_auths();
+    let before = capture_budget(&t.env);
+    let _results = t.client.batch_claim(&recipient, &ids);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
 
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
+    print_budget_metrics("Batch claim (size: 25)", &metrics);
+    record_metrics("batch_claim_25", 25, &metrics);
+}
 
-    // Re-create the same package state in new environment
-    let admin = Address::generate(&env);
-    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
-    let token = token_id.address();
-    let token_sac = StellarAssetClient::new(&env, &token);
+#[test]
+fn profile_batch_revoke_25() {
+    let t = TestSetup::new();
+    let recipient = Address::generate(&t.env);
 
-    client.init(&admin);
-    client.set_config(&Config {
-        min_amount: 1,
-        max_expires_in: 0,
-        allowed_tokens: Vec::new(&env),
-    });
+    for id in 1..=25u64 {
+        create_profiled_package(&t, id, &recipient);
+    }
+    let ids = profile_ids(&t, 25);
 
-    token_sac.mint(&client.address, &ONE_TOKEN);
-    let recipient_new = Address::generate(&env);
-    let expires_at_new = env.ledger().timestamp() + 3_600;
-    let metadata_new = Map::new(&env);
-    let package_id_new = client.create_package(
-        &admin,
-        &1u64,
-        &recipient_new,
-        &ONE_TOKEN,
-        &token,
-        &expires_at_new,
-        &metadata_new,
-    );
+    let before = capture_budget(&t.env);
+    let _results = t.client.batch_revoke(&ids);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
 
-    // Capture initial budget
-    let before = capture_budget(&env);
+    print_budget_metrics("Batch revoke (size: 25)", &metrics);
+    record_metrics("batch_revoke_25", 25, &metrics);
+}
 
-    // Claim package
-    client.claim(&package_id_new);
+#[test]
+fn profile_batch_refund_25() {
+    let t = TestSetup::new();
+    let recipient = Address::generate(&t.env);
 
-    // Capture final budget
-    let after = capture_budget(&env);
+    for id in 1..=25u64 {
+        create_profiled_package(&t, id, &recipient);
+    }
+    t.env.ledger().with_mut(|li| li.timestamp += 3_601);
+    let ids = profile_ids(&t, 25);
 
-    let metrics = BudgetMetrics {
-        cpu_instructions: after
-            .cpu_instructions
-            .saturating_sub(before.cpu_instructions),
-        memory_bytes: after.memory_bytes.saturating_sub(before.memory_bytes),
-    };
+    let before = capture_budget(&t.env);
+    let _results = t.client.batch_refund(&ids);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
 
-    print_budget_metrics("Single claim", &metrics);
+    print_budget_metrics("Batch refund (size: 25)", &metrics);
+    record_metrics("batch_refund_25", 25, &metrics);
 }
 
 #[test]
@@ -294,10 +578,8 @@ fn profile_claim_with_proof() {
     let t = TestSetup::new();
     let claimant = Address::generate(&t.env);
 
-    // Fund contract
     t.fund_contract(ONE_TOKEN);
 
-    // Create Merkle root for single leaf (claimant)
     let addr = claimant.to_string();
     let len = addr.len() as usize;
     let mut raw = [0u8; 96];
@@ -316,15 +598,14 @@ fn profile_claim_with_proof() {
         root_hex.push_str(&format!("{:02x}", b));
     }
 
-    // Create package with Merkle root
-    let mut metadata = Map::new(&t.env);
+    let mut metadata = new_metadata(&t.env);
     metadata.set(
-        soroban_sdk::Symbol::new(&t.env, "merkle_root"),
+        Symbol::new(&t.env, "merkle_root"),
         soroban_sdk::String::from_str(&t.env, &root_hex),
     );
 
     let expires_at = t.now() + 3_600;
-    let _package_id = t.client.create_package(
+    let package_id = t.client.create_package(
         &t.admin,
         &1u64,
         &Address::generate(&t.env),
@@ -334,108 +615,29 @@ fn profile_claim_with_proof() {
         &metadata,
     );
 
-    // Reset environment for clean claim measurement
-    let env = Env::default();
-    env.ledger().set(default_ledger_info());
-    env.mock_all_auths();
-
-    let contract_id = env.register(AidEscrow, ());
-    let client = AidEscrowClient::new(&env, &contract_id);
-
-    let admin = Address::generate(&env);
-    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
-    let token = token_id.address();
-    let token_sac = StellarAssetClient::new(&env, &token);
-
-    client.init(&admin);
-    client.set_config(&Config {
-        min_amount: 1,
-        max_expires_in: 0,
-        allowed_tokens: Vec::new(&env),
-    });
-
-    token_sac.mint(&client.address, &ONE_TOKEN);
-
-    let claimant_new = Address::generate(&env);
-    let addr_new = claimant_new.to_string();
-    let len_new = addr_new.len() as usize;
-    let mut raw_new = [0u8; 96];
-    addr_new.copy_into_slice(&mut raw_new[..len_new]);
-
-    let mut data_new = soroban_sdk::Bytes::new(&env);
-    for b in raw_new[..len_new].iter() {
-        data_new.push_back(*b);
-    }
-
-    let digest_new = env.crypto().sha256(&data_new);
-    let hash_new = digest_new.to_array();
-
-    let mut root_hex_new = String::new();
-    for b in hash_new {
-        root_hex_new.push_str(&format!("{:02x}", b));
-    }
-
-    let mut metadata_new = Map::new(&env);
-    metadata_new.set(
-        soroban_sdk::Symbol::new(&env, "merkle_root"),
-        soroban_sdk::String::from_str(&env, &root_hex_new),
-    );
-
-    let expires_at_new = env.ledger().timestamp() + 3_600;
-    let package_id_new = client.create_package(
-        &admin,
-        &1u64,
-        &Address::generate(&env),
-        &ONE_TOKEN,
-        &token,
-        &expires_at_new,
-        &metadata_new,
-    );
-
-    // Capture initial budget
-    let before = capture_budget(&env);
-
-    // Claim with proof (empty proof for single leaf)
-    let proof: Vec<soroban_sdk::String> = Vec::new(&env);
-    client.claim_with_proof(&package_id_new, &claimant_new, &proof);
-
-    // Capture final budget
-    let after = capture_budget(&env);
-
-    let metrics = BudgetMetrics {
-        cpu_instructions: after
-            .cpu_instructions
-            .saturating_sub(before.cpu_instructions),
-        memory_bytes: after.memory_bytes.saturating_sub(before.memory_bytes),
-    };
+    let before = capture_budget(&t.env);
+    let proof: Vec<soroban_sdk::String> = Vec::new(&t.env);
+    t.client.claim_with_proof(&package_id, &claimant, &proof);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
 
     print_budget_metrics("Claim with Merkle proof", &metrics);
+    record_metrics("claim_with_proof", 1, &metrics);
 }
 
 #[test]
 fn profile_fund_operation() {
     let t = TestSetup::new();
 
-    // Mint tokens to admin first
     t.token_sac.mint(&t.admin, &(ONE_TOKEN * 100));
 
-    // Capture initial budget
     let before = capture_budget(&t.env);
-
-    // Fund contract
     t.client.fund(&t.token, &t.admin, &ONE_TOKEN);
-
-    // Capture final budget
     let after = capture_budget(&t.env);
-
-    let metrics = BudgetMetrics {
-        cpu_instructions: after
-            .cpu_instructions
-            .saturating_sub(before.cpu_instructions),
-        memory_bytes: after.memory_bytes.saturating_sub(before.memory_bytes),
-    };
+    let metrics = diff_budget(&before, &after);
 
     print_budget_metrics("Fund operation (1 token)", &metrics);
+    record_metrics("fund", 1, &metrics);
 }
 
 #[test]
@@ -443,11 +645,10 @@ fn profile_get_package() {
     let t = TestSetup::new();
     let recipient = Address::generate(&t.env);
 
-    // Create a package
     t.fund_contract(ONE_TOKEN);
     let expires_at = t.now() + 3_600;
-    let metadata = Map::new(&t.env);
-    let _package_id = t.client.create_package(
+    let metadata = new_metadata(&t.env);
+    let package_id = t.client.create_package(
         &t.admin,
         &1u64,
         &recipient,
@@ -457,39 +658,28 @@ fn profile_get_package() {
         &metadata,
     );
 
-    // Capture initial budget
     let before = capture_budget(&t.env);
-
-    // Get package
-    t.client.get_package(&_package_id);
-
-    // Capture final budget
+    t.client.get_package(&package_id);
     let after = capture_budget(&t.env);
-
-    let metrics = BudgetMetrics {
-        cpu_instructions: after
-            .cpu_instructions
-            .saturating_sub(before.cpu_instructions),
-        memory_bytes: after.memory_bytes.saturating_sub(before.memory_bytes),
-    };
+    let metrics = diff_budget(&before, &after);
 
     print_budget_metrics("Get package", &metrics);
+    record_metrics("get_package", 1, &metrics);
 }
 
 #[test]
 fn profile_get_aggregates() {
     let t = TestSetup::new();
 
-    // Create multiple packages
     let batch_size = 50;
     let mut recipients: Vec<Address> = Vec::new(&t.env);
     let mut amounts: Vec<i128> = Vec::new(&t.env);
-    let mut metadatas: Vec<Map<soroban_sdk::Symbol, soroban_sdk::String>> = Vec::new(&t.env);
+    let mut metadatas: Vec<Map<Symbol, soroban_sdk::String>> = Vec::new(&t.env);
 
     for _ in 0..batch_size {
         recipients.push_back(Address::generate(&t.env));
         amounts.push_back(ONE_TOKEN);
-        metadatas.push_back(Map::new(&t.env));
+        metadatas.push_back(new_metadata(&t.env));
     }
 
     let total_amount = ONE_TOKEN * batch_size as i128;
@@ -498,24 +688,14 @@ fn profile_get_aggregates() {
     t.client
         .batch_create_packages(&t.admin, &recipients, &amounts, &t.token, &3600, &metadatas);
 
-    // Capture initial budget
     let before = capture_budget(&t.env);
-
-    // Get aggregates
     t.client.get_aggregates(&t.token);
-
-    // Capture final budget
     let after = capture_budget(&t.env);
-
-    let metrics = BudgetMetrics {
-        cpu_instructions: after
-            .cpu_instructions
-            .saturating_sub(before.cpu_instructions),
-        memory_bytes: after.memory_bytes.saturating_sub(before.memory_bytes),
-    };
+    let metrics = diff_budget(&before, &after);
 
     print_budget_metrics(
         &format!("Get aggregates ({} packages)", batch_size),
         &metrics,
     );
+    record_metrics("get_aggregates", 1, &metrics);
 }

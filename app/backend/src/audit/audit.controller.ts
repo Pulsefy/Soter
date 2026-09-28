@@ -1,6 +1,17 @@
-import { Controller, Get, Query, Res, Version } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Query,
+  Res,
+  Version,
+  HttpCode,
+  HttpStatus,
+  Headers,
+} from '@nestjs/common';
 import { Response } from 'express';
 import { AuditService, AuditQuery, ExportAuditQuery } from './audit.service';
+import { AuditChainService } from './audit-chain.service';
 import {
   ApiTags,
   ApiOperation,
@@ -9,12 +20,19 @@ import {
   ApiUnauthorizedResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { MetricsService } from 'src/audit/metrics.service';
+import { Roles } from '../auth/roles.decorator';
+import { AppRole } from '../auth/app-role.enum';
 
 @ApiTags('Audit')
 @ApiBearerAuth('JWT-auth')
 @Controller('audit')
 export class AuditController {
-  constructor(private readonly auditService: AuditService) {}
+  constructor(
+    private readonly auditService: AuditService,
+    private readonly chainService: AuditChainService,
+    private metricsService: MetricsService,
+  ) {}
 
   @Get()
   @Version('1')
@@ -129,5 +147,65 @@ export class AuditController {
     }
 
     return result;
+  }
+
+  @Get('chain/status')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'Report audit chain integrity status (admin only)',
+    description:
+      'Verifies the tamper-evident hash chain over audit entries and reports ' +
+      'its integrity status. Detects content mutation, inserted or deleted ' +
+      'entries, and — when a previously anchored head hash is supplied via ' +
+      'the `X-Expected-Chain-Head` header — truncation of the newest ' +
+      'entries. Unsealed (legacy) rows are reported via `backfillPending` ' +
+      'until POST /audit/chain/backfill seals them.',
+  })
+  @ApiOkResponse({ description: 'Audit chain integrity status.' })
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid authentication credentials.',
+  })
+  @ApiQuery({
+    name: 'X-Expected-Chain-Head',
+    required: false,
+    description:
+      'Previously anchored chain head hash; when supplied, a mismatch is reported as an integrity issue.',
+  })
+  async getChainStatus(
+    @Headers('x-expected-chain-head') expectedHeadHash?: string,
+  ) {
+    return this.chainService.verifyChain(
+      expectedHeadHash ? { expectedHeadHash } : undefined,
+    );
+  }
+
+  @Post('chain/backfill')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Seal legacy audit entries into the hash chain (admin only)',
+    description:
+      'Assigns sequence numbers and hashes to pre-existing audit rows that ' +
+      'predate the hash chain, linking them onto the current chain head. ' +
+      'Safe to re-run: already-sealed rows are skipped and the process ' +
+      'resumes where it left off.',
+  })
+  @ApiOkResponse({ description: 'Legacy rows sealed into the chain.' })
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid authentication credentials.',
+  })
+  async backfillChain() {
+    return this.chainService.backfillChain();
+  }
+
+  @Get('metrics')
+  @ApiOperation({ summary: 'Get service metrics' })
+  @ApiOkResponse({ description: 'Prometheus metrics exported successfully.' })
+  async getMetrics(@Res() res: Response) {
+    res.set('Content-Type', 'text/plain');
+    const metrics = await this.metricsService.getMetrics();
+    res.send(metrics);
   }
 }

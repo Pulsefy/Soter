@@ -67,6 +67,8 @@ export interface BatchCreateAidPackagesResult {
 export interface ClaimAidPackageParams {
   packageId: string;
   recipientAddress: string;
+  receiptPointer?: string;
+  amount?: string;
 }
 
 export interface ClaimAidPackageResult {
@@ -81,6 +83,7 @@ export interface ClaimAidPackageResult {
 export interface DisburseAidPackageParams {
   packageId: string;
   operatorAddress: string; // Usually admin
+  receiptPointer?: string;
 }
 
 export interface DisburseAidPackageResult {
@@ -105,6 +108,8 @@ export interface AidPackage {
   createdAt: number;
   expiresAt: number;
   metadata?: Record<string, string>;
+  claimedAmount?: string;
+  remainingAmount?: string;
 }
 
 export interface GetAidPackageResult {
@@ -193,6 +198,7 @@ export interface DisburseParams {
   recipientAddress?: string;
   amount?: string;
   tokenAddress: string; // Required for multi-token support
+  receiptPointer?: string;
 }
 
 export interface DisburseResult {
@@ -200,6 +206,26 @@ export interface DisburseResult {
   timestamp: Date;
   status: 'success' | 'failed';
   amountDisbursed: string;
+  metadata?: Record<string, any>;
+}
+
+export interface ExtendAidPackageExpiryParams {
+  packageId: string;
+  /**
+   * New unix timestamp (in seconds) when the package expires.
+   * Strictly greater than current package expiration.
+   */
+  newExpiresAt: number;
+  operatorAddress?: string;
+}
+
+export interface ExtendAidPackageExpiryResult {
+  packageId: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  oldExpiresAt?: number;
+  newExpiresAt: number;
   metadata?: Record<string, any>;
 }
 
@@ -239,6 +265,21 @@ export interface OnchainAdapter {
   disburseAidPackage(
     params: DisburseAidPackageParams,
   ): Promise<DisburseAidPackageResult>;
+
+  /**
+   * Extend the expiration timestamp of an active aid package.
+   *
+   * Design Decision:
+   * Canonical convention chosen: Absolute timestamp (`extend_expiry(id, new_expires_at)`).
+   * Rationale:
+   * 1. The smart contract explicitly deprecated relative `extend_expiration(id, additional_time)`
+   *    in favor of `extend_expiry(id, new_expires_at)`.
+   * 2. Absolute timestamps provide idempotency and protect against race conditions or retry-induced
+   *    expiration drift if operations are re-submitted.
+   */
+  extendAidPackageExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult>;
 
   /**
    * Get details of an aid package

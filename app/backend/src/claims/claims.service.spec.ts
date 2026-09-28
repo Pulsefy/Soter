@@ -1,7 +1,8 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+
 import { ConfigService } from '@nestjs/config';
-import { ClaimsService } from './claims.service';
+import { ClaimsService, ClaimExportRow } from './claims.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BudgetService } from '../common/budget/budget.service';
 import {
@@ -12,13 +13,15 @@ import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
-import { ClaimStatus, Prisma } from '@prisma/client';
+import { ClaimStatus, Prisma, SorobanOperationType } from '@prisma/client';
 import { SorobanTransactionLifecycleService } from '../onchain/soroban-transaction-lifecycle.service';
 import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
+import { VerificationService } from '../verification/verification.service';
 
 describe('ClaimsService', () => {
   let service: ClaimsService;
   let prismaService: PrismaService;
+  let budgetService: BudgetService;
   let _onchainAdapter: OnchainAdapter;
   let _metricsService: MetricsService;
   let _auditService: AuditService;
@@ -76,6 +79,12 @@ describe('ClaimsService', () => {
     incrementOnchainOperation: jest.fn(),
     recordOnchainDuration: jest.fn(),
     incrementCounter: jest.fn(),
+    incrementClaimsCreated: jest.fn(),
+    incrementClaimsDisbursed: jest.fn(),
+    incrementClaimsVerified: jest.fn(),
+    incrementClaimsApproved: jest.fn(),
+    recordClaimFunnelDuration: jest.fn(),
+    adjustClaimsInFunnel: jest.fn(),
   };
 
   const mockSorobanTxLifecycleService = {
@@ -89,6 +98,12 @@ describe('ClaimsService', () => {
     record: jest.fn().mockResolvedValue({ id: 'audit-1' }),
   };
 
+  const mockVerificationService = {
+    enqueueVerification: jest
+      .fn()
+      .mockResolvedValue({ jobId: 'job-1', priority: 0 }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -97,20 +112,31 @@ describe('ClaimsService', () => {
           provide: BudgetService,
           useValue: {
             assertWithinBudget: jest.fn(),
+            reserveBudget: jest.fn(),
             getCampaignBudgetUsage: jest.fn(),
           },
         },
         {
           provide: PrismaService,
           useValue: {
+            campaign: {
+              findUnique: jest.fn(),
+            },
             claim: {
               findUnique: jest.fn(),
               update: jest.fn(),
               findMany: jest.fn(),
               create: jest.fn(),
+              count: jest.fn(),
+            },
+            balanceLedger: {
+              create: jest.fn(),
             },
             sorobanTransaction: {
               create: jest.fn(),
+            },
+            sorobanEventCorrelation: {
+              findFirst: jest.fn(),
             },
             $transaction: jest.fn(),
           },
@@ -165,11 +191,16 @@ describe('ClaimsService', () => {
           provide: SorobanTransactionScheduler,
           useValue: mockSorobanTxScheduler,
         },
+        {
+          provide: VerificationService,
+          useValue: mockVerificationService,
+        },
       ],
     }).compile();
 
     service = module.get<ClaimsService>(ClaimsService);
     prismaService = module.get<PrismaService>(PrismaService);
+    budgetService = module.get<BudgetService>(BudgetService);
     _onchainAdapter = module.get<OnchainAdapter>(ONCHAIN_ADAPTER_TOKEN);
     _metricsService = module.get<MetricsService>(MetricsService);
     _auditService = module.get<AuditService>(AuditService);
@@ -178,31 +209,164 @@ describe('ClaimsService', () => {
     jest.clearAllMocks();
   });
 
+  describe('create', () => {
+    const createDto: any = {
+      campaignId: 'campaign-1',
+      amount: 100,
+      recipientRef: 'recipient-123',
+      tokenAddress: 'G' + 'A'.repeat(55),
+      evidenceRef: 'evidence-456',
+    };
+
+    const mockCampaign = {
+      id: 'campaign-1',
+      name: 'Test Campaign',
+      status: 'active',
+      budget: 1000,
+    };
+
+    /**
+     * Builds a fake transaction client and wires prismaService.$transaction
+     * to invoke the real callback against it, mirroring how Prisma actually
+     * runs `$transaction(async (tx) => ...)`.
+     */
+    function mockTransaction() {
+      const tx = {
+        claim: {
+          create: jest.fn().mockResolvedValue({
+            id: 'claim-new',
+            campaignId: createDto.campaignId,
+            amount: createDto.amount,
+            recipientRef: createDto.recipientRef,
+            evidenceRef: createDto.evidenceRef,
+            status: ClaimStatus.requested,
+            campaign: mockCampaign,
+          }),
+        },
+        balanceLedger: {
+          create: jest.fn().mockResolvedValue({ id: 'ledger-1' }),
+        },
+      };
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) =>
+          callback(tx),
+        );
+      return tx;
+    }
+
+    beforeEach(() => {
+      jest
+        .spyOn(prismaService.campaign, 'findUnique')
+        .mockResolvedValue(mockCampaign as any);
+    });
+
+    it('throws AppException when the campaign does not exist', async () => {
+      jest.spyOn(prismaService.campaign, 'findUnique').mockResolvedValue(null);
+
+      await expect(service.create(createDto)).rejects.toThrow(AppException);
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('reserves budget and creates the claim + lock ledger entry inside one transaction', async () => {
+      const tx = mockTransaction();
+      (budgetService.reserveBudget as jest.Mock).mockResolvedValue(undefined);
+
+      const result = await service.create(createDto);
+
+      // Budget was reserved against the transaction client, not the top-level
+      // prisma client, and using the given campaign/amount.
+      expect(budgetService.reserveBudget).toHaveBeenCalledWith(
+        tx,
+        createDto.campaignId,
+        createDto.amount,
+      );
+
+      // The claim was created on the same transaction client.
+      expect(tx.claim.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            campaignId: createDto.campaignId,
+            amount: createDto.amount,
+          }),
+        }),
+      );
+
+      // reserveBudget must run before the claim (and its ledger entry) are
+      // written, so a rejection never leaves a partial claim behind.
+      const reserveOrder = (budgetService.reserveBudget as jest.Mock).mock
+        .invocationCallOrder[0];
+      const createOrder = tx.claim.create.mock.invocationCallOrder[0];
+      expect(reserveOrder).toBeLessThan(createOrder);
+
+      // A matching 'lock' ledger entry is written for the new claim so that
+      // subsequent budget checks see this claim's usage.
+      expect(tx.balanceLedger.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          campaignId: createDto.campaignId,
+          claimId: 'claim-new',
+          eventType: 'lock',
+          amount: createDto.amount,
+        }),
+      });
+
+      expect(result.id).toBe('claim-new');
+    });
+
+    it('rolls back (creates no claim) when the transaction-safe budget check rejects', async () => {
+      const tx = mockTransaction();
+      (budgetService.reserveBudget as jest.Mock).mockRejectedValue(
+        new Error('Campaign funding cap exceeded'),
+      );
+
+      await expect(service.create(createDto)).rejects.toThrow(
+        'Campaign funding cap exceeded',
+      );
+
+      expect(tx.claim.create).not.toHaveBeenCalled();
+      expect(tx.balanceLedger.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('disburse', () => {
     it('should create and schedule a Soroban transaction when onchain is enabled', async () => {
+      const expectedClaim = {
+        ...mockClaim,
+        status: ClaimStatus.disbursed,
+      };
+
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
       jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
+
+      jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          await Promise.resolve();
           return callback({
             claim: {
-              update: jest.fn().mockResolvedValue({
-                ...mockClaim,
-                status: ClaimStatus.disbursed,
-              }),
+              update: jest.fn().mockResolvedValue(expectedClaim),
             },
           });
         });
 
-      await service.disburse('claim-123');
+      const result = await service.disburse('claim-123');
 
       expect(
         mockSorobanTxLifecycleService.createTransaction,
-      ).toHaveBeenCalled();
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          claimId: 'claim-123',
+          operation: SorobanOperationType.disburse_claim,
+          packageId: 'real-package-id',
+        }),
+      );
       expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalled();
+
+      expect(result.status).toBe(ClaimStatus.disbursed);
+      expect(result.campaign).toBeDefined();
     });
 
     it('should record metrics when Soroban transaction is scheduled', async () => {
@@ -210,14 +374,17 @@ describe('ClaimsService', () => {
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
       jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
+      jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          await Promise.resolve();
           return callback({
             claim: {
               update: jest.fn().mockResolvedValue({
                 ...mockClaim,
                 status: ClaimStatus.disbursed,
+                campaign: mockClaim.campaign,
               }),
             },
           });
@@ -232,15 +399,18 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
       const transactionMock = jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          await Promise.resolve();
           return callback({
             claim: {
               update: jest.fn().mockResolvedValue({
                 ...mockClaim,
                 status: ClaimStatus.disbursed,
+                campaign: mockClaim.campaign,
               }),
             },
           });
@@ -282,12 +452,12 @@ describe('ClaimsService', () => {
                 .fn()
                 .mockImplementation(
                   async (callback: (tx: any) => Promise<unknown>) => {
-                    await Promise.resolve();
                     return callback({
                       claim: {
                         update: jest.fn().mockResolvedValue({
                           ...mockClaim,
                           status: ClaimStatus.disbursed,
+                          campaign: mockClaim.campaign,
                         }),
                       },
                     });
@@ -343,6 +513,10 @@ describe('ClaimsService', () => {
             provide: SorobanTransactionScheduler,
             useValue: mockSorobanTxScheduler,
           },
+          {
+            provide: VerificationService,
+            useValue: mockVerificationService,
+          },
         ],
       }).compile();
 
@@ -371,12 +545,12 @@ describe('ClaimsService', () => {
       const transactionSpy = jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          await Promise.resolve();
           return callback({
             claim: {
               update: jest.fn().mockResolvedValue({
                 ...mockClaim,
                 status: ClaimStatus.disbursed,
+                campaign: mockClaim.campaign,
               }),
             },
           });
@@ -387,15 +561,15 @@ describe('ClaimsService', () => {
       expect(transactionSpy).toHaveBeenCalled();
     });
 
-    it('should throw NotFoundException if claim does not exist', async () => {
+    it('should throw AppException if claim does not exist', async () => {
       jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue(null);
 
       await expect(service.disburse('non-existent')).rejects.toThrow(
-        NotFoundException,
+        AppException,
       );
     });
 
-    it('should throw BadRequestException if claim is not in approved status', async () => {
+    it('should throw AppException if claim is not in approved status', async () => {
       const unapprovedClaim = {
         ...mockClaim,
         status: ClaimStatus.verified,
@@ -404,9 +578,7 @@ describe('ClaimsService', () => {
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(unapprovedClaim);
 
-      await expect(service.disburse('claim-123')).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.disburse('claim-123')).rejects.toThrow(AppException);
     });
   });
 
@@ -421,6 +593,9 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findMany')
         .mockResolvedValue([expiredClaim] as never);
+      jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
       jest.spyOn(prismaService.claim, 'update').mockResolvedValue({
         ...expiredClaim,
         status: ClaimStatus.archived,
@@ -468,6 +643,9 @@ describe('ClaimsService', () => {
       jest
         .spyOn(prismaService.claim, 'findMany')
         .mockResolvedValue([expiredClaim] as never);
+      jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
       jest.spyOn(prismaService.claim, 'update').mockResolvedValue({
         ...expiredClaim,
         status: ClaimStatus.archived,
@@ -487,6 +665,130 @@ describe('ClaimsService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('CSV export streaming', () => {
+    const makeRawClaim = (
+      id: string,
+      overrides: Record<string, unknown> = {},
+    ) => ({
+      id,
+      campaignId: 'campaign-1',
+      campaign: { name: 'Test Campaign', metadata: null },
+      status: ClaimStatus.approved,
+      amount: 100,
+      evidenceRef: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      deletedAt: null,
+      cancelledAt: null,
+      cancelledBy: null,
+      cancelReason: null,
+      reissuedFromId: null,
+      metadata: null,
+      ...overrides,
+    });
+
+    it('countExport(): counts using the same filters as the export', async () => {
+      jest.spyOn(prismaService.claim, 'count').mockResolvedValue(7);
+
+      const total = await service.countExport({
+        status: ClaimStatus.approved,
+        campaignId: 'campaign-1',
+      });
+
+      expect(total).toBe(7);
+      const args = (prismaService.claim.count as jest.Mock).mock.calls[0]?.[0];
+      expect(args?.where).toMatchObject({
+        deletedAt: null,
+        status: ClaimStatus.approved,
+        campaignId: 'campaign-1',
+      });
+    });
+
+    it('countExport(): rejects an invalid date filter', async () => {
+      await expect(service.countExport({ from: 'not-a-date' })).rejects.toThrow(
+        AppException,
+      );
+    });
+
+    it('streamExportRows(): pages through results with cursor-based pagination', async () => {
+      const firstPage = Array.from({ length: 500 }, (_, i) =>
+        makeRawClaim(`claim-${i}`),
+      );
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValueOnce(firstPage)
+        .mockResolvedValueOnce([makeRawClaim('claim-500')] as never);
+
+      const rows: ClaimExportRow[] = [];
+      for await (const row of service.streamExportRows({})) {
+        rows.push(row);
+      }
+
+      expect(rows).toHaveLength(501);
+      expect(rows[0].campaignName).toBe('Test Campaign');
+
+      const calls = (prismaService.claim.findMany as jest.Mock).mock.calls;
+      expect(calls[0][0]?.cursor).toBeUndefined();
+      expect(calls[1][0]?.cursor).toEqual({ id: 'claim-499' });
+      expect(calls[1][0]?.skip).toBe(1);
+    });
+
+    it('streamExportRows(): never requests more than the batch size in a single query', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValue([] as never);
+
+      const rows: ClaimExportRow[] = [];
+      for await (const row of service.streamExportRows({})) {
+        rows.push(row);
+      }
+
+      for (const call of (prismaService.claim.findMany as jest.Mock).mock
+        .calls) {
+        expect(call[0]?.take).toBeLessThanOrEqual(500);
+      }
+    });
+
+    it('streamExportRows(): does not fetch further pages than the caller consumes (non-buffering)', async () => {
+      const fullPage = Array.from({ length: 500 }, (_, i) =>
+        makeRawClaim(`claim-${i}`),
+      );
+      jest.spyOn(prismaService.claim, 'findMany').mockResolvedValue(fullPage);
+
+      const rows: ClaimExportRow[] = [];
+      for await (const row of service.streamExportRows({})) {
+        rows.push(row);
+        if (rows.length === 3) break;
+      }
+
+      expect(rows).toHaveLength(3);
+      expect(prismaService.claim.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('streamExportCsv(): yields the header first, then one escaped CSV line per row', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValueOnce([
+          makeRawClaim('claim-1', {
+            campaign: { name: 'Has, a comma', metadata: null },
+          }),
+        ] as never)
+        .mockResolvedValueOnce([] as never);
+
+      const chunks: string[] = [];
+      for await (const chunk of service.streamExportCsv({})) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).toBe(
+        'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress\r\n',
+      );
+      expect(chunks[1]).toContain('"claim-1"');
+      expect(chunks[1]).toContain('"Has, a comma"');
+      expect(chunks[1].endsWith('\r\n')).toBe(true);
     });
   });
 });

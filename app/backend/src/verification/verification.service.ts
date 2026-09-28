@@ -1,11 +1,7 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { Request } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,11 +15,28 @@ import {
   VerificationJobData,
   VerificationResult,
 } from './interfaces/verification-job.interface';
+import {
+  DEFAULT_VERIFICATION_PRIORITY,
+  EnqueueVerificationDto,
+  VerificationPriority,
+} from './dto/enqueue-verification.dto';
 import { AuditService } from '../audit/audit.service';
 import { firstValueFrom } from 'rxjs';
 import OpenAI from 'openai';
+import {
+  AppException,
+  INTEGRATION_ERROR_CODES,
+} from '../common/constants/integration-error-codes';
 import * as crypto from 'crypto';
 import { CircuitBreaker } from '../common/utils/circuit-breaker.util';
+import { VerificationMetadataService } from './metadata.service';
+import { VerificationResultDto } from './dto/verification-result.dto';
+import {
+  mergeClaimAnchorMetadata,
+  toPersistedVerificationResult,
+} from './verification-result.persistence';
+import { CorrelationPropagationUtil } from '../common/utils/correlation-propagation.util';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 // ---------------------------------------------------------------------------
 // OCR service types
@@ -138,6 +151,9 @@ export class VerificationService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly httpService: HttpService,
+    private readonly verificationMetadataService: VerificationMetadataService,
+    private readonly correlationUtil: CorrelationPropagationUtil,
+    private readonly metricsService: MetricsService,
   ) {
     this.verificationMode =
       this.configService.get<string>('VERIFICATION_MODE') || 'mock';
@@ -196,26 +212,50 @@ export class VerificationService {
   // Public API
   // -------------------------------------------------------------------------
 
-  async enqueueVerification(claimId: string): Promise<{ jobId: string }> {
+  async enqueueVerification(
+    claimId: string,
+    dto?: EnqueueVerificationDto,
+  ): Promise<{ jobId: string; priority: VerificationPriority }> {
     const claim = await this.prisma.claim.findUnique({
       where: { id: claimId },
     });
 
     if (!claim) {
-      throw new NotFoundException(`Claim with ID ${claimId} not found`);
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+        404,
+        `Claim with ID ${claimId} not found`,
+        { claimId },
+      );
     }
 
     if (claim.status === 'verified') {
       this.logger.warn(`Claim ${claimId} is already verified`);
-      return { jobId: 'already-verified' };
+      return {
+        jobId: 'already-verified',
+        priority: DEFAULT_VERIFICATION_PRIORITY,
+      };
     }
+
+    const priority = dto?.priority ?? DEFAULT_VERIFICATION_PRIORITY;
+    const anchorMetadata = dto?.anchorMetadata;
 
     const jobData: VerificationJobData = {
       claimId,
       timestamp: Date.now(),
+      priority,
+      anchorMetadata: anchorMetadata
+        ? {
+            campaignRef: anchorMetadata.campaignRef ?? null,
+            claimId: anchorMetadata.claimId ?? null,
+            packageId: anchorMetadata.packageId ?? null,
+            contractId: anchorMetadata.contractId ?? null,
+          }
+        : undefined,
     };
 
     const job = await this.verificationQueue.add('verify-claim', jobData, {
+      priority,
       attempts: parseInt(
         this.configService.get<string>('QUEUE_MAX_RETRIES') || '3',
       ),
@@ -227,26 +267,38 @@ export class VerificationService {
       removeOnFail: 50,
     });
 
-    this.logger.log(`Enqueued verification job ${job.id} for claim ${claimId}`);
+    const priorityLabel = VerificationPriority[priority] ?? String(priority);
+    this.logger.log(
+      `Enqueued verification job ${job.id} for claim ${claimId} [priority=${priorityLabel}(${priority})]`,
+    );
+
+    this.metricsService.incrementVerificationJobEnqueued(priorityLabel);
 
     await this.auditService.record({
       actorId: 'system',
       entity: 'verification',
       entityId: claimId,
       action: 'enqueue',
-      metadata: { jobId: job.id || 'unknown' },
+      metadata: {
+        jobId: job.id || 'unknown',
+        priority,
+        priorityLabel,
+        anchorMetadata,
+      },
     });
 
-    return { jobId: job.id || 'unknown' };
+    return { jobId: job.id || 'unknown', priority };
   }
 
   async processVerification(
     jobData: VerificationJobData,
   ): Promise<VerificationResult> {
-    const { claimId } = jobData;
+    const { claimId, anchorMetadata, priority } = jobData;
+    const priorityLabel = VerificationPriority[priority] ?? String(priority);
 
     this.logger.log(
-      `Processing verification for claim ${claimId} in ${this.verificationMode} mode`,
+      `Processing verification for claim ${claimId} in ${this.verificationMode} mode` +
+        ` [priority=${priorityLabel}(${priority})]`,
     );
 
     const claim = await this.prisma.claim.findUnique({
@@ -254,7 +306,12 @@ export class VerificationService {
     });
 
     if (!claim) {
-      throw new NotFoundException(`Claim with ID ${claimId} not found`);
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+        404,
+        `Claim with ID ${claimId} not found`,
+        { claimId },
+      );
     }
 
     let result: VerificationResult;
@@ -267,18 +324,51 @@ export class VerificationService {
       result = await this.performAIVerification(claim);
     }
 
-    const shouldVerify = result.score >= this.verificationThreshold;
+    // ENHANCED: Add contract-aware metadata to result
+    const enhancedResult = await this.enhanceResultWithMetadata(
+      result,
+      claimId,
+      claim.campaignId,
+    );
+
+    const shouldVerify = enhancedResult.score >= this.verificationThreshold;
+
+    // Build anchor metadata to persist
+    const anchorMetadataToPersist: Prisma.InputJsonObject | null =
+      anchorMetadata
+        ? {
+            campaignRef: anchorMetadata.campaignRef ?? null,
+            claimId: anchorMetadata.claimId ?? null,
+            packageId: anchorMetadata.packageId ?? null,
+            contractId: anchorMetadata.contractId ?? null,
+          }
+        : null;
+
+    // Persist the outcome on the claim itself. The claim row - not the queue,
+    // and not an in-flight job - is what operators read and what
+    // ClaimsService.verify() gates on, so a completed verification is only
+    // durable once it lands here. The write merges, so it can neither erase
+    // the anchor metadata the AI service wrote nor an earlier outcome.
+    const persistedVerification = toPersistedVerificationResult(
+      enhancedResult,
+      this.verificationThreshold,
+    );
 
     await this.prisma.claim.update({
       where: { id: claimId },
       data: {
         status: shouldVerify ? 'verified' : 'requested',
+        anchorMetadata: mergeClaimAnchorMetadata(
+          claim.anchorMetadata,
+          anchorMetadataToPersist,
+          persistedVerification,
+        ),
       },
     });
 
     this.logger.log(
-      `Claim ${claimId} verification completed – score ${result.score} ` +
-        `(threshold: ${this.verificationThreshold})`,
+      `Claim ${claimId} verification completed – score ${enhancedResult.score} ` +
+        `(threshold: ${this.verificationThreshold}, packageId: ${enhancedResult.metadata?.packageId})`,
     );
 
     await this.auditService.record({
@@ -287,12 +377,15 @@ export class VerificationService {
       entityId: claimId,
       action: 'complete',
       metadata: {
-        score: result.score,
+        score: enhancedResult.score,
         status: shouldVerify ? 'verified' : 'requested',
+        packageId: enhancedResult.metadata?.packageId,
+        network: enhancedResult.metadata?.network,
+        anchorMetadata: anchorMetadataToPersist,
       },
     });
 
-    return result;
+    return enhancedResult;
   }
 
   // -------------------------------------------------------------------------
@@ -565,6 +658,16 @@ the JSON verdict.
 
   private async callOCRService(documentUrl: string): Promise<OCRResponse> {
     try {
+      // Get correlation ID and propagate to OCR service
+      const correlationId = this.correlationUtil.getCurrentCorrelationId();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (correlationId) {
+        headers['x-correlation-id'] = correlationId;
+      }
+
       const response = await this.ocrCircuitBreaker.fire(() =>
         firstValueFrom(
           this.httpService.post(
@@ -572,7 +675,7 @@ the JSON verdict.
             { document_url: documentUrl },
             {
               timeout: this.aiServiceTimeout,
-              headers: { 'Content-Type': 'application/json' },
+              headers,
             },
           ),
         ),
@@ -585,20 +688,41 @@ the JSON verdict.
         message: string;
       };
       if (err.response) {
-        throw new Error(
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_INVALID_RESPONSE,
+          502,
           `OCR service returned ${err.response.status}: ` +
             `${JSON.stringify(err.response.data)}`,
+          { httpStatus: err.response.status, body: err.response.data },
         );
-      } else if (err.code === 'ECONNREFUSED') {
-        throw new Error(
+      } else if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_SERVICE_UNAVAILABLE,
+          503,
           `OCR service unavailable at ${this.aiServiceUrl}. ` +
             `Is the Python ai-service running?`,
+          { serviceUrl: this.aiServiceUrl },
+        );
+      } else if (err.message?.includes('timeout') || err.code === 'ETIMEDOUT') {
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_SERVICE_TIMEOUT,
+          504,
+          `OCR service call timed out: ${err.message}`,
+          { serviceUrl: this.aiServiceUrl },
         );
       } else {
-        throw new Error(`OCR service call failed: ${err.message}`);
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_SERVICE_UNAVAILABLE,
+          503,
+          `OCR service call failed: ${err.message}`,
+        );
       }
     }
   }
+
+  // private getCorrelationIdForOutbound(): string | null {
+  //   return this.correlationUtil.getCurrentCorrelationId();
+  // }
 
   // -------------------------------------------------------------------------
   // Result builders
@@ -640,6 +764,48 @@ the JSON verdict.
       },
       processedAt: new Date(),
     };
+  }
+
+  /**
+   * Enhances a verification result with contract-aware metadata
+   */
+  private async enhanceResultWithMetadata(
+    result: VerificationResult,
+    claimId: string,
+    campaignId: string,
+  ): Promise<VerificationResult> {
+    // Convert to DTO first
+    const resultDto: VerificationResultDto = {
+      score: result.score,
+      confidence: result.confidence,
+      details: result.details,
+      processedAt: result.processedAt || new Date(),
+    };
+
+    // Enhance with contract-aware metadata
+    const enhanced = await this.verificationMetadataService.enhanceWithMetadata(
+      resultDto,
+      claimId,
+      campaignId,
+    );
+
+    // Log warnings if any
+    if (enhanced.warnings && enhanced.warnings.length > 0) {
+      this.logger.warn(
+        `Metadata warnings for claim ${claimId}: ${enhanced.warnings.join(', ')}`,
+      );
+    }
+
+    return {
+      score: enhanced.score,
+      confidence: enhanced.confidence,
+      details: enhanced.details,
+      processedAt: enhanced.processedAt,
+      // Add metadata to result
+      metadata: enhanced.metadata,
+      warnings: enhanced.warnings,
+      validationErrors: enhanced.validationErrors,
+    } as VerificationResult;
   }
 
   /** Heuristic: treat strings that start with http/https as URLs. */
@@ -803,7 +969,12 @@ the JSON verdict.
   async findOne(id: string) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
-      throw new NotFoundException(`Claim with ID ${id} not found`);
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+        404,
+        `Claim with ID ${id} not found`,
+        { claimId: id },
+      );
     }
     return claim;
   }
@@ -902,12 +1073,57 @@ the JSON verdict.
       this.verificationQueue.getFailedCount(),
     ]);
 
+    // Build a per-priority breakdown of waiting jobs.
+    // BullMQ stores waiting jobs with their priority in the payload; we iterate
+    // the waiting set and tally by the `priority` field we embed in jobData.
+    const waitingJobs = await this.verificationQueue.getWaiting(0, -1);
+    const priorityCounts: Record<string, number> = {
+      [VerificationPriority.URGENT]: 0,
+      [VerificationPriority.HIGH]: 0,
+      [VerificationPriority.NORMAL]: 0,
+      [VerificationPriority.LOW]: 0,
+    };
+    for (const job of waitingJobs) {
+      const p =
+        (job.data as VerificationJobData).priority ??
+        DEFAULT_VERIFICATION_PRIORITY;
+      if (p in priorityCounts) {
+        priorityCounts[p]++;
+      }
+    }
+
+    const breakdown = {
+      urgent: priorityCounts[VerificationPriority.URGENT],
+      high: priorityCounts[VerificationPriority.HIGH],
+      normal: priorityCounts[VerificationPriority.NORMAL],
+      low: priorityCounts[VerificationPriority.LOW],
+    };
+
+    // Keep Prometheus gauges in sync with the current snapshot.
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'URGENT',
+      breakdown.urgent,
+    );
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'HIGH',
+      breakdown.high,
+    );
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'NORMAL',
+      breakdown.normal,
+    );
+    this.metricsService.setVerificationQueueWaitingByPriority(
+      'LOW',
+      breakdown.low,
+    );
+
     return {
       waiting,
       active,
       completed,
       failed,
       total: waiting + active + completed + failed,
+      priorityBreakdown: breakdown,
     };
   }
 
@@ -996,12 +1212,20 @@ the JSON verdict.
         typeof parsed.createdAt !== 'string' ||
         typeof parsed.id !== 'string'
       ) {
-        throw new BadRequestException('Invalid review queue cursor');
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+          400,
+          'Invalid review queue cursor',
+        );
       }
 
       const createdAt = new Date(parsed.createdAt);
       if (Number.isNaN(createdAt.getTime())) {
-        throw new BadRequestException('Invalid review queue cursor');
+        throw new AppException(
+          INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+          400,
+          'Invalid review queue cursor',
+        );
       }
 
       return {
@@ -1009,11 +1233,15 @@ the JSON verdict.
         id: parsed.id,
       };
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof AppException) {
         throw error;
       }
 
-      throw new BadRequestException('Invalid review queue cursor');
+      throw new AppException(
+        INTEGRATION_ERROR_CODES.AI_VERIFICATION_FAILED,
+        400,
+        'Invalid review queue cursor',
+      );
     }
   }
 }

@@ -73,18 +73,12 @@ export default function AidDashboard() {
           {/* Search / Filter + Package list — client, needs Suspense for useSearchParams */}
           <DashboardContent />
 
-          {/* Coming-soon note */}
-          <p className="text-center text-gray-600 dark:text-gray-400 text-sm">
-            Full API wiring, claim tracking, and impact reports coming in a
-            future wave.
-          </p>
-
           {/* CTA buttons */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
               Get Notified
             </button>
-            <button className="px-6 py-3 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+            <button className="px-6 py-3 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-700 dark:text-gray-200">
               Learn More
             </button>
           </div>

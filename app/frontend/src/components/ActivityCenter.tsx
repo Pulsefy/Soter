@@ -5,7 +5,8 @@ import { Bell, X, ExternalLink, RefreshCw, CheckCircle, XCircle, Clock, AlertCir
 import { useTranslations } from 'next-intl';
 import { useFormatter } from '@/hooks/useFormatter';
 import { useActivityStore } from '@/lib/activityStore';
-import type { ActivityStatus } from '@/types/activity';
+import { useActivityFeed } from '@/hooks/useActivity';
+import type { ActivityItem, ActivityStatus } from '@/types/activity';
 
 const statusIcons: Record<ActivityStatus, React.ComponentType<{ size?: number; className?: string }>> = {
   pending: Clock,
@@ -30,12 +31,26 @@ export function ActivityCenter() {
   const t = useTranslations();
   const { formatRelativeTimeValue } = useFormatter();
   const { activities, removeActivity, clearCompleted, updateActivity } = useActivityStore();
+  const { data: feedItems = [], isLoading, isError, refetch } = useActivityFeed();
+  const [readIds, setReadIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const stored = window.localStorage.getItem('activity-center-read-ids');
+      return stored ? new Set(JSON.parse(stored) as string[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const pendingCount = activities.filter(
-    a => a.status === 'pending' || a.status === 'processing',
+  const mergedActivities: ActivityItem[] = feedItems.length > 0
+    ? feedItems.map(item => ({ ...item, read: readIds.has(item.id) || item.read }))
+    : activities;
+
+  const pendingCount = mergedActivities.filter(
+    a => a.status === 'pending' || a.status === 'processing' || !a.read,
   ).length;
 
   /** Close the panel and return focus to the trigger button. */
@@ -96,7 +111,7 @@ export function ActivityCenter() {
     }
   };
 
-  const handleRetry = async (activity: any) => {
+  const handleRetry = async (activity: ActivityItem) => {
     if (activity.retryAction) {
       updateActivity(activity.id, {
         status: 'pending',
@@ -111,6 +126,30 @@ export function ActivityCenter() {
     }
   };
 
+  const markAsRead = (id: string) => {
+    setReadIds(previous => {
+      const next = new Set(previous);
+      next.add(id);
+      window.localStorage.setItem(
+        'activity-center-read-ids',
+        JSON.stringify(Array.from(next).slice(-200)),
+      );
+      return next;
+    });
+  };
+
+  const markAllAsRead = () => {
+    setReadIds(previous => {
+      const next = new Set(previous);
+      mergedActivities.forEach(activity => next.add(activity.id));
+      window.localStorage.setItem(
+        'activity-center-read-ids',
+        JSON.stringify(Array.from(next).slice(-200)),
+      );
+      return next;
+    });
+  };
+
   return (
     <div className="relative">
       {/* Trigger button */}
@@ -120,7 +159,7 @@ export function ActivityCenter() {
         className="relative p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
         aria-label={
           pendingCount > 0
-            ? `Activity center, ${pendingCount} active`
+            ? `Activity center, ${pendingCount} active or unread`
             : 'Activity center'
         }
         aria-expanded={isOpen}
@@ -156,7 +195,15 @@ export function ActivityCenter() {
                 {t('activity.center')}
               </h3>
               <div className="flex items-center gap-2">
-                {activities.length > 0 && (
+                {mergedActivities.length > 0 && (
+                  <button
+                    onClick={markAllAsRead}
+                    className="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+                  >
+                    Mark all read
+                  </button>
+                )}
+                {activities.length > 0 && feedItems.length === 0 && (
                   <button
                     onClick={clearCompleted}
                     className="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
@@ -177,21 +224,43 @@ export function ActivityCenter() {
 
           {/* Activity list */}
           <div className="max-h-96 overflow-y-auto">
-            {activities.length === 0 ? (
+            {isLoading ? (
+              <div className="p-4 text-center text-slate-500 dark:text-slate-400">
+                <RefreshCw size={24} aria-hidden="true" className="mx-auto mb-2 animate-spin opacity-60" />
+                <p>Loading operational activity...</p>
+              </div>
+            ) : isError ? (
+              <div className="p-4 text-center text-slate-500 dark:text-slate-400">
+                <AlertCircle size={24} aria-hidden="true" className="mx-auto mb-2 text-red-500" />
+                <p>Activity feed is unavailable.</p>
+                <button
+                  type="button"
+                  onClick={() => refetch()}
+                  className="mt-3 rounded-md border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : mergedActivities.length === 0 ? (
               <div className="p-4 text-center text-slate-500 dark:text-slate-400">
                 <Bell size={24} aria-hidden="true" className="mx-auto mb-2 opacity-50" />
-                <p>{t('activity.noRecentActivity')}</p>
+                <p>No operational notifications, audits, or review updates yet.</p>
               </div>
             ) : (
               <ul className="p-2 list-none" aria-label="Recent activities">
-                {activities.map(activity => {
+                {mergedActivities.map(activity => {
                   const StatusIcon = statusIcons[activity.status];
                   const isSpinning = activity.status === 'processing';
+                  const isUnread = !activity.read;
 
                   return (
                     <li
                       key={activity.id}
-                      className="group p-3 rounded-lg border border-slate-200 dark:border-slate-700 mb-2 last:mb-0 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                      className={`group p-3 rounded-lg border mb-2 last:mb-0 hover:bg-slate-50 dark:hover:bg-slate-700/50 ${
+                        isUnread
+                          ? 'border-blue-300 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/30'
+                          : 'border-slate-200 dark:border-slate-700'
+                      }`}
                     >
                       <div className="flex items-start gap-3">
                         <StatusIcon
@@ -204,6 +273,11 @@ export function ActivityCenter() {
                             <div className="flex-1">
                               <h4 className="font-medium text-sm text-slate-900 dark:text-slate-100">
                                 {activity.title}
+                                {isUnread && (
+                                  <span className="ml-2 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold uppercase text-white">
+                                    Unread
+                                  </span>
+                                )}
                               </h4>
                               <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                                 {activity.description}
@@ -217,6 +291,11 @@ export function ActivityCenter() {
                                 <p className="text-xs text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
                                   <AlertCircle size={12} aria-hidden="true" />
                                   {activity.errorMessage}
+                                </p>
+                              )}
+                              {activity.correlationId && (
+                                <p className="mt-1 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                  correlation: {activity.correlationId}
                                 </p>
                               )}
                             </div>
@@ -238,6 +317,14 @@ export function ActivityCenter() {
                               })()}
                             </span>
                             <div className="flex items-center gap-2">
+                              {isUnread && (
+                                <button
+                                  onClick={() => markAsRead(activity.id)}
+                                  className="text-xs px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                                >
+                                  Mark read
+                                </button>
+                              )}
                               {activity.retryAction && activity.status === 'failed' && (
                                 <button
                                   onClick={() => handleRetry(activity)}
@@ -255,6 +342,15 @@ export function ActivityCenter() {
                                   className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
                                 >
                                   {t('activity.viewTransaction')}
+                                  <ExternalLink size={12} aria-hidden="true" />
+                                </a>
+                              )}
+                              {activity.linkHref && (
+                                <a
+                                  href={activity.linkHref}
+                                  className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+                                >
+                                  {activity.linkLabel ?? 'Open'}
                                   <ExternalLink size={12} aria-hidden="true" />
                                 </a>
                               )}

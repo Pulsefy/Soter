@@ -1,6 +1,47 @@
+import { guardAgainstPinningFailure } from './certificatePinning';
+import { apiGet } from './requestLayer';
 import { config } from '../config';
 
-const API_URL = config.apiUrl;
+export interface ClaimReceiptData {
+  claimId: string;
+  packageId: string;
+  status: 'requested' | 'verified' | 'approved' | 'disbursed' | 'archived' | 'cancelled';
+  amount: number;
+  tokenAddress?: string;
+  transactionHash?: string;
+  contractId?: string;
+  timestamp: string;
+  recipientRef?: string;
+  explorerLink?: string;
+  receiptPointer?: string;
+}
+
+export class ReceiptApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = 'ReceiptApiError';
+  }
+}
+
+export const fetchClaimReceipt = async (
+  identifier: string,
+): Promise<ClaimReceiptData> => {
+  const response = await fetch(
+    `${config.apiUrl}/claims/${encodeURIComponent(identifier)}/receipt`,
+  );
+
+  if (!response.ok) {
+    let message = `Server responded with ${response.status}`;
+    try {
+      const body = (await response.json()) as { message?: string; error?: string };
+      message = body.message ?? body.error ?? message;
+    } catch {
+    }
+    throw new ReceiptApiError(response.status, message);
+  }
+
+  return (await response.json()) as ClaimReceiptData;
+};
 
 export interface HealthStatus {
   status: string;
@@ -13,17 +54,10 @@ export interface HealthStatus {
 
 export const fetchHealthStatus = async (): Promise<HealthStatus> => {
   try {
-    const response = await fetch(`${API_URL}/health`);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    
-    const data = await response.json();
+    const { data } = await apiGet<HealthStatus>('/health');
     return data;
   } catch (error) {
-    console.error('Failed to fetch health status:', error);
-    throw error;
+    return guardAgainstPinningFailure(`${process.env.API_URL}/health`, error);
   }
 };
 
@@ -37,14 +71,9 @@ export interface AidPackage {
 
 export const getAidPackages = async (): Promise<AidPackage[]> => {
   try {
-    const response = await fetch(`${API_URL}/aid`);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
+    const { data } = await apiGet<AidPackage[]>('/aid');
     return data;
   } catch (error) {
-    console.error('Failed to fetch aid packages:', error);
-    throw error;
+    return guardAgainstPinningFailure(`${process.env.API_URL}/aid`, error);
   }
 };

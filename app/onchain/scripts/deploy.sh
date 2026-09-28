@@ -167,6 +167,13 @@ if [ -n "$CONTRACT_ID" ]; then
                 esac
             done
         fi
+
+        python3 "$SCRIPT_DIR/verify-deployment.py" \
+            --project-dir "$PROJECT_DIR" \
+            --contract-id "$CONTRACT_ID" \
+            --version "$CONTRACT_VERSION" \
+            --network "$NETWORK" \
+            --wasm "$WASM_FILE"
     else
         echo "⚠️  python3 not found; skipped registry update (run scripts/register-deployment.py manually)"
     fi

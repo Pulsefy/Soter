@@ -1,0 +1,16 @@
+{
+  "$comment": "Cold-start-to-interactive budget for the Soter mobile app (issue #931). Read and enforced by scripts/measure-cold-start.js. See ../COLD_START_BUDGET.md before changing these numbers.",
+  "deviceProfile": "Low-end reference device: Android 8.1 (API 27), 2 vCPU, 2048MB RAM emulator (see .github/workflows/mobile-cold-start-budget.yml's AVD config). Chosen to represent field devices, not development hardware.",
+  "totalMs": 3500,
+  "toleranceRatio": 0.15,
+  "iterations": 5,
+  "aggregation": "median",
+  "phaseBudgetsMs": {
+    "$comment": "Informational targets for the phase breakdown in the report. Only totalMs + toleranceRatio above are enforced as a hard CI gate; these help attribute a regression to a phase during triage.",
+    "nativeLaunchToJsStart": 1200,
+    "jsStartToAppRenderStart": 400,
+    "appRenderStartToInteractive": 1900
+  },
+  "lastCalibrated": "2026-08-31",
+  "calibrationNote": "Initial budget is a conservative starting estimate based on typical React Native cold-start times on 2GB-RAM Android 8-9 devices, not yet measured against this app's actual CI run. Recalibrate from the first several real cold-start-report.json runs once the workflow has run on main, then update lastCalibrated."
+}

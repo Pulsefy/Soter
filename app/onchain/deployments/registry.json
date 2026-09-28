@@ -1,4 +1,5 @@
 {
+  "$schema": "./registry.schema.json",
   "schema_version": 1,
   "contract": "aid_escrow",
   "deployments": [
@@ -8,7 +9,11 @@
       "contract_id": "CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG",
       "wasm_hash": "24328e15b7c11c7ff07caeaf0328da591b3b63e84af57fa03623c10126eabc8d",
       "deployer": "GA5TBSBGERHVMEFBJGEM3KYMRLWO73Y2QRAV6P66GPEBOJ5ZMJUT7LLY",
+      "init_args": {
+        "admin": "GA5TBSBGERHVMEFBJGEM3KYMRLWO73Y2QRAV6P66GPEBOJ5ZMJUT7LLY"
+      },
       "deployed_at": "2026-06-03",
+      "git_commit": null,
       "version_tag": "v0.1.0-testnet",
       "record": "deployments/testnet-2026-06-03.md"
     }
