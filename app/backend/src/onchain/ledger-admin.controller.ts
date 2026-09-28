@@ -52,7 +52,9 @@ export class LedgerAdminController {
     description:
       'Start or resume a backfill job to process a range of ledgers and populate missing ledger entries. ' +
       'Uses a durable checkpoint so interrupted runs resume from `lastProcessedLedger` rather than restarting. ' +
-      'Re-triggering the same range while a run is already in progress returns 409.',
+      'Re-triggering the same range while a run is already in progress returns 409. ' +
+      'Pass `dryRun: true` to preview what the run would create/update — using the same read/detection logic ' +
+      'as the real run — without persisting anything or enqueuing a job.',
   })
   @ApiBody({
     schema: {
@@ -78,12 +80,18 @@ export class LedgerAdminController {
           type: 'string',
           description: 'Optional actor identifier for audit trail',
         },
+        dryRun: {
+          type: 'boolean',
+          description:
+            'When true, preview what the run would create/update without persisting anything or enqueuing a job (default: false)',
+        },
       },
       required: ['startLedger', 'endLedger'],
     },
   })
   @ApiAcceptedResponse({
-    description: 'Backfill job queued or resumed successfully.',
+    description:
+      'Backfill job queued or resumed successfully, or — when `dryRun` is true — a preview report of what the run would do.',
     schema: {
       example: {
         jobId: 'job_123',
@@ -117,6 +125,7 @@ export class LedgerAdminController {
       campaignId?: string;
       batchSize?: number;
       triggeredBy?: string;
+      dryRun?: boolean;
     },
   ) {
     const {
@@ -125,6 +134,7 @@ export class LedgerAdminController {
       campaignId,
       batchSize = 100,
       triggeredBy,
+      dryRun = false,
     } = body;
 
     if (startLedger > endLedger) {
@@ -137,6 +147,7 @@ export class LedgerAdminController {
       campaignId,
       batchSize,
       triggeredBy,
+      dryRun,
     );
   }
 

@@ -25,6 +25,47 @@ export interface BackfillResult {
   resumeFrom?: number;
 }
 
+/** A single ledger entry as detected from the on-chain source, prior to persistence. */
+interface DetectedLedgerEntry {
+  id: string;
+  campaignId?: string;
+  claimId?: string;
+  eventType: string;
+  amount: number;
+  note?: string;
+  createdAt: Date;
+}
+
+export interface DryRunSampleRecord {
+  id: string;
+  campaignId?: string;
+  claimId?: string;
+  eventType: string;
+  amount: number;
+  action: 'create' | 'skip';
+}
+
+export interface DryRunEntityBreakdown {
+  toCreate: number;
+  toSkip: number;
+}
+
+export interface DryRunResult {
+  dryRun: true;
+  jobKey: string;
+  startLedger: number;
+  endLedger: number;
+  totalCount: number;
+  wouldCreateCount: number;
+  wouldSkipCount: number;
+  /** Counts grouped by ledger entry `eventType` (e.g. lock / unlock / disburse). */
+  byEntityType: Record<string, DryRunEntityBreakdown>;
+  /** A capped sample of affected records for operator review. */
+  sample: DryRunSampleRecord[];
+}
+
+const DRY_RUN_SAMPLE_SIZE = 20;
+
 /**
  * Builds a deterministic job key for a backfill range so that re-triggering
  * the same range either resumes an existing run or is rejected when one is
@@ -56,6 +97,8 @@ export class LedgerBackfillService {
    *   from `lastProcessedLedger` so processing resumes rather than restarts.
    * - If a `running` checkpoint exists, a ConflictException is thrown.
    * - If a `completed` checkpoint exists, the existing result is returned directly.
+   * - If `dryRun` is true, nothing is persisted or enqueued: the same read/detection
+   *   logic used by the real run is used to report what it *would* do instead.
    */
   async triggerBackfill(
     startLedger: number,
@@ -63,7 +106,17 @@ export class LedgerBackfillService {
     campaignId?: string,
     batchSize: number = 100,
     triggeredBy?: string,
-  ): Promise<BackfillResult> {
+    dryRun: boolean = false,
+  ): Promise<BackfillResult | DryRunResult> {
+    if (dryRun) {
+      return this.previewBackfill(
+        startLedger,
+        endLedger,
+        campaignId,
+        batchSize,
+      );
+    }
+
     const jobKey = buildJobKey(startLedger, endLedger, campaignId);
     const totalCount = endLedger - startLedger + 1;
 
@@ -281,6 +334,88 @@ export class LedgerBackfillService {
   }
 
   /**
+   * Preview a backfill without persisting anything. Walks the same batches and
+   * uses the same detection logic (`detectLedgerRange`) as `processBackfillBatch`,
+   * so the preview cannot drift from what a real run would actually do — it just
+   * never calls `create` on the detected entries.
+   */
+  async previewBackfill(
+    startLedger: number,
+    endLedger: number,
+    campaignId?: string,
+    batchSize: number = 100,
+  ): Promise<DryRunResult> {
+    const jobKey = buildJobKey(startLedger, endLedger, campaignId);
+    const totalCount = endLedger - startLedger + 1;
+
+    this.logger.log(
+      `[backfill] Dry-run preview — range=${startLedger}-${endLedger} key=${jobKey}`,
+    );
+
+    const byEntityType: Record<string, DryRunEntityBreakdown> = {};
+    const sample: DryRunSampleRecord[] = [];
+    let wouldCreateCount = 0;
+    let wouldSkipCount = 0;
+
+    const record = (
+      entries: DetectedLedgerEntry[],
+      action: 'create' | 'skip',
+    ) => {
+      for (const entry of entries) {
+        const bucket = (byEntityType[entry.eventType] ??= {
+          toCreate: 0,
+          toSkip: 0,
+        });
+        if (action === 'create') {
+          bucket.toCreate++;
+        } else {
+          bucket.toSkip++;
+        }
+
+        if (sample.length < DRY_RUN_SAMPLE_SIZE) {
+          sample.push({
+            id: entry.id,
+            campaignId: entry.campaignId,
+            claimId: entry.claimId,
+            eventType: entry.eventType,
+            amount: entry.amount,
+            action,
+          });
+        }
+      }
+    };
+
+    for (let ledger = startLedger; ledger <= endLedger; ledger += batchSize) {
+      const batchEnd = Math.min(ledger + batchSize - 1, endLedger);
+      const { toCreate, toSkip } = await this.detectLedgerRange(
+        ledger,
+        batchEnd,
+        campaignId,
+      );
+      wouldCreateCount += toCreate.length;
+      wouldSkipCount += toSkip.length;
+      record(toCreate, 'create');
+      record(toSkip, 'skip');
+    }
+
+    this.logger.log(
+      `[backfill] Dry-run complete — key=${jobKey} wouldCreate=${wouldCreateCount} wouldSkip=${wouldSkipCount}`,
+    );
+
+    return {
+      dryRun: true,
+      jobKey,
+      startLedger,
+      endLedger,
+      totalCount,
+      wouldCreateCount,
+      wouldSkipCount,
+      byEntityType,
+      sample,
+    };
+  }
+
+  /**
    * Retrieve status for a backfill job by BullMQ job ID (legacy) or by
    * checkpoint ID.
    */
@@ -376,9 +511,47 @@ export class LedgerBackfillService {
     endLedger: number,
     campaignId?: string,
   ): Promise<{ processed: number; skipped: number }> {
-    let processed = 0;
-    let skipped = 0;
+    const { toCreate, toSkip } = await this.detectLedgerRange(
+      startLedger,
+      endLedger,
+      campaignId,
+    );
 
+    for (const entry of toCreate) {
+      await this.prisma.balanceLedger.create({
+        data: {
+          id: entry.id,
+          campaignId: entry.campaignId ?? campaignId,
+          claimId: entry.claimId,
+          eventType: entry.eventType,
+          amount: entry.amount,
+          note: entry.note,
+          createdAt: entry.createdAt,
+        },
+      });
+    }
+
+    this.logger.debug(
+      `[backfill] Ledger range ${startLedger}-${endLedger}: ${toCreate.length} new, ${toSkip.length} skipped`,
+    );
+
+    return { processed: toCreate.length, skipped: toSkip.length };
+  }
+
+  /**
+   * Shared read/detection logic used by both the real run (`processLedgerRange`)
+   * and the dry-run preview (`previewBackfill`). Determines which on-chain ledger
+   * entries in the range are new (would be created) vs. already present (would be
+   * skipped) without writing anything, so preview and reality cannot drift apart.
+   */
+  private async detectLedgerRange(
+    startLedger: number,
+    endLedger: number,
+    campaignId?: string,
+  ): Promise<{
+    toCreate: DetectedLedgerEntry[];
+    toSkip: DetectedLedgerEntry[];
+  }> {
     // Check for existing ledger entries to ensure idempotency.
     const existingEntries = await this.prisma.balanceLedger.findMany({
       where: {
@@ -394,32 +567,28 @@ export class LedgerBackfillService {
     // Fetch ledger data from on-chain (stubbed; real impl calls Horizon API).
     const ledgerData = this.fetchLedgerRange(startLedger, endLedger);
 
+    const toCreate: DetectedLedgerEntry[] = [];
+    const toSkip: DetectedLedgerEntry[] = [];
+
     for (const entry of ledgerData) {
+      const detected: DetectedLedgerEntry = {
+        id: entry.id,
+        campaignId: entry.campaignId ?? campaignId,
+        claimId: entry.claimId,
+        eventType: entry.eventType,
+        amount: entry.amount,
+        note: entry.note,
+        createdAt: entry.createdAt,
+      };
+
       if (existingIds.has(entry.id)) {
-        skipped++;
-        continue;
+        toSkip.push(detected);
+      } else {
+        toCreate.push(detected);
       }
-
-      await this.prisma.balanceLedger.create({
-        data: {
-          id: entry.id,
-          campaignId: entry.campaignId ?? campaignId,
-          claimId: entry.claimId,
-          eventType: entry.eventType,
-          amount: entry.amount,
-          note: entry.note,
-          createdAt: entry.createdAt,
-        },
-      });
-
-      processed++;
     }
 
-    this.logger.debug(
-      `[backfill] Ledger range ${startLedger}-${endLedger}: ${processed} new, ${skipped} skipped`,
-    );
-
-    return { processed, skipped };
+    return { toCreate, toSkip };
   }
 
   /** Placeholder for a real Stellar Horizon API call. */

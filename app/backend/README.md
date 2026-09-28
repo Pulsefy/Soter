@@ -204,10 +204,40 @@ curl -H "Authorization: Bearer $ADMIN_JWT_TOKEN" \
   http://localhost:3001/api/v1/admin/ledger/backfill/{jobId}
 ```
 
+**Preview a backfill before running it (dry run):**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $ADMIN_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"startLedger": 1000, "endLedger": 2000, "batchSize": 100, "dryRun": true}' \
+  http://localhost:3001/api/v1/admin/ledger/backfill
+```
+Returns a report instead of queuing a job:
+```json
+{
+  "dryRun": true,
+  "jobKey": "backfill:1000:2000",
+  "startLedger": 1000,
+  "endLedger": 2000,
+  "totalCount": 1001,
+  "wouldCreateCount": 42,
+  "wouldSkipCount": 8,
+  "byEntityType": {
+    "lock": { "toCreate": 20, "toSkip": 3 },
+    "unlock": { "toCreate": 10, "toSkip": 2 },
+    "disburse": { "toCreate": 12, "toSkip": 3 }
+  },
+  "sample": [
+    { "id": "led_1", "campaignId": "camp_1", "eventType": "lock", "amount": 50, "action": "create" }
+  ]
+}
+```
+
 **Notes:**
 - Backfill is idempotent - can be run repeatedly without duplicating data
 - Uses `batchSize` to control memory usage during processing
 - Job status includes processed count and total count
+- Pass `dryRun: true` to preview what a run would create/update without persisting anything or enqueuing a job. The dry run uses the exact same read/detection logic as the real run (no separate code path), so the preview cannot drift from what actually happens. The response includes counts grouped by `eventType` and a capped sample (20 records) of affected entries for review.
 
 ### Ledger Reconciliation
 

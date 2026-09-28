@@ -156,6 +156,89 @@ describe('LedgerBackfillService', () => {
     });
   });
 
+  // ── triggerBackfill (dryRun) ───────────────────────────────────────────────
+
+  describe('triggerBackfill with dryRun', () => {
+    it('reports what would happen without creating a checkpoint or enqueuing a job', async () => {
+      mockPrisma.balanceLedger.findMany.mockResolvedValue([]);
+
+      const result = await service.triggerBackfill(
+        1000,
+        2000,
+        undefined,
+        100,
+        undefined,
+        true,
+      );
+
+      expect(mockPrisma.backfillCheckpoint.create).not.toHaveBeenCalled();
+      expect(mockPrisma.backfillCheckpoint.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.balanceLedger.create).not.toHaveBeenCalled();
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        dryRun: true,
+        jobKey: 'backfill:1000:2000',
+        startLedger: 1000,
+        endLedger: 2000,
+        totalCount: 1001,
+      });
+    });
+
+    it('reuses the same detection logic as a real run to compute counts and a sample', async () => {
+      const existing = { id: 'led_1' };
+      mockPrisma.balanceLedger.findMany.mockResolvedValue([existing]);
+
+      // fetchLedgerRange is a private stub returning []; simulate detected
+      // entries by spying on it so dry-run and real-run share the same input.
+      const fetchSpy = jest
+        .spyOn(service as any, 'fetchLedgerRange')
+        .mockReturnValue([
+          {
+            id: 'led_1',
+            campaignId: 'camp_1',
+            claimId: null,
+            eventType: 'lock',
+            amount: 100,
+            note: null,
+            createdAt: new Date(),
+          },
+          {
+            id: 'led_2',
+            campaignId: 'camp_1',
+            claimId: null,
+            eventType: 'disburse',
+            amount: 50,
+            note: null,
+            createdAt: new Date(),
+          },
+        ]);
+
+      const result = (await service.triggerBackfill(
+        1,
+        1,
+        undefined,
+        100,
+        undefined,
+        true,
+      )) as any;
+
+      expect(result.wouldCreateCount).toBe(1);
+      expect(result.wouldSkipCount).toBe(1);
+      expect(result.byEntityType).toMatchObject({
+        lock: { toCreate: 0, toSkip: 1 },
+        disburse: { toCreate: 1, toSkip: 0 },
+      });
+      expect(result.sample).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'led_1', action: 'skip' }),
+          expect.objectContaining({ id: 'led_2', action: 'create' }),
+        ]),
+      );
+
+      fetchSpy.mockRestore();
+    });
+  });
+
   // ── processBackfillBatch ───────────────────────────────────────────────────
 
   describe('processBackfillBatch', () => {
