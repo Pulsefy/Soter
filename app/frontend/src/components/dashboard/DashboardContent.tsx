@@ -19,8 +19,6 @@ export function DashboardContent() {
   const urlToken = searchParams.get('token') ?? '';
   const urlPage = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1);
   const urlSize = Math.min(100, Math.max(1, parseInt(searchParams.get('size') ?? String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE));
-  const urlSortBy = searchParams.get('sortBy') ?? 'id';
-  const urlSortDirection = (searchParams.get('sortDirection') as 'asc' | 'desc') ?? 'asc';
 
   // Local state for immediate input responsiveness
   const [localSearch, setLocalSearch] = useState(urlSearch);
@@ -30,15 +28,6 @@ export function DashboardContent() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalSearch(urlSearch);
   }, [urlSearch]);
-
-  // Debounce search → URL
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      updateParam('search', localSearch);
-    }, 300);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [localSearch]);
 
   const updateParam = useCallback(
     (key: string, value: string) => {
@@ -56,6 +45,15 @@ export function DashboardContent() {
     },
     [router, searchParams],
   );
+
+  // Debounce search → URL
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      updateParam('search', localSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localSearch]);
 
   const handleSearchChange = useCallback((value: string) => {
     setLocalSearch(value);

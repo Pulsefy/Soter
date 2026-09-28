@@ -53,7 +53,9 @@ const fetchBalance = async (address: string, networkName: string | null) => {
     throw new Error(`Failed to fetch balance: ${res.statusText}`);
   }
   const data = await res.json();
-  const nativeBalance = data.balances?.find((b: any) => b.asset_type === "native");
+  const nativeBalance = data.balances?.find(
+    (b: { asset_type: string; balance: string }) => b.asset_type === "native"
+  );
   return nativeBalance ? nativeBalance.balance : "0.0000000";
 };
 
@@ -118,9 +120,14 @@ export default function TestnetFaucetHelper() {
   }, [publicKey, network]);
 
   useEffect(() => {
-    if (isTestnet && publicKey) {
-      void loadBalance();
+    // Canonical data-fetching effect shape (react.dev): an effect-local async
+    // function fires the load; loadBalance only sets state after its awaits.
+    async function startFetching() {
+      if (isTestnet && publicKey) {
+        await loadBalance();
+      }
     }
+    void startFetching();
   }, [isTestnet, publicKey, loadBalance]);
 
   const handleFundAccount = async () => {
@@ -135,10 +142,10 @@ export default function TestnetFaucetHelper() {
       setTimeout(() => {
         setFundingState("idle");
       }, 5000);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error funding account via Friendbot:", err);
       setFundingState("error");
-      setFundingError(err.message || "Failed to request funds from Friendbot");
+      setFundingError(err instanceof Error ? err.message : "Failed to request funds from Friendbot");
     }
   };
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -646,6 +646,21 @@ function SectionHeader({
 
 /* ─── Main page ──────────────────────────────────────────────────────────── */
 
+/** No-op subscribe: `hydrated` flips once on mount and never changes after. */
+const subscribeNoop = () => () => {};
+
+/** Reads the persisted checklist ticks; returns {} on the server or on error. */
+function readStoredCheckedSteps(storageKey: string): Record<string, boolean> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const stored = localStorage.getItem(storageKey);
+    return stored ? (JSON.parse(stored) as Record<string, boolean>) : {};
+  } catch {
+    /* ignore */
+    return {};
+  }
+}
+
 export default function DemoChecklistPage() {
   const router = useRouter();
   const t = useTranslations('demoChecklist');
@@ -654,30 +669,30 @@ export default function DemoChecklistPage() {
   const runbook = useRunbook();
   const walletConnected = Boolean(publicKey);
 
-  const [allowed, setAllowed] = useState(false);
-  const [checked, setChecked] = useState(false);
+  // Build-time constant: the route is enabled or not for the whole session.
+  const allowed = enableDemoChecklist;
+
+  // True only after hydration; the server snapshot renders nothing so lazily
+  // read localStorage state can never cause a hydration mismatch.
+  const hydrated = useSyncExternalStore(
+    subscribeNoop,
+    () => true,
+    () => false,
+  );
+
   const [activeTab, setActiveTab] = useState<TabId>('all');
 
+  // Redirecting a disabled route is a side effect on the router, not React state.
   useEffect(() => {
     if (!enableDemoChecklist) {
       router.replace('/');
-    } else {
-      setAllowed(true);
     }
-    setChecked(true);
   }, [router]);
 
   const STORAGE_KEY = 'soter-demo-checklist';
-  const [checkedSteps, setCheckedSteps] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) setCheckedSteps(JSON.parse(stored));
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  const [checkedSteps, setCheckedSteps] = useState<Record<string, boolean>>(() =>
+    readStoredCheckedSteps(STORAGE_KEY),
+  );
 
   const toggleStep = (id: string) => {
     setCheckedSteps((prev) => {
@@ -691,16 +706,22 @@ export default function DemoChecklistPage() {
     });
   };
 
-  const isAutoComplete = (item: RunbookChecklistItem): boolean => {
-    if (item.autoVerify === 'wallet') return walletConnected;
-    if (item.autoVerify === 'health') return healthState === 'ok';
-    return false;
-  };
+  const isAutoComplete = useCallback(
+    (item: RunbookChecklistItem): boolean => {
+      if (item.autoVerify === 'wallet') return walletConnected;
+      if (item.autoVerify === 'health') return healthState === 'ok';
+      return false;
+    },
+    [walletConnected, healthState],
+  );
 
-  const isStepDone = (item: RunbookChecklistItem): boolean => {
-    if (isAutoComplete(item)) return true;
-    return Boolean(checkedSteps[item.id]);
-  };
+  const isStepDone = useCallback(
+    (item: RunbookChecklistItem): boolean => {
+      if (isAutoComplete(item)) return true;
+      return Boolean(checkedSteps[item.id]);
+    },
+    [isAutoComplete, checkedSteps],
+  );
 
   const runbookSections = useMemo(() => {
     const sb = runbook.data?.sections;
@@ -719,7 +740,7 @@ export default function DemoChecklistPage() {
       live: count(runbookSections.live),
       post: count(runbookSections.post),
     };
-  }, [runbookSections, checkedSteps, walletConnected, healthState]);
+  }, [runbookSections, isStepDone]);
 
   const totalSteps =
     sectionCounts.pre[1] + sectionCounts.live[1] + sectionCounts.post[1];
@@ -766,8 +787,7 @@ export default function DemoChecklistPage() {
     },
   ];
 
-  if (!checked) return null;
-  if (!allowed) return null;
+  if (!allowed || !hydrated) return null;
 
   const renderItemList = (items: RunbookChecklistItem[]) => (
     <ol className="space-y-3">

@@ -10,7 +10,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { ERROR_METADATA, ErrorCategory } from '@/types/error';
-import { categorizeError, normalizeError } from '@/lib/error-utils';
+import { normalizeError } from '@/lib/error-utils';
 import { useTranslations } from 'next-intl';
 
 interface ErrorInlineProps {

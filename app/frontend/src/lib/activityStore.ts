@@ -5,7 +5,7 @@ import { buildExplorerUrl } from './explorer';
 
 export const useActivityStore = create<ActivityStore>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       activities: [],
 
       addActivity: (activity) => {

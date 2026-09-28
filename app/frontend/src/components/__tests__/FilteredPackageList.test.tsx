@@ -32,7 +32,7 @@ jest.mock('@/lib/mock-api/client', () => ({
 
 jest.mock('@/hooks/useAidPackages');
 jest.mock('@/components/empty-state/AppEmptyState', () => ({
-  AppEmptyState: ({ compact, eyebrow, title }: { compact?: boolean; eyebrow?: string; title?: string }) => (
+  AppEmptyState: ({ eyebrow, title }: { compact?: boolean; eyebrow?: string; title?: string }) => (
     <div data-testid="empty-state">
       <span>{eyebrow}</span>
       <span>{title}</span>
