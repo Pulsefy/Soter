@@ -98,14 +98,16 @@ export class VerificationInboxSseController {
       .pipe(map(event => this.toMessageEvent(event)));
 
     const heartbeat$ = interval(this.heartbeatMs()).pipe(
-      map((): MessageEvent => ({
-        type: INBOX_HEARTBEAT_EVENT,
-        data: {
-          emittedAt: new Date().toISOString(),
-          lastEventId: this.events.lastEventId,
-          reviewerId,
-        },
-      })),
+      map(
+        (): MessageEvent => ({
+          type: INBOX_HEARTBEAT_EVENT,
+          data: {
+            emittedAt: new Date().toISOString(),
+            lastEventId: this.events.lastEventId,
+            reviewerId,
+          },
+        }),
+      ),
     );
 
     return merge(updates$, heartbeat$);

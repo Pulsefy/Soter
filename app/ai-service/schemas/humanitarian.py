@@ -116,7 +116,9 @@ class HumanitarianVerificationResponse(BaseModel):
             "Human-readable explanation of why the claim was flagged for manual "
             "review. Present only when flagged_for_manual_review is True."
         ),
-        examples=["All AI providers are currently unavailable; claim queued for human review."],
+        examples=[
+            "All AI providers are currently unavailable; claim queued for human review."
+        ],
     )
 
     model_config = {

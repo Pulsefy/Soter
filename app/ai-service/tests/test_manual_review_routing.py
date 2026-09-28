@@ -24,7 +24,6 @@ from services.humanitarian_verification import HumanitarianVerificationService
 from services.load_shedder import build_manual_review_response
 from services.providers import ModelProvider, LLMResponse, ProviderRegistry
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -308,9 +307,7 @@ class TestFullOutagePathE2E:
     def test_normal_request_succeeds_when_providers_available(self, client):
         """When providers are up, requests flow through as normal (no manual-review
         flag in a successful AI response)."""
-        with patch(
-            "services.load_shedder.check_provider_pressure", return_value=None
-        ):
+        with patch("services.load_shedder.check_provider_pressure", return_value=None):
             response = client.post(
                 "/v1/ai/humanitarian/verify",
                 json={"aid_claim": "Food distribution reached all households"},
@@ -371,9 +368,7 @@ class TestRecoveryPathE2E:
     def test_normal_routing_resumes_after_provider_recovers(self, client):
         """After a provider comes back up, the middleware no longer intercepts
         humanitarian verify requests for manual review."""
-        with patch(
-            "services.load_shedder.check_provider_pressure", return_value=None
-        ):
+        with patch("services.load_shedder.check_provider_pressure", return_value=None):
             response = client.post(
                 "/v1/ai/humanitarian/verify",
                 json={"aid_claim": "Food distribution verified across all sectors"},
