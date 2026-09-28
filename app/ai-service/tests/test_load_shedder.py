@@ -12,6 +12,7 @@ import main
 from exceptions import LoadShedError
 from services.load_shedder import (
     build_shed_response,
+    build_manual_review_response,
     check_memory_pressure,
     check_queue_pressure,
     check_provider_pressure,
@@ -174,7 +175,7 @@ class TestMiddlewareLoadShedding:
         # is complex. The priority logic is tested in TestPriorityBasedShedding.
         pass
 
-    def test_humanitarian_shed_when_providers_down(self, client):
+    def test_humanitarian_routes_to_manual_review_when_providers_down(self, client):
         with patch(
             "services.load_shedder.check_provider_pressure",
             return_value=("provider_down", {"provider_health": "down"}),
@@ -183,8 +184,14 @@ class TestMiddlewareLoadShedding:
                 "/v1/ai/humanitarian/verify",
                 json={"aid_claim": "Need food assistance"},
             )
-        assert response.status_code == 503
-        assert_shed_envelope(response.json(), "provider_down")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["flagged_for_manual_review"] is True
+        result = data["result"]
+        assert result["flagged_for_manual_review"] is True
+        assert result["success"] is True
+        assert "manual_review_reason" in result
+        assert result["manual_review_reason"] is not None
 
     def test_humanitarian_shed_when_providers_degraded(self, client):
         with patch(

@@ -101,6 +101,23 @@ class HumanitarianVerificationResponse(BaseModel):
     )
     error: Optional[str] = Field(None, examples=["Provider timed out"])
     anchor_metadata: Optional[AnchorMetadata] = None
+    flagged_for_manual_review: bool = Field(
+        default=False,
+        description=(
+            "True when the claim could not be verified automatically and has been "
+            "routed to a human reviewer. The claim will be re-processed by the AI "
+            "pipeline once a provider becomes available again."
+        ),
+        examples=[True],
+    )
+    manual_review_reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "Human-readable explanation of why the claim was flagged for manual "
+            "review. Present only when flagged_for_manual_review is True."
+        ),
+        examples=["All AI providers are currently unavailable; claim queued for human review."],
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -119,8 +136,15 @@ class HumanitarianVerificationResponse(BaseModel):
                         "campaign_ref": "campaign-2024-001",
                         "claim_id": "claim-abc123",
                     },
+                    "flagged_for_manual_review": False,
+                    "manual_review_reason": None,
                 },
                 {"success": False, "error": "Provider timed out"},
+                {
+                    "success": True,
+                    "flagged_for_manual_review": True,
+                    "manual_review_reason": "All AI providers are currently unavailable; claim queued for human review.",
+                },
             ]
         }
     }
