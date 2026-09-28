@@ -6,6 +6,7 @@ import type {
   ContractRegistryEntry,
   ContractRegistryResult,
   ContractRegistryState,
+  ContractNetworkDeployment,
 } from '@/types/contract-registry';
 
 /**
@@ -50,8 +51,15 @@ function deriveState(
   return 'error';
 }
 
+export interface ContractRegistryMatch {
+  name: string;
+  network: string;
+  deployment: ContractNetworkDeployment;
+}
+
 export function useContractRegistry(): ContractRegistryResult & {
   getContract: (name: string, network?: string) => ContractRegistryEntry | null;
+  findByContractId: (contractId: string) => ContractRegistryMatch | null;
 } {
   const { data, error, isLoading, dataUpdatedAt } = useQuery<
     ContractRegistryResponse,
@@ -75,11 +83,25 @@ export function useContractRegistry(): ContractRegistryResult & {
     return entry.networks?.[network] ? entry : null;
   };
 
+  /** Reverse lookup: which contract/network a deployed contract ID belongs to. */
+  const findByContractId = (contractId: string): ContractRegistryMatch | null => {
+    if (!contractId || !data?.contracts) return null;
+    for (const [name, entry] of Object.entries(data.contracts)) {
+      for (const [network, deployment] of Object.entries(entry.networks ?? {})) {
+        if (deployment.contract_id === contractId) {
+          return { name, network, deployment };
+        }
+      }
+    }
+    return null;
+  };
+
   return {
     state,
     data: data ?? null,
     error: error ?? null,
     lastChecked,
     getContract,
+    findByContractId,
   };
 }

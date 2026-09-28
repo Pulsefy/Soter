@@ -7,6 +7,7 @@ import { StatsBar } from '@/components/verification-review/StatsBar';
 import { ReviewFiltersBar } from '@/components/verification-review/ReviewFiltersBar';
 import { ReviewFilterPresets } from '@/components/verification-review/ReviewFilterPresets';
 import { ReviewQueue } from '@/components/verification-review/ReviewQueue';
+import { ContractRegistryPanel } from '@/components/ContractRegistryPanel';
 import type { ReviewFilters, VerificationStatus, RiskLevel } from '@/types/verification-review';
 
 // ── URL ↔ state helpers ───────────────────────────────────────────────────────
@@ -84,6 +85,11 @@ export default function VerificationReviewPage() {
 
           {/* Stats */}
           <StatsBar />
+
+          {/* Active contract IDs, network labels, and deployment metadata —
+              reviewers need this to confirm they're auditing the right
+              network/contract before approving on-chain-adjacent claims. */}
+          <ContractRegistryPanel defaultExpanded={false} />
 
           {/* Filters + Saved Views */}
           <div className="p-4 rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 space-y-4">

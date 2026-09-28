@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ClaimReceipt, ClaimReceiptData } from '@/components/ClaimReceipt';
 import { AlertCircle, Loader2, Clock, FileSearch } from 'lucide-react';
 import { fetchClient } from '@/lib/mock-api/client';
+import { useContractRegistry } from '@/hooks/useContractRegistry';
+import { stellarNetwork } from '@/lib/env';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -23,6 +25,7 @@ type LoadState =
 export default function ClaimReceiptPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { findByContractId } = useContractRegistry();
   const claimId = searchParams.get('claimId');
   const packageId = searchParams.get('packageId');
   const identifier = claimId ?? packageId;
@@ -212,7 +215,26 @@ export default function ClaimReceiptPage() {
               </div>
             )}
 
-            <ClaimReceipt claim={state.data} onShare={handleShare} />
+            {(() => {
+              const match = state.data.contractAddress
+                ? findByContractId(state.data.contractAddress)
+                : null;
+              return (
+                <ClaimReceipt
+                  claim={state.data}
+                  onShare={handleShare}
+                  network={match?.network ?? stellarNetwork}
+                  contractDeployment={
+                    match
+                      ? {
+                          version: match.deployment.version,
+                          deployedAt: match.deployment.deployed_at,
+                        }
+                      : undefined
+                  }
+                />
+              );
+            })()}
 
             {/* Additional Information */}
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6 border border-slate-200 dark:border-slate-700">
