@@ -150,8 +150,7 @@ export class AdaptiveRateLimitGuard implements CanActivate {
     // IP-based for public/unauthenticated requests
     // Try x-forwarded-for first (for proxied requests)
     const forwardedIp = request.headers['x-forwarded-for'] as
-      | string
-      | undefined;
+      string | undefined;
     if (forwardedIp) {
       const ips = forwardedIp.split(',').map(ip => ip.trim());
       if (ips.length > 0 && ips[0]) {

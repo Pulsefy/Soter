@@ -45,8 +45,7 @@ export class CorrelationPropagationUtil {
       const asyncLocalStorage = this.logger?.getAsyncLocalStorage();
       if (asyncLocalStorage) {
         const store = asyncLocalStorage.getStore() as
-          | Map<string, any>
-          | undefined;
+          Map<string, any> | undefined;
         if (store) {
           const fromStore = store.get(CORRELATION_ID_KEY);
           if (fromStore) {

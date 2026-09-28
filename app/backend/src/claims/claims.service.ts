@@ -444,8 +444,7 @@ export class ClaimsService {
     }
 
     const campaignMetadata = claim.campaign?.metadata as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     if (campaignMetadata?.tokenAddress) {
       return campaignMetadata.tokenAddress as string;
     }
@@ -972,8 +971,7 @@ export class ClaimsService {
   private mapClaimRow(c: RawClaimExportRow): ClaimExportRow {
     const claimMetadata = c.metadata as Record<string, unknown> | undefined;
     const campaignMetadata = c.campaign?.metadata as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
 
     return {
       id: c.id,

@@ -167,9 +167,9 @@ describe('Error Envelope (E2E)', () => {
 
       for (const { url, method, expectedStatus } of errorEndpoints) {
         const response = await request(app.getHttpServer())
-          [
-            method.toLowerCase() as 'get' | 'post' | 'put' | 'delete' | 'patch'
-          ](url)
+          [method.toLowerCase() as 'get' | 'post' | 'put' | 'delete' | 'patch'](
+            url,
+          )
           .expect(expectedStatus);
 
         const body = response.body as ErrorResponseDto;

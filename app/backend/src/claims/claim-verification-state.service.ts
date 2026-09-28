@@ -45,8 +45,7 @@ export const RECONCILED_CLAIM_STATUSES: ClaimStatus[] = [
  *   verification but the claim row never left `requested`.
  */
 export type ClaimVerificationDrift =
-  | 'verified_without_verification_record'
-  | 'verification_record_not_reflected';
+  'verified_without_verification_record' | 'verification_record_not_reflected';
 
 /**
  * The verification record the pipeline left for a claim.
