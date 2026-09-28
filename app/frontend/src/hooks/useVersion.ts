@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useVersionStore, VersionService } from '@/lib/versionStore';
 import type { VersionConfig } from '@/types/version';
 
@@ -9,7 +9,7 @@ export function useVersion() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadVersionConfig = async () => {
+  const loadVersionConfig = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     
@@ -22,7 +22,7 @@ export function useVersion() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [store.setVersionConfig]);
 
   const handleContinue = () => {
     if (store.releaseNotes) {

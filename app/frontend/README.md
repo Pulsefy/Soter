@@ -75,6 +75,25 @@ Run the large-fixture regression check with:
 pnpm test -- --runInBand src/components/dashboard/__tests__/AidDistributionMap.performance.test.ts
 ```
 
+### Dashboard visual regression
+
+The frontend CI workflow compares full-page Chromium screenshots of the dashboard in light and dark themes. It uses fixed API data and map tiles so the screenshots stay independent of backend and map-provider changes. CI runs on Windows to match the screenshot rendering platform used for the committed baselines.
+
+Run the visual check locally from this directory:
+
+```bash
+pnpm exec playwright install chromium
+pnpm run test:visual
+```
+
+When a dashboard change is intentional, update the reference images in the same pull request:
+
+```bash
+pnpm run test:visual:update
+```
+
+Review the PNG changes under `tests/visual/dashboard.visual.ts-snapshots/` before committing them with the UI change.
+
 ### Environment Setup
 
 1. Copy the example environment file:
