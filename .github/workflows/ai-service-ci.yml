@@ -108,18 +108,19 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Regenerate OpenAPI spec from the live app
+    - name: Regenerate OpenAPI spec and API reference from the live app
       working-directory: ./app/ai-service
       run: |
         python scripts/generate_openapi.py
 
-    - name: Fail if the committed spec drifted
+    - name: Fail if committed spec or API reference drifted
       run: |
-        # Regenerating must produce byte-identical output to the committed
-        # openapi.json. Any diff means routes or schemas changed without the
-        # static reference being updated in the same PR.
-        git diff --exit-code -- app/ai-service/openapi.json
+        # Regenerating must produce byte-identical output to the committed files.
+        # Any diff means routes or schemas changed without the static reference
+        # being updated in the same PR.
+        git diff --exit-code -- app/ai-service/openapi.json app/ai-service/API_REFERENCE.md
         echo "✓ app/ai-service/openapi.json is up to date"
+        echo "✓ app/ai-service/API_REFERENCE.md is up to date"
 
   build:
     runs-on: ubuntu-latest
