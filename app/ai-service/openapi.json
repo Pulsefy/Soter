@@ -103,6 +103,7 @@
           "fields": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -166,6 +167,7 @@
             "type": "integer"
           },
           "pii_summary": {
+            "additionalProperties": true,
             "examples": [
               {
                 "dates": 1,
@@ -436,8 +438,8 @@
             "title": "Document Type"
           },
           "image": {
+            "contentMediaType": "application/octet-stream",
             "description": "Image file to process",
-            "format": "binary",
             "title": "Image",
             "type": "string"
           },
@@ -486,8 +488,8 @@
             "title": "Document Type"
           },
           "image": {
+            "contentMediaType": "application/octet-stream",
             "description": "Image file to process",
-            "format": "binary",
             "title": "Image",
             "type": "string"
           },
@@ -526,7 +528,7 @@
           "files": {
             "description": "One or more image files to process",
             "items": {
-              "format": "binary",
+              "contentMediaType": "application/octet-stream",
               "type": "string"
             },
             "title": "Files",
@@ -577,8 +579,8 @@
             "title": "Document Type"
           },
           "image": {
+            "contentMediaType": "application/octet-stream",
             "description": "Image file to process",
-            "format": "binary",
             "title": "Image",
             "type": "string"
           },
@@ -603,8 +605,8 @@
       "Body_upload_chunk_v1_ai_evidence_uploads_sessions__session_id__chunks__chunk_index__put": {
         "properties": {
           "chunk": {
+            "contentMediaType": "application/octet-stream",
             "description": "Raw bytes for this chunk",
-            "format": "binary",
             "title": "Chunk",
             "type": "string"
           }
@@ -721,11 +723,7 @@
         ],
         "properties": {
           "band": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/FraudBand"
-              }
-            ],
+            "$ref": "#/components/schemas/FraudBand",
             "examples": [
               "PASS",
               "REJECT"
@@ -839,6 +837,7 @@
             "title": "Evidence Hash"
           },
           "extra": {
+            "additionalProperties": true,
             "examples": [
               {
                 "source": "mobile_app"
@@ -1167,7 +1166,9 @@
         "type": "object"
       },
       "FraudExplanationCode": {
-        "const": "ANOMALY_DETECTED",
+        "enum": [
+          "ANOMALY_DETECTED"
+        ],
         "title": "FraudExplanationCode",
         "type": "string"
       },
@@ -1238,6 +1239,7 @@
             "type": "array"
           },
           "context_factors": {
+            "additionalProperties": true,
             "examples": [
               {
                 "disaster_type": "flood",
@@ -1360,6 +1362,7 @@
           "data": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1798,6 +1801,7 @@
         ],
         "properties": {
           "checks": {
+            "additionalProperties": true,
             "examples": [
               {
                 "face_detected": true,
@@ -1898,6 +1902,7 @@
             "type": "integer"
           },
           "pii_summary": {
+            "additionalProperties": true,
             "examples": [
               {
                 "dates": 1,
@@ -2134,6 +2139,7 @@
             "title": "Reasons"
           },
           "result": {
+            "additionalProperties": true,
             "title": "Result",
             "type": "object"
           },
@@ -2318,6 +2324,7 @@
           },
           "result": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "title": "Result",
@@ -2782,6 +2789,13 @@
       },
       "ValidationError": {
         "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
           "loc": {
             "items": {
               "anyOf": [
