@@ -240,7 +240,9 @@ function useReviewMutation(
       qc.setQueriesData<{ items: VerificationInboxItem[] }>(
         { queryKey: inboxKeys.all },
         old => {
-          if (!old || !('items' in old)) return old;
+          // `inboxKeys.all` also matches the latency store, whose cached value
+          // is a plain number. Skip anything that is not an inbox page.
+          if (!old || typeof old !== 'object' || !('items' in old)) return old;
           return {
             ...old,
             items: old.items.map(item =>
