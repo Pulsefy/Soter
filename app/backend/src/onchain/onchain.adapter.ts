@@ -138,6 +138,19 @@ export interface GetAidPackageCountResult {
   timestamp: Date;
 }
 
+/**
+ * Result of a direct `get_aggregates(token)` contract read.
+ *
+ * Unlike `GetAidPackageCountResult`, this carries the token the aggregates
+ * belong to so a caller cannot accidentally attribute another token's totals
+ * to the requested one.
+ */
+export interface GetAggregatesResult {
+  tokenAddress: string;
+  aggregates: AidPackageAggregates;
+  timestamp: Date;
+}
+
 export interface GetTokenBalanceParams {
   tokenAddress: string;
   accountAddress: string;
@@ -292,6 +305,18 @@ export interface OnchainAdapter {
   getAidPackageCount(
     params: GetAidPackageCountParams,
   ): Promise<GetAidPackageCountResult>;
+
+  /**
+   * Read the authoritative per-token aggregates straight from the contract.
+   *
+   * Calls the public `get_aggregates(token)` entrypoint, which scans stored
+   * packages and returns:
+   *  - `totalCommitted`        - funds currently locked (packages in `Created`)
+   *  - `totalClaimed`          - funds claimed (packages in `Claimed`, including
+   *                              admin disbursements)
+   *  - `totalExpiredCancelled` - funds released (Expired / Cancelled / Refunded)
+   */
+  getAggregates(token: string): Promise<GetAggregatesResult>;
 
   /**
    * Get token balance for a specific account

@@ -22,6 +22,7 @@ import {
   GetAidPackageResult,
   GetAidPackageCountParams,
   GetAidPackageCountResult,
+  GetAggregatesResult,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
   ContractMetadata,
@@ -424,6 +425,49 @@ export class MockOnchainAdapter implements OnchainAdapter {
         totalCommitted: '5000000000',
         totalClaimed: '2000000000',
         totalExpiredCancelled: '500000000',
+      },
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Aggregate the in-memory mock packages for a token, mirroring the
+   * contract's `get_aggregates` semantics: committed counts packages still in
+   * `Created` (including partially claimed ones), claimed counts packages in
+   * `Claimed`, and everything terminal counts as expired/cancelled.
+   */
+  async getAggregates(token: string): Promise<GetAggregatesResult> {
+    await Promise.resolve();
+
+    let totalCommitted = BigInt(0);
+    let totalClaimed = BigInt(0);
+    let totalExpiredCancelled = BigInt(0);
+
+    for (const pkg of this.mockPackages.values()) {
+      if (pkg.token !== token) continue;
+
+      const amount = BigInt(pkg.amount);
+      switch (pkg.status) {
+        case 'Created':
+          totalCommitted += amount;
+          break;
+        case 'Claimed':
+          totalClaimed += amount;
+          break;
+        case 'Expired':
+        case 'Cancelled':
+        case 'Refunded':
+          totalExpiredCancelled += amount;
+          break;
+      }
+    }
+
+    return {
+      tokenAddress: token,
+      aggregates: {
+        totalCommitted: totalCommitted.toString(),
+        totalClaimed: totalClaimed.toString(),
+        totalExpiredCancelled: totalExpiredCancelled.toString(),
       },
       timestamp: new Date(),
     };

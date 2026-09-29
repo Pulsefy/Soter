@@ -406,4 +406,89 @@ describe('MockOnchainAdapter', () => {
       ).rejects.toThrow('Aid package has expired');
     });
   });
+
+  describe('getAggregates', () => {
+    const TOKEN_A =
+      'GAAAAAAAACCCCCCCCCCRRRRRRRRRRHHHHHHHHHHNNNNNNNNNNGGGGGGGGXX';
+    const TOKEN_B =
+      'GBBBBBBBBBDDDDDDDDDDSSSSSSSSSSKKKKKKKKKKMMMMMMMMMMGGGGGGGGYY';
+
+    it('returns committed and claimed totals for a token', async () => {
+      const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId: 'agg-1',
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '1000',
+        tokenAddress: TOKEN_A,
+        expiresAt,
+      });
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId: 'agg-2',
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '400',
+        tokenAddress: TOKEN_A,
+        expiresAt,
+      });
+
+      // Fully claim the second package so it leaves the committed total.
+      await adapter.claimAidPackage({
+        packageId: 'agg-2',
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '400',
+      });
+
+      const result = await adapter.getAggregates(TOKEN_A);
+
+      expect(result.tokenAddress).toBe(TOKEN_A);
+      expect(result.aggregates.totalCommitted).toBe('1000');
+      expect(result.aggregates.totalClaimed).toBe('400');
+      expect(result.aggregates.totalExpiredCancelled).toBe('0');
+      expect(result.timestamp).toBeInstanceOf(Date);
+    });
+
+    it('excludes packages belonging to other tokens', async () => {
+      const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId: 'agg-token-a',
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '500',
+        tokenAddress: TOKEN_A,
+        expiresAt,
+      });
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId: 'agg-token-b',
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '900',
+        tokenAddress: TOKEN_B,
+        expiresAt,
+      });
+
+      const aggregatesA = await adapter.getAggregates(TOKEN_A);
+      const aggregatesB = await adapter.getAggregates(TOKEN_B);
+
+      expect(aggregatesA.aggregates.totalCommitted).toBe('500');
+      expect(aggregatesB.aggregates.totalCommitted).toBe('900');
+    });
+
+    it('returns zeroed aggregates for an unknown token', async () => {
+      const result = await adapter.getAggregates(TOKEN_A);
+
+      expect(result.aggregates).toEqual({
+        totalCommitted: '0',
+        totalClaimed: '0',
+        totalExpiredCancelled: '0',
+      });
+    });
+  });
 });

@@ -95,6 +95,16 @@ export const CACHE_TTL = {
     process.env.CACHE_TTL_CONTRACT_ERROR_CATALOG || '3600',
     10,
   ),
+
+  /**
+   * On-chain aggregates - read directly from Soroban RPC on cache miss, so the
+   * TTL bounds how often a busy dashboard can hit the RPC endpoint.
+   * Default: 60 seconds (short enough to stay close to on-chain state)
+   */
+  ONCHAIN_AGGREGATES: parseInt(
+    process.env.CACHE_TTL_ONCHAIN_AGGREGATES || '60',
+    10,
+  ),
 } as const;
 
 /**
