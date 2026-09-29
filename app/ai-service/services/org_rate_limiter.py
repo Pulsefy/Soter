@@ -94,16 +94,14 @@ class OrganizationRateLimiterService:
     def __init__(self, api_key_org_mapping: ApiKeyOrgMapping):
         self._lock = threading.Lock()
         # Storage: org_id -> collections.deque of float timestamps
-        self._in_memory_records: Dict[str, collections.deque] = (
-            collections.defaultdict(collections.deque)
+        self._in_memory_records: Dict[str, collections.deque] = collections.defaultdict(
+            collections.deque
         )
         self._api_key_org_mapping = api_key_org_mapping
         # Organization ID -> (limit, window_seconds)
         self._org_tier_cache: Dict[str, Tuple[int, int]] = {}
 
-    def set_organization_tier(
-        self, org_id: str, limit_str: str
-    ) -> None:
+    def set_organization_tier(self, org_id: str, limit_str: str) -> None:
         """
         Register or update an organization's rate limit tier.
 
