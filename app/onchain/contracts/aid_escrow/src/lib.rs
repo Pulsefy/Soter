@@ -240,6 +240,12 @@ pub enum Error {
     /// `execute_surplus_withdrawal` was called before the timelock delay has
     /// elapsed.  Wait until `executable_at` and try again.
     SurplusWithdrawalTimelockActive = 28,
+    /// Package metadata included a `merkle_root` value that is not a
+    /// well-formed 64-character hex string (32 bytes). Rejected at creation
+    /// time so a malformed root can never silently disable the allowlist
+    /// gate (see `merkle_root_from_metadata`, which would otherwise treat
+    /// it as "no Merkle gate configured").
+    InvalidMerkleRoot = 29,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -1279,6 +1285,8 @@ impl AidEscrow {
             }
         }
 
+        Self::validate_merkle_root_metadata(&env, &metadata)?;
+
         let key = crate::keys::package_key(id);
         if env.storage().persistent().has(&key) {
             return Err(Error::PackageIdExists);
@@ -1424,6 +1432,8 @@ impl AidEscrow {
             if claim_starts_at > expires_at {
                 return Err(Error::InvalidState);
             }
+
+            Self::validate_merkle_root_metadata(&env, &metadata)?;
 
             // Validate amount
             if amount <= 0 {
@@ -2907,6 +2917,23 @@ impl AidEscrow {
         metadata
             .get(root_key)
             .and_then(|hex| Self::parse_hex_32(&hex))
+    }
+
+    /// Rejects package metadata whose `merkle_root` value (if present) is not
+    /// well-formed 32-byte hex. Called at package-creation time so a typo'd
+    /// or malformed root can never be stored: `merkle_root_from_metadata`
+    /// treats any unparseable value as "no Merkle gate configured", which
+    /// would otherwise silently downgrade an intended allowlist-only package
+    /// into one claimable directly by its `recipient`.
+    fn validate_merkle_root_metadata(
+        env: &Env,
+        metadata: &Map<Symbol, String>,
+    ) -> Result<(), Error> {
+        let root_key = Symbol::new(env, keys::META_MERKLE_ROOT_KEY);
+        match metadata.get(root_key) {
+            Some(hex) if Self::parse_hex_32(&hex).is_none() => Err(Error::InvalidMerkleRoot),
+            _ => Ok(()),
+        }
     }
 
     fn verify_merkle_proof_for_claimant(
