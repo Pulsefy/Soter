@@ -41,10 +41,10 @@ export class CampaignBudgetAlertScheduler {
         const usage = await this.budgetService.getCampaignBudgetUsage(
           campaign.id,
         );
-        if (usage.budget <= 0) continue;
+        if (campaign.budget <= 0) continue;
 
-        const percentConsumed = (usage.disbursed / usage.budget) * 100;
-        const threshold = campaign.budgetThresholdPercent ?? 80;
+        const percentConsumed = (usage.disbursed / campaign.budget) * 100;
+        const threshold = (campaign as any).budgetThresholdPercent ?? 80;
 
         if (percentConsumed >= threshold) {
           const existingAlert = await this.prisma.auditLog.findFirst({
@@ -64,7 +64,7 @@ export class CampaignBudgetAlertScheduler {
                 ? `admin@org-${campaign.orgId}.local`
                 : 'admin@soter.local',
               `Campaign Budget Alert: ${campaign.name} has reached ${percentConsumed.toFixed(1)}% budget consumption`,
-              `Campaign "${campaign.name}" (ID: ${campaign.id}) has consumed ${percentConsumed.toFixed(1)}% of its budget (${usage.disbursed} / ${usage.budget}). Configured threshold is ${threshold}%.`,
+              `Campaign "${campaign.name}" (ID: ${campaign.id}) has consumed ${percentConsumed.toFixed(1)}% of its budget (${usage.disbursed} / ${campaign.budget}). Configured threshold is ${threshold}%.`,
             );
 
             await this.prisma.auditLog.create({
@@ -77,9 +77,9 @@ export class CampaignBudgetAlertScheduler {
                   threshold,
                   percentConsumed,
                   disbursed: usage.disbursed,
-                  budget: usage.budget,
+                  budget: campaign.budget,
                 },
-              },
+              } as any,
             });
 
             this.logger.log(
