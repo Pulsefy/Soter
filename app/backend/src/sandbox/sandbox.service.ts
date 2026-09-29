@@ -154,6 +154,7 @@ export class SandboxService {
             amount: claimSeed.amount,
             status: claimSeed.status,
             evidenceRef: claimSeed.evidenceRef,
+            cancelReasonCode: claimSeed.cancelReasonCode,
           },
           create: {
             campaignId: campaignId,
@@ -161,6 +162,7 @@ export class SandboxService {
             amount: claimSeed.amount,
             status: claimSeed.status,
             evidenceRef: claimSeed.evidenceRef,
+            cancelReasonCode: claimSeed.cancelReasonCode,
           },
         });
         this.loggerService.log(

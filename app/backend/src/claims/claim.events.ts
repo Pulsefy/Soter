@@ -5,6 +5,8 @@
  * every state change is traceable without an external message broker.
  */
 
+import type { CancelReasonCode } from '@prisma/client';
+
 export const CLAIM_EVENT = {
   CANCELLED: 'claim.cancelled',
   REISSUED: 'claim.reissued',
@@ -17,6 +19,9 @@ export interface ClaimCancelledEvent {
   claimId: string;
   campaignId: string;
   operatorId: string;
+  /** Structured cancellation reason. Always set; `reason` is only detail. */
+  reasonCode: CancelReasonCode;
+  /** Free-text detail. Never parsed — reporting must use `reasonCode`. */
   reason?: string;
   /** Amount that was unlocked from the campaign budget */
   unlockedAmount: number;
@@ -32,6 +37,7 @@ export interface ClaimReissuedEvent {
   campaignId: string;
   operatorId: string;
   amount: number;
+  reasonCode: CancelReasonCode;
   reason?: string;
   timestamp: Date;
 }
