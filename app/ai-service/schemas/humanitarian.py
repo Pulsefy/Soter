@@ -1,26 +1,6 @@
-from typing import Any, Dict, List, Literal, Optional
+﻿from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 from schemas.common import AnchorMetadata
-
-
-class LLMVerificationPayload(BaseModel):
-    """Expected shape of a verification LLM's parsed JSON response.
-
-    Only the fields every prompt variant asks for and that downstream code
-    actually reads (`verdict`, `confidence`) are required; the rest of the
-    requested schema (`criteria_assessment`, `risk_flags`, etc.) is accepted
-    but not enforced here; the response is still processed by the caller
-    with those fields present if the provider included them. This model
-    exists to catch what genuinely renders a response unusable -- a missing
-    verdict, an out-of-range confidence, or a wrong type -- not to be a
-    strict superset check that would reject an otherwise-usable answer over
-    an omitted optional field.
-    """
-
-    model_config = {"extra": "allow"}
-
-    verdict: Literal["credible", "partially_credible", "inconclusive", "not_credible"]
-    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class HumanitarianVerificationRequest(BaseModel):
@@ -47,17 +27,13 @@ class HumanitarianVerificationRequest(BaseModel):
     artifact_ids: List[str] = Field(
         default_factory=list,
         description="IDs of evidence artifacts (see /ai/verification-artifacts) referenced by this claim. "
-        "Used to key the response cache so it can be explicitly invalidated when an artifact is updated. "
-        "The cache additionally stores a content-hash key, so re-uploading identical bytes under a new "
-        "artifact ID reuses the cached result.",
+        "Used to key the response cache so it can be explicitly invalidated when an artifact is updated.",
         examples=[["artifact_abc123"]],
     )
-    prompt_version: Optional[str] = Field(
-        default=None,
-        description="Explicit prompt version to use from registry (defaults to configured active version)",
-        examples=["v1"],
-    )
     anchor_metadata: Optional[AnchorMetadata] = None
+    language: Optional[str] = Field(
+        default=None, description="Optional BCP-47 language hint.", examples=["en"]
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -71,7 +47,6 @@ class HumanitarianVerificationRequest(BaseModel):
                     },
                     "provider_preference": "auto",
                     "timeout": 30.0,
-                    "prompt_version": "v1",
                     "anchor_metadata": {
                         "campaign_ref": "campaign-2024-001",
                         "claim_id": "claim-abc123",
@@ -86,9 +61,7 @@ class HumanitarianVerificationResponse(BaseModel):
     success: bool = Field(examples=[True])
     provider: Optional[str] = Field(None, examples=["test"])
     model: Optional[str] = Field(None, examples=["gpt-4o"])
-    prompt_variant: Optional[str] = Field(None, examples=["primary"])
-    prompt_name: Optional[str] = Field(None, examples=["humanitarian_primary"])
-    prompt_version: Optional[str] = Field(None, examples=["v1"])
+    prompt_variant: Optional[str] = Field(None, examples=["v1"])
     verification: Optional[Dict[str, Any]] = Field(
         None,
         examples=[
@@ -101,24 +74,8 @@ class HumanitarianVerificationResponse(BaseModel):
     )
     error: Optional[str] = Field(None, examples=["Provider timed out"])
     anchor_metadata: Optional[AnchorMetadata] = None
-    flagged_for_manual_review: bool = Field(
-        default=False,
-        description=(
-            "True when the claim could not be verified automatically and has been "
-            "routed to a human reviewer. The claim will be re-processed by the AI "
-            "pipeline once a provider becomes available again."
-        ),
-        examples=[True],
-    )
-    manual_review_reason: Optional[str] = Field(
-        default=None,
-        description=(
-            "Human-readable explanation of why the claim was flagged for manual "
-            "review. Present only when flagged_for_manual_review is True."
-        ),
-        examples=[
-            "All AI providers are currently unavailable; claim queued for human review."
-        ],
+    language: Optional[str] = Field(
+        default=None, description="Optional BCP-47 language hint.", examples=["en"]
     )
 
     model_config = {
@@ -138,15 +95,8 @@ class HumanitarianVerificationResponse(BaseModel):
                         "campaign_ref": "campaign-2024-001",
                         "claim_id": "claim-abc123",
                     },
-                    "flagged_for_manual_review": False,
-                    "manual_review_reason": None,
                 },
                 {"success": False, "error": "Provider timed out"},
-                {
-                    "success": True,
-                    "flagged_for_manual_review": True,
-                    "manual_review_reason": "All AI providers are currently unavailable; claim queued for human review.",
-                },
             ]
         }
     }
