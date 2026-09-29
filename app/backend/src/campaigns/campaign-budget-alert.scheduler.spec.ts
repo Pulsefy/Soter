@@ -17,7 +17,8 @@ describe('CampaignBudgetAlertScheduler', () => {
   let budgetService: { getCampaignBudgetUsage: jest.Mock };
   let notificationsService: { sendEmail: jest.Mock };
 
-  const originalThresholdEnv = process.env.CAMPAIGN_BUDGET_ALERT_THRESHOLD_PERCENT;
+  const originalThresholdEnv =
+    process.env.CAMPAIGN_BUDGET_ALERT_THRESHOLD_PERCENT;
 
   beforeEach(() => {
     delete process.env.CAMPAIGN_BUDGET_ALERT_THRESHOLD_PERCENT;
@@ -48,7 +49,8 @@ describe('CampaignBudgetAlertScheduler', () => {
     if (originalThresholdEnv === undefined) {
       delete process.env.CAMPAIGN_BUDGET_ALERT_THRESHOLD_PERCENT;
     } else {
-      process.env.CAMPAIGN_BUDGET_ALERT_THRESHOLD_PERCENT = originalThresholdEnv;
+      process.env.CAMPAIGN_BUDGET_ALERT_THRESHOLD_PERCENT =
+        originalThresholdEnv;
     }
   });
 
@@ -272,7 +274,9 @@ describe('CampaignBudgetAlertScheduler', () => {
       ];
       prisma.notificationOutbox.findFirst.mockImplementation(({ where }) => {
         const contains = where.metadata.contains as string;
-        const hit = storedMetadata.some(metadata => metadata.includes(contains));
+        const hit = storedMetadata.some(metadata =>
+          metadata.includes(contains),
+        );
         return Promise.resolve(hit ? { id: 'outbox-x' } : null);
       });
       prisma.user.findMany.mockResolvedValue([{ email: 'admin@example.com' }]);
@@ -298,7 +302,9 @@ describe('CampaignBudgetAlertScheduler', () => {
         .spyOn(scheduler, 'checkBudgetThresholds')
         .mockRejectedValue(new Error('db down'));
 
-      await expect(scheduler.handleBudgetThresholdCron()).resolves.toBeUndefined();
+      await expect(
+        scheduler.handleBudgetThresholdCron(),
+      ).resolves.toBeUndefined();
     });
 
     it('runs the check on each tick', async () => {

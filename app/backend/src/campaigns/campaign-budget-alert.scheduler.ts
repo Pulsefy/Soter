@@ -87,7 +87,8 @@ export class CampaignBudgetAlertScheduler {
       try {
         await this.checkCampaign(campaign, thresholdPercent);
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
+        const message =
+          error instanceof Error ? error.message : 'Unknown error';
         this.logger.error(
           `Budget threshold check failed for campaign ${campaign.id}: ${message}`,
         );
