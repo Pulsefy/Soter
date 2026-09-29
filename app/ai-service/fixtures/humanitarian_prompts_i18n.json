@@ -1,0 +1,27 @@
+{
+  "_comment": "Golden fixtures for issue #1201. `en` is populated; es/fr/ar fixtures land in a follow-up so this PR stays reviewable.",
+  "en": {
+    "language": "en",
+    "prompt_version": "1.0",
+    "sample_claim": "Water deliveries are insufficient in the north region.",
+    "assert_contains": ["Sphere Criteria", "Aid Claim", "Supporting Evidence"]
+  },
+  "es": {
+    "language": "es",
+    "prompt_version": "1.0",
+    "sample_claim": "Las entregas de agua son insuficientes.",
+    "assert_contains": ["Criterios de Esfera", "Afirmación", "Evidencia de Apoyo"]
+  },
+  "fr": {
+    "language": "fr",
+    "prompt_version": "1.0",
+    "sample_claim": "Les livraisons d'eau sont insuffisantes.",
+    "assert_contains": ["Critères Sphere", "Déclaration", "Preuves"]
+  },
+  "ar": {
+    "language": "ar",
+    "prompt_version": "1.0",
+    "sample_claim": "المساعدات الانسانية غير كافية.",
+    "assert_contains": ["معايير", "مزعم المساعدة", "الادلة"]
+  }
+}
