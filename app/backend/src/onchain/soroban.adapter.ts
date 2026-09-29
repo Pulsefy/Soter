@@ -45,6 +45,10 @@ import {
   ContractVersionParams,
   MigrateContractParams,
   MigrateContractResult,
+  AdminState,
+  AdminTransferParams,
+  AdminTransferResult,
+  TransferAdminParams,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
@@ -781,6 +785,164 @@ export class SorobanAdapter implements OnchainAdapter {
 
     return {
       isPaused: result === true,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Normalize an `Option<Address>` return value. Soroban encodes `None` as
+   * either a void ScVal or a null native value depending on the SDK version,
+   * so both are collapsed to `null` here.
+   */
+  private normalizeOptionalAddress(value: unknown): string | null {
+    if (typeof value === 'string') {
+      return value.length > 0 ? value : null;
+    }
+    if (typeof value === 'number') {
+      return String(value);
+    }
+    return null;
+  }
+
+  /**
+   * Coerce a decoded ScVal into a non-null string, tolerating null/void.
+   */
+  private readAddress(value: unknown): string {
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      return String(value);
+    }
+    return '';
+  }
+
+  /**
+   * Read the admin pair, tolerating `get_pending_admin` being unavailable so
+   * a pending-transfer lookup can never fail an otherwise valid state read.
+   */
+  private async readAdminState(
+    correlationId: string,
+    contractId = this.contractId,
+  ): Promise<AdminState> {
+    const adminAddress = await this.simulateReadOnly(
+      'get_admin',
+      [],
+      correlationId,
+      contractId,
+    );
+
+    let pendingAdminAddress: string | null = null;
+    try {
+      pendingAdminAddress = this.normalizeOptionalAddress(
+        await this.simulateReadOnly(
+          'get_pending_admin',
+          [],
+          correlationId,
+          contractId,
+        ),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `[${correlationId}] get_pending_admin failed for ${contractId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    return {
+      adminAddress: this.readAddress(adminAddress),
+      pendingAdminAddress,
+      timestamp: new Date(),
+    };
+  }
+
+  async getAdminState(params: AdminTransferParams = {}): Promise<AdminState> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] getAdminState`);
+
+    return this.readAdminState(cid, params.contractId ?? this.contractId);
+  }
+
+  async transferAdmin(
+    params: TransferAdminParams,
+  ): Promise<AdminTransferResult> {
+    this.ensureConfigured();
+    const newAdminAddress = params.newAdminAddress?.trim();
+    if (!newAdminAddress) {
+      throw new Error('newAdminAddress is required to propose an admin');
+    }
+
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(
+      `[${cid}] transferAdmin contract=${contractId} newAdmin=${newAdminAddress}`,
+    );
+
+    const { hash } = await this.submitContractOp(
+      'transfer_admin',
+      [this.scvAddress(newAdminAddress)],
+      cid,
+      contractId,
+    );
+    const state = await this.readAdminState(cid, contractId);
+
+    return {
+      contractId,
+      transactionHash: hash,
+      adminAddress: state.adminAddress,
+      pendingAdminAddress: state.pendingAdminAddress,
+      timestamp: new Date(),
+    };
+  }
+
+  async acceptAdmin(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    this.ensureConfigured();
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] acceptAdmin contract=${contractId}`);
+
+    const { hash } = await this.submitContractOp(
+      'accept_admin',
+      [],
+      cid,
+      contractId,
+    );
+    const state = await this.readAdminState(cid, contractId);
+
+    return {
+      contractId,
+      transactionHash: hash,
+      adminAddress: state.adminAddress,
+      pendingAdminAddress: state.pendingAdminAddress,
+      timestamp: new Date(),
+    };
+  }
+
+  async cancelAdminTransfer(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    this.ensureConfigured();
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] cancelAdminTransfer contract=${contractId}`);
+
+    const { hash } = await this.submitContractOp(
+      'cancel_admin_transfer',
+      [],
+      cid,
+      contractId,
+    );
+    const state = await this.readAdminState(cid, contractId);
+
+    return {
+      contractId,
+      transactionHash: hash,
+      adminAddress: state.adminAddress,
+      pendingAdminAddress: state.pendingAdminAddress,
       timestamp: new Date(),
     };
   }

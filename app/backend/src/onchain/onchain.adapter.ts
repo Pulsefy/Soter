@@ -245,6 +245,35 @@ export interface ExtendAidPackageExpiryResult {
   metadata?: Record<string, any>;
 }
 
+export interface AdminState {
+  adminAddress: string;
+  pendingAdminAddress: string | null;
+  timestamp: Date;
+}
+
+export interface AdminTransferParams {
+  contractId?: string;
+}
+
+export interface TransferAdminParams extends AdminTransferParams {
+  newAdminAddress: string;
+}
+
+/**
+ * Result of one leg of a two-step admin transfer.
+ *
+ * `adminAddress` / `pendingAdminAddress` are read back from the contract after
+ * the write lands, so callers can record verified state rather than the values
+ * they submitted.
+ */
+export interface AdminTransferResult {
+  contractId: string;
+  transactionHash: string;
+  adminAddress: string;
+  pendingAdminAddress: string | null;
+  timestamp: Date;
+}
+
 /**
  * Interface for on-chain operations with Soroban AidEscrow contract
  */
@@ -324,6 +353,32 @@ export interface OnchainAdapter {
   getPauseState(): Promise<PauseState>;
   getFeeConfig(): Promise<FeeConfig>;
   getPackageSummary(packageId: string): Promise<PackageSummary>;
+
+  /**
+   * Read the current admin and any transfer in progress.
+   */
+  getAdminState(params?: AdminTransferParams): Promise<AdminState>;
+
+  /**
+   * Step one of a two-step admin transfer: nominate `newAdminAddress` as the
+   * pending admin. The nomination does not take effect until the nominated
+   * address calls `acceptAdmin`.
+   */
+  transferAdmin(params: TransferAdminParams): Promise<AdminTransferResult>;
+
+  /**
+   * Step two of a two-step admin transfer: called by the pending admin to take
+   * the admin role, completing the transfer.
+   */
+  acceptAdmin(params?: AdminTransferParams): Promise<AdminTransferResult>;
+
+  /**
+   * Abandon a transfer proposed via `transferAdmin`, leaving the current admin
+   * in place.
+   */
+  cancelAdminTransfer(
+    params?: AdminTransferParams,
+  ): Promise<AdminTransferResult>;
 
   /**
    * Get the status of a transaction by hash

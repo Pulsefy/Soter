@@ -38,6 +38,10 @@ import {
   ContractVersionParams,
   MigrateContractParams,
   MigrateContractResult,
+  AdminState,
+  AdminTransferParams,
+  AdminTransferResult,
+  TransferAdminParams,
 } from './onchain.adapter';
 
 /**
@@ -372,6 +376,69 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     return {
       isPaused: typeof result === 'boolean' ? result : false,
       timestamp: new Date(),
+    };
+  }
+
+  async getAdminState(params: AdminTransferParams = {}): Promise<AdminState> {
+    const contractId = params.contractId ?? this.contractId;
+    const admin = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId,
+      key: 'admin',
+    });
+    const pendingAdmin = await rpcCall(
+      this.http,
+      this.rpcUrl,
+      'getContractData',
+      { contractId, key: 'pending_admin' },
+    );
+    return {
+      adminAddress: readString(admin, ''),
+      pendingAdminAddress:
+        typeof pendingAdmin === 'string' && pendingAdmin.length > 0
+          ? pendingAdmin
+          : null,
+      timestamp: new Date(),
+    };
+  }
+
+  async transferAdmin(
+    params: TransferAdminParams,
+  ): Promise<AdminTransferResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract(
+      'transfer_admin',
+      [params.newAdminAddress],
+      contractId,
+    );
+    return this.buildAdminTransferResult(contractId);
+  }
+
+  async acceptAdmin(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract('accept_admin', [], contractId);
+    return this.buildAdminTransferResult(contractId);
+  }
+
+  async cancelAdminTransfer(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract('cancel_admin_transfer', [], contractId);
+    return this.buildAdminTransferResult(contractId);
+  }
+
+  private async buildAdminTransferResult(
+    contractId: string,
+  ): Promise<AdminTransferResult> {
+    const state = await this.getAdminState({ contractId });
+    return {
+      contractId,
+      transactionHash: '',
+      adminAddress: state.adminAddress,
+      pendingAdminAddress: state.pendingAdminAddress,
+      timestamp: state.timestamp,
     };
   }
 

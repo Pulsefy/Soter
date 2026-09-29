@@ -35,6 +35,10 @@ import {
   ContractVersionParams,
   MigrateContractParams,
   MigrateContractResult,
+  AdminState,
+  AdminTransferParams,
+  AdminTransferResult,
+  TransferAdminParams,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 
@@ -74,6 +78,28 @@ export class MockOnchainAdapter implements OnchainAdapter {
   private readonly mockEscrowAddress =
     'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
   private readonly mockContractVersions = new Map<string, number>();
+
+  /**
+   * Admin/pending-admin per contract, mirroring the contract's two-step
+   * transfer storage so the mock can be exercised end to end.
+   */
+  private readonly mockAdmins = new Map<string, string>();
+  private readonly mockPendingAdmins = new Map<string, string>();
+  private readonly mockContractId = 'MOCK_CONTRACT_ID';
+
+  /**
+   * Read the mock's admin pair, seeding a default admin on first access.
+   */
+  private readMockAdminState(contractId: string): AdminState {
+    if (!this.mockAdmins.has(contractId)) {
+      this.mockAdmins.set(contractId, this.mockEscrowAddress);
+    }
+    return {
+      adminAddress: this.mockAdmins.get(contractId) as string,
+      pendingAdminAddress: this.mockPendingAdmins.get(contractId) ?? null,
+      timestamp: new Date(),
+    };
+  }
 
   /**
    * Generate a deterministic mock transaction hash from input
@@ -494,6 +520,87 @@ export class MockOnchainAdapter implements OnchainAdapter {
     await Promise.resolve();
     return {
       isPaused: false,
+      timestamp: new Date(),
+    };
+  }
+
+  async getAdminState(params: AdminTransferParams = {}): Promise<AdminState> {
+    await Promise.resolve();
+    return this.readMockAdminState(params.contractId ?? this.mockContractId);
+  }
+
+  async transferAdmin(
+    params: TransferAdminParams,
+  ): Promise<AdminTransferResult> {
+    await Promise.resolve();
+    const contractId = params.contractId ?? this.mockContractId;
+    const state = this.readMockAdminState(contractId);
+
+    if (!params.newAdminAddress?.trim()) {
+      throw new BadRequestException('newAdminAddress is required');
+    }
+    if (params.newAdminAddress === state.adminAddress) {
+      throw new BadRequestException(
+        'InvalidPendingAdmin: new admin must differ from the current admin',
+      );
+    }
+
+    this.mockPendingAdmins.set(contractId, params.newAdminAddress);
+
+    return {
+      contractId,
+      transactionHash: this.generateMockHash(
+        `transfer-admin-${contractId}-${params.newAdminAddress}`,
+      ),
+      adminAddress: state.adminAddress,
+      pendingAdminAddress: params.newAdminAddress,
+      timestamp: new Date(),
+    };
+  }
+
+  async acceptAdmin(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    await Promise.resolve();
+    const contractId = params.contractId ?? this.mockContractId;
+    const pendingAdmin = this.mockPendingAdmins.get(contractId);
+    if (!pendingAdmin) {
+      throw new BadRequestException('NoPendingTransfer');
+    }
+
+    this.mockAdmins.set(contractId, pendingAdmin);
+    this.mockPendingAdmins.delete(contractId);
+
+    return {
+      contractId,
+      transactionHash: this.generateMockHash(
+        `accept-admin-${contractId}-${pendingAdmin}`,
+      ),
+      adminAddress: pendingAdmin,
+      pendingAdminAddress: null,
+      timestamp: new Date(),
+    };
+  }
+
+  async cancelAdminTransfer(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    await Promise.resolve();
+    const contractId = params.contractId ?? this.mockContractId;
+    const adminAddress = this.mockAdmins.get(contractId) ?? '';
+    if (!this.mockPendingAdmins.has(contractId)) {
+      throw new BadRequestException('NoPendingTransfer');
+    }
+
+    this.mockPendingAdmins.delete(contractId);
+
+    return {
+      contractId,
+      transactionHash: this.generateMockHash(
+        `cancel-admin-transfer-${contractId}`,
+      ),
+      adminAddress,
+      pendingAdminAddress: null,
       timestamp: new Date(),
     };
   }
