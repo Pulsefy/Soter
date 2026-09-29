@@ -85,10 +85,17 @@ describe('ClaimsService', () => {
     incrementClaimsApproved: jest.fn(),
     recordClaimFunnelDuration: jest.fn(),
     adjustClaimsInFunnel: jest.fn(),
+    incrementDisbursementReconciliation: jest.fn(),
   };
 
   const mockSorobanTxLifecycleService = {
     createTransaction: jest.fn().mockResolvedValue({ id: 'tx-123' }),
+    reconcileInFlightDisbursements: jest.fn().mockResolvedValue({
+      reconciled: 0,
+      confirmed: 0,
+      retried: 0,
+      failed: 0,
+    }),
   };
   const mockSorobanTxScheduler = {
     scheduleTransaction: jest.fn().mockResolvedValue(undefined),
@@ -142,6 +149,8 @@ describe('ClaimsService', () => {
             },
             sorobanTransaction: {
               create: jest.fn(),
+              findMany: jest.fn().mockResolvedValue([]),
+              update: jest.fn(),
             },
             sorobanEventCorrelation: {
               findFirst: jest.fn(),
@@ -356,6 +365,68 @@ describe('ClaimsService', () => {
           });
         });
     }
+
+    it('does not double-submit when a crash occurs between submission and confirmation', async () => {
+      const idempotencyKey = 'claim-123:disbursement';
+      const submittedTx = {
+        id: 'tx-123',
+        idempotencyKey,
+        status: 'submitted',
+        claimId: mockClaim.id,
+      };
+
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
+      jest
+        .spyOn(prismaService.sorobanTransaction, 'findMany')
+        .mockResolvedValue([submittedTx] as any);
+
+      // Simulate a crash after submission but before the local status update.
+      mockDisburse.mockRejectedValueOnce(new Error('worker crashed'));
+
+      await expect(service.disburse(mockClaim.id)).rejects.toThrow(
+        'worker crashed',
+      );
+
+      // The idempotency key must be attached to the submission attempt.
+      expect(mockSorobanTxLifecycleService.createTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({ idempotencyKey }),
+      );
+
+      // On restart, reconciliation runs against actual onchain state before
+      // any retry is attempted.
+      await service.reconcileInFlightDisbursements();
+
+      expect(
+        mockSorobanTxLifecycleService.reconcileInFlightDisbursements,
+      ).toHaveBeenCalled();
+
+      // A retry must reuse the same idempotency key so the onchain layer can
+      // deduplicate and avoid a double-disbursement.
+      mockDisburse.mockResolvedValueOnce({
+        transactionHash: 'mock-tx-hash-123',
+        timestamp: new Date(),
+        status: 'success' as const,
+        amountDisbursed: '1000000000',
+        metadata: { adapter: 'mock' },
+      });
+
+      await service.disburse(mockClaim.id);
+
+      const calls = mockSorobanTxLifecycleService.createTransaction.mock.calls;
+      const keys = calls.map((c: any[]) => c[0]?.idempotencyKey);
+      expect(new Set(keys).size).toBe(1);
+      expect(keys[0]).toBe(idempotencyKey);
+
+      // Reconciliation outcomes are counted as a metric.
+      expect(
+        mockMetricsService.incrementDisbursementReconciliation,
+      ).toHaveBeenCalled();
+    });
 
     it('should create and schedule a Soroban transaction when onchain is enabled', async () => {
       const expectedClaim = {

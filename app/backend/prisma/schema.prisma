@@ -323,6 +323,11 @@ model SorobanTransaction {
   /// Correlation and metadata  
   correlationId     String?
   metadata          Json?
+
+  /// Idempotency key tying a claim to its disbursement attempt. A retry
+  /// after a partial failure reuses the same key so the onchain path cannot
+  /// double-submit. Unique per (operation, claim) disbursement attempt.
+  idempotencyKey    String?               @unique
   
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
@@ -335,12 +340,54 @@ model SorobanTransaction {
   @@index([correlationId])
   @@index([attemptCount])
   @@index([isRetryable, nextRetryAt])
+  @@index([idempotencyKey])
 }
 
 enum PurgeStrategy {
   soft_delete
   hard_delete
   anonymize
+}
+
+enum DisbursementReconciliationStatus {
+  pending
+  in_progress
+  reconciled
+  no_action
+  failed
+}
+
+/// Tracks the lifecycle of an onchain disbursement attempt so that a crash
+/// between submission and local status update can be reconciled against
+/// actual onchain state on worker restart before any retry is issued.
+model DisbursementAttempt {
+  id                String   @id @default(cuid())
+  claimId           String
+  claim             Claim    @relation(fields: [claimId], references: [id])
+
+  /// Deterministic idempotency key for this disbursement attempt. Retries
+  /// reuse the same key so the onchain path cannot double-submit.
+  idempotencyKey    String   @unique
+
+  /// The Soroban transaction this attempt is tied to, if submitted.
+  sorobanTransactionId String?
+  sorobanTransaction   SorobanTransaction? @relation(fields: [sorobanTransactionId], references: [id])
+
+  /// Onchain tx hash once submitted (may be null if crash occurred pre-submit).
+  txHash            String?
+
+  /// Reconciliation state used on worker restart.
+  reconciliationStatus DisbursementReconciliationStatus @default(pending)
+  reconciledAt      DateTime?
+  reconciliationNote String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([claimId])
+  @@index([idempotencyKey])
+  @@index([reconciliationStatus])
+  @@index([txHash])
 }
 
 model RetentionPolicy {

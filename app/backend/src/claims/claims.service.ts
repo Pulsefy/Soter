@@ -29,6 +29,7 @@ import { escapeCsvField, toCsvRow } from '../common/csv/csv.util';
 import { streamCursorPaginated } from '../common/streaming/cursor-paginate';
 import { VerificationService } from '../verification/verification.service';
 import { readPersistedVerificationResult } from '../verification/verification-result.persistence';
+import { createHash, randomUUID } from 'crypto';
 
 export interface ClaimExportRow {
   id: string;
@@ -90,6 +91,8 @@ type ExpirationCleanupCapableAdapter = OnchainAdapter & {
 
 const DEFAULT_CLAIM_EXPIRY_DAYS = 30;
 
+const DISBURSE_IDEMPOTENCY_PREFIX = 'disburse-idem:';
+
 @Injectable()
 export class ClaimsService {
   private readonly logger = new Logger(ClaimsService.name);
@@ -112,6 +115,7 @@ export class ClaimsService {
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
+    void this.reconcileInFlightDisbursements();
   }
 
   async create(createClaimDto: CreateClaimDto) {
@@ -316,6 +320,30 @@ export class ClaimsService {
       );
     }
 
+    const idempotencyKey = this.buildDisbursementIdempotencyKey(id);
+
+    const existingAttempt = await this.findExistingDisbursementAttempt(
+      id,
+      idempotencyKey,
+    );
+    if (existingAttempt) {
+      this.metricsService.incrementCounter(
+        'soroban_disbursement_idempotent_replay',
+        { claimId: id, transactionId: existingAttempt.transactionId ?? '' },
+      );
+      this.loggerService.log(
+        `Disbursement for claim ${id} already attempted; skipping resubmission`,
+        'ClaimsService',
+        {
+          claimId: id,
+          idempotencyKey,
+          transactionId: existingAttempt.transactionId,
+          status: existingAttempt.status,
+        },
+      );
+      return this.findOne(id);
+    }
+
     if (receiptPointer) {
       await this.prisma.claim.update({
         where: { id },
@@ -327,6 +355,13 @@ export class ClaimsService {
       correlationId?.trim() ||
       this.loggerService.getCorrelationId() ||
       `disburse-${id}-${Date.now()}`;
+
+    await this.recordDisbursementAttempt(id, idempotencyKey, {
+      correlationId: traceId,
+      receiptPointer,
+      status: 'submitted',
+      submittedAt: new Date().toISOString(),
+    });
 
     let sorobanTransaction: SorobanTransaction | undefined;
     if (this.onchainEnabled && this.onchainAdapter) {
@@ -354,6 +389,13 @@ export class ClaimsService {
             },
             maxAttempts: 5,
           });
+
+        await this.recordDisbursementAttempt(id, idempotencyKey, {
+          correlationId: traceId,
+          receiptPointer,
+          status: 'scheduled',
+          transactionId: sorobanTransaction.id,
+        });
 
         await this.sorobanTransactionScheduler.scheduleTransaction(
           sorobanTransaction.id,
@@ -390,6 +432,12 @@ export class ClaimsService {
             error: error instanceof Error ? error.message : String(error),
           },
         );
+        await this.recordDisbursementAttempt(id, idempotencyKey, {
+          correlationId: traceId,
+          receiptPointer,
+          status: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 
@@ -398,6 +446,14 @@ export class ClaimsService {
       ClaimStatus.approved,
       ClaimStatus.disbursed,
     );
+
+    await this.recordDisbursementAttempt(id, idempotencyKey, {
+      correlationId: traceId,
+      receiptPointer,
+      status: 'confirmed',
+      transactionId: sorobanTransaction?.id,
+      confirmedAt: new Date().toISOString(),
+    });
 
     this.loggerService.log(
       `Claim ${id} marked as disbursed with Soroban transaction tracking`,
@@ -411,6 +467,213 @@ export class ClaimsService {
     );
 
     return updatedClaim;
+  }
+
+  private buildDisbursementIdempotencyKey(claimId: string): string {
+    const digest = createHash('sha256')
+      .update(`${DISBURSE_IDEMPOTENCY_PREFIX}${claimId}`)
+      .digest('hex')
+      .slice(0, 32);
+    return `${DISBURSE_IDEMPOTENCY_PREFIX}${digest}`;
+  }
+
+  private async findExistingDisbursementAttempt(
+    claimId: string,
+    idempotencyKey: string,
+  ): Promise<{
+    transactionId?: string;
+    status: string;
+  } | null> {
+    const logs = await this.prisma.auditLog.findMany({
+      where: {
+        entity: 'claim',
+        entityId: claimId,
+        action: 'disbursement_attempt',
+      },
+      orderBy: { timestamp: 'desc' },
+      take: 5,
+    });
+
+    for (const log of logs) {
+      const metadata = log.metadata as Record<string, unknown> | null;
+      if (metadata?.idempotencyKey !== idempotencyKey) continue;
+      const status = String(metadata?.status ?? '');
+      if (
+        status === 'submitted' ||
+        status === 'scheduled' ||
+        status === 'confirmed'
+      ) {
+        return {
+          transactionId:
+            typeof metadata?.transactionId === 'string'
+              ? metadata.transactionId
+              : undefined,
+          status,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  private async recordDisbursementAttempt(
+    claimId: string,
+    idempotencyKey: string,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          actorId: 'system',
+          entity: 'claim',
+          entityId: claimId,
+          action: 'disbursement_attempt',
+          metadata: {
+            idempotencyKey,
+            attemptId: randomUUID(),
+            ...details,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    } catch (error) {
+      this.loggerService.error(
+        `Failed to persist disbursement attempt for claim ${claimId}`,
+        error instanceof Error ? error.message : String(error),
+        'ClaimsService',
+        { claimId, idempotencyKey },
+      );
+    }
+  }
+
+  /**
+   * Reconcile any disbursement attempts that were left in-flight by a crash
+   * or restart. Runs once at boot and again on the hourly cron. For each
+   * ambiguous attempt we check the onchain state and either finalize the
+   * local status or mark the attempt as failed so a retry can proceed.
+   */
+  async reconcileInFlightDisbursements(): Promise<{
+    reconciled: number;
+    confirmed: number;
+    failed: number;
+  }> {
+    const inFlight = await this.prisma.auditLog.findMany({
+      where: {
+        entity: 'claim',
+        action: 'disbursement_attempt',
+      },
+      orderBy: { timestamp: 'desc' },
+      take: 200,
+    });
+
+    const latestByClaim = new Map<
+      string,
+      { metadata: Record<string, unknown>; claimId: string }
+    >();
+
+    for (const log of inFlight) {
+      if (latestByClaim.has(log.entityId)) continue;
+      const metadata = log.metadata as Record<string, unknown> | null;
+      if (!metadata) continue;
+      latestByClaim.set(log.entityId, {
+        metadata,
+        claimId: log.entityId,
+      });
+    }
+
+    let confirmed = 0;
+    let failed = 0;
+
+    for (const { metadata, claimId } of latestByClaim.values()) {
+      const status = String(metadata.status ?? '');
+      if (status !== 'submitted' && status !== 'scheduled') continue;
+
+      const claim = await this.prisma.claim.findUnique({
+        where: { id: claimId },
+      });
+      if (!claim) continue;
+
+      if (claim.status === ClaimStatus.disbursed) {
+        confirmed += 1;
+        this.metricsService.incrementCounter(
+          'soroban_disbursement_reconciled',
+          { claimId, outcome: 'already_disbursed' },
+        );
+        continue;
+      }
+
+      const transactionId =
+        typeof metadata.transactionId === 'string'
+          ? metadata.transactionId
+          : undefined;
+
+      let onchainConfirmed = false;
+      if (transactionId) {
+        try {
+          const tx = await this.prisma.sorobanTransaction.findUnique({
+            where: { id: transactionId },
+          });
+          onchainConfirmed =
+            tx?.status === 'confirmed' || tx?.status === 'success';
+        } catch {
+          onchainConfirmed = false;
+        }
+      }
+
+      if (onchainConfirmed) {
+        confirmed += 1;
+        await this.recordDisbursementAttempt(
+          claimId,
+          String(metadata.idempotencyKey ?? ''),
+          {
+            status: 'confirmed',
+            transactionId,
+            reconciledAt: new Date().toISOString(),
+            outcome: 'reconciled_confirmed',
+          },
+        );
+        this.metricsService.incrementCounter(
+          'soroban_disbursement_reconciled',
+          { claimId, outcome: 'confirmed' },
+        );
+        this.loggerService.log(
+          `Reconciled in-flight disbursement for claim ${claimId}: confirmed onchain`,
+          'ClaimsService',
+          { claimId, transactionId },
+        );
+      } else {
+        failed += 1;
+        await this.recordDisbursementAttempt(
+          claimId,
+          String(metadata.idempotencyKey ?? ''),
+          {
+            status: 'failed',
+            transactionId,
+            reconciledAt: new Date().toISOString(),
+            outcome: 'reconciled_failed',
+          },
+        );
+        this.metricsService.incrementCounter(
+          'soroban_disbursement_reconciled',
+          { claimId, outcome: 'failed' },
+        );
+        this.loggerService.log(
+          `Reconciled in-flight disbursement for claim ${claimId}: not confirmed onchain, safe to retry`,
+          'ClaimsService',
+          { claimId, transactionId },
+        );
+      }
+    }
+
+    const reconciled = confirmed + failed;
+    if (reconciled > 0) {
+      this.loggerService.log(
+        `Disbursement reconciliation complete: ${reconciled} attempt(s) reconciled`,
+        'ClaimsService',
+        { confirmed, failed },
+      );
+    }
+
+    return { reconciled, confirmed, failed };
   }
 
   private async getPackageIdForClaim(claimId: string): Promise<string> {
@@ -463,6 +726,7 @@ export class ClaimsService {
   @Cron(CronExpression.EVERY_HOUR)
   async handleExpiredClaimsCron(): Promise<void> {
     try {
+      await this.reconcileInFlightDisbursements();
       await this.cleanupExpiredClaims();
       await this.refreshFunnelGauges();
     } catch (error) {
