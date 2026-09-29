@@ -8,7 +8,6 @@ This module standardizes prompt construction across providers and model families
 from typing import Any, Dict, List, Optional
 from services.prompt_registry import default_registry
 
-
 SPHERE_HANDBOOK_CRITERIA: Dict[str, List[str]] = {
     "water_supply_sanitation_hygiene": [
         "Minimum daily water access is sufficient and equitable.",
@@ -145,4 +144,3 @@ class HumanitarianPromptEngine:
         if not context_factors:
             return "(none provided)"
         return "\n".join(f"- {k}: {v}" for k, v in context_factors.items())
-

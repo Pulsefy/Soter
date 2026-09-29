@@ -5,8 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-
-_JSON_SCHEMA = '''{
+_JSON_SCHEMA = """{
   "verdict": "credible|partially_credible|inconclusive|not_credible",
   "confidence": 0.0,
   "summary": "short neutral summary",
@@ -16,7 +15,7 @@ _JSON_SCHEMA = '''{
   "risk_flags": ["string"],
   "missing_information": ["string"],
   "recommended_next_steps": ["string"]
-}'''
+}"""
 
 
 @dataclass(frozen=True)
@@ -27,12 +26,18 @@ class PromptTemplate:
     system_prompt: str
     user_prompt_template: str
 
-    def render(self, *, criteria_text: str, aid_claim: str, evidence_text: str, context_text: str):
+    def render(
+        self,
+        *,
+        criteria_text: str,
+        aid_claim: str,
+        evidence_text: str,
+        context_text: str,
+    ):
         # Manual substitution — avoids str.format's brace rules entirely, so
         # JSON blocks in the templates can contain literal { and } safely.
         user = (
-            self.user_prompt_template
-            .replace("<<CRITERIA>>", criteria_text)
+            self.user_prompt_template.replace("<<CRITERIA>>", criteria_text)
             .replace("<<CLAIM>>", aid_claim)
             .replace("<<EVIDENCE>>", evidence_text)
             .replace("<<CONTEXT>>", context_text)
@@ -62,8 +67,7 @@ _EN_PRIMARY = PromptTemplate(
         "Aid Claim:\n<<CLAIM>>\n\n"
         "Supporting Evidence:\n<<EVIDENCE>>\n\n"
         "Context Factors (from backend):\n<<CONTEXT>>\n\n"
-        "Output JSON schema exactly:\n"
-        + _JSON_SCHEMA
+        "Output JSON schema exactly:\n" + _JSON_SCHEMA
     ),
 )
 
@@ -88,7 +92,9 @@ _EN_FALLBACK = PromptTemplate(
 )
 
 _ES_PRIMARY = PromptTemplate(
-    variant="primary", language="es", version="1.0",
+    variant="primary",
+    language="es",
+    version="1.0",
     system_prompt=(
         "Eres un analista objetivo de verificacion humanitaria. "
         "Evalua las afirmaciones de ayuda unicamente a partir de la evidencia y "
@@ -100,13 +106,14 @@ _ES_PRIMARY = PromptTemplate(
         "Afirmacion de Ayuda:\n<<CLAIM>>\n\n"
         "Evidencia de Apoyo:\n<<EVIDENCE>>\n\n"
         "Factores de Contexto:\n<<CONTEXT>>\n\n"
-        "Devuelve el esquema JSON exactamente:\n"
-        + _JSON_SCHEMA
+        "Devuelve el esquema JSON exactamente:\n" + _JSON_SCHEMA
     ),
 )
 
 _FR_PRIMARY = PromptTemplate(
-    variant="primary", language="fr", version="1.0",
+    variant="primary",
+    language="fr",
+    version="1.0",
     system_prompt=(
         "Vous etes un analyste objectif de verification humanitaire. "
         "Retournez uniquement du JSON valide."
@@ -117,13 +124,14 @@ _FR_PRIMARY = PromptTemplate(
         "Declaration d Aide:\n<<CLAIM>>\n\n"
         "Preuves a l Appui:\n<<EVIDENCE>>\n\n"
         "Facteurs de Contexte:\n<<CONTEXT>>\n\n"
-        "Retournez le schema JSON exactement:\n"
-        + _JSON_SCHEMA
+        "Retournez le schema JSON exactement:\n" + _JSON_SCHEMA
     ),
 )
 
 _AR_PRIMARY = PromptTemplate(
-    variant="primary", language="ar", version="1.0",
+    variant="primary",
+    language="ar",
+    version="1.0",
     system_prompt=(
         "\u0623\u0646\u062a \u0645\u062d\u0644\u0644 \u0645\u0648\u0636\u0648\u0639\u064a. \u0627\u0644\u0625\u062c\u0627\u0628\u0629 \u0628\u0640 JSON \u0641\u0642\u0637."
     ),
@@ -133,8 +141,7 @@ _AR_PRIMARY = PromptTemplate(
         "\u0645\u0632\u0639\u0645 \u0627\u0644\u0645\u0633\u0627\u0639\u062f\u0629:\n<<CLAIM>>\n\n"
         "\u0627\u0644\u0623\u062f\u0644\u0629:\n<<EVIDENCE>>\n\n"
         "\u0639\u0648\u0627\u0645\u0644 \u0627\u0644\u0633\u064a\u0627\u0642:\n<<CONTEXT>>\n\n"
-        "\u0623\u0639\u062f \u0645\u062e\u0637\u0637 JSON:\n"
-        + _JSON_SCHEMA
+        "\u0623\u0639\u062f \u0645\u062e\u0637\u0637 JSON:\n" + _JSON_SCHEMA
     ),
 )
 

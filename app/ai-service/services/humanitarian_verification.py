@@ -49,7 +49,9 @@ class HumanitarianVerificationService:
         try:
             evidence = supporting_evidence or []
             context = context_factors or {}
-            effective_language = language or self.prompt_engine.detect_language(aid_claim)
+            effective_language = language or self.prompt_engine.detect_language(
+                aid_claim
+            )
 
             primary_prompt = self.prompt_engine.build_primary_prompt(
                 aid_claim=aid_claim,
@@ -66,19 +68,26 @@ class HumanitarianVerificationService:
 
             providers = self._provider_attempt_order(provider_preference)
             if not providers:
-                raise RuntimeError("No LLM providers configured for humanitarian verification")
+                raise RuntimeError(
+                    "No LLM providers configured for humanitarian verification"
+                )
 
             errors: List[str] = []
 
             for provider in providers:
                 breaker = self.breakers.get(provider)
                 if breaker and not breaker.allow_request():
-                    logger.warning("Circuit breaker is OPEN for provider=%s. Skipping.", provider)
+                    logger.warning(
+                        "Circuit breaker is OPEN for provider=%s. Skipping.", provider
+                    )
                     errors.append(f"provider={provider}, error=Circuit breaker is OPEN")
                     continue
 
                 model = self._get_model_for_provider(provider)
-                for prompt_variant, prompt in (("primary", primary_prompt), ("fallback", fallback_prompt)):
+                for prompt_variant, prompt in (
+                    ("primary", primary_prompt),
+                    ("fallback", fallback_prompt),
+                ):
                     try:
                         logger.info(
                             "Attempting humanitarian verification with provider=%s model=%s prompt=%s",
@@ -108,12 +117,16 @@ class HumanitarianVerificationService:
                             breaker.record_failure()
                         err = f"provider={provider}, model={model}, prompt={prompt_variant}, error={exc}"
                         errors.append(err)
-                        logger.warning("Humanitarian verification attempt failed: %s", err)
+                        logger.warning(
+                            "Humanitarian verification attempt failed: %s", err
+                        )
 
-            raise RuntimeError("All humanitarian verification attempts failed: " + " | ".join(errors))
+            raise RuntimeError(
+                "All humanitarian verification attempts failed: " + " | ".join(errors)
+            )
         finally:
             latency = time.time() - start_time
-            metrics.PIPELINE_STEP_LATENCY.labels(step_name='verify').observe(latency)
+            metrics.PIPELINE_STEP_LATENCY.labels(step_name="verify").observe(latency)
 
     def _provider_attempt_order(self, provider_preference: str) -> List[str]:
         available: List[str] = []
@@ -128,7 +141,9 @@ class HumanitarianVerificationService:
         if preference == "test" and settings.test_provider_mode:
             return [preference]
         if preference in ("openai", "groq", "test") and preference in available:
-            return [preference] + [provider for provider in available if provider != preference]
+            return [preference] + [
+                provider for provider in available if provider != preference
+            ]
         return available
 
     def all_providers_unavailable(self) -> bool:
@@ -251,7 +266,9 @@ class HumanitarianVerificationService:
             "Content-Type": "application/json",
         }
 
-        req_timeout = timeout if timeout is not None else float(settings.llm_timeout_seconds)
+        req_timeout = (
+            timeout if timeout is not None else float(settings.llm_timeout_seconds)
+        )
         provider_name = "openai" if "openai" in base_url else "groq"
 
         try:
@@ -260,21 +277,37 @@ class HumanitarianVerificationService:
                 response.raise_for_status()
                 data = response.json()
         except httpx.TimeoutException as exc:
-            logger.error("LLM provider %s request timed out after %s seconds", provider_name, req_timeout)
+            logger.error(
+                "LLM provider %s request timed out after %s seconds",
+                provider_name,
+                req_timeout,
+            )
             raise AIServiceError(
                 message=f"LLM request timed out after {req_timeout}s",
                 code="AI_TIMEOUT",
                 details={"provider": provider_name, "timeout_seconds": req_timeout},
             ) from exc
         except httpx.HTTPStatusError as exc:
-            logger.error("LLM provider %s returned status %s: %s", provider_name, exc.response.status_code, exc.response.text)
+            logger.error(
+                "LLM provider %s returned status %s: %s",
+                provider_name,
+                exc.response.status_code,
+                exc.response.text,
+            )
             raise AIServiceError(
                 message=f"LLM request failed with status {exc.response.status_code}",
                 code="AI_PROVIDER_ERROR",
-                details={"provider": provider_name, "status_code": exc.response.status_code},
+                details={
+                    "provider": provider_name,
+                    "status_code": exc.response.status_code,
+                },
             ) from exc
         except Exception as exc:
-            logger.error("LLM provider %s connection or unexpected error: %s", provider_name, str(exc))
+            logger.error(
+                "LLM provider %s connection or unexpected error: %s",
+                provider_name,
+                str(exc),
+            )
             raise AIServiceError(
                 message=f"LLM connection error: {str(exc)}",
                 code="AI_CONNECTION_ERROR",
@@ -301,7 +334,9 @@ class HumanitarianVerificationService:
         )
         return json.dumps(response, separators=(",", ":"), sort_keys=True)
 
-    def _get_deterministic_response(self, model: str, system_prompt: str, user_prompt: str) -> str:
+    def _get_deterministic_response(
+        self, model: str, system_prompt: str, user_prompt: str
+    ) -> str:
         stable_response = {
             "verdict": "credible",
             "confidence": 0.74,
@@ -319,5 +354,3 @@ class HumanitarianVerificationService:
         if not isinstance(parsed, dict):
             raise RuntimeError("LLM response must be a JSON object")
         return parsed
-
-
