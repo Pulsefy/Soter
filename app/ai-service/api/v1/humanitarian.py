@@ -1,4 +1,4 @@
-"""
+﻿"""
 v1 humanitarian verification endpoint.
 """
 
@@ -32,6 +32,7 @@ async def _verify_claim_cached(
     timeout: Optional[float],
     model_version: str,
     artifact_tag: str,
+    language: Optional[str],
 ) -> Dict[str, Any]:
     """
     Cacheable wrapper around HumanitarianVerificationService.verify_claim.
@@ -51,6 +52,7 @@ async def _verify_claim_cached(
             context_factors=context_factors,
             provider_preference=provider_preference,
             timeout=timeout,
+            language=language,
         )
     except TypeError as exc:
         if "timeout" in str(exc):
@@ -85,6 +87,7 @@ async def verify_humanitarian_claim(
             context_factors=request.context_factors,
             provider_preference=request.provider_preference,
             timeout=request.timeout,
+            language=request.language,
             model_version=model_version,
             artifact_tag=artifact_tag,
         )
@@ -118,3 +121,6 @@ async def verify_humanitarian_claim(
         logger.error("Humanitarian verification failed: %s", str(e), exc_info=True)
         # Re-raise so the global exception handler formats the error envelope
         raise
+
+
+

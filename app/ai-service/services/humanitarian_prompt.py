@@ -1,11 +1,12 @@
-"""
+﻿"""
 Prompt templating for humanitarian aid claim verification.
 
 This module standardizes prompt construction across providers and model families
 (OpenAI/Groq-compatible APIs) to keep scoring objective and reproducible.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+from services.prompt_registry import default_registry
 
 
 SPHERE_HANDBOOK_CRITERIA: Dict[str, List[str]] = {
@@ -144,3 +145,4 @@ class HumanitarianPromptEngine:
         if not context_factors:
             return "(none provided)"
         return "\n".join(f"- {k}: {v}" for k, v in context_factors.items())
+

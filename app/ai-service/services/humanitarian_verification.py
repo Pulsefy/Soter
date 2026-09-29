@@ -1,4 +1,4 @@
-"""Humanitarian claim verification service with model/provider fallbacks."""
+﻿"""Humanitarian claim verification service with model/provider fallbacks."""
 
 import json
 import logging
@@ -43,21 +43,25 @@ class HumanitarianVerificationService:
         context_factors: Optional[Dict[str, Any]] = None,
         provider_preference: str = "auto",
         timeout: Optional[float] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
         try:
             evidence = supporting_evidence or []
             context = context_factors or {}
+            effective_language = language or self.prompt_engine.detect_language(aid_claim)
 
             primary_prompt = self.prompt_engine.build_primary_prompt(
                 aid_claim=aid_claim,
                 supporting_evidence=evidence,
                 context_factors=context,
+                language=effective_language,
             )
             fallback_prompt = self.prompt_engine.build_fallback_prompt(
                 aid_claim=aid_claim,
                 supporting_evidence=evidence,
                 context_factors=context,
+                language=effective_language,
             )
 
             providers = self._provider_attempt_order(provider_preference)
@@ -315,3 +319,5 @@ class HumanitarianVerificationService:
         if not isinstance(parsed, dict):
             raise RuntimeError("LLM response must be a JSON object")
         return parsed
+
+

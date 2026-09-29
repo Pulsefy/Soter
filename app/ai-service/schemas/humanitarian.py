@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Literal, Optional
+﻿from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 from schemas.common import AnchorMetadata
 
@@ -16,6 +16,7 @@ class HumanitarianVerificationRequest(BaseModel):
         examples=[["artifact_abc123"]],
     )
     anchor_metadata: Optional[AnchorMetadata] = None
+    language: Optional[str] = Field(default=None, description="Optional BCP-47 language hint.", examples=["en"])
 
     model_config = {
         "json_schema_extra": {
@@ -41,6 +42,7 @@ class HumanitarianVerificationResponse(BaseModel):
     verification: Optional[Dict[str, Any]] = Field(None, examples=[{"eligible": True, "confidence": 0.9, "reasoning": "Claim meets humanitarian criteria"}])
     error: Optional[str] = Field(None, examples=["Provider timed out"])
     anchor_metadata: Optional[AnchorMetadata] = None
+    language: Optional[str] = Field(default=None, description="Optional BCP-47 language hint.", examples=["en"])
 
     model_config = {
         "json_schema_extra": {

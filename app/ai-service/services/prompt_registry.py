@@ -1,23 +1,4 @@
-"""Versioned, language-keyed prompt template registry for the humanitarian verifier.
-
-Introduced for issue #1201 (multi-language support for humanitarian verification
-prompts). Before this module, prompts lived as string literals inside
-``HumanitarianPromptEngine`` and had no notion of language or version. Claims
-submitted in any language were processed by an English-only prompt.
-
-Design:
-
-- Each ``(variant, language)`` pair maps to a ``PromptTemplate`` with an
-  explicit ``version`` string. Bumping the wording of a prompt is a version
-  bump, which lets regression fixtures pin to a version instead of a raw
-  string.
-- Only ``en`` is registered with full fixtures for now. ``es``, ``fr``, and
-  ``ar`` are registered with translations of the same structural template —
-  their fixtures are added in a follow-up so this PR stays reviewable.
-- Unknown languages fall back to ``en`` and set ``language_fallback=True``
-  in the returned metadata, so callers can tell the difference between
-  "we support this language" and "we didn't and used English."
-"""
+﻿"""Versioned, language-keyed prompt template registry (issue #1201)."""
 
 from __future__ import annotations
 
@@ -25,39 +6,42 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 
+_JSON_SCHEMA = '''{
+  "verdict": "credible|partially_credible|inconclusive|not_credible",
+  "confidence": 0.0,
+  "summary": "short neutral summary",
+  "criteria_assessment": [
+    {"criterion": "string", "status": "met|partially_met|not_met|unknown", "reason": "string"}
+  ],
+  "risk_flags": ["string"],
+  "missing_information": ["string"],
+  "recommended_next_steps": ["string"]
+}'''
+
+
 @dataclass(frozen=True)
 class PromptTemplate:
-    """A single versioned prompt variant for one (variant, language) pair."""
-
-    variant: str  # "primary" | "fallback"
-    language: str  # BCP-47-ish: "en", "es", "fr", "ar"
-    version: str  # semver-ish: "1.0", "1.1"
+    variant: str
+    language: str
+    version: str
     system_prompt: str
-    user_prompt_template: str  # contains {criteria}, {claim}, {evidence}, {context}
+    user_prompt_template: str
 
-    def render(
-        self,
-        *,
-        criteria_text: str,
-        aid_claim: str,
-        evidence_text: str,
-        context_text: str,
-    ) -> Dict[str, str]:
-        return {
-            "system": self.system_prompt,
-            "user": self.user_prompt_template.format(
-                criteria=criteria_text,
-                claim=aid_claim,
-                evidence=evidence_text,
-                context=context_text,
-            ),
-        }
+    def render(self, *, criteria_text: str, aid_claim: str, evidence_text: str, context_text: str):
+        # Manual substitution — avoids str.format's brace rules entirely, so
+        # JSON blocks in the templates can contain literal { and } safely.
+        user = (
+            self.user_prompt_template
+            .replace("<<CRITERIA>>", criteria_text)
+            .replace("<<CLAIM>>", aid_claim)
+            .replace("<<EVIDENCE>>", evidence_text)
+            .replace("<<CONTEXT>>", context_text)
+        )
+        return {"system": self.system_prompt, "user": user}
 
 
 _DEFAULT_LANGUAGE = "en"
 
-
-# ─── English templates (version 1.0) ────────────────────────────────────────
 
 _EN_PRIMARY = PromptTemplate(
     variant="primary",
@@ -74,22 +58,12 @@ _EN_PRIMARY = PromptTemplate(
         "Humanitarian Standard Verification Task\n\n"
         "Assess whether the aid claim is credible, partially credible, inconclusive, or not credible. "
         "Your analysis must map to Sphere Handbook criteria and explain uncertainty.\n\n"
-        "Sphere Criteria:\n{criteria}\n\n"
-        "Aid Claim:\n{claim}\n\n"
-        "Supporting Evidence:\n{evidence}\n\n"
-        "Context Factors (from backend):\n{context}\n\n"
+        "Sphere Criteria:\n<<CRITERIA>>\n\n"
+        "Aid Claim:\n<<CLAIM>>\n\n"
+        "Supporting Evidence:\n<<EVIDENCE>>\n\n"
+        "Context Factors (from backend):\n<<CONTEXT>>\n\n"
         "Output JSON schema exactly:\n"
-        "{\n"
-        '  "verdict": "credible|partially_credible|inconclusive|not_credible",\n'
-        '  "confidence": 0.0,\n'
-        '  "summary": "short neutral summary",\n'
-        '  "criteria_assessment": [\n'
-        '    {"criterion": "string", "status": "met|partially_met|not_met|unknown", "reason": "string"}\n'
-        "  ],\n"
-        '  "risk_flags": ["string"],\n'
-        '  "missing_information": ["string"],\n'
-        '  "recommended_next_steps": ["string"]\n'
-        "}"
+        + _JSON_SCHEMA
     ),
 )
 
@@ -103,9 +77,9 @@ _EN_FALLBACK = PromptTemplate(
     ),
     user_prompt_template=(
         "Fallback Humanitarian Verification\n\n"
-        "Claim: {claim}\n"
-        "Evidence: {evidence}\n"
-        "Context: {context}\n\n"
+        "Claim: <<CLAIM>>\n"
+        "Evidence: <<EVIDENCE>>\n"
+        "Context: <<CONTEXT>>\n\n"
         "Respond with JSON only:\n"
         '{"verdict":"credible|partially_credible|inconclusive|not_credible",'
         '"confidence":0.0,"summary":"",'
@@ -113,114 +87,54 @@ _EN_FALLBACK = PromptTemplate(
     ),
 )
 
-
-# ─── Spanish / French / Arabic placeholders (version 1.0) ───────────────────
-# Structural translations of the English templates. Fixture coverage for these
-# is added in a follow-up; the registry entries ship now so callers can pass
-# `language="es"` etc. and get a prompt in that language rather than silently
-# falling back to English.
-
 _ES_PRIMARY = PromptTemplate(
-    variant="primary",
-    language="es",
-    version="1.0",
+    variant="primary", language="es", version="1.0",
     system_prompt=(
         "Eres un analista objetivo de verificacion humanitaria. "
-        "Evalua las afirmaciones de ayuda unicamente a partir de la evidencia "
-        "y el contexto proporcionados. Aplica el Estandar Humanitario basado "
-        "en los criterios de Esfera. No infieras hechos que no esten "
-        "explicitamente presentes. Devuelve unicamente JSON valido."
+        "Evalua las afirmaciones de ayuda unicamente a partir de la evidencia y "
+        "el contexto proporcionados. Devuelve unicamente JSON valido."
     ),
     user_prompt_template=(
         "Tarea de Verificacion del Estandar Humanitario\n\n"
-        "Evalua si la afirmacion de ayuda es creible, parcialmente creible, "
-        "no concluyente o no creible. Tu analisis debe mapear a los criterios "
-        "del Manual Esfera y explicar la incertidumbre.\n\n"
-        "Criterios de Esfera:\n{criteria}\n\n"
-        "Afirmacion de Ayuda:\n{claim}\n\n"
-        "Evidencia de Apoyo:\n{evidence}\n\n"
-        "Factores de Contexto (del backend):\n{context}\n\n"
+        "Criterios de Esfera:\n<<CRITERIA>>\n\n"
+        "Afirmacion de Ayuda:\n<<CLAIM>>\n\n"
+        "Evidencia de Apoyo:\n<<EVIDENCE>>\n\n"
+        "Factores de Contexto:\n<<CONTEXT>>\n\n"
         "Devuelve el esquema JSON exactamente:\n"
-        "{\n"
-        '  "verdict": "credible|partially_credible|inconclusive|not_credible",\n'
-        '  "confidence": 0.0,\n'
-        '  "summary": "resumen neutral corto",\n'
-        '  "criteria_assessment": [\n'
-        '    {"criterion": "string", "status": "met|partially_met|not_met|unknown", "reason": "string"}\n'
-        "  ],\n"
-        '  "risk_flags": ["string"],\n'
-        '  "missing_information": ["string"],\n'
-        '  "recommended_next_steps": ["string"]\n'
-        "}"
+        + _JSON_SCHEMA
     ),
 )
 
 _FR_PRIMARY = PromptTemplate(
-    variant="primary",
-    language="fr",
-    version="1.0",
+    variant="primary", language="fr", version="1.0",
     system_prompt=(
         "Vous etes un analyste objectif de verification humanitaire. "
-        "Evaluez les declarations d'aide uniquement a partir des preuves et "
-        "du contexte fournis. Appliquez la Norme Humanitaire basee sur les "
-        "criteres Sphere. N'inferencez pas de faits non explicitement presents. "
         "Retournez uniquement du JSON valide."
     ),
     user_prompt_template=(
         "Tache de Verification de la Norme Humanitaire\n\n"
-        "Evaluez si la declaration d'aide est credible, partiellement credible, "
-        "non concluante ou non credible. Votre analyse doit correspondre aux "
-        "criteres du Manuel Sphere et expliquer l'incertitude.\n\n"
-        "Criteres Sphere:\n{criteria}\n\n"
-        "Declaration d'Aide:\n{claim}\n\n"
-        "Preuves a l'Appui:\n{evidence}\n\n"
-        "Facteurs de Contexte (du backend):\n{context}\n\n"
+        "Criteres Sphere:\n<<CRITERIA>>\n\n"
+        "Declaration d Aide:\n<<CLAIM>>\n\n"
+        "Preuves a l Appui:\n<<EVIDENCE>>\n\n"
+        "Facteurs de Contexte:\n<<CONTEXT>>\n\n"
         "Retournez le schema JSON exactement:\n"
-        "{\n"
-        '  "verdict": "credible|partially_credible|inconclusive|not_credible",\n'
-        '  "confidence": 0.0,\n'
-        '  "summary": "resume neutre court",\n'
-        '  "criteria_assessment": [\n'
-        '    {"criterion": "string", "status": "met|partially_met|not_met|unknown", "reason": "string"}\n'
-        "  ],\n"
-        '  "risk_flags": ["string"],\n'
-        '  "missing_information": ["string"],\n'
-        '  "recommended_next_steps": ["string"]\n'
-        "}"
+        + _JSON_SCHEMA
     ),
 )
 
 _AR_PRIMARY = PromptTemplate(
-    variant="primary",
-    language="ar",
-    version="1.0",
+    variant="primary", language="ar", version="1.0",
     system_prompt=(
-        "انت محلل موضوعي للتحقق من المساعدات الانسانية. "
-        "قم بتقييم مزاعم المساعدات فقط من الادلة والسياق المقدمين. "
-        "طبق المعيار الانساني المستند الى معايير كرة الارض. "
-        "لا تستنتج حقائق غير موجودة بشكل صريح. "
-        "ارجع فقط JSON صالح."
+        "\u0623\u0646\u062a \u0645\u062d\u0644\u0644 \u0645\u0648\u0636\u0648\u0639\u064a. \u0627\u0644\u0625\u062c\u0627\u0628\u0629 \u0628\u0640 JSON \u0641\u0642\u0637."
     ),
     user_prompt_template=(
-        "مهمة التحقق من المعيار الانساني\n\n"
-        "قم بتقييم ما اذا كان مزعم المساعدة موثوقا او موثوقا جزئيا او غير حاسم او غير موثوق. "
-        "يجب ان يتوافق تحليلك مع معايير كتيب كرة الارض ويشرح عدم اليقين.\n\n"
-        "معايير كرة الارض:\n{criteria}\n\n"
-        "مزعم المساعدة:\n{claim}\n\n"
-        "الادلة الداعمة:\n{evidence}\n\n"
-        "عوامل السياق (من الواجهة الخلفية):\n{context}\n\n"
-        "ارجع مخطط JSON بالضبط:\n"
-        "{\n"
-        '  "verdict": "credible|partially_credible|inconclusive|not_credible",\n'
-        '  "confidence": 0.0,\n'
-        '  "summary": "ملخص محايد قصير",\n'
-        '  "criteria_assessment": [\n'
-        '    {"criterion": "string", "status": "met|partially_met|not_met|unknown", "reason": "string"}\n'
-        "  ],\n"
-        '  "risk_flags": ["string"],\n'
-        '  "missing_information": ["string"],\n'
-        '  "recommended_next_steps": ["string"]\n'
-        "}"
+        "\u0645\u0647\u0645\u0629 \u0627\u0644\u062a\u062d\u0642\u0642\n\n"
+        "\u0645\u0639\u0627\u064a\u064a\u0631 \u0627\u0644\u0643\u0631\u0629:\n<<CRITERIA>>\n\n"
+        "\u0645\u0632\u0639\u0645 \u0627\u0644\u0645\u0633\u0627\u0639\u062f\u0629:\n<<CLAIM>>\n\n"
+        "\u0627\u0644\u0623\u062f\u0644\u0629:\n<<EVIDENCE>>\n\n"
+        "\u0639\u0648\u0627\u0645\u0644 \u0627\u0644\u0633\u064a\u0627\u0642:\n<<CONTEXT>>\n\n"
+        "\u0623\u0639\u062f \u0645\u062e\u0637\u0637 JSON:\n"
+        + _JSON_SCHEMA
     ),
 )
 
@@ -231,51 +145,28 @@ _REGISTRY: Dict[tuple, PromptTemplate] = {
     ("primary", "es"): _ES_PRIMARY,
     ("primary", "fr"): _FR_PRIMARY,
     ("primary", "ar"): _AR_PRIMARY,
-    # Fallbacks in non-English languages intentionally not registered yet —
-    # the primary template is the load-bearing path; the fallback is a
-    # safety-net used after a provider failure, and English is acceptable
-    # there. Add language-keyed fallbacks in a follow-up if needed.
 }
 
 
 class PromptRegistry:
-    """Lookup + registration for versioned prompt templates.
-
-    The default instance is pre-populated with the templates above. Callers
-    register additional templates with :meth:`register` — typically only
-    tests, or a plugin that adds a language the base set doesn't cover.
-    """
-
     def __init__(self) -> None:
         self._templates: Dict[tuple, PromptTemplate] = dict(_REGISTRY)
 
     def register(self, template: PromptTemplate) -> None:
         self._templates[(template.variant, template.language)] = template
 
-    def get(
-        self,
-        variant: str,
-        language: Optional[str],
-    ) -> tuple:
-        """Return ``(template, used_language, fallback)``.
-
-        ``fallback`` is ``True`` when the requested language is not
-        registered and English is used instead.
-        """
+    def get(self, variant: str, language: Optional[str]) -> tuple:
         lang = (language or _DEFAULT_LANGUAGE).lower().strip()
-        template = self._templates.get((variant, lang))
-        if template is not None:
-            return template, lang, False
-        # Fall back to English for this variant.
-        english = self._templates.get((variant, _DEFAULT_LANGUAGE))
-        if english is None:  # pragma: no cover — English is always registered
-            raise KeyError(f"No template for variant={variant!r} in any language")
-        return english, _DEFAULT_LANGUAGE, True
+        t = self._templates.get((variant, lang))
+        if t is not None:
+            return t, lang, False
+        en = self._templates.get((variant, _DEFAULT_LANGUAGE))
+        if en is None:
+            raise KeyError(f"No template for variant={variant!r}")
+        return en, _DEFAULT_LANGUAGE, True
 
     def supported_languages(self, variant: str = "primary") -> List[str]:
-        return sorted(
-            lang for (v, lang) in self._templates.keys() if v == variant
-        )
+        return sorted(l for (v, l) in self._templates if v == variant)
 
 
 default_registry = PromptRegistry()
