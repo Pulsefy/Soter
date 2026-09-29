@@ -1,0 +1,40 @@
+name: Actionlint
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - '.github/workflows/**.yml'
+      - '.github/workflows/**.yaml'
+  pull_request:
+    paths:
+      - '.github/workflows/**.yml'
+      - '.github/workflows/**.yaml'
+
+jobs:
+  actionlint:
+    name: Lint GitHub Actions workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install actionlint
+        run: |
+          # Install actionlint from the official release so the version is pinned.
+          # actionlint catches invalid workflow constructs that GitHub's own
+          # validator only surfaces as a vague "workflow file issue" at run time.
+          # The original `secrets`-in-`if:` regression (#1326) would have been
+          # caught here before merge.
+          ACTIONLINT_VERSION=1.7.7
+          curl -fsSL \
+            "https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash" \
+            -o /tmp/download-actionlint.bash
+          bash /tmp/download-actionlint.bash "$ACTIONLINT_VERSION" /tmp/actionlint
+          chmod +x /tmp/actionlint
+
+      - name: Run actionlint
+        run: |
+          /tmp/actionlint -color
