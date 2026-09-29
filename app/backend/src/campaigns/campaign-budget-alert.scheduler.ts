@@ -20,7 +20,10 @@ export class CampaignBudgetAlertScheduler {
     try {
       await this.checkCampaignBudgetThresholds();
     } catch (error) {
-      this.logger.error('Error running campaign budget threshold checks', error?.stack || error);
+      this.logger.error(
+        'Error running campaign budget threshold checks',
+        error?.stack || error,
+      );
     }
   }
 
@@ -35,14 +38,15 @@ export class CampaignBudgetAlertScheduler {
 
     for (const campaign of campaigns) {
       try {
-        const usage = await this.budgetService.getCampaignBudgetUsage(campaign.id);
+        const usage = await this.budgetService.getCampaignBudgetUsage(
+          campaign.id,
+        );
         if (usage.budget <= 0) continue;
 
         const percentConsumed = (usage.disbursed / usage.budget) * 100;
         const threshold = campaign.budgetThresholdPercent ?? 80;
 
         if (percentConsumed >= threshold) {
-          const alertKey = `campaign-budget-alert:${campaign.id}:${threshold}`;
           const existingAlert = await this.prisma.auditLog.findFirst({
             where: {
               action: 'CAMPAIGN_BUDGET_THRESHOLD_ALERT',
@@ -56,7 +60,9 @@ export class CampaignBudgetAlertScheduler {
 
           if (!existingAlert) {
             await this.notificationsService.sendEmail(
-              campaign.orgId ? `admin@org-${campaign.orgId}.local` : 'admin@soter.local',
+              campaign.orgId
+                ? `admin@org-${campaign.orgId}.local`
+                : 'admin@soter.local',
               `Campaign Budget Alert: ${campaign.name} has reached ${percentConsumed.toFixed(1)}% budget consumption`,
               `Campaign "${campaign.name}" (ID: ${campaign.id}) has consumed ${percentConsumed.toFixed(1)}% of its budget (${usage.disbursed} / ${usage.budget}). Configured threshold is ${threshold}%.`,
             );
@@ -76,11 +82,16 @@ export class CampaignBudgetAlertScheduler {
               },
             });
 
-            this.logger.log(`Triggered budget threshold alert for campaign ${campaign.id} at ${percentConsumed.toFixed(1)}% (threshold: ${threshold}%)`);
+            this.logger.log(
+              `Triggered budget threshold alert for campaign ${campaign.id} at ${percentConsumed.toFixed(1)}% (threshold: ${threshold}%)`,
+            );
           }
         }
       } catch (err) {
-        this.logger.error(`Failed checking budget for campaign ${campaign.id}`, err?.stack || err);
+        this.logger.error(
+          `Failed checking budget for campaign ${campaign.id}`,
+          err?.stack || err,
+        );
       }
     }
   }
