@@ -1,179 +1,117 @@
-﻿"""Versioned, language-keyed prompt template registry (issue #1201)."""
+﻿"""
+Prompt Registry module for versioning and resolving AI verification prompts.
 
-from __future__ import annotations
+Enforces prompt immutability and runtime observable versioning so results
+can be deterministically traced to the exact prompt template that produced them.
+"""
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional
+import logging
 
-_JSON_SCHEMA = """{
-  "verdict": "credible|partially_credible|inconclusive|not_credible",
-  "confidence": 0.0,
-  "summary": "short neutral summary",
-  "criteria_assessment": [
-    {"criterion": "string", "status": "met|partially_met|not_met|unknown", "reason": "string"}
-  ],
-  "risk_flags": ["string"],
-  "missing_information": ["string"],
-  "recommended_next_steps": ["string"]
-}"""
+logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class PromptTemplate:
-    variant: str
-    language: str
-    version: str
-    system_prompt: str
-    user_prompt_template: str
+class VerificationPrompt(ABC):
+    """Abstract base class for versioned verification prompts."""
 
-    def render(
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Unique identifier for the prompt type."""
+        pass
+
+    @property
+    @abstractmethod
+    def version(self) -> str:
+        """Version string for this prompt template."""
+        pass
+
+    @property
+    def description(self) -> Optional[str]:
+        return None
+
+    @abstractmethod
+    def build_prompt(
         self,
-        *,
-        criteria_text: str,
         aid_claim: str,
-        evidence_text: str,
-        context_text: str,
-    ):
-        # Manual substitution — avoids str.format's brace rules entirely, so
-        # JSON blocks in the templates can contain literal { and } safely.
-        user = (
-            self.user_prompt_template.replace("<<CRITERIA>>", criteria_text)
-            .replace("<<CLAIM>>", aid_claim)
-            .replace("<<EVIDENCE>>", evidence_text)
-            .replace("<<CONTEXT>>", context_text)
-        )
-        return {"system": self.system_prompt, "user": user}
-
-
-_DEFAULT_LANGUAGE = "en"
-
-
-_EN_PRIMARY = PromptTemplate(
-    variant="primary",
-    language="en",
-    version="1.0",
-    system_prompt=(
-        "You are an objective humanitarian verification analyst. "
-        "Evaluate aid claims only from provided evidence and context. "
-        "Apply a Humanitarian Standard grounded in Sphere criteria. "
-        "Do not infer facts that are not explicitly present. "
-        "Return valid JSON only."
-    ),
-    user_prompt_template=(
-        "Humanitarian Standard Verification Task\n\n"
-        "Assess whether the aid claim is credible, partially credible, inconclusive, or not credible. "
-        "Your analysis must map to Sphere Handbook criteria and explain uncertainty.\n\n"
-        "Sphere Criteria:\n<<CRITERIA>>\n\n"
-        "Aid Claim:\n<<CLAIM>>\n\n"
-        "Supporting Evidence:\n<<EVIDENCE>>\n\n"
-        "Context Factors (from backend):\n<<CONTEXT>>\n\n"
-        "Output JSON schema exactly:\n" + _JSON_SCHEMA
-    ),
-)
-
-_EN_FALLBACK = PromptTemplate(
-    variant="fallback",
-    language="en",
-    version="1.0",
-    system_prompt=(
-        "You verify humanitarian aid claims conservatively. "
-        "Use only supplied inputs. Return strict JSON only."
-    ),
-    user_prompt_template=(
-        "Fallback Humanitarian Verification\n\n"
-        "Claim: <<CLAIM>>\n"
-        "Evidence: <<EVIDENCE>>\n"
-        "Context: <<CONTEXT>>\n\n"
-        "Respond with JSON only:\n"
-        '{"verdict":"credible|partially_credible|inconclusive|not_credible",'
-        '"confidence":0.0,"summary":"",'
-        '"risk_flags":[],"missing_information":[],"recommended_next_steps":[]}'
-    ),
-)
-
-_ES_PRIMARY = PromptTemplate(
-    variant="primary",
-    language="es",
-    version="1.0",
-    system_prompt=(
-        "Eres un analista objetivo de verificacion humanitaria. "
-        "Evalua las afirmaciones de ayuda unicamente a partir de la evidencia y "
-        "el contexto proporcionados. Devuelve unicamente JSON valido."
-    ),
-    user_prompt_template=(
-        "Tarea de Verificacion del Estandar Humanitario\n\n"
-        "Criterios de Esfera:\n<<CRITERIA>>\n\n"
-        "Afirmacion de Ayuda:\n<<CLAIM>>\n\n"
-        "Evidencia de Apoyo:\n<<EVIDENCE>>\n\n"
-        "Factores de Contexto:\n<<CONTEXT>>\n\n"
-        "Devuelve el esquema JSON exactamente:\n" + _JSON_SCHEMA
-    ),
-)
-
-_FR_PRIMARY = PromptTemplate(
-    variant="primary",
-    language="fr",
-    version="1.0",
-    system_prompt=(
-        "Vous etes un analyste objectif de verification humanitaire. "
-        "Retournez uniquement du JSON valide."
-    ),
-    user_prompt_template=(
-        "Tache de Verification de la Norme Humanitaire\n\n"
-        "Criteres Sphere:\n<<CRITERIA>>\n\n"
-        "Declaration d Aide:\n<<CLAIM>>\n\n"
-        "Preuves a l Appui:\n<<EVIDENCE>>\n\n"
-        "Facteurs de Contexte:\n<<CONTEXT>>\n\n"
-        "Retournez le schema JSON exactement:\n" + _JSON_SCHEMA
-    ),
-)
-
-_AR_PRIMARY = PromptTemplate(
-    variant="primary",
-    language="ar",
-    version="1.0",
-    system_prompt=(
-        "\u0623\u0646\u062a \u0645\u062d\u0644\u0644 \u0645\u0648\u0636\u0648\u0639\u064a. \u0627\u0644\u0625\u062c\u0627\u0628\u0629 \u0628\u0640 JSON \u0641\u0642\u0637."
-    ),
-    user_prompt_template=(
-        "\u0645\u0647\u0645\u0629 \u0627\u0644\u062a\u062d\u0642\u0642\n\n"
-        "\u0645\u0639\u0627\u064a\u064a\u0631 \u0627\u0644\u0643\u0631\u0629:\n<<CRITERIA>>\n\n"
-        "\u0645\u0632\u0639\u0645 \u0627\u0644\u0645\u0633\u0627\u0639\u062f\u0629:\n<<CLAIM>>\n\n"
-        "\u0627\u0644\u0623\u062f\u0644\u0629:\n<<EVIDENCE>>\n\n"
-        "\u0639\u0648\u0627\u0645\u0644 \u0627\u0644\u0633\u064a\u0627\u0642:\n<<CONTEXT>>\n\n"
-        "\u0623\u0639\u062f \u0645\u062e\u0637\u0637 JSON:\n" + _JSON_SCHEMA
-    ),
-)
-
-
-_REGISTRY: Dict[tuple, PromptTemplate] = {
-    ("primary", "en"): _EN_PRIMARY,
-    ("fallback", "en"): _EN_FALLBACK,
-    ("primary", "es"): _ES_PRIMARY,
-    ("primary", "fr"): _FR_PRIMARY,
-    ("primary", "ar"): _AR_PRIMARY,
-}
+        supporting_evidence: List[str],
+        context_factors: Dict[str, Any],
+        language: Optional[str] = None,
+    ) -> Dict[str, str]:
+        pass
 
 
 class PromptRegistry:
+    """Central registry for managing, versioning, and resolving prompts."""
+
     def __init__(self) -> None:
-        self._templates: Dict[tuple, PromptTemplate] = dict(_REGISTRY)
+        self._prompts: Dict[str, Dict[str, VerificationPrompt]] = {}
+        self._active_versions: Dict[str, str] = {}
 
-    def register(self, template: PromptTemplate) -> None:
-        self._templates[(template.variant, template.language)] = template
+    def register(self, prompt: VerificationPrompt, set_active: bool = False) -> None:
+        name = prompt.name
+        version = prompt.version
+        if name not in self._prompts:
+            self._prompts[name] = {}
+        if version in self._prompts[name]:
+            raise ValueError(
+                f"Prompt '{name}' version '{version}' is already registered. "
+                "Prompts are immutable; register a new version instead."
+            )
+        self._prompts[name][version] = prompt
+        logger.debug("Registered prompt name='%s' version='%s'", name, version)
+        if set_active or name not in self._active_versions:
+            self._active_versions[name] = version
+            logger.debug("Set active version for prompt '%s' to '%s'", name, version)
 
-    def get(self, variant: str, language: Optional[str]) -> tuple:
-        lang = (language or _DEFAULT_LANGUAGE).lower().strip()
-        t = self._templates.get((variant, lang))
-        if t is not None:
-            return t, lang, False
-        en = self._templates.get((variant, _DEFAULT_LANGUAGE))
-        if en is None:
-            raise KeyError(f"No template for variant={variant!r}")
-        return en, _DEFAULT_LANGUAGE, True
+    def get(self, name: str, version: Optional[str] = None) -> VerificationPrompt:
+        if name not in self._prompts:
+            raise ValueError(
+                f"Unknown prompt name: '{name}'. Registered prompts: {list(self._prompts.keys())}"
+            )
+        target_version = version or self._active_versions.get(name)
+        if not target_version:
+            raise ValueError(f"No active version configured for prompt '{name}'")
+        if target_version not in self._prompts[name]:
+            available = sorted(list(self._prompts[name].keys()))
+            raise ValueError(
+                f"Prompt '{name}' has no version '{target_version}'. "
+                f"Available versions: {available}"
+            )
+        return self._prompts[name][target_version]
 
-    def supported_languages(self, variant: str = "primary") -> List[str]:
-        return sorted(l for (v, l) in self._templates if v == variant)
+    def set_active_version(self, name: str, version: str) -> None:
+        if name not in self._prompts:
+            raise ValueError(f"Unknown prompt name: '{name}'")
+        if version not in self._prompts[name]:
+            available = sorted(list(self._prompts[name].keys()))
+            raise ValueError(
+                f"Cannot set active version to '{version}' for prompt '{name}'. "
+                f"Available versions: {available}"
+            )
+        self._active_versions[name] = version
+        logger.info("Active version for prompt '%s' updated to '%s'", name, version)
 
+    def get_active_version(self, name: str) -> str:
+        if name not in self._active_versions:
+            raise ValueError(f"Unknown prompt name or no active version for: '{name}'")
+        return self._active_versions[name]
 
-default_registry = PromptRegistry()
+    def list_prompts(self) -> Dict[str, List[str]]:
+        return {
+            name: sorted(list(versions.keys()))
+            for name, versions in self._prompts.items()
+        }
+
+    def list_versions(self, name: str) -> List[str]:
+        if name not in self._prompts:
+            return []
+        return sorted(list(self._prompts[name].keys()))
+
+    def has(self, name: str, version: Optional[str] = None) -> bool:
+        if name not in self._prompts:
+            return False
+        if version is not None:
+            return version in self._prompts[name]
+        return True
