@@ -120,7 +120,15 @@
     "clearSyncedCache": "Effacer le cache synchronisé",
     "yourPublicKey": "Votre clé publique",
     "stellarLabFaucet": "Airdrop de Stellar Lab",
-    "friendbotApi": "API Friendbot"
+    "friendbotApi": "API Friendbot",
+    "syncFrequency": "Fréquence de synchronisation",
+    "syncFrequencyHint": "Choisissez la fréquence de synchronisation en arrière-plan",
+    "syncFrequencyAggressive": "Fréquente",
+    "syncFrequencyNormal": "Normale",
+    "syncFrequencyConservative": "Conservatrice",
+    "syncFrequencyAggressiveHint": "Synchronise toutes les 5 minutes",
+    "syncFrequencyNormalHint": "Synchronise toutes les 15 minutes (par défaut)",
+    "syncFrequencyConservativeHint": "Synchronise toutes les 60 minutes"
   },
   "tasks": {
     "title": "Tâches",

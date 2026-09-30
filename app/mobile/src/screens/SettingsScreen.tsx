@@ -17,6 +17,7 @@ import { useBiometric } from '../contexts/BiometricContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { useCrashReporting } from '../contexts/CrashReportingContext';
+import { useSyncDeferral } from '../contexts/SyncDeferralContext';
 import { config } from '../config';
 import { useWallet } from '../contexts/WalletContext';
 import { getAccountExplorerUrl } from '../explorerUtils';
@@ -75,6 +76,7 @@ export const SettingsScreen: React.FC = () => {
     enabled: crashReportingEnabled,
     toggle: toggleCrashReporting,
   } = useCrashReporting();
+  const { syncFrequency, setSyncFrequency } = useSyncDeferral();
   const { publicKey, status: walletStatus } = useWallet();
   const isWalletConnected = walletStatus === 'connected';
   const [copiedKey, setCopiedKey] = useState(false);
@@ -464,6 +466,64 @@ export const SettingsScreen: React.FC = () => {
           style={styles.sectionHeader}
           accessibilityRole="header"
         >
+          {t('settings.syncFrequency')}
+        </Text>
+        <Text style={styles.sectionHint}>{t('settings.syncFrequencyHint')}</Text>
+
+        <View style={styles.frequencyRow}>
+          {(['aggressive', 'normal', 'conservative'] as const).map((freq) => {
+            const isSelected = syncFrequency === freq;
+            const label =
+              freq === 'aggressive'
+                ? t('settings.syncFrequencyAggressive')
+                : freq === 'normal'
+                  ? t('settings.syncFrequencyNormal')
+                  : t('settings.syncFrequencyConservative');
+            const hint =
+              freq === 'aggressive'
+                ? t('settings.syncFrequencyAggressiveHint')
+                : freq === 'normal'
+                  ? t('settings.syncFrequencyNormalHint')
+                  : t('settings.syncFrequencyConservativeHint');
+
+            return (
+              <Pressable
+                key={freq}
+                style={[
+                  styles.frequencyChip,
+                  isSelected && styles.frequencyChipActive,
+                ]}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: isSelected }}
+                accessibilityLabel={label}
+                accessibilityHint={hint}
+                onPress={() => void setSyncFrequency(freq)}
+              >
+                <Text
+                  style={[
+                    styles.frequencyChipText,
+                    isSelected && styles.frequencyChipTextActive,
+                  ]}
+                >
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Text style={styles.hint}>
+          {syncFrequency === 'aggressive'
+            ? t('settings.syncFrequencyAggressiveHint')
+            : syncFrequency === 'conservative'
+              ? t('settings.syncFrequencyConservativeHint')
+              : t('settings.syncFrequencyNormalHint')}
+        </Text>
+
+        <Text
+          style={styles.sectionHeader}
+          accessibilityRole="header"
+        >
           Offline Storage
         </Text>
 
@@ -679,6 +739,32 @@ const makeStyles = (colors: AppColors) =>
       color: colors.textPrimary,
     },
     languageChipTextActive: {
+      color: '#FFFFFF',
+    },
+    frequencyRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 4,
+    },
+    frequencyChip: {
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    frequencyChipActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    frequencyChipText: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.textPrimary,
+    },
+    frequencyChipTextActive: {
       color: '#FFFFFF',
     },
     row: {
