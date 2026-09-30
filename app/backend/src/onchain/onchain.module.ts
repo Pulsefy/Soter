@@ -28,13 +28,15 @@ import { CommonServicesModule } from '../common/services/common-services.module'
 const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
 
 /**
- * Factory function to create the appropriate adapter based on configuration
+ * Factory function to create the appropriate adapter based on configuration.
+ * Defaults to 'soroban' to wire the mock adapter out of the default CI/production path,
+ * falling back or explicitly evaluating 'mock' only when configured or in explicit mock environments.
  */
 export const createOnchainAdapter = (
   configService: ConfigService,
 ): OnchainAdapter => {
   const adapterType =
-    configService.get<string>('ONCHAIN_ADAPTER')?.toLowerCase() || 'mock';
+    configService.get<string>('ONCHAIN_ADAPTER')?.toLowerCase() || 'soroban';
 
   switch (adapterType) {
     case 'mock':
