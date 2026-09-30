@@ -1015,11 +1015,7 @@ export class SorobanAdapter implements OnchainAdapter {
 
     const { hash } = await this.submitContractOp(
       'propose_surplus_withdrawal',
-      [
-        this.scvAddress(to),
-        this.scvI128(amount),
-        this.scvAddress(token),
-      ],
+      [this.scvAddress(to), this.scvI128(amount), this.scvAddress(token)],
       cid,
       contractId,
     );

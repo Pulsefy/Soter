@@ -65,12 +65,10 @@ export class SurplusWithdrawalController {
     description: 'Current surplus withdrawal state.',
     schema: {
       example: {
-        contractId:
-          'CBUILDERSEXAMPLECONTRACTID000000000000000000',
+        contractId: 'CBUILDERSEXAMPLECONTRACTID000000000000000000',
         pendingWithdrawal: {
           to: 'GDESTINATIONADDRESS000000000000000000000000000000000',
-          token:
-            'CA3D5KRYM6CB7OWQ6TWYRR3Z4ZT7B32DRH2V2385ST2QY4QCP2CAF5Y',
+          token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4ZT7B32DRH2V2385ST2QY4QCP2CAF5Y',
           amount: '1000000000',
           executableAt: 1789000000,
         },

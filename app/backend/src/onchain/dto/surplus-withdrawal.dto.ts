@@ -58,8 +58,7 @@ export class ProposeSurplusWithdrawalDto {
   @ApiProperty({
     description:
       'Token contract address to withdraw. Must be on the contract allowlist.',
-    example:
-      'CA3D5KRYM6CB7OWQ6TWYRR3Z4ZT7B32DRH2V2385ST2QY4QCP2CAF5Y',
+    example: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4ZT7B32DRH2V2385ST2QY4QCP2CAF5Y',
   })
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,

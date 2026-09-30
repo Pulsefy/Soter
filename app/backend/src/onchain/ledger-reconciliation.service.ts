@@ -14,10 +14,7 @@ export interface ReconciliationJobData {
 export interface ReconciliationDiscrepancy {
   ledger: number;
   type:
-    | 'missing'
-    | 'amount_mismatch'
-    | 'event_type_mismatch'
-    | 'count_mismatch';
+    'missing' | 'amount_mismatch' | 'event_type_mismatch' | 'count_mismatch';
   /** Value recorded off-chain. Shape varies by discrepancy type. */
   expected: unknown;
   /** Value observed on-chain. Shape varies by discrepancy type. */

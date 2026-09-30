@@ -46,7 +46,7 @@ describe('SurplusWithdrawalController', () => {
   describe('authorization', () => {
     const handlers = ['getStatus', 'propose', 'cancel', 'execute'] as const;
 
-    it.each(handlers)('%s requires the admin role', (handler) => {
+    it.each(handlers)('%s requires the admin role', handler => {
       const roles = reflector.getAllAndOverride<AppRole[]>(ROLES_KEY, [
         SurplusWithdrawalController.prototype[handler],
       ]);

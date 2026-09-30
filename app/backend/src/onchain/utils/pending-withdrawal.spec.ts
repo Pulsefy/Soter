@@ -51,7 +51,12 @@ describe('parsePendingWithdrawal', () => {
         amount: 5000n,
         executable_at: 1789000000n,
       }),
-    ).toEqual({ to: TO, token: TOKEN, amount: '5000', executableAt: 1789000000 });
+    ).toEqual({
+      to: TO,
+      token: TOKEN,
+      amount: '5000',
+      executableAt: 1789000000,
+    });
   });
 
   it('parses the Map form some SDK versions decode to', () => {
@@ -64,7 +69,12 @@ describe('parsePendingWithdrawal', () => {
           ['executable_at', 1789000000],
         ]),
       ),
-    ).toEqual({ to: TO, token: TOKEN, amount: '5000', executableAt: 1789000000 });
+    ).toEqual({
+      to: TO,
+      token: TOKEN,
+      amount: '5000',
+      executableAt: 1789000000,
+    });
   });
 
   it.each([

@@ -413,7 +413,12 @@ describe('MockOnchainAdapter', () => {
     const TO = 'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
     const TOKEN =
       'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
-    const proposal = { contractId: CONTRACT, to: TO, token: TOKEN, amount: '1000' };
+    const proposal = {
+      contractId: CONTRACT,
+      to: TO,
+      token: TOKEN,
+      amount: '1000',
+    };
 
     beforeEach(() => {
       // Reproduce a matured timelock without waiting out the contract's
@@ -421,7 +426,7 @@ describe('MockOnchainAdapter', () => {
       adapter.mockSurplusWithdrawalDelaySeconds = 0;
     });
 
-    it('defaults the delay to the contract\'s one-day timelock', () => {
+    it("defaults the delay to the contract's one-day timelock", () => {
       const fresh = new MockOnchainAdapter();
       expect(fresh.mockSurplusWithdrawalDelaySeconds).toBe(86_400);
     });

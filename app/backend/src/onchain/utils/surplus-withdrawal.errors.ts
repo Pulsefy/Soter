@@ -21,7 +21,10 @@ export class SurplusWithdrawalTimelockNotElapsedError extends Error {
   constructor(message: string, executableAt: number | null = null) {
     super(message);
     this.executableAt = executableAt;
-    Object.setPrototypeOf(this, SurplusWithdrawalTimelockNotElapsedError.prototype);
+    Object.setPrototypeOf(
+      this,
+      SurplusWithdrawalTimelockNotElapsedError.prototype,
+    );
   }
 }
 
@@ -29,7 +32,8 @@ export class SurplusWithdrawalTimelockNotElapsedError extends Error {
  * Contract error variant raised when a withdrawal leg is attempted with no
  * proposal outstanding.
  */
-export const SURPLUS_WITHDRAWAL_NOT_PENDING_ERROR = 'SurplusWithdrawalNotPending';
+export const SURPLUS_WITHDRAWAL_NOT_PENDING_ERROR =
+  'SurplusWithdrawalNotPending';
 
 /**
  * Contract error variant raised when a second proposal is submitted while one
@@ -48,6 +52,34 @@ export const SURPLUS_WITHDRAWAL_PENDING_ERROR = 'SurplusWithdrawalPending';
 export const SURPLUS_WITHDRAWAL_TIMELOCK_SECS = 86_400;
 
 /**
+ * Coerce an unknown thrown value into text to search.
+ *
+ * `String(obj)` on a plain object yields `[object Object]`, which matches
+ * nothing useful and would hide a real transport error, so non-Error values are
+ * serialised instead. JSON is the shape a JSON-RPC or decoded-contract error
+ * arrives in, and its `message` field is exactly what needs matching.
+ */
+function describeError(error: unknown): string {
+  if (typeof error === 'string') {
+    return error;
+  }
+  if (error === null || error === undefined) {
+    return '';
+  }
+  try {
+    // Renders primitives, arrays and objects faithfully. Returns undefined for
+    // functions and symbols, and throws on BigInt, so both are normalised to an
+    // empty string rather than being allowed to escape as a crash.
+    const serialised = JSON.stringify(error, (_key, value) =>
+      typeof value === 'bigint' ? value.toString() : value,
+    );
+    return serialised ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/**
  * True when `error` is (or wraps) the contract's premature-execution variant.
  *
  * Adapters and transports differ in how the variant surfaces — a decoded error
@@ -58,8 +90,7 @@ export function isSurplusWithdrawalTimelockError(error: unknown): boolean {
   if (error instanceof SurplusWithdrawalTimelockNotElapsedError) {
     return true;
   }
-  const message =
-    error instanceof Error ? error.message : String(error ?? '');
+  const message = describeError(error);
   return (
     message.includes('SurplusWithdrawalTimelockActive') ||
     message.includes('SURPLUS_WITHDRAWAL_TIMELOCK_ACTIVE')

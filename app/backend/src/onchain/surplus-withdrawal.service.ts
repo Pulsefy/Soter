@@ -147,7 +147,9 @@ export class SurplusWithdrawalService {
   /**
    * Abandon a pending proposal. Nothing is transferred.
    */
-  async cancel(actor: SurplusWithdrawalActor): Promise<SurplusWithdrawalStatus> {
+  async cancel(
+    actor: SurplusWithdrawalActor,
+  ): Promise<SurplusWithdrawalStatus> {
     const before = await this.onchainAdapter.getPendingWithdrawal({
       contractId: actor.contractId,
     });
@@ -201,7 +203,9 @@ export class SurplusWithdrawalService {
    * A premature attempt is reported as a distinct conflict carrying the wait,
    * rather than surfacing as an opaque contract failure.
    */
-  async execute(actor: SurplusWithdrawalActor): Promise<SurplusWithdrawalStatus> {
+  async execute(
+    actor: SurplusWithdrawalActor,
+  ): Promise<SurplusWithdrawalStatus> {
     const before = await this.onchainAdapter.getPendingWithdrawal({
       contractId: actor.contractId,
     });

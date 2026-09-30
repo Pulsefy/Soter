@@ -99,7 +99,10 @@ export class MockOnchainAdapter implements OnchainAdapter {
    * Pending surplus withdrawal proposals per contract, mirroring the
    * contract's single `KEY_PENDING_WITHDRAWAL` instance slot.
    */
-  private readonly mockPendingWithdrawals = new Map<string, PendingWithdrawal>();
+  private readonly mockPendingWithdrawals = new Map<
+    string,
+    PendingWithdrawal
+  >();
 
   /**
    * Delay applied between a proposal and its execution.
@@ -636,8 +639,9 @@ export class MockOnchainAdapter implements OnchainAdapter {
   ): Promise<PendingWithdrawal | null> {
     await Promise.resolve();
     return (
-      this.mockPendingWithdrawals.get(params.contractId ?? this.mockContractId) ??
-      null
+      this.mockPendingWithdrawals.get(
+        params.contractId ?? this.mockContractId,
+      ) ?? null
     );
   }
 

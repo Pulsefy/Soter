@@ -1,11 +1,7 @@
-import {
-  Injectable,
-  Logger,
-  NotImplementedException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotImplementedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { rpc as SorobanRpc, scValToNative } from '@stellar/stellar-sdk';
-import { getNetworkProfile } from '../../config/network.config';
+import { getNetworkProfile } from 'src/config/network.config';
 import { withRetryTimeout } from './utils/retry-with-timeout';
 
 /**
@@ -106,11 +102,11 @@ const EVENT_TOPIC_TO_LEDGER_TYPE: Readonly<
  * `STELLAR_LEDGER_SOURCE` pins the choice. Left on `auto`, the client uses
  * `soroban-rpc` when a contract id is configured and `horizon` otherwise.
  *
- * When neither source can serve live data — an explicit `disabled` setting, or
- * no contract id on a node expected to provide `getEvents` — {@link
- * isEnabled} reports false and {@link fetchLedgerEntries} raises
- * {@link NotImplementedException}. Callers surface that instead of reporting
- * an always-passing reconciliation.
+ * Both sources read the escrow contract, so both need
+ * `AID_ESCROW_CONTRACT_ID`. When neither can serve live data — an explicit
+ * `disabled` setting, or no contract id — {@link isEnabled} reports false and
+ * {@link fetchLedgerEntries} raises {@link NotImplementedException}. Callers
+ * surface that instead of reporting an always-passing reconciliation.
  */
 @Injectable()
 export class StellarLedgerSource {
@@ -133,7 +129,10 @@ export class StellarLedgerSource {
     this.horizonUrl = this.configService
       .get<string>('STELLAR_HORIZON_URL', profile.defaultHorizonUrl)
       .replace(/\/+$/, '');
-    this.contractId = this.configService.get<string>('AID_ESCROW_CONTRACT_ID', '');
+    this.contractId = this.configService.get<string>(
+      'AID_ESCROW_CONTRACT_ID',
+      '',
+    );
 
     const configured = (
       this.configService.get<string>('STELLAR_LEDGER_SOURCE') ?? 'auto'
@@ -171,19 +170,20 @@ export class StellarLedgerSource {
   /**
    * False when this client cannot serve live data.
    *
-   * `horizon` is always available because the public endpoint needs no
-   * configuration; `soroban-rpc` needs a contract id to scope the event
-   * filter, and `disabled` is never available.
+   * Both sources need `AID_ESCROW_CONTRACT_ID`: `soroban-rpc` uses it to scope
+   * the event filter, and `horizon` uses it to know *whose* operation stream to
+   * read, since a Horizon query is per-account. `horizon` additionally needs an
+   * endpoint. `disabled` is never available.
    */
   isEnabled(): boolean {
     const kind = this.sourceKind;
-    if (kind === 'disabled') {
+    if (kind === 'disabled' || !this.contractId) {
       return false;
     }
     if (kind === 'horizon') {
       return this.horizonUrl.length > 0;
     }
-    return this.contractId.length > 0;
+    return true;
   }
 
   /**
@@ -194,8 +194,8 @@ export class StellarLedgerSource {
     if (kind === 'disabled') {
       return 'STELLAR_LEDGER_SOURCE is set to "disabled".';
     }
-    if (kind === 'soroban-rpc' && !this.contractId) {
-      return 'AID_ESCROW_CONTRACT_ID is not set, so the escrow contract event stream cannot be scoped.';
+    if (!this.contractId) {
+      return 'AID_ESCROW_CONTRACT_ID is not set, so the escrow contract cannot be read from either source.';
     }
     if (!this.horizonUrl && kind === 'horizon') {
       return 'STELLAR_HORIZON_URL is not set.';
@@ -317,7 +317,9 @@ export class StellarLedgerSource {
    */
   private mapSorobanEvent(
     event: {
-      contractId?: string;
+      // The SDK types this as a `Contract` object, but the RPC wire format sends
+      // a plain contract id string. Treat it as untrusted and normalise below.
+      contractId?: unknown;
       txHash?: string;
       ledger?: number;
       transactionIndex?: number;
@@ -348,7 +350,13 @@ export class StellarLedgerSource {
 
     const payload = decodePayload(event.value);
     const ledger = Number(event.ledger ?? 0);
-    const contractId = String(event.contractId ?? fallbackContractId);
+    // Only a string is a usable id. Anything else means the event cannot be
+    // attributed, and the filter already scoped this query to the escrow
+    // contract, so the fallback is the correct answer.
+    const contractId =
+      typeof event.contractId === 'string' && event.contractId.length > 0
+        ? event.contractId
+        : fallbackContractId;
     const packageId = readStringField(payload, 'package_id');
 
     return {
@@ -485,9 +493,11 @@ export class StellarLedgerSource {
     }
 
     const ledger = Number(record.ledger ?? 0);
-    const outgoing = record.to === this.contractId;
-    const incoming = record.from === this.contractId;
-    if (!outgoing && !incoming) {
+    // A payment naming the contract as its destination brings funds into the
+    // escrow; one naming it as the source takes them out.
+    const incoming = record.to === this.contractId;
+    const outgoing = record.from === this.contractId;
+    if (!incoming && !outgoing) {
       return null;
     }
 
@@ -538,7 +548,10 @@ interface HorizonOperationRecord {
   from?: string;
   to?: string;
   amount?: string;
-  transaction_hash_set?: { transaction_hash?: string; operation_index?: number };
+  transaction_hash_set?: {
+    transaction_hash?: string;
+    operation_index?: number;
+  };
 }
 
 /**
@@ -601,7 +614,7 @@ function decodePayload(value: unknown): Record<string, unknown> {
   if (value === undefined || value === null) {
     return {};
   }
-  if (typeof value === 'object' && !('toXDR' in (value as object))) {
+  if (typeof value === 'object' && !('toXDR' in value)) {
     const decoded = value as Record<string, unknown>;
     return decoded instanceof Map ? Object.fromEntries(decoded) : decoded;
   }

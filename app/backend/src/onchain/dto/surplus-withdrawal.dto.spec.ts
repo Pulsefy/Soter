@@ -21,9 +21,9 @@ describe('ProposeSurplusWithdrawalDto', () => {
   });
 
   it('trims surrounding whitespace before validating', () => {
-    expect(validate({ to: `  ${VALID_TO}  `, amount: ' 1000000000 ' })).toHaveLength(
-      0,
-    );
+    expect(
+      validate({ to: `  ${VALID_TO}  `, amount: ' 1000000000 ' }),
+    ).toHaveLength(0);
   });
 
   describe('to', () => {

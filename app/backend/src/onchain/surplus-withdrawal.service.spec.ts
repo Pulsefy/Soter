@@ -26,6 +26,17 @@ const mockAudit = { record: jest.fn() };
 
 const actor = { actorId: 'admin_1', contractId: 'CTEST' };
 
+/**
+ * Seconds since the epoch, read at call time.
+ *
+ * `timelockRemainingSeconds` compares `executableAt` against the real clock, so
+ * a fixture anchored to a fixed date would read as long matured. Anchoring to
+ * "now" is what makes "still locked" and "already matured" expressible.
+ */
+function nowSeconds(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
 function makePending(
   overrides: Partial<PendingWithdrawal> = {},
 ): PendingWithdrawal {
@@ -33,7 +44,7 @@ function makePending(
     to: 'GRECIPIENTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
     amount: '1000',
     token: 'USDC',
-    executableAt: NOW.getTime() / 1000 + HOUR,
+    executableAt: nowSeconds() + HOUR,
     ...overrides,
   };
 }
@@ -72,7 +83,7 @@ describe('SurplusWithdrawalService', () => {
 
     it('reports the remaining wait on a pending proposal', async () => {
       mockAdapter.getPendingWithdrawal.mockResolvedValue(
-        makePending({ executableAt: NOW.getTime() / 1000 + 600 }),
+        makePending({ executableAt: nowSeconds() + 600 }),
       );
 
       const status = await service.getStatus(actor.contractId);
@@ -209,7 +220,7 @@ describe('SurplusWithdrawalService', () => {
 
   describe('execute', () => {
     it('executes once the timelock has elapsed and audits the release', async () => {
-      const pending = makePending({ executableAt: NOW.getTime() / 1000 - 1 });
+      const pending = makePending({ executableAt: nowSeconds() - 1 });
       mockAdapter.getPendingWithdrawal.mockResolvedValue(pending);
       mockAdapter.executeSurplusWithdrawal.mockResolvedValue({
         contractId: 'CTEST',
@@ -234,7 +245,7 @@ describe('SurplusWithdrawalService', () => {
 
     it('reports a distinct conflict while the timelock is still running', async () => {
       mockAdapter.getPendingWithdrawal.mockResolvedValue(
-        makePending({ executableAt: NOW.getTime() / 1000 + 600 }),
+        makePending({ executableAt: nowSeconds() + 600 }),
       );
 
       const error = await service.execute(actor).catch(e => e);
@@ -251,7 +262,7 @@ describe('SurplusWithdrawalService', () => {
       // The chain is the authority on the delay; a locally-elapsed proposal
       // that the contract still rejects must read the same to the caller.
       mockAdapter.getPendingWithdrawal.mockResolvedValue(
-        makePending({ executableAt: NOW.getTime() / 1000 - 1 }),
+        makePending({ executableAt: nowSeconds() - 1 }),
       );
       mockAdapter.executeSurplusWithdrawal.mockRejectedValue(
         new SurplusWithdrawalTimelockNotElapsedError(),
@@ -272,7 +283,7 @@ describe('SurplusWithdrawalService', () => {
 
     it('fails when the contract still reports the proposal as pending', async () => {
       mockAdapter.getPendingWithdrawal.mockResolvedValue(
-        makePending({ executableAt: NOW.getTime() / 1000 - 1 }),
+        makePending({ executableAt: nowSeconds() - 1 }),
       );
       mockAdapter.executeSurplusWithdrawal.mockResolvedValue({
         contractId: 'CTEST',
@@ -287,7 +298,7 @@ describe('SurplusWithdrawalService', () => {
 
     it('does not swallow an unrelated contract failure', async () => {
       mockAdapter.getPendingWithdrawal.mockResolvedValue(
-        makePending({ executableAt: NOW.getTime() / 1000 - 1 }),
+        makePending({ executableAt: nowSeconds() - 1 }),
       );
       mockAdapter.executeSurplusWithdrawal.mockRejectedValue(
         new Error('insufficient trustline balance'),
