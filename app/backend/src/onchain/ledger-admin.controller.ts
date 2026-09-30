@@ -296,7 +296,12 @@ export class LedgerAdminController {
         summary: {
           totalDiscrepancies: 0,
           bySeverity: { low: 0, medium: 0, high: 0 },
-          byType: { missing: 0, amount_mismatch: 0, count_mismatch: 0 },
+          byType: {
+            missing: 0,
+            amount_mismatch: 0,
+            event_type_mismatch: 0,
+            count_mismatch: 0,
+          },
         },
         actionable: false,
       },

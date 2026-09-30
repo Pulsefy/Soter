@@ -42,7 +42,19 @@ import {
   AdminTransferParams,
   AdminTransferResult,
   TransferAdminParams,
+  PendingWithdrawal,
+  ProposeSurplusWithdrawalParams,
+  SurplusWithdrawalParams,
+  SurplusWithdrawalResult,
 } from './onchain.adapter';
+import {
+  parsePendingWithdrawal,
+  timelockRemainingSeconds,
+} from './utils/pending-withdrawal';
+import {
+  isSurplusWithdrawalTimelockError,
+  SurplusWithdrawalTimelockNotElapsedError,
+} from './utils/surplus-withdrawal.errors';
 
 /**
  * Narrow an RPC result to a plain object so its fields can be read.
@@ -439,6 +451,102 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       adminAddress: state.adminAddress,
       pendingAdminAddress: state.pendingAdminAddress,
       timestamp: state.timestamp,
+    };
+  }
+
+  async getPendingWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<PendingWithdrawal | null> {
+    const contractId = params.contractId ?? this.contractId;
+    const result = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId,
+      key: 'pending_withdrawal',
+    });
+    return parsePendingWithdrawal(result);
+  }
+
+  async proposeSurplusWithdrawal(
+    params: ProposeSurplusWithdrawalParams,
+  ): Promise<SurplusWithdrawalResult> {
+    const contractId = params.contractId ?? this.contractId;
+    const to = params.to?.trim();
+    const token = params.token?.trim();
+    const amount = params.amount?.trim();
+
+    if (!to) {
+      throw new Error('to is required to propose a surplus withdrawal');
+    }
+    if (!token) {
+      throw new Error('token is required to propose a surplus withdrawal');
+    }
+    if (!amount || !/^\d+$/.test(amount) || BigInt(amount) <= 0n) {
+      throw new Error(
+        'amount must be a positive integer string in the token base unit',
+      );
+    }
+
+    await this.invokeContract(
+      'propose_surplus_withdrawal',
+      [to, amount, token],
+      contractId,
+    );
+
+    return {
+      contractId,
+      transactionHash: '',
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
+      timestamp: new Date(),
+    };
+  }
+
+  async cancelSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract('cancel_surplus_withdrawal', [], contractId);
+    return {
+      contractId,
+      transactionHash: '',
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
+      timestamp: new Date(),
+    };
+  }
+
+  async executeSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    const contractId = params.contractId ?? this.contractId;
+    const pending = await this.getPendingWithdrawal({ contractId });
+
+    if (pending) {
+      const remaining = timelockRemainingSeconds(pending);
+      if (remaining > 0) {
+        throw new SurplusWithdrawalTimelockNotElapsedError(
+          `SurplusWithdrawalTimelockActive: withdrawal of ${pending.amount} to ` +
+            `${pending.to} becomes executable in ${remaining}s ` +
+            `(at ledger timestamp ${pending.executableAt})`,
+          pending.executableAt,
+        );
+      }
+    }
+
+    try {
+      await this.invokeContract('execute_surplus_withdrawal', [], contractId);
+    } catch (error) {
+      if (isSurplusWithdrawalTimelockError(error)) {
+        throw new SurplusWithdrawalTimelockNotElapsedError(
+          'SurplusWithdrawalTimelockActive: the surplus withdrawal timelock delay has not elapsed',
+          pending?.executableAt ?? null,
+        );
+      }
+      throw error;
+    }
+
+    return {
+      contractId,
+      transactionHash: '',
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
+      timestamp: new Date(),
     };
   }
 

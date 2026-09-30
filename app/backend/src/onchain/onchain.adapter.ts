@@ -255,6 +255,70 @@ export interface AdminTransferParams {
   contractId?: string;
 }
 
+/**
+ * A surplus withdrawal that has been proposed but not yet executed.
+ *
+ * Mirrors the contract's `PendingWithdrawal` struct, with the timelock
+ * expressed in the same terms the API surface uses everywhere else: the amount
+ * is a decimal string in token base units (so it survives JSON round trips)
+ * and `executableAt` is a unix timestamp in seconds, matching the ledger
+ * timestamp the contract compares against.
+ */
+export interface PendingWithdrawal {
+  /** Destination address the funds would be transferred to. */
+  to: string;
+  /** Token contract address. */
+  token: string;
+  /** Amount in the token's smallest unit, as a decimal string. */
+  amount: string;
+  /**
+   * Earliest unix timestamp (seconds) at which `executeSurplusWithdrawal` may
+   * be submitted. Equals the proposal time plus the contract's
+   * `SURPLUS_WITHDRAWAL_DELAY_SECS`.
+   */
+  executableAt: number;
+}
+
+export interface SurplusWithdrawalParams {
+  contractId?: string;
+}
+
+export interface ProposeSurplusWithdrawalParams extends SurplusWithdrawalParams {
+  /** Destination address for the funds. */
+  to: string;
+  /** Amount in the token's smallest unit, as a decimal string. */
+  amount: string;
+  /** Token contract address; must be on the contract's allowlist. */
+  token: string;
+}
+
+/**
+ * Result of one leg of the timelocked surplus withdrawal state machine.
+ *
+ * `pendingWithdrawal` is read back from the contract after the write so callers
+ * record verified state rather than the values they submitted. It is `null`
+ * after a cancel or execute, and after a rejected proposal the contract never
+ * created one.
+ */
+export interface SurplusWithdrawalResult {
+  contractId: string;
+  transactionHash: string;
+  pendingWithdrawal: PendingWithdrawal | null;
+  timestamp: Date;
+}
+
+/** Read-only view of the timelocked surplus withdrawal state. */
+export interface SurplusWithdrawalStatus {
+  contractId: string;
+  pendingWithdrawal: PendingWithdrawal | null;
+  /**
+   * Seconds remaining before the pending proposal becomes executable. `0` when
+   * no proposal is pending, and `0` once the delay has elapsed.
+   */
+  timelockRemainingSeconds: number;
+  timestamp: Date;
+}
+
 export interface TransferAdminParams extends AdminTransferParams {
   newAdminAddress: string;
 }
@@ -379,6 +443,41 @@ export interface OnchainAdapter {
   cancelAdminTransfer(
     params?: AdminTransferParams,
   ): Promise<AdminTransferResult>;
+
+  /**
+   * Step one of a timelocked surplus withdrawal: record the intent to move
+   * `amount` of `token` to `to`, and start the contract's timelock.
+   *
+   * No funds move. Only one proposal may be pending at a time.
+   */
+  proposeSurplusWithdrawal(
+    params: ProposeSurplusWithdrawalParams,
+  ): Promise<SurplusWithdrawalResult>;
+
+  /**
+   * Abandon a pending surplus withdrawal proposal. Moves no funds.
+   */
+  cancelSurplusWithdrawal(
+    params?: SurplusWithdrawalParams,
+  ): Promise<SurplusWithdrawalResult>;
+
+  /**
+   * Step two of a timelocked surplus withdrawal: transfer the proposed funds
+   * and clear the proposal.
+   *
+   * Rejects with a timelock-specific error while the delay has not elapsed, so
+   * a premature attempt is distinguishable from any other contract failure.
+   */
+  executeSurplusWithdrawal(
+    params?: SurplusWithdrawalParams,
+  ): Promise<SurplusWithdrawalResult>;
+
+  /**
+   * Read the pending surplus withdrawal proposal, or `null` when none exists.
+   */
+  getPendingWithdrawal(
+    params?: SurplusWithdrawalParams,
+  ): Promise<PendingWithdrawal | null>;
 
   /**
    * Get the status of a transaction by hash

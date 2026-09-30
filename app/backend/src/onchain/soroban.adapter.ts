@@ -49,9 +49,21 @@ import {
   AdminTransferParams,
   AdminTransferResult,
   TransferAdminParams,
+  PendingWithdrawal,
+  ProposeSurplusWithdrawalParams,
+  SurplusWithdrawalParams,
+  SurplusWithdrawalResult,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
+import {
+  parsePendingWithdrawal,
+  timelockRemainingSeconds,
+} from './utils/pending-withdrawal';
+import {
+  isSurplusWithdrawalTimelockError,
+  SurplusWithdrawalTimelockNotElapsedError,
+} from './utils/surplus-withdrawal.errors';
 import {
   Aggregates,
   Package,
@@ -943,6 +955,163 @@ export class SorobanAdapter implements OnchainAdapter {
       transactionHash: hash,
       adminAddress: state.adminAddress,
       pendingAdminAddress: state.pendingAdminAddress,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Read the pending surplus withdrawal proposal, or `null` when none exists.
+   *
+   * `get_pending_withdrawal` is a plain getter, so it goes through the
+   * read-only simulation path rather than a signed submission.
+   */
+  async getPendingWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<PendingWithdrawal | null> {
+    this.ensureConfigured();
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] getPendingWithdrawal contract=${contractId}`);
+
+    return parsePendingWithdrawal(
+      await this.simulateReadOnly(
+        'get_pending_withdrawal',
+        [],
+        cid,
+        contractId,
+      ),
+    );
+  }
+
+  /**
+   * Step one of the timelocked withdrawal: record the intent to move funds and
+   * start the contract's delay. Nothing is transferred by this call.
+   */
+  async proposeSurplusWithdrawal(
+    params: ProposeSurplusWithdrawalParams,
+  ): Promise<SurplusWithdrawalResult> {
+    this.ensureConfigured();
+    const to = params.to?.trim();
+    const token = params.token?.trim();
+    const amount = params.amount?.trim();
+
+    if (!to) {
+      throw new Error('to is required to propose a surplus withdrawal');
+    }
+    if (!token) {
+      throw new Error('token is required to propose a surplus withdrawal');
+    }
+    if (!amount || !/^\d+$/.test(amount) || BigInt(amount) <= 0n) {
+      throw new Error(
+        'amount must be a positive integer string in the token base unit',
+      );
+    }
+
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(
+      `[${cid}] proposeSurplusWithdrawal contract=${contractId} to=${to} token=${token} amount=${amount}`,
+    );
+
+    const { hash } = await this.submitContractOp(
+      'propose_surplus_withdrawal',
+      [
+        this.scvAddress(to),
+        this.scvI128(amount),
+        this.scvAddress(token),
+      ],
+      cid,
+      contractId,
+    );
+
+    return {
+      contractId,
+      transactionHash: hash,
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Abandon a pending proposal. Moves no funds.
+   */
+  async cancelSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    this.ensureConfigured();
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] cancelSurplusWithdrawal contract=${contractId}`);
+
+    const { hash } = await this.submitContractOp(
+      'cancel_surplus_withdrawal',
+      [],
+      cid,
+      contractId,
+    );
+
+    return {
+      contractId,
+      transactionHash: hash,
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Step two of the timelocked withdrawal: transfer the proposed funds.
+   *
+   * The delay is checked before submitting so a premature attempt reports the
+   * remaining wait instead of paying for a simulation that the contract will
+   * reject anyway; a contract-side `SurplusWithdrawalTimelockActive` is mapped
+   * onto the same distinct error.
+   */
+  async executeSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    this.ensureConfigured();
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+
+    const pending = await this.getPendingWithdrawal({ contractId });
+    if (pending) {
+      const remaining = timelockRemainingSeconds(pending);
+      if (remaining > 0) {
+        throw new SurplusWithdrawalTimelockNotElapsedError(
+          `SurplusWithdrawalTimelockActive: withdrawal of ${pending.amount} to ` +
+            `${pending.to} becomes executable in ${remaining}s ` +
+            `(at ledger timestamp ${pending.executableAt})`,
+          pending.executableAt,
+        );
+      }
+    }
+
+    this.logger.log(
+      `[${cid}] executeSurplusWithdrawal contract=${contractId} amount=${pending?.amount ?? 'unknown'}`,
+    );
+
+    let hash: string;
+    try {
+      ({ hash } = await this.submitContractOp(
+        'execute_surplus_withdrawal',
+        [],
+        cid,
+        contractId,
+      ));
+    } catch (error) {
+      if (isSurplusWithdrawalTimelockError(error)) {
+        throw new SurplusWithdrawalTimelockNotElapsedError(
+          'SurplusWithdrawalTimelockActive: the surplus withdrawal timelock delay has not elapsed',
+          pending?.executableAt ?? null,
+        );
+      }
+      throw error;
+    }
+
+    return {
+      contractId,
+      transactionHash: hash,
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
       timestamp: new Date(),
     };
   }

@@ -57,10 +57,10 @@ functions**. The count is based on `#[contractimpl]` in `src/lib.rs` and the
 | `attach_evidence_hash` | Not wired | The backend has no operation for attaching an evidence hash after package creation. |
 | `extend_expiration` | Intentionally not wired | This deprecated relative-time entrypoint is superseded by the adapter's absolute-time `extend_expiry` call. |
 | `extend_expiry` | Wired | `extendAidPackageExpiry` submits the canonical absolute-expiry update through this entrypoint. |
-| `propose_surplus_withdrawal` | Intentionally not wired | Surplus withdrawals are timelocked treasury actions handled by contract operators. |
-| `cancel_surplus_withdrawal` | Intentionally not wired | Cancelling a surplus withdrawal is part of operator-controlled treasury management. |
-| `execute_surplus_withdrawal` | Intentionally not wired | Executing a timelocked surplus withdrawal is an operator-controlled treasury action. |
-| `get_pending_withdrawal` | Intentionally not wired | Pending treasury withdrawals are monitored through contract operations tooling, not the application API. |
+| `propose_surplus_withdrawal` | Wired | `proposeSurplusWithdrawal` records the intent and starts the timelock via `POST /api/v1/admin/surplus-withdrawal/propose`. |
+| `cancel_surplus_withdrawal` | Wired | `cancelSurplusWithdrawal` abandons the proposal via `POST /api/v1/admin/surplus-withdrawal/cancel`. |
+| `execute_surplus_withdrawal` | Wired | `executeSurplusWithdrawal` releases the funds via `POST /api/v1/admin/surplus-withdrawal/execute`, rejected with a distinct 409 while the delay is still running. |
+| `get_pending_withdrawal` | Wired | `getPendingWithdrawal` backs `GET /api/v1/admin/surplus-withdrawal/status` and the pre-flight checks on each leg. |
 | `get_total_locked` | Not wired | No backend endpoint currently exposes the per-token locked total. |
 | `get_total_claimed` | Not wired | No backend endpoint currently exposes the per-token claimed total. |
 | `get_campaign_token_locked` | Not wired | No backend campaign reporting endpoint currently reads locked token totals. |

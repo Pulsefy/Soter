@@ -13,6 +13,9 @@ import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { LedgerAdminController } from './ledger-admin.controller';
 import { AdminTransferController } from './admin-transfer.controller';
 import { AdminTransferService } from './admin-transfer.service';
+import { StellarLedgerSource } from './stellar-ledger-source';
+import { SurplusWithdrawalController } from './surplus-withdrawal.controller';
+import { SurplusWithdrawalService } from './surplus-withdrawal.service';
 import { JobsModule } from '../jobs/jobs.module';
 import { LoggerModule } from '../logger/logger.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
@@ -94,15 +97,21 @@ const onchainAdapterProvider: Provider = {
     MetricsModule,
     CommonServicesModule,
   ],
-  controllers: [LedgerAdminController, AdminTransferController],
+  controllers: [
+    LedgerAdminController,
+    AdminTransferController,
+    SurplusWithdrawalController,
+  ],
   providers: [
     MockOnchainAdapter,
     SorobanAdapter,
     onchainAdapterProvider,
     OnchainProcessor,
     OnchainService,
+    StellarLedgerSource,
     LedgerBackfillService,
     LedgerReconciliationService,
+    SurplusWithdrawalService,
     AdminTransferService,
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
@@ -114,8 +123,10 @@ const onchainAdapterProvider: Provider = {
   exports: [
     ONCHAIN_ADAPTER_TOKEN,
     OnchainService,
+    StellarLedgerSource,
     LedgerBackfillService,
     LedgerReconciliationService,
+    SurplusWithdrawalService,
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
     SorobanEventCorrelationService,

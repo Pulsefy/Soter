@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotImplementedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { StellarLedgerSource } from './stellar-ledger-source';
 
 export interface ReconciliationJobData {
   startLedger: number;
@@ -10,20 +11,13 @@ export interface ReconciliationJobData {
   thresholdPercent: number;
 }
 
-/**
- * A ledger entry as reported by the chain, compared against the stored
- * BalanceLedger rows during reconciliation.
- */
-export interface OnChainLedgerEntry {
-  id: string;
-  ledger: number;
-  amount: number;
-  eventType: string;
-}
-
 export interface ReconciliationDiscrepancy {
   ledger: number;
-  type: 'missing' | 'amount_mismatch' | 'count_mismatch';
+  type:
+    | 'missing'
+    | 'amount_mismatch'
+    | 'event_type_mismatch'
+    | 'count_mismatch';
   /** Value recorded off-chain. Shape varies by discrepancy type. */
   expected: unknown;
   /** Value observed on-chain. Shape varies by discrepancy type. */
@@ -45,6 +39,7 @@ export interface ReconciliationReport {
     byType: {
       missing: number;
       amount_mismatch: number;
+      event_type_mismatch: number;
       count_mismatch: number;
     };
   };
@@ -58,16 +53,32 @@ export class LedgerReconciliationService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue('onchain') private readonly onchainQueue: Queue,
+    private readonly ledgerSource: StellarLedgerSource,
   ) {}
 
+  /**
+   * Queue a reconciliation over a ledger range.
+   *
+   * Refuses to enqueue when the backend has no live on-chain source configured.
+   * The alternative — queueing a job that will find nothing and report a clean
+   * bill of health — is the false assurance this job exists to eliminate, so an
+   * operator gets an explicit 501 instead.
+   */
   async triggerReconciliation(
     startLedger: number,
     endLedger: number,
     campaignId?: string,
     thresholdPercent: number = 5,
   ): Promise<ReconciliationReport> {
+    if (!this.ledgerSource.isEnabled()) {
+      throw new NotImplementedException(
+        `Reconciliation is not available against live data: ${this.ledgerSource.describeUnavailable()} ` +
+          'Configure AID_ESCROW_CONTRACT_ID with STELLAR_RPC_URL / STELLAR_HORIZON_URL before reconciling.',
+      );
+    }
+
     this.logger.log(
-      `Triggering reconciliation for ledgers ${startLedger} to ${endLedger}`,
+      `Triggering reconciliation for ledgers ${startLedger} to ${endLedger} via ${this.ledgerSource.sourceKind}`,
     );
 
     const totalLedgers = endLedger - startLedger + 1;
@@ -108,7 +119,12 @@ export class LedgerReconciliationService {
       summary: {
         totalDiscrepancies: 0,
         bySeverity: { low: 0, medium: 0, high: 0 },
-        byType: { missing: 0, amount_mismatch: 0, count_mismatch: 0 },
+        byType: {
+          missing: 0,
+          amount_mismatch: 0,
+          event_type_mismatch: 0,
+          count_mismatch: 0,
+        },
       },
       actionable: false,
     };
@@ -125,8 +141,13 @@ export class LedgerReconciliationService {
       `Processing reconciliation: ledgers ${startLedger}-${endLedger}`,
     );
 
-    // Fetch on-chain data (simulated - would call Horizon API in production)
-    const onChainData = this.fetchOnChainData(startLedger, endLedger);
+    // Genuine on-chain data, read through the shared Stellar client. This is
+    // the only comparison source; there is no local fallback, so a run either
+    // reconciles against the chain or fails.
+    const onChainData = await this.ledgerSource.fetchLedgerEntries({
+      startLedger,
+      endLedger,
+    });
 
     // Fetch stored ledger entries
     const storedEntries = await this.prisma.balanceLedger.findMany({
@@ -166,11 +187,13 @@ export class LedgerReconciliationService {
         });
       }
 
-      // Check event type mismatch
+      // A movement the chain and the store both know about, filed under
+      // different classifications, is a real disagreement: the same id cannot
+      // legitimately be a lock on one side and a disburse on the other.
       if (onChainEntry.eventType !== storedEntry.eventType) {
         discrepancies.push({
           ledger: onChainEntry.ledger,
-          type: 'count_mismatch',
+          type: 'event_type_mismatch',
           expected: onChainEntry.eventType,
           observed: storedEntry.eventType,
           severity: 'medium',
@@ -195,7 +218,7 @@ export class LedgerReconciliationService {
     const summary = this.calculateSummary(discrepancies);
 
     this.logger.log(
-      `Reconciliation complete: ${checkedLedgers} ledgers checked, ${summary.totalDiscrepancies} discrepancies found`,
+      `Reconciliation complete: ${checkedLedgers} on-chain movements checked, ${summary.totalDiscrepancies} discrepancies found`,
     );
 
     return {
@@ -211,22 +234,18 @@ export class LedgerReconciliationService {
     };
   }
 
-  private fetchOnChainData(
-    _startLedger: number,
-    _endLedger: number,
-  ): OnChainLedgerEntry[] {
-    // Placeholder for actual Horizon API call
-    // In production, this would query the Stellar Horizon API
-    return [];
-  }
-
   private calculateSummary(
     discrepancies: ReconciliationDiscrepancy[],
   ): ReconciliationReport['summary'] {
     const summary: ReconciliationReport['summary'] = {
       totalDiscrepancies: discrepancies.length,
       bySeverity: { low: 0, medium: 0, high: 0 },
-      byType: { missing: 0, amount_mismatch: 0, count_mismatch: 0 },
+      byType: {
+        missing: 0,
+        amount_mismatch: 0,
+        event_type_mismatch: 0,
+        count_mismatch: 0,
+      },
     };
 
     for (const d of discrepancies) {
@@ -266,7 +285,12 @@ export class LedgerReconciliationService {
       summary: (progress.summary as ReconciliationReport['summary']) ?? {
         totalDiscrepancies: 0,
         bySeverity: { low: 0, medium: 0, high: 0 },
-        byType: { missing: 0, amount_mismatch: 0, count_mismatch: 0 },
+        byType: {
+          missing: 0,
+          amount_mismatch: 0,
+          event_type_mismatch: 0,
+          count_mismatch: 0,
+        },
       },
       actionable: progress.actionable === true,
     };

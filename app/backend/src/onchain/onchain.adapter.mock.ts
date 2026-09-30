@@ -39,8 +39,16 @@ import {
   AdminTransferParams,
   AdminTransferResult,
   TransferAdminParams,
+  PendingWithdrawal,
+  ProposeSurplusWithdrawalParams,
+  SurplusWithdrawalParams,
+  SurplusWithdrawalResult,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
+import {
+  SURPLUS_WITHDRAWAL_TIMELOCK_SECS,
+  SurplusWithdrawalTimelockNotElapsedError,
+} from './utils/surplus-withdrawal.errors';
 
 /**
  * Lifecycle states a mock aid package can occupy.
@@ -86,6 +94,21 @@ export class MockOnchainAdapter implements OnchainAdapter {
   private readonly mockAdmins = new Map<string, string>();
   private readonly mockPendingAdmins = new Map<string, string>();
   private readonly mockContractId = 'MOCK_CONTRACT_ID';
+
+  /**
+   * Pending surplus withdrawal proposals per contract, mirroring the
+   * contract's single `KEY_PENDING_WITHDRAWAL` instance slot.
+   */
+  private readonly mockPendingWithdrawals = new Map<string, PendingWithdrawal>();
+
+  /**
+   * Delay applied between a proposal and its execution.
+   *
+   * Defaults to the contract's real delay. Tests that need the execute leg to
+   * succeed in the same run set this to 0, which reproduces a matured timelock
+   * without waiting a day.
+   */
+  mockSurplusWithdrawalDelaySeconds = SURPLUS_WITHDRAWAL_TIMELOCK_SECS;
 
   /**
    * Read the mock's admin pair, seeding a default admin on first access.
@@ -601,6 +624,134 @@ export class MockOnchainAdapter implements OnchainAdapter {
       ),
       adminAddress,
       pendingAdminAddress: null,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Read the mock's pending surplus withdrawal for a contract, if any.
+   */
+  async getPendingWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<PendingWithdrawal | null> {
+    await Promise.resolve();
+    return (
+      this.mockPendingWithdrawals.get(params.contractId ?? this.mockContractId) ??
+      null
+    );
+  }
+
+  /**
+   * Record a surplus withdrawal proposal and start the timelock. Mirrors the
+   * contract's rule that only one proposal may be pending at a time.
+   */
+  async proposeSurplusWithdrawal(
+    params: ProposeSurplusWithdrawalParams,
+  ): Promise<SurplusWithdrawalResult> {
+    await Promise.resolve();
+    const contractId = params.contractId ?? this.mockContractId;
+
+    const to = params.to?.trim();
+    const token = params.token?.trim();
+    const amount = params.amount?.trim();
+
+    if (!to) {
+      throw new BadRequestException('to is required');
+    }
+    if (!token) {
+      throw new BadRequestException('token is required');
+    }
+    if (!amount || !/^\d+$/.test(amount) || BigInt(amount) <= 0n) {
+      throw new BadRequestException(
+        'amount must be a positive integer string in the token base unit',
+      );
+    }
+    if (this.mockPendingWithdrawals.has(contractId)) {
+      throw new BadRequestException(
+        'SurplusWithdrawalPending: a withdrawal proposal is already pending',
+      );
+    }
+
+    const pending: PendingWithdrawal = {
+      to,
+      token,
+      amount,
+      executableAt:
+        Math.floor(Date.now() / 1000) + this.mockSurplusWithdrawalDelaySeconds,
+    };
+    this.mockPendingWithdrawals.set(contractId, pending);
+
+    return {
+      contractId,
+      transactionHash: this.generateMockHash(
+        `propose-surplus-withdrawal-${contractId}-${to}-${amount}`,
+      ),
+      pendingWithdrawal: { ...pending },
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Abandon a pending proposal. Moves no funds.
+   */
+  async cancelSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    await Promise.resolve();
+    const contractId = params.contractId ?? this.mockContractId;
+
+    if (!this.mockPendingWithdrawals.delete(contractId)) {
+      throw new BadRequestException(
+        'SurplusWithdrawalNotPending: no withdrawal proposal is pending',
+      );
+    }
+
+    return {
+      contractId,
+      transactionHash: this.generateMockHash(
+        `cancel-surplus-withdrawal-${contractId}`,
+      ),
+      pendingWithdrawal: null,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Transfer the proposed funds, clearing the proposal. Rejects while the
+   * timelock is still active with a distinct error carrying the wait.
+   */
+  async executeSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    await Promise.resolve();
+    const contractId = params.contractId ?? this.mockContractId;
+    const pending = this.mockPendingWithdrawals.get(contractId);
+
+    if (!pending) {
+      throw new BadRequestException(
+        'SurplusWithdrawalNotPending: no withdrawal proposal is pending',
+      );
+    }
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (nowSeconds < pending.executableAt) {
+      const remaining = pending.executableAt - nowSeconds;
+      throw new SurplusWithdrawalTimelockNotElapsedError(
+        `SurplusWithdrawalTimelockActive: withdrawal of ${pending.amount} to ` +
+          `${pending.to} becomes executable in ${remaining}s ` +
+          `(at ledger timestamp ${pending.executableAt})`,
+        pending.executableAt,
+      );
+    }
+
+    this.mockPendingWithdrawals.delete(contractId);
+
+    return {
+      contractId,
+      transactionHash: this.generateMockHash(
+        `execute-surplus-withdrawal-${contractId}-${pending.amount}`,
+      ),
+      pendingWithdrawal: null,
       timestamp: new Date(),
     };
   }
