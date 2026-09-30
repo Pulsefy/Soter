@@ -18,6 +18,7 @@ from schemas.humanitarian import LLMVerificationPayload
 from services.humanitarian_prompt import (
     HumanitarianPromptEngine,
     default_prompt_registry,
+    detect_language,
 )
 from services.prompt_registry import PromptRegistry
 from services.circuit_breaker import CircuitBreaker
@@ -26,16 +27,8 @@ from services.provider_cost_ceiling import ProviderCostCeiling
 
 logger = logging.getLogger(__name__)
 
-# Total attempts against a single (provider, prompt_variant) combination
-# before giving up as persistently malformed: the initial call plus this
-# many reformat/repair retries.
 _MAX_ATTEMPTS_PER_PROMPT = 2
 
-# Substrings (checked case-insensitively) that indicate the model declined
-# to answer at all, rather than attempting the requested output. Not
-# exhaustive by design -- broad enough to catch common refusal phrasing
-# without flagging legitimate "inconclusive" verdicts, which are a real,
-# valid answer, not a refusal.
 _REFUSAL_MARKERS: Tuple[str, ...] = (
     "i cannot assist",
     "i can't assist",
@@ -53,7 +46,7 @@ _REFUSAL_MARKERS: Tuple[str, ...] = (
 
 
 class HumanitarianVerificationService:
-    """Runs humanitarian verification against configured LLM providers with versioned prompts."""
+    """Runs humanitarian verification against configured LLM providers."""
 
     def __init__(
         self,
@@ -69,7 +62,6 @@ class HumanitarianVerificationService:
         self.cost_ceiling = cost_ceiling or ProviderCostCeiling()
 
     def _apply_settings_prompt_versions(self) -> None:
-        """Apply active prompt versions configured in settings if registered."""
         if hasattr(settings, "humanitarian_primary_prompt_version"):
             primary_v = settings.humanitarian_primary_prompt_version
             if self.prompt_registry.has("humanitarian_primary", primary_v):
@@ -103,13 +95,14 @@ class HumanitarianVerificationService:
         prompt_version: Optional[str] = None,
         primary_prompt_version: Optional[str] = None,
         fallback_prompt_version: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
         try:
             evidence = supporting_evidence or []
             context = context_factors or {}
+            effective_language = language or detect_language(aid_claim)
 
-            # Resolve primary and fallback prompt templates from registry
             pri_ver = primary_prompt_version or prompt_version
             primary_prompt_obj = self.prompt_registry.get(
                 "humanitarian_primary", version=pri_ver
@@ -118,6 +111,7 @@ class HumanitarianVerificationService:
                 aid_claim=aid_claim,
                 supporting_evidence=evidence,
                 context_factors=context,
+                language=effective_language,
             )
 
             fb_ver = fallback_prompt_version
@@ -134,6 +128,7 @@ class HumanitarianVerificationService:
                 aid_claim=aid_claim,
                 supporting_evidence=evidence,
                 context_factors=context,
+                language=effective_language,
             )
 
             providers = self.registry.resolve_llm(provider_preference)
@@ -143,8 +138,8 @@ class HumanitarianVerificationService:
                 )
 
             errors: List[str] = []
-
             pending_providers = list(providers)
+
             while pending_providers:
                 provider_name, provider = pending_providers.pop(0)
                 if self.cost_ceiling.is_exceeded(provider_name):
@@ -181,6 +176,7 @@ class HumanitarianVerificationService:
                     pending_providers.remove(fallback)
                     pending_providers.insert(0, fallback)
                     continue
+
                 breaker = self._get_breaker(provider_name)
                 if not breaker.allow_request():
                     logger.warning(
@@ -199,11 +195,12 @@ class HumanitarianVerificationService:
                 ):
                     try:
                         logger.info(
-                            "Attempting humanitarian verification with provider=%s model=%s prompt=%s version=%s",
+                            "Attempting humanitarian verification with provider=%s model=%s prompt=%s version=%s language=%s",
                             provider_name,
                             model,
                             prompt_variant,
                             prompt_obj.version,
+                            effective_language,
                         )
                         parsed, response = self._call_and_validate(
                             provider=provider,
@@ -238,15 +235,11 @@ class HumanitarianVerificationService:
                             "prompt_variant": prompt_variant,
                             "prompt_name": prompt_obj.name,
                             "prompt_version": prompt_obj.version,
+                            "language": effective_language,
                             "verification": parsed,
                             "raw_response": response.content,
                         }
                     except (MalformedProviderOutputError, ProviderRefusalError) as exc:
-                        # The provider answered -- the content just wasn't
-                        # usable (bad shape) or was a decline (not a
-                        # transport problem), so this does not trip the
-                        # circuit breaker the way a connection/timeout
-                        # failure would.
                         err = f"provider={provider_name}, model={model}, prompt={prompt_variant}, error={exc}"
                         errors.append(err)
                         logger.warning(
@@ -269,7 +262,6 @@ class HumanitarianVerificationService:
             metrics.PIPELINE_STEP_LATENCY.labels(step_name="verify").observe(latency)
 
     def all_providers_unavailable(self) -> bool:
-        """Return True when every configured LLM provider circuit is open."""
         if settings.test_provider_mode:
             return False
 
@@ -285,19 +277,6 @@ class HumanitarianVerificationService:
         supporting_evidence: Optional[List[str]] = None,
         context_factors: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Return a structured payload indicating a claim has been routed to manual review.
-
-        Called when ``all_providers_unavailable()`` is True. The payload
-        is surfaced directly to the caller (and therefore to the backend)
-        so the claim visibly enters the human-review queue rather than
-        being silently discarded.
-
-        Recovery is automatic: once the circuit-breaker ``recovery_timeout``
-        has elapsed, the next ``allow_request()`` call transitions the
-        breaker from OPEN -> HALF_OPEN and normal AI-assisted verification
-        resumes without manual intervention (see
-        :meth:`check_recovery`).
-        """
         reason = (
             "All AI providers are currently unavailable; "
             "claim queued for human review."
@@ -316,14 +295,6 @@ class HumanitarianVerificationService:
         }
 
     def check_recovery(self) -> bool:
-        """Return True if at least one provider has recovered and can accept requests.
-
-        Recovery is automatic: the circuit breaker transitions from OPEN to
-        HALF_OPEN when ``recovery_timeout`` seconds have elapsed and
-        ``allow_request()`` is called. This method is a convenience probe
-        for callers that need to know whether normal routing can resume
-        without external intervention.
-        """
         if settings.test_provider_mode:
             return True
 
@@ -342,7 +313,6 @@ class HumanitarianVerificationService:
         return f"{provider_name}:{model}"
 
     def get_prompt_version(self, prompt_name: str = "humanitarian_primary") -> str:
-        """Return the active version string for the given prompt name."""
         return self.prompt_registry.get_active_version(prompt_name)
 
     def _get_model_for_provider(self, provider: str) -> str:
@@ -370,13 +340,6 @@ class HumanitarianVerificationService:
         return any(marker in lowered for marker in _REFUSAL_MARKERS)
 
     def _validate_schema(self, parsed: Dict[str, Any]) -> None:
-        """Raises :class:`MalformedProviderOutputError` if `parsed` does not
-        match the shape downstream code relies on (see
-        `LLMVerificationPayload`). Validation is used only to accept/reject;
-        the caller keeps using the original `parsed` dict either way, so a
-        provider's extra fields (criteria_assessment, risk_flags, ...) are
-        never dropped.
-        """
         try:
             LLMVerificationPayload.model_validate(parsed)
         except ValidationError as exc:
@@ -393,16 +356,6 @@ class HumanitarianVerificationService:
         prompt: Dict[str, str],
         timeout: Optional[float],
     ) -> Tuple[Dict[str, Any], LLMResponse]:
-        """Calls `provider` and returns `(validated_payload, response)`.
-
-        On malformed JSON or a schema-validation failure, retries up to
-        `_MAX_ATTEMPTS_PER_PROMPT` total attempts, asking the model to
-        repair its own previous output each time. Raises
-        `ProviderRefusalError` immediately (no repair attempt -- reformatting
-        won't turn a decline into an answer) if the response looks like an
-        explicit refusal, or `MalformedProviderOutputError` once every
-        repair attempt is exhausted.
-        """
         system_prompt = prompt["system"]
         user_prompt = prompt["user"]
         last_error: Optional[Exception] = None

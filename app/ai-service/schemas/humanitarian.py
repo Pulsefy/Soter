@@ -4,18 +4,7 @@ from schemas.common import AnchorMetadata
 
 
 class LLMVerificationPayload(BaseModel):
-    """Expected shape of a verification LLM's parsed JSON response.
-
-    Only the fields every prompt variant asks for and that downstream code
-    actually reads (`verdict`, `confidence`) are required; the rest of the
-    requested schema (`criteria_assessment`, `risk_flags`, etc.) is accepted
-    but not enforced here; the response is still processed by the caller
-    with those fields present if the provider included them. This model
-    exists to catch what genuinely renders a response unusable -- a missing
-    verdict, an out-of-range confidence, or a wrong type -- not to be a
-    strict superset check that would reject an otherwise-usable answer over
-    an omitted optional field.
-    """
+    """Expected shape of a verification LLM's parsed JSON response."""
 
     model_config = {"extra": "allow"}
 
@@ -57,6 +46,15 @@ class HumanitarianVerificationRequest(BaseModel):
         description="Explicit prompt version to use from registry (defaults to configured active version)",
         examples=["v1"],
     )
+    language: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional BCP-47 language hint (en/es/fr/ar). If omitted, the "
+            "language is auto-detected from aid_claim. Falls back to 'en' "
+            "when detection is ambiguous."
+        ),
+        examples=["en"],
+    )
     anchor_metadata: Optional[AnchorMetadata] = None
 
     model_config = {
@@ -72,6 +70,7 @@ class HumanitarianVerificationRequest(BaseModel):
                     "provider_preference": "auto",
                     "timeout": 30.0,
                     "prompt_version": "v1",
+                    "language": "en",
                     "anchor_metadata": {
                         "campaign_ref": "campaign-2024-001",
                         "claim_id": "claim-abc123",
@@ -89,6 +88,11 @@ class HumanitarianVerificationResponse(BaseModel):
     prompt_variant: Optional[str] = Field(None, examples=["primary"])
     prompt_name: Optional[str] = Field(None, examples=["humanitarian_primary"])
     prompt_version: Optional[str] = Field(None, examples=["v1"])
+    language: Optional[str] = Field(
+        None,
+        description="Language code used to build the verification prompt.",
+        examples=["en"],
+    )
     verification: Optional[Dict[str, Any]] = Field(
         None,
         examples=[
@@ -105,8 +109,7 @@ class HumanitarianVerificationResponse(BaseModel):
         default=False,
         description=(
             "True when the claim could not be verified automatically and has been "
-            "routed to a human reviewer. The claim will be re-processed by the AI "
-            "pipeline once a provider becomes available again."
+            "routed to a human reviewer."
         ),
         examples=[True],
     )
@@ -114,7 +117,7 @@ class HumanitarianVerificationResponse(BaseModel):
         default=None,
         description=(
             "Human-readable explanation of why the claim was flagged for manual "
-            "review. Present only when flagged_for_manual_review is True."
+            "review."
         ),
         examples=[
             "All AI providers are currently unavailable; claim queued for human review."
@@ -128,7 +131,9 @@ class HumanitarianVerificationResponse(BaseModel):
                     "success": True,
                     "provider": "test",
                     "model": "gpt-4o",
-                    "prompt_variant": "v1",
+                    "prompt_variant": "primary",
+                    "prompt_version": "v1",
+                    "language": "en",
                     "verification": {
                         "eligible": True,
                         "confidence": 0.9,
