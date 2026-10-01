@@ -1,4 +1,5 @@
-import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
 import { ConfigService } from '@nestjs/config';
@@ -33,7 +34,9 @@ export class SandboxService {
         `Attempted demo seed reset in disallowed environment: ${nodeEnv}`,
         SandboxService.name,
       );
-      throw new ForbiddenException(
+      throw new AppException(
+        ERROR_CODES.FORBIDDEN,
+        403,
         'Demo seed reset is only allowed in development, test, or sandbox environments.',
       );
     }
@@ -151,6 +154,7 @@ export class SandboxService {
             amount: claimSeed.amount,
             status: claimSeed.status,
             evidenceRef: claimSeed.evidenceRef,
+            cancelReasonCode: claimSeed.cancelReasonCode,
           },
           create: {
             campaignId: campaignId,
@@ -158,6 +162,7 @@ export class SandboxService {
             amount: claimSeed.amount,
             status: claimSeed.status,
             evidenceRef: claimSeed.evidenceRef,
+            cancelReasonCode: claimSeed.cancelReasonCode,
           },
         });
         this.loggerService.log(

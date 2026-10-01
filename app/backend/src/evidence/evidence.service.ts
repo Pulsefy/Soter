@@ -1,9 +1,5 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { AuditService } from '../audit/audit.service';
@@ -77,7 +73,9 @@ export class EvidenceService {
           orgId,
         },
       });
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'File already exists in queue for this organization',
       );
     }
@@ -268,10 +266,19 @@ export class EvidenceService {
       where: { id, ownerId },
     });
 
-    if (!item) throw new NotFoundException('Queue item not found');
+    if (!item)
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Queue item not found',
+      );
 
     if (item.status === EvidenceStatus.completed) {
-      throw new BadRequestException('Item already uploaded');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Item already uploaded',
+      );
     }
 
     await this.prisma.evidenceQueueItem.update({
@@ -289,7 +296,12 @@ export class EvidenceService {
       where: { id, ownerId },
     });
 
-    if (!item) throw new NotFoundException('Queue item not found');
+    if (!item)
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Queue item not found',
+      );
 
     // Delete the durably stored artifact from the StorageDriver, if present.
     if (item.storageKey) {

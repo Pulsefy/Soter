@@ -1,16 +1,17 @@
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-  Logger,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
-import { ClaimStatus } from '@prisma/client';
+import { CancellationReportQueryDto } from './dto/cancellation-report-query.dto';
+import {
+  CancellationReportDto,
+  CancellationReasonBreakdownDto,
+} from './dto/cancellation-report.dto';
+import { CancelReasonCode, ClaimStatus, Prisma } from '@prisma/client';
 import {
   CLAIM_EVENT,
   ClaimCancelledEvent,
@@ -43,6 +44,8 @@ export class CancelAndReissueService {
    * Cancel an active claim.
    *
    * - Marks the claim as `cancelled` and records who cancelled it and why.
+   *   Both halves of "why" are stored: `cancelReasonCode` (structured, reported
+   *   on) and `cancelReason` (free-text detail, never parsed).
    * - Writes an `unlock` entry to BalanceLedger so the campaign budget is freed.
    * - Emits a `claim.cancelled` audit event with the full relationship context.
    *
@@ -55,15 +58,21 @@ export class CancelAndReissueService {
     });
 
     if (!claim || claim.deletedAt) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
     if (claim.status === ClaimStatus.cancelled) {
-      throw new BadRequestException('Claim is already cancelled');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Claim is already cancelled',
+      );
     }
 
     if (!CANCELLABLE_STATUSES.includes(claim.status)) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Cannot cancel a claim in status "${claim.status}". ` +
           `Only ${CANCELLABLE_STATUSES.join(', ')} claims may be cancelled.`,
       );
@@ -79,6 +88,7 @@ export class CancelAndReissueService {
           status: ClaimStatus.cancelled,
           cancelledAt: now,
           cancelledBy: dto.operatorId,
+          cancelReasonCode: dto.code,
           cancelReason: dto.reason ?? null,
         },
         include: { campaign: true },
@@ -92,7 +102,9 @@ export class CancelAndReissueService {
           eventType: 'unlock',
           // Negative amount: this entry reduces the total locked balance
           amount: -claim.amount,
-          note: `Claim ${id} cancelled by ${dto.operatorId}. Reason: ${dto.reason ?? 'none'}`,
+          note:
+            `Claim ${id} cancelled by ${dto.operatorId}. ` +
+            `Code: ${dto.code}. Detail: ${dto.reason ?? 'none'}`,
         },
       });
 
@@ -105,6 +117,7 @@ export class CancelAndReissueService {
       claimId: id,
       campaignId: claim.campaignId,
       operatorId: dto.operatorId,
+      reasonCode: dto.code,
       reason: dto.reason,
       unlockedAmount: claim.amount,
       timestamp: now,
@@ -153,15 +166,25 @@ export class CancelAndReissueService {
     });
 
     if (!original || original.deletedAt) {
-      throw new NotFoundException('Original claim not found');
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Original claim not found',
+      );
     }
 
     if (original.status === ClaimStatus.cancelled) {
-      throw new BadRequestException('Original claim is already cancelled');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Original claim is already cancelled',
+      );
     }
 
     if (!CANCELLABLE_STATUSES.includes(original.status)) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Cannot reissue from a claim in status "${original.status}". ` +
           `Only ${CANCELLABLE_STATUSES.join(', ')} claims may be reissued.`,
       );
@@ -183,6 +206,7 @@ export class CancelAndReissueService {
             status: ClaimStatus.cancelled,
             cancelledAt: now,
             cancelledBy: dto.operatorId,
+            cancelReasonCode: CancelReasonCode.reissued,
             cancelReason: dto.reason ?? `Reissued as new claim`,
           },
         });
@@ -232,6 +256,7 @@ export class CancelAndReissueService {
       claimId: originalId,
       campaignId: original.campaignId,
       operatorId: dto.operatorId,
+      reasonCode: CancelReasonCode.reissued,
       reason: dto.reason ?? `Reissued as ${newClaim.id}`,
       unlockedAmount: original.amount,
       timestamp: now,
@@ -244,6 +269,7 @@ export class CancelAndReissueService {
       campaignId: original.campaignId,
       operatorId: dto.operatorId,
       amount: newAmount,
+      reasonCode: CancelReasonCode.reissued,
       reason: dto.reason,
       timestamp: now,
     };
@@ -302,7 +328,7 @@ export class CancelAndReissueService {
   async getReissueHistory(id: string) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim || claim.deletedAt) {
-      throw new NotFoundException('Claim not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
     // Walk backwards to find the root of the chain
@@ -311,10 +337,104 @@ export class CancelAndReissueService {
     // Walk forwards from root to collect all descendants
     const chain = await this.collectChain(root);
 
-    return chain.map(c => ({
-      ...c,
-      recipientRef: this.encryptionService.decrypt(c.recipientRef),
-    }));
+    return chain
+      .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined)
+      .map(c => ({
+        ...c,
+        recipientRef: this.encryptionService.decrypt(c.recipientRef),
+      }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cancellation reporting
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Group cancellations by `cancelReasonCode` so "why are claims being
+   * cancelled?" is answerable without reading free text.
+   *
+   * Aggregation happens in the database rather than in JS — the grouping is
+   * pushed down to Postgres and only the resulting buckets cross the wire, so
+   * the cost does not grow with the number of cancelled claims.
+   *
+   * Cancelled claims with a NULL code (rows written before the migration, or
+   * by a code path that predates it) are reported separately in `uncodedCount`
+   * rather than being dropped, so the totals always reconcile.
+   */
+  async getCancellationReport(
+    query: CancellationReportQueryDto,
+  ): Promise<CancellationReportDto> {
+    const where = this.buildCancellationReportWhere(query);
+
+    const [grouped, totals, uncodedCount] = await Promise.all([
+      this.prisma.claim.groupBy({
+        by: ['cancelReasonCode'],
+        where,
+        _count: { _all: true },
+        _sum: { amount: true },
+      }),
+      this.prisma.claim.aggregate({
+        where,
+        _count: { _all: true },
+        _sum: { amount: true },
+      }),
+      this.prisma.claim.count({ where: { ...where, cancelReasonCode: null } }),
+    ]);
+
+    const breakdown: CancellationReasonBreakdownDto[] = grouped
+      .filter(
+        (row): row is typeof row & { cancelReasonCode: CancelReasonCode } =>
+          row.cancelReasonCode !== null,
+      )
+      .map(row => ({
+        code: row.cancelReasonCode,
+        count: row._count._all,
+        totalAmount: row._sum.amount ?? 0,
+      }))
+      .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
+
+    return {
+      totalCancelled: totals._count._all,
+      totalAmount: totals._sum.amount ?? 0,
+      uncodedCount,
+      breakdown,
+    };
+  }
+
+  private buildCancellationReportWhere(
+    query: CancellationReportQueryDto,
+  ): Prisma.ClaimWhereInput {
+    const where: Prisma.ClaimWhereInput = {
+      status: ClaimStatus.cancelled,
+      deletedAt: null,
+    };
+
+    if (query.campaignId) where.campaignId = query.campaignId;
+
+    if (query.from || query.to) {
+      if (query.from && isNaN(Date.parse(query.from))) {
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Invalid 'from' date: ${query.from}`,
+        );
+      }
+      if (query.to && isNaN(Date.parse(query.to))) {
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Invalid 'to' date: ${query.to}`,
+        );
+      }
+      // Filter on cancelledAt, not createdAt: the question being answered is
+      // "why were claims cancelled in this window", not "which claims from this
+      // window were later cancelled".
+      where.cancelledAt = {};
+      if (query.from) where.cancelledAt.gte = new Date(query.from);
+      if (query.to) where.cancelledAt.lte = new Date(query.to);
+    }
+
+    return where;
   }
 
   // ---------------------------------------------------------------------------
@@ -334,7 +454,7 @@ export class CancelAndReissueService {
       where: { id: campaignId },
     });
     if (!campaign || campaign.deletedAt) {
-      throw new NotFoundException('Campaign not found');
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Campaign not found');
     }
 
     const ledger = await this.prisma.balanceLedger.findMany({
@@ -410,7 +530,7 @@ export class CancelAndReissueService {
       }
     }
 
-    return results.filter(Boolean) as NonNullable<(typeof results)[number]>[];
+    return results.filter(Boolean);
   }
 
   /**

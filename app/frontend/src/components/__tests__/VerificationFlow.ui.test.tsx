@@ -3,6 +3,7 @@ import React from 'react';
 import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
 import { VerificationFlow } from '../VerificationFlow';
+import { ToastProvider } from '@/components/ToastProvider';
 import * as networkGuard from '@/hooks/useNetworkGuard';
 
 jest.mock('next-intl', () => ({
@@ -38,7 +39,11 @@ describe('VerificationFlow UI Network Guard', () => {
             expectedNetwork: 'mainnet'
         });
 
-        render(<VerificationFlow />);
+        render(
+            <ToastProvider>
+                <VerificationFlow />
+            </ToastProvider>
+        );
 
         // The banner should be rendered
         expect(screen.getByText(/Network mismatch/i)).toBeInTheDocument();
@@ -56,7 +61,11 @@ describe('VerificationFlow UI Network Guard', () => {
             expectedNetwork: 'mainnet'
         });
 
-        render(<VerificationFlow />);
+        render(
+            <ToastProvider>
+                <VerificationFlow />
+            </ToastProvider>
+        );
 
         // The banner should NOT be rendered
         expect(screen.queryByText(/Network mismatch/i)).not.toBeInTheDocument();

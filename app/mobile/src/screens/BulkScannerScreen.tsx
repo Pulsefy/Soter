@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Text,
   View,
@@ -17,6 +17,13 @@ import { useSync } from '../contexts/SyncContext';
 import { createScanDeduper } from './scanDeduper';
 import { useCameraPermission } from '../hooks/useCameraPermission';
 import { CameraPermissionDenied } from '../components/CameraPermissionDenied';
+import {
+  recordItemDeduped,
+  recordItemFailed,
+  recordItemQueued,
+  recordScanReceived,
+  recordScanStarted,
+} from '../services/scannerBreadcrumbs';
 
 type BulkScannerScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'BulkScanner'>;
 
@@ -59,11 +66,16 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
     statusMessage,
   } = useCameraPermission();
 
+  useEffect(() => {
+    recordScanStarted('bulk');
+  }, []);
+
   const handleBarCodeScanned = async ({ data }: BarcodeScanningResult) => {
     if (isProcessing) return;
 
     const normalizedData = data.trim();
     if (isDuplicateScan(normalizedData)) {
+      recordItemDeduped('bulk', { ...stats, skipped: stats.skipped + 1 });
       setStats(prev => ({ ...prev, skipped: prev.skipped + 1 }));
       setLastScanResult({ status: 'skipped', message: 'Duplicate scan skipped. Ready for the next package.' });
       return;
@@ -75,6 +87,8 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
     const regex = /^soter:\/\/package\/(.+)$/;
     const match = normalizedData.match(regex);
 
+    recordScanReceived('bulk', { ...stats, scanned: stats.scanned + 1 });
+
     setStats(prev => ({ ...prev, scanned: prev.scanned + 1 }));
 
     if (match && match[1]) {
@@ -85,6 +99,11 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
         const result = await queueClaimConfirmation(aidId, claimId);
         
         if (result.status === 'completed' || result.status === 'queued') {
+          recordItemQueued('bulk', {
+            ...stats,
+            scanned: stats.scanned + 1,
+            verified: stats.verified + 1,
+          });
           setStats(prev => ({ ...prev, verified: prev.verified + 1 }));
           setLastScanResult({ 
             status: 'success', 
@@ -92,10 +111,20 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
           });
         }
       } catch (error) {
+        recordItemFailed('bulk', {
+          ...stats,
+          scanned: stats.scanned + 1,
+          failed: stats.failed + 1,
+        });
         setStats(prev => ({ ...prev, failed: prev.failed + 1 }));
         setLastScanResult({ status: 'error', message: 'Verification failed. Please try again.' });
       }
     } else {
+      recordItemFailed('bulk', {
+        ...stats,
+        scanned: stats.scanned + 1,
+        failed: stats.failed + 1,
+      });
       setStats(prev => ({ ...prev, failed: prev.failed + 1 }));
       setLastScanResult({ status: 'error', message: 'Invalid Soter QR code.' });
     }

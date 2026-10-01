@@ -25,7 +25,11 @@ import {
 } from '../services/syncQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useSaverMode } from './SaverModeContext';
-import { useSyncDeferral } from './SyncDeferralContext';
+import {
+  useSyncDeferral,
+  SyncFrequency,
+  SYNC_FREQUENCY_INTERVALS,
+} from './SyncDeferralContext';
 
 interface SyncContextValue extends SyncQueueState {
   isConnected: boolean;
@@ -63,6 +67,8 @@ interface SyncContextValue extends SyncQueueState {
   getActionsForAid: (aidId: string) => QueuedSyncAction[];
   forceSync: () => Promise<void>;
   deferralExplanation: string;
+  syncFrequency: SyncFrequency;
+  setSyncFrequency: (frequency: SyncFrequency) => Promise<void>;
 }
 
 const defaultValue: SyncContextValue = {
@@ -87,6 +93,8 @@ const defaultValue: SyncContextValue = {
   getActionsForAid: () => [],
   forceSync: async () => {},
   deferralExplanation: '',
+  syncFrequency: 'normal',
+  setSyncFrequency: async () => {},
 };
 
 const SyncContext = createContext<SyncContextValue>(defaultValue);
@@ -113,6 +121,8 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
     clearForceSync,
     getDeferralExplanation,
     setEstimatedUploadSize,
+    syncFrequency,
+    setSyncFrequency,
   } = useSyncDeferral();
 
   const flushNow = useCallback(async (force: boolean = false) => {
@@ -144,27 +154,54 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
     };
   }, []);
 
+  // Periodic background sync based on syncFrequency
+  useEffect(() => {
+    if (!isConnected || saverModeActive) {
+      return;
+    }
+
+    const intervalMs =
+      SYNC_FREQUENCY_INTERVALS[syncFrequency] ?? SYNC_FREQUENCY_INTERVALS.normal;
+    const intervalId = setInterval(() => {
+      void flushNow();
+    }, intervalMs);
+
+    return () => clearInterval(intervalId);
+  }, [flushNow, isConnected, saverModeActive, syncFrequency]);
+
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active' && isConnected) {
         // In saver mode, skip the automatic flush when returning to the app
         // to reduce background data usage. The user can still pull-to-refresh.
         if (!saverModeActive) {
+          if (syncFrequency === 'conservative' && syncState.lastSyncAt) {
+            const elapsed = Date.now() - new Date(syncState.lastSyncAt).getTime();
+            if (elapsed < SYNC_FREQUENCY_INTERVALS.conservative) {
+              return;
+            }
+          }
           void flushNow();
         }
       }
     });
 
     return () => subscription.remove();
-  }, [flushNow, isConnected, saverModeActive]);
+  }, [flushNow, isConnected, saverModeActive, syncFrequency, syncState.lastSyncAt]);
 
   useEffect(() => {
     // In saver mode, don't auto-flush on mount/reconnect – let the user
     // explicitly trigger refreshes to save data.
     if (isConnected && !saverModeActive) {
+      if (syncFrequency === 'conservative' && syncState.lastSyncAt) {
+        const elapsed = Date.now() - new Date(syncState.lastSyncAt).getTime();
+        if (elapsed < SYNC_FREQUENCY_INTERVALS.conservative) {
+          return;
+        }
+      }
       void flushNow();
     }
-  }, [flushNow, isConnected, saverModeActive]);
+  }, [flushNow, isConnected, saverModeActive, syncFrequency, syncState.lastSyncAt]);
 
   // Clear force sync override when component unmounts
   useEffect(() => {
@@ -254,6 +291,8 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
         await flushNow(true);
       },
       deferralExplanation: getDeferralExplanation(),
+      syncFrequency,
+      setSyncFrequency,
     };
   }, [
     flushNow, 
@@ -269,6 +308,8 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
     clearForceSync,
     getDeferralExplanation,
     setEstimatedUploadSize,
+    syncFrequency,
+    setSyncFrequency,
   ]);
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;

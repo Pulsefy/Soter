@@ -40,9 +40,15 @@ describe('Mock API Client', () => {
     const response = await fetchPromise;
     const data = await response.json();
 
+    // The endpoint returns the paginated envelope the API client expects
+    // ({ data, total, page, size, totalPages }) — see #921 / api-contract.ts.
     expect(response.status).toBe(200);
-    expect(Array.isArray(data)).toBe(true);
-    expect(data).toHaveLength(8);
+    expect(Array.isArray(data.data)).toBe(true);
+    expect(data.data).toHaveLength(8);
+    expect(data.total).toBe(8);
+    expect(data.page).toBe(1);
+    expect(data.size).toBe(10);
+    expect(data.totalPages).toBe(1);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -54,8 +60,12 @@ describe('Mock API Client', () => {
     const response = await fetchPromise;
     const data = await response.json();
 
+    // "pending" is not a valid AidPackageStatus, so the filtered page is empty;
+    // the response must still keep the paginated envelope shape.
     expect(response.status).toBe(200);
-    expect(Array.isArray(data)).toBe(true);
+    expect(Array.isArray(data.data)).toBe(true);
+    expect(data.data).toHaveLength(0);
+    expect(data.total).toBe(0);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 

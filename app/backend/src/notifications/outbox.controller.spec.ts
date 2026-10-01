@@ -1,5 +1,6 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+
 import { OutboxController } from './outbox.controller';
 import { NotificationsService } from './notifications.service';
 import { ApiKeyGuard } from '../common/guards/api-key.guard';
@@ -94,7 +95,7 @@ describe('OutboxController', () => {
       notificationsServiceMock.getOutboxRecord.mockResolvedValueOnce(null);
 
       await expect(controller.getOne('non-existent')).rejects.toThrow(
-        NotFoundException,
+        AppException,
       );
     });
 

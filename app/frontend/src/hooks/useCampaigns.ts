@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchClient } from '@/lib/mock-api/client';
+import { apiFetch } from '@/lib/api-client';
 import type {
   Campaign,
   CampaignCreatePayload,
@@ -10,7 +10,10 @@ import type {
 } from '@/types/campaign';
 import { useActivity } from './useActivity';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+// All requests go through the real API client, which addresses the backend as
+// `${NEXT_PUBLIC_API_URL}/api/v1/<resource>`. There is no demo-handler
+// interception here: a missing API URL falls back to the documented local
+// backend instead of silently serving fabricated campaigns.
 
 interface ApiResponse<T> {
   success: boolean;
@@ -20,7 +23,7 @@ interface ApiResponse<T> {
 }
 
 async function fetchCampaigns(): Promise<Campaign[]> {
-  const res = await fetchClient(`${API_URL}/campaigns`);
+  const res = await apiFetch('/campaigns');
   if (!res.ok) {
     throw new Error(`Failed to fetch campaigns: ${res.status}`);
   }
@@ -34,7 +37,7 @@ async function fetchCampaigns(): Promise<Campaign[]> {
 }
 
 async function fetchCampaign(id: string): Promise<Campaign> {
-  const res = await fetchClient(`${API_URL}/campaigns/${id}`);
+  const res = await apiFetch(`/campaigns/${id}`);
   if (!res.ok) {
     throw new Error(`Failed to fetch campaign: ${res.status}`);
   }
@@ -48,7 +51,7 @@ async function fetchCampaign(id: string): Promise<Campaign> {
 }
 
 async function fetchCampaignTimeline(id: string): Promise<CampaignTimelineMilestone[]> {
-  const res = await fetchClient(`${API_URL}/campaigns/${id}/timeline`);
+  const res = await apiFetch(`/campaigns/${id}/timeline`);
   if (!res.ok) {
     throw new Error(`Failed to fetch campaign timeline: ${res.status}`);
   }
@@ -62,7 +65,7 @@ async function fetchCampaignTimeline(id: string): Promise<CampaignTimelineMilest
 }
 
 async function postCampaign(payload: CampaignCreatePayload): Promise<Campaign> {
-  const res = await fetchClient(`${API_URL}/campaigns`, {
+  const res = await apiFetch('/campaigns', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -82,7 +85,7 @@ async function postCampaign(payload: CampaignCreatePayload): Promise<Campaign> {
 }
 
 async function patchCampaign(id: string, payload: CampaignUpdatePayload): Promise<Campaign> {
-  const res = await fetchClient(`${API_URL}/campaigns/${id}`, {
+  const res = await apiFetch(`/campaigns/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

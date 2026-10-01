@@ -119,6 +119,20 @@ function mapWebauthnErrorToResult(err: unknown): BiometricAuthResult {
   return 'error';
 }
 
+/**
+ * `navigator.credentials.create()` / `.get()` resolve with a
+ * `PublicKeyCredential` in real browsers, but the global constructor is absent
+ * in non-browser environments (jsdom, older polyfills) and also on credentials
+ * coming from another realm, where `instanceof` either throws or is false.
+ * Fall back to a structural check so the flow still works there.
+ */
+function isPublicKeyCredential(value: unknown): value is PublicKeyCredential {
+  if (typeof value !== 'object' || value === null) return false;
+  const ctor = typeof PublicKeyCredential === 'function' ? PublicKeyCredential : undefined;
+  if (ctor) return value instanceof ctor;
+  return (value as { type?: unknown }).type === 'public-key';
+}
+
 function inferAuthenticatorType(capabilities: string[]): BiometricCapabilities['type'] {
   if (capabilities.includes('face')) return 'face_id';
   if (capabilities.includes('fingerprint')) return 'touch_id';
@@ -244,7 +258,7 @@ export async function registerWebauthn(opts?: WebauthnRegisterOptions): Promise<
     };
 
     const credential = await navigator.credentials.create({ publicKey });
-    if (!credential || !(credential instanceof PublicKeyCredential)) {
+    if (!isPublicKeyCredential(credential)) {
       return 'failed';
     }
 
@@ -333,7 +347,7 @@ export async function authenticateBiometric(opts?: AuthenticateOptions): Promise
     };
 
     const assertion = await navigator.credentials.get({ publicKey });
-    if (!assertion || !(assertion instanceof PublicKeyCredential)) {
+    if (!isPublicKeyCredential(assertion)) {
       return 'failed';
     }
 

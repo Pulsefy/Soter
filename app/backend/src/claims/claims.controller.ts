@@ -1,3 +1,4 @@
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import {
   Controller,
   Get,
@@ -9,7 +10,6 @@ import {
   Request,
   Res,
   Version,
-  ForbiddenException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Request as ExpressRequest } from 'express';
@@ -26,6 +26,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { ClaimsService } from './claims.service';
+import { extractCorrelationId } from '../common/utils/correlation-id.util';
 import { CancelAndReissueService } from './cancel-and-reissue.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import {
@@ -35,6 +36,8 @@ import {
 } from './dto/claim-receipt.dto';
 import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
+import { CancellationReportQueryDto } from './dto/cancellation-report-query.dto';
+import { CancellationReportDto } from './dto/cancellation-report.dto';
 import { DisburseClaimDto } from './dto/disburse-claim.dto';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
 import { Roles } from 'src/auth/roles.decorator';
@@ -57,7 +60,8 @@ export class ClaimsController {
   ) {}
 
   private ensureOrgAccess(user: any, claim: any) {
-    if (!user) throw new ForbiddenException('Not authenticated');
+    if (!user)
+      throw new AppException(ERROR_CODES.FORBIDDEN, 403, 'Not authenticated');
     // Admins bypass this check
     if (user.role === AppRole.admin) return;
     // Only NGO role is org-scoped for this guard
@@ -67,7 +71,9 @@ export class ClaimsController {
     if (!claimOrgId) return; // nothing to check
 
     if (!user.ngoId || user.ngoId !== claimOrgId) {
-      throw new ForbiddenException(
+      throw new AppException(
+        ERROR_CODES.FORBIDDEN,
+        403,
         'Access denied: resource belongs to a different organization',
       );
     }
@@ -102,6 +108,51 @@ export class ClaimsController {
   })
   findAll() {
     return this.claimsService.findAll();
+  }
+
+  /**
+   * Declared before `@Get(':id')` so Express does not bind the literal path
+   * segment `cancellations` to the `:id` param and shadow this route.
+   */
+  @Get('cancellations/reasons')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Cancellation breakdown by reason',
+    description:
+      'Groups cancelled claims by their structured `cancelReasonCode`, ' +
+      'returning a count and total amount per code. ' +
+      'Cancelled claims with no code (written before the reason-code migration) ' +
+      'are reported in `uncodedCount` rather than dropped, so `totalCancelled` ' +
+      'always reconciles with the sum of the breakdown. ' +
+      'Filters apply to `cancelledAt`, not `createdAt`.',
+  })
+  @ApiOkResponse({
+    description: 'Cancellation breakdown retrieved successfully.',
+    type: CancellationReportDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid date filter.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - operator or admin role required.',
+  })
+  @ApiQuery({
+    name: 'campaignId',
+    required: false,
+    description: 'Restrict the report to a single campaign.',
+  })
+  @ApiQuery({
+    name: 'from',
+    required: false,
+    description: 'Earliest `cancelledAt` to include (ISO-8601).',
+  })
+  @ApiQuery({
+    name: 'to',
+    required: false,
+    description: 'Latest `cancelledAt` to include (ISO-8601).',
+  })
+  getCancellationReport(@Query() query: CancellationReportQueryDto) {
+    return this.cancelAndReissueService.getCancellationReport(query);
   }
 
   @Get(':id')
@@ -219,7 +270,13 @@ export class ClaimsController {
   ) {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
-    return this.claimsService.disburse(id, dto.receiptPointer);
+    // Pass the request's correlation ID down so the Soroban transaction record,
+    // the queued job and every log line of the disbursement path share one ID.
+    return this.claimsService.disburse(
+      id,
+      dto.receiptPointer,
+      extractCorrelationId(req) ?? undefined,
+    );
   }
 
   @Patch(':id/archive')
@@ -394,11 +451,15 @@ export class ClaimsController {
     description:
       'Cancels an active claim (requested / verified / approved). ' +
       'Releases the locked budget back to the campaign and records a full audit trail. ' +
-      'Disbursed claims cannot be cancelled.',
+      'Disbursed claims cannot be cancelled. ' +
+      'A structured `code` is required so cancellations can be reported on; the ' +
+      'optional free-text `reason` is stored as detail alongside it.',
   })
   @ApiOkResponse({ description: 'Claim cancelled successfully.' })
   @ApiBadRequestResponse({
-    description: 'Claim is already cancelled or in a non-cancellable status.',
+    description:
+      'Claim is already cancelled, in a non-cancellable status, or the ' +
+      'supplied cancellation code is not a valid CancelReasonCode.',
   })
   @ApiForbiddenResponse({
     description: 'Access denied - operator role required.',

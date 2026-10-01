@@ -274,6 +274,49 @@ def test_empty_llm_fallback_order_rejected(monkeypatch):
     assert "LLM_PROVIDER_FALLBACK_ORDER" in str(excinfo.value)
 
 
+def test_provider_cost_ceiling_configuration_validates(monkeypatch):
+    _isolate_env(monkeypatch)
+    config = Settings(_env_file=None)
+    config.llm_provider_cost_ceilings = {
+        "groq": {
+            "limit_usd": 10.0,
+            "window": "daily",
+            "fallback_provider": "openai",
+        }
+    }
+    config.validate_configuration()
+
+
+def test_more_expensive_provider_fallback_is_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    config = Settings(_env_file=None)
+    config.llm_provider_cost_ceilings = {
+        "openai": {
+            "limit_usd": 10.0,
+            "window": "daily",
+            "fallback_provider": "groq",
+        }
+    }
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        config.validate_configuration()
+
+    assert "must have lower configured token rates" in str(excinfo.value)
+
+
+def test_invalid_provider_cost_ceiling_is_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    config = Settings(_env_file=None)
+    config.llm_provider_cost_ceilings = {
+        "openai": {"limit_usd": -1, "window": "weekly"}
+    }
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        config.validate_configuration()
+
+    assert "LLM_PROVIDER_COST_CEILINGS" in str(excinfo.value)
+
+
 def test_default_llm_model_cost_rates_validate(monkeypatch):
     _isolate_env(monkeypatch)
     settings = Settings(_env_file=None)

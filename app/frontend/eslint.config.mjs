@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Tooling scripts executed directly by Node (CommonJS by design; see
+    // playwright.config.ts webServer.command).
+    "scripts/**",
   ]),
 ]);
 

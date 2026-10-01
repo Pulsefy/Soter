@@ -1,9 +1,5 @@
-import {
-  Injectable,
-  Logger,
-  UnauthorizedException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -193,11 +189,15 @@ export class ArtifactOwnershipTokenService {
     });
 
     if (!tokenRecord) {
-      throw new UnauthorizedException('Token not found');
+      throw new AppException(ERROR_CODES.UNAUTHORIZED, 401, 'Token not found');
     }
 
     if (tokenRecord.revokedAt) {
-      throw new ForbiddenException('Token already revoked');
+      throw new AppException(
+        ERROR_CODES.FORBIDDEN,
+        403,
+        'Token already revoked',
+      );
     }
 
     await this.prisma.artifactAccessToken.update({
@@ -235,7 +235,11 @@ export class ArtifactOwnershipTokenService {
     });
 
     if (!artifact) {
-      throw new UnauthorizedException('Artifact not found');
+      throw new AppException(
+        ERROR_CODES.UNAUTHORIZED,
+        401,
+        'Artifact not found',
+      );
     }
 
     // Allow access if artifact has no org (legacy) or belongs to the requesting org

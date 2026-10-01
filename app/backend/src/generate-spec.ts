@@ -10,6 +10,11 @@
  *   # or via npm script:
  *   pnpm --filter backend run spec:generate
  *
+ * Set SPEC_OUTPUT_PATH to write the document somewhere other than the
+ * committed artifact. CI uses this to snapshot the freshly generated spec
+ * (openapi/openapi.generated.json) without mutating the file the drift
+ * check is about to read.
+ *
  * Prerequisites: DATABASE_URL and REDIS_HOST must be reachable so NestJS
  * can complete its module initialization (same requirement as starting the
  * app normally). For CI, ensure the postgres/redis service containers are
@@ -27,7 +32,9 @@ async function generate() {
 
   const outDir = join(process.cwd(), 'openapi');
   mkdirSync(outDir, { recursive: true });
-  const outPath = join(outDir, 'openapi.json');
+  const outPath = process.env.SPEC_OUTPUT_PATH
+    ? join(process.cwd(), process.env.SPEC_OUTPUT_PATH)
+    : join(outDir, 'openapi.json');
   writeFileSync(outPath, JSON.stringify(document, null, 2), 'utf-8');
 
   const pathCount = Object.keys(document.paths ?? {}).length;
@@ -39,6 +46,15 @@ async function generate() {
   console.log(`    Paths: ${pathCount}  |  Schemas: ${schemaCount}`);
 
   await app.close();
+
+  if (pathCount === 0) {
+    console.error(
+      '❌  Generated OpenAPI document contains zero paths — controller\n' +
+        '    metadata was not discovered. Refusing to publish an empty spec.',
+    );
+    process.exit(1);
+  }
+
   process.exit(0);
 }
 

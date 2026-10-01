@@ -1,4 +1,5 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { AppException } from '../common/dto/error-response.dto';
+
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { filter, firstValueFrom, take } from 'rxjs';
@@ -47,10 +48,8 @@ describe('VerificationInboxSseController', () => {
   });
 
   it('rejects unauthenticated connections', () => {
-    expect(() => controller.stream({})).toThrow(UnauthorizedException);
-    expect(() => controller.stream({ user: null })).toThrow(
-      UnauthorizedException,
-    );
+    expect(() => controller.stream({})).toThrow(AppException);
+    expect(() => controller.stream({ user: null })).toThrow(AppException);
   });
 
   it('emits review updates as SSE messages with id, type and JSON data', async () => {

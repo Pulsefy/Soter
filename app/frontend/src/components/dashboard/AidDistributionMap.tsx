@@ -56,6 +56,37 @@ function createMarkerIcon({ count, status }: { count?: number; status?: string }
   });
 }
 
+export type DistributionMapFilters = {
+  search?: string;
+  status?: string;
+  token?: string;
+};
+
+function normalizePoint(input: unknown, index: number): AidPackagePoint | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const point = input as Record<string, unknown>;
+  const lat = Number(point.lat ?? point.latitude);
+  const lng = Number(point.lng ?? point.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  return {
+    id: String(point.id ?? point.packageId ?? `pkg-${index}`),
+    lat,
+    lng,
+    amount:
+      typeof point.amount === 'number' || typeof point.amount === 'string'
+        ? point.amount
+        : typeof point.value === 'number' || typeof point.value === 'string'
+          ? point.value
+          : '—',
+    token: String(point.token ?? point.asset ?? 'N/A'),
+    status: String(point.status ?? 'Unknown'),
+  };
+}
+
 function ZoomWatcher({ onZoom }: { onZoom: (zoom: number) => void }) {
   const map = useMapEvents({
     zoomend: () => {

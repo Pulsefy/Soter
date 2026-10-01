@@ -12,7 +12,7 @@
  * Usage (invoked by the `spec:check` npm script):
  *   pnpm --filter backend run spec:check
  */
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -22,6 +22,18 @@ import {
 
 const strictMode = process.env.OPENAPI_SPEC_CHECK_STRICT !== 'false';
 
+// This script terminates with process.exit(), which does not flush a piped
+// stdout/stderr buffer. Write synchronously so the verdict always shows up in
+// the CI log instead of being silently discarded.
+const write = (stream: 1 | 2, message: string) =>
+  writeSync(stream, `${message}\n`);
+const log = (message: string) => write(1, message);
+const logError = (message: string) => write(2, message);
+const describeError = (err: unknown) =>
+  err instanceof Error
+    ? err.stack || `${err.name}: ${err.message}`
+    : String(err);
+
 async function checkDrift() {
   loadSwaggerEnv();
 
@@ -29,13 +41,13 @@ async function checkDrift() {
 
   if (!existsSync(committedPath)) {
     if (!strictMode) {
-      console.warn(
+      log(
         '⚠️  OpenAPI artifact missing; skipping drift check because OPENAPI_SPEC_CHECK_STRICT=false.',
       );
       process.exit(0);
     }
 
-    console.error(
+    logError(
       '❌  Committed artifact openapi/openapi.json not found.\n' +
         '    Run `pnpm --filter backend run spec:generate` and commit the result.',
     );
@@ -54,7 +66,7 @@ async function checkDrift() {
     );
 
     if (fresh === committed) {
-      console.log('✅  OpenAPI spec is up to date — no drift detected.');
+      log('✅  OpenAPI spec is up to date — no drift detected.');
       process.exit(0);
     }
 
@@ -64,7 +76,7 @@ async function checkDrift() {
         .paths ?? {},
     ).length;
 
-    console.error(
+    logError(
       '❌  OpenAPI spec drift detected!\n\n' +
         `    Generated paths: ${freshPaths}  |  committed paths: ${committedPaths}\n\n` +
         '    The committed artifact (openapi/openapi.json) does not match the\n' +
@@ -77,15 +89,15 @@ async function checkDrift() {
     process.exit(1);
   } catch (err: unknown) {
     if (!strictMode) {
-      console.warn(
+      log(
         '⚠️  OpenAPI generation failed in this environment; skipping spec drift enforcement because OPENAPI_SPEC_CHECK_STRICT=false.',
       );
-      console.warn(err);
+      logError(describeError(err));
       process.exit(0);
     }
 
-    console.error('❌  Failed to generate OpenAPI spec for drift check.');
-    console.error(err);
+    logError('❌  Failed to generate OpenAPI spec for drift check.');
+    logError(describeError(err));
     process.exit(1);
   }
 }

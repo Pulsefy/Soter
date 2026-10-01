@@ -90,6 +90,21 @@ REQUESTS_SHED_TOTAL = Counter(
     "Requests rejected due to overload (load shedding)",
     ["reason", "method", "endpoint"],
 )
+LOAD_SHED_QUEUE_DEPTH = Histogram(
+    "load_shed_queue_depth",
+    "Queue depth at the time of load shedding",
+    buckets=[10, 25, 50, 75, 100, 150, 200, 300, 500, 1000],
+)
+LOAD_SHED_PROVIDER_HEALTH = Counter(
+    "load_shed_provider_health_total",
+    "Load shedding decisions by provider health status",
+    ["provider_health"],
+)
+LOAD_SHED_BY_PRIORITY = Counter(
+    "load_shed_by_priority_total",
+    "Load shedding decisions by job priority",
+    ["priority"],
+)
 REQUEST_REJECTIONS_TOTAL = Counter(
     "api_request_rejections_total",
     "Requests rejected or constrained by request safety limits",
@@ -97,8 +112,13 @@ REQUEST_REJECTIONS_TOTAL = Counter(
 )
 RATE_LIMIT_EXCEEDED_TOTAL = Counter(
     "rate_limit_exceeded_total",
-    "Requests rejected due to rate limiting",
+    "Requests rejected due to rate limiting (per-key)",
     ["endpoint", "method"],
+)
+ORGANIZATION_RATE_LIMIT_EXCEEDED_TOTAL = Counter(
+    "organization_rate_limit_exceeded_total",
+    "Requests rejected due to organization-level rate limit",
+    [],
 )
 CELERY_QUEUE_DEPTH = Gauge(
     "celery_queue_depth", "Pending tasks in the Celery default queue"
@@ -197,10 +217,15 @@ def check_system_resources(memory_threshold_percent: float = 90.0) -> bool:
 
 
 def record_rate_limit_exceeded(endpoint: str, method: str) -> None:
-    """Record a rejected rate limit request."""
+    """Record a rejected per-key rate limit request."""
     bounded = bounded_endpoint_label(endpoint)
     RATE_LIMIT_EXCEEDED_TOTAL.labels(endpoint=bounded, method=method).inc()
     REQUEST_COUNT.labels(method=method, endpoint=bounded, http_status=429).inc()
+
+
+def record_org_rate_limit_exceeded(org_id: str) -> None:
+    """Record a rejected organization-level rate limit request."""
+    ORGANIZATION_RATE_LIMIT_EXCEEDED_TOTAL.inc()
 
 
 # --- Label cardinality bounding helpers (issue #988) ---
@@ -354,6 +379,21 @@ LLM_USAGE_UNAVAILABLE_TOTAL = Counter(
     "llm_usage_unavailable_total",
     "LLM requests where the provider did not report token usage (not counted as zero)",
     ["provider", "model", "endpoint"],
+)
+LLM_PROVIDER_COST_CEILING_USD = Gauge(
+    "llm_provider_cost_ceiling_usd",
+    "Configured estimated spend ceiling by provider and UTC window",
+    ["provider", "window"],
+)
+LLM_PROVIDER_CURRENT_SPEND_USD = Gauge(
+    "llm_provider_current_spend_usd",
+    "Estimated provider spend in the current UTC window",
+    ["provider", "window"],
+)
+LLM_PROVIDER_COST_CEILING_EXCEEDED_TOTAL = Counter(
+    "llm_provider_cost_ceiling_exceeded_total",
+    "Provider requests routed away because the current spend ceiling was reached",
+    ["provider"],
 )
 
 

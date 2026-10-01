@@ -2,12 +2,16 @@
 
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 import time
 import metrics
 
-import spacy
-from spacy.language import Language
+try:
+    import spacy
+    from spacy.language import Language
+except Exception:  # pragma: no cover - spaCy may be unavailable or incompatible
+    spacy = None
+    Language = Any
 
 from config import settings
 from services.test_provider import TestProvider
@@ -31,6 +35,31 @@ class PIIScrubberService:
         "EMAIL": "EMAIL_ADDRESS",
         "PHONE": "PHONE_NUMBER",
         "ID": "ID_NUMBER",
+    }
+
+    FIELD_REDACTION_BY_NAME = {
+        "name": "RECIPIENT_NAME",
+        "full_name": "RECIPIENT_NAME",
+        "first_name": "RECIPIENT_NAME",
+        "last_name": "RECIPIENT_NAME",
+        "date_of_birth": "EVENT_DATE",
+        "dob": "EVENT_DATE",
+        "birth_date": "EVENT_DATE",
+        "date": "EVENT_DATE",
+        "national_id": "ID_NUMBER",
+        "id_number": "ID_NUMBER",
+        "passport_number": "ID_NUMBER",
+        "passport_no": "ID_NUMBER",
+        "document_id": "ID_NUMBER",
+        "phone_number": "PHONE_NUMBER",
+        "phone": "PHONE_NUMBER",
+        "email": "EMAIL_ADDRESS",
+        "email_address": "EMAIL_ADDRESS",
+        "address": "LOCATION",
+        "location": "LOCATION",
+        "city": "LOCATION",
+        "state": "LOCATION",
+        "country": "LOCATION",
     }
 
     ALLOWLIST = {
@@ -170,7 +199,154 @@ class PIIScrubberService:
 
         return segments
 
-    def _build_nlp(self) -> Language:
+    def preview_structured_fields(self, fields: Dict[str, object]) -> Dict[str, object]:
+        """Build a redaction preview for structured OCR field payloads."""
+        if not fields:
+            return {
+                "original_length": 0,
+                "segments": [],
+                "pii_summary": {
+                    "names": 0,
+                    "locations": 0,
+                    "dates": 0,
+                    "emails": 0,
+                    "phones": 0,
+                    "ids": 0,
+                    "total": 0,
+                },
+            }
+
+        rendered_text = ""
+        segments: List[Dict[str, object]] = []
+        pii_summary = {
+            "names": 0,
+            "locations": 0,
+            "dates": 0,
+            "emails": 0,
+            "phones": 0,
+            "ids": 0,
+            "total": 0,
+        }
+        cursor = 0
+
+        for field_name, field_value in fields.items():
+            value = self._coerce_structured_value(field_value)
+            label_prefix = f"{field_name}: "
+            rendered_value = value if value else ""
+            rendered_entry = f"{label_prefix}{rendered_value}\n"
+            entry_start = len(rendered_text)
+            entry_end = entry_start + len(rendered_entry)
+            rendered_text += rendered_entry
+
+            if not rendered_value:
+                continue
+
+            category = self._map_ocr_field_to_category(str(field_name))
+            value_start = entry_start + len(label_prefix)
+            value_end = entry_end - 1 if rendered_entry.endswith("\n") else entry_end
+
+            if value_start > cursor:
+                segments.append(
+                    {
+                        "type": "kept",
+                        "start": cursor,
+                        "end": value_start,
+                        "category": None,
+                    }
+                )
+
+            if category is not None:
+                segments.append(
+                    {
+                        "type": "redacted",
+                        "start": value_start,
+                        "end": value_end,
+                        "category": category,
+                    }
+                )
+                if category == "RECIPIENT_NAME":
+                    pii_summary["names"] += 1
+                elif category == "LOCATION":
+                    pii_summary["locations"] += 1
+                elif category == "EVENT_DATE":
+                    pii_summary["dates"] += 1
+                elif category == "EMAIL_ADDRESS":
+                    pii_summary["emails"] += 1
+                elif category == "PHONE_NUMBER":
+                    pii_summary["phones"] += 1
+                elif category == "ID_NUMBER":
+                    pii_summary["ids"] += 1
+                cursor = value_end
+            else:
+                cursor = value_end
+
+        if cursor < len(rendered_text):
+            segments.append(
+                {
+                    "type": "kept",
+                    "start": cursor,
+                    "end": len(rendered_text),
+                    "category": None,
+                }
+            )
+
+        pii_summary["total"] = sum(pii_summary.values())
+        return {
+            "original_length": len(rendered_text),
+            "segments": segments,
+            "pii_summary": pii_summary,
+        }
+
+    def redact_structured_fields(self, fields: Dict[str, object]) -> Dict[str, object]:
+        """Return the same OCR fields with sensitive values replaced by their category token."""
+        redacted: Dict[str, object] = {}
+        for field_name, field_value in fields.items():
+            value = self._coerce_structured_value(field_value)
+            category = self._map_ocr_field_to_category(str(field_name))
+            if category is None:
+                redacted[field_name] = field_value
+                continue
+            token = f"[{category}]"
+            if isinstance(field_value, dict):
+                redacted[field_name] = {**field_value, "value": token}
+            else:
+                redacted[field_name] = token
+        return redacted
+
+    def _coerce_structured_value(self, value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, dict):
+            nested_value = value.get("value")
+            if nested_value is not None:
+                return str(nested_value)
+            return ""
+        return str(value)
+
+    def _map_ocr_field_to_category(self, field_name: str) -> str | None:
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(field_name).lower()).strip("_")
+        exact = self.FIELD_REDACTION_BY_NAME.get(normalized)
+        if exact:
+            return exact
+
+        if "name" in normalized:
+            return "RECIPIENT_NAME"
+        if "dob" in normalized or "birth" in normalized or "date" in normalized:
+            return "EVENT_DATE"
+        if "passport" in normalized or "national" in normalized or "id" in normalized:
+            return "ID_NUMBER"
+        if "phone" in normalized:
+            return "PHONE_NUMBER"
+        if "email" in normalized:
+            return "EMAIL_ADDRESS"
+        if "address" in normalized or "location" in normalized or "city" in normalized:
+            return "LOCATION"
+        return None
+
+    def _build_nlp(self) -> Language | None:
+        if spacy is None:
+            return None
+
         nlp = spacy.blank("en")
         ruler = nlp.add_pipe("entity_ruler")
         ruler.add_patterns(
@@ -255,25 +431,26 @@ class PIIScrubberService:
 
         email_ranges = {(span.start, span.end) for span in email_spans}
 
-        doc = self.nlp(text)
+        if self.nlp is not None:
+            doc = self.nlp(text)
 
-        for ent in doc.ents:
-            if any(
-                not (ent.end_char <= start or ent.start_char >= end)
-                for start, end in email_ranges
-            ):
-                continue
+            for ent in doc.ents:
+                if any(
+                    not (ent.end_char <= start or ent.start_char >= end)
+                    for start, end in email_ranges
+                ):
+                    continue
 
-            mapped = self._normalize_label(ent.label_)
-            if mapped:
-                spans.append(
-                    PIISpan(
-                        start=ent.start_char,
-                        end=ent.end_char,
-                        label=mapped,
-                        text=ent.text,
+                mapped = self._normalize_label(ent.label_)
+                if mapped:
+                    spans.append(
+                        PIISpan(
+                            start=ent.start_char,
+                            end=ent.end_char,
+                            label=mapped,
+                            text=ent.text,
+                        )
                     )
-                )
 
         for pattern in self.DATE_REGEXES:
             spans.extend(self._spans_from_regex(text, pattern, "DATE"))

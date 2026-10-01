@@ -27,6 +27,7 @@ import { RolesGuard } from './auth/roles.guard';
 import { ScopesGuard } from './api-keys/scopes.guard';
 import { ObservabilityModule } from './observability/observability.module';
 import { ClaimsModule } from './claims/claims.module';
+import { ClaimVerificationModule } from './claims/claim-verification.module';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { LoggerService } from './logger/logger.service';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
@@ -128,6 +129,7 @@ const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
     RecipientsModule,
     ObservabilityModule,
     ClaimsModule,
+    ClaimVerificationModule,
     NotificationsModule,
     JobsModule,
     AnalyticsModule,

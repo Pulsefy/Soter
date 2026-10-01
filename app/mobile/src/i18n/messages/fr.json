@@ -120,7 +120,15 @@
     "clearSyncedCache": "Effacer le cache synchronisé",
     "yourPublicKey": "Votre clé publique",
     "stellarLabFaucet": "Airdrop de Stellar Lab",
-    "friendbotApi": "API Friendbot"
+    "friendbotApi": "API Friendbot",
+    "syncFrequency": "Fréquence de synchronisation",
+    "syncFrequencyHint": "Choisissez la fréquence de synchronisation en arrière-plan",
+    "syncFrequencyAggressive": "Fréquente",
+    "syncFrequencyNormal": "Normale",
+    "syncFrequencyConservative": "Conservatrice",
+    "syncFrequencyAggressiveHint": "Synchronise toutes les 5 minutes",
+    "syncFrequencyNormalHint": "Synchronise toutes les 15 minutes (par défaut)",
+    "syncFrequencyConservativeHint": "Synchronise toutes les 60 minutes"
   },
   "tasks": {
     "title": "Tâches",
@@ -200,7 +208,14 @@
     "step1": "Étape 1 : Choisir une photo",
     "step2": "Étape 2 : Aperçu",
     "chooseAgain": "Choisir à nouveau",
-    "step3": "Étape 3 : Téléverser"
+    "step3": "Étape 3 : Téléverser",
+    "storageLowTitle": "Stockage faible",
+    "storageLowBody": "Il ne reste qu'environ {free} de stockage libre après prise en compte des envois en attente. La capture de la preuve peut échouer en cours de route et la photo pourrait être perdue.",
+    "storageCriticalTitle": "Stockage presque plein",
+    "storageCriticalBody": "Il ne reste que {free} de stockage libre. Libérez de l'espace avant de capturer la preuve.",
+    "storageBannerBody": "Stockage libre : environ {free} (dont {pending} retenus par les envois en attente). La capture peut échouer si l'espace vient à manquer.",
+    "storageBannerA11y": "Avertissement de stockage : l'espace libre est faible, la capture de preuve peut échouer",
+    "storageContinue": "Continuer quand même"
   },
   "errors": {
     "networkError": "Erreur réseau. Vérifiez votre connexion.",

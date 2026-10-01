@@ -133,6 +133,29 @@ default (`MAX_REQUEST_TIMEOUT_SECONDS=60`). A larger timeout is reduced to the
 server ceiling and counted with the `timeout_clamped` reason label. Both values
 are configurable through environment variables.
 
+### LLM Provider Cost Ceilings
+
+`LLM_PROVIDER_COST_CEILINGS` optionally configures a USD spend ceiling for
+each provider. Set it to a JSON object keyed by provider name. Each entry
+requires `limit_usd` and a `window` of `hourly` or `daily`, and may specify a
+`fallback_provider`. Spend is estimated from the configured per-model token
+rates and shared across workers through Redis. A breached provider is skipped
+for its configured fallback; without an available fallback the verification
+is marked for manual review. Configuring ceilings requires Redis.
+
+```json
+{
+  "groq": {
+    "limit_usd": 25.0,
+    "window": "daily",
+    "fallback_provider": "openai"
+  }
+}
+```
+
+The `/ai/metrics` endpoint exposes `llm_provider_cost_ceiling_usd` and
+`llm_provider_current_spend_usd` by provider and window.
+
 **Response:**
 
 ```json

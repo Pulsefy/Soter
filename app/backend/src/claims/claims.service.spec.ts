@@ -1,5 +1,6 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+
 import { ConfigService } from '@nestjs/config';
 import { ClaimsService, ClaimExportRow } from './claims.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,13 +13,20 @@ import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
-import { ClaimStatus, Prisma, SorobanOperationType } from '@prisma/client';
+import {
+  CancelReasonCode,
+  ClaimStatus,
+  Prisma,
+  SorobanOperationType,
+} from '@prisma/client';
 import { SorobanTransactionLifecycleService } from '../onchain/soroban-transaction-lifecycle.service';
 import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
+import { VerificationService } from '../verification/verification.service';
 
 describe('ClaimsService', () => {
   let service: ClaimsService;
   let prismaService: PrismaService;
+  let budgetService: BudgetService;
   let _onchainAdapter: OnchainAdapter;
   let _metricsService: MetricsService;
   let _auditService: AuditService;
@@ -76,6 +84,7 @@ describe('ClaimsService', () => {
     incrementOnchainOperation: jest.fn(),
     recordOnchainDuration: jest.fn(),
     incrementCounter: jest.fn(),
+    incrementClaimsCreated: jest.fn(),
     incrementClaimsDisbursed: jest.fn(),
     incrementClaimsVerified: jest.fn(),
     incrementClaimsApproved: jest.fn(),
@@ -94,6 +103,20 @@ describe('ClaimsService', () => {
     record: jest.fn().mockResolvedValue({ id: 'audit-1' }),
   };
 
+  const mockVerificationService = {
+    enqueueVerification: jest
+      .fn()
+      .mockResolvedValue({ jobId: 'job-1', priority: 0 }),
+  };
+
+  const mockLoggerService = {
+    log: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    getCorrelationId: jest.fn((): string | undefined => undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -102,18 +125,25 @@ describe('ClaimsService', () => {
           provide: BudgetService,
           useValue: {
             assertWithinBudget: jest.fn(),
+            reserveBudget: jest.fn(),
             getCampaignBudgetUsage: jest.fn(),
           },
         },
         {
           provide: PrismaService,
           useValue: {
+            campaign: {
+              findUnique: jest.fn(),
+            },
             claim: {
               findUnique: jest.fn(),
               update: jest.fn(),
               findMany: jest.fn(),
               create: jest.fn(),
               count: jest.fn(),
+            },
+            balanceLedger: {
+              create: jest.fn(),
             },
             sorobanTransaction: {
               create: jest.fn(),
@@ -142,12 +172,7 @@ describe('ClaimsService', () => {
         },
         {
           provide: LoggerService,
-          useValue: {
-            log: jest.fn(),
-            error: jest.fn(),
-            warn: jest.fn(),
-            debug: jest.fn(),
-          },
+          useValue: mockLoggerService,
         },
         {
           provide: MetricsService,
@@ -174,11 +199,16 @@ describe('ClaimsService', () => {
           provide: SorobanTransactionScheduler,
           useValue: mockSorobanTxScheduler,
         },
+        {
+          provide: VerificationService,
+          useValue: mockVerificationService,
+        },
       ],
     }).compile();
 
     service = module.get<ClaimsService>(ClaimsService);
     prismaService = module.get<PrismaService>(PrismaService);
+    budgetService = module.get<BudgetService>(BudgetService);
     _onchainAdapter = module.get<OnchainAdapter>(ONCHAIN_ADAPTER_TOKEN);
     _metricsService = module.get<MetricsService>(MetricsService);
     _auditService = module.get<AuditService>(AuditService);
@@ -187,7 +217,151 @@ describe('ClaimsService', () => {
     jest.clearAllMocks();
   });
 
+  describe('create', () => {
+    const createDto: any = {
+      campaignId: 'campaign-1',
+      amount: 100,
+      recipientRef: 'recipient-123',
+      tokenAddress: 'G' + 'A'.repeat(55),
+      evidenceRef: 'evidence-456',
+    };
+
+    const mockCampaign = {
+      id: 'campaign-1',
+      name: 'Test Campaign',
+      status: 'active',
+      budget: 1000,
+    };
+
+    /**
+     * Builds a fake transaction client and wires prismaService.$transaction
+     * to invoke the real callback against it, mirroring how Prisma actually
+     * runs `$transaction(async (tx) => ...)`.
+     */
+    function mockTransaction() {
+      const tx = {
+        claim: {
+          create: jest.fn().mockResolvedValue({
+            id: 'claim-new',
+            campaignId: createDto.campaignId,
+            amount: createDto.amount,
+            recipientRef: createDto.recipientRef,
+            evidenceRef: createDto.evidenceRef,
+            status: ClaimStatus.requested,
+            campaign: mockCampaign,
+          }),
+        },
+        balanceLedger: {
+          create: jest.fn().mockResolvedValue({ id: 'ledger-1' }),
+        },
+      };
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) =>
+          callback(tx),
+        );
+      return tx;
+    }
+
+    beforeEach(() => {
+      jest
+        .spyOn(prismaService.campaign, 'findUnique')
+        .mockResolvedValue(mockCampaign as any);
+    });
+
+    it('throws AppException when the campaign does not exist', async () => {
+      jest.spyOn(prismaService.campaign, 'findUnique').mockResolvedValue(null);
+
+      await expect(service.create(createDto)).rejects.toThrow(AppException);
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('reserves budget and creates the claim + lock ledger entry inside one transaction', async () => {
+      const tx = mockTransaction();
+      (budgetService.reserveBudget as jest.Mock).mockResolvedValue(undefined);
+
+      const result = await service.create(createDto);
+
+      // Budget was reserved against the transaction client, not the top-level
+      // prisma client, and using the given campaign/amount.
+      expect(budgetService.reserveBudget).toHaveBeenCalledWith(
+        tx,
+        createDto.campaignId,
+        createDto.amount,
+      );
+
+      // The claim was created on the same transaction client.
+      expect(tx.claim.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            campaignId: createDto.campaignId,
+            amount: createDto.amount,
+          }),
+        }),
+      );
+
+      // reserveBudget must run before the claim (and its ledger entry) are
+      // written, so a rejection never leaves a partial claim behind.
+      const reserveOrder = (budgetService.reserveBudget as jest.Mock).mock
+        .invocationCallOrder[0];
+      const createOrder = tx.claim.create.mock.invocationCallOrder[0];
+      expect(reserveOrder).toBeLessThan(createOrder);
+
+      // A matching 'lock' ledger entry is written for the new claim so that
+      // subsequent budget checks see this claim's usage.
+      expect(tx.balanceLedger.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          campaignId: createDto.campaignId,
+          claimId: 'claim-new',
+          eventType: 'lock',
+          amount: createDto.amount,
+        }),
+      });
+
+      expect(result.id).toBe('claim-new');
+    });
+
+    it('rolls back (creates no claim) when the transaction-safe budget check rejects', async () => {
+      const tx = mockTransaction();
+      (budgetService.reserveBudget as jest.Mock).mockRejectedValue(
+        new Error('Campaign funding cap exceeded'),
+      );
+
+      await expect(service.create(createDto)).rejects.toThrow(
+        'Campaign funding cap exceeded',
+      );
+
+      expect(tx.claim.create).not.toHaveBeenCalled();
+      expect(tx.balanceLedger.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('disburse', () => {
+    /**
+     * Wire the prisma spies needed for a disbursement that runs to completion,
+     * so each correlation test can focus on the ID it expects to be propagated.
+     */
+    function arrangeSuccessfulDisburse() {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+      jest
+        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
+        .mockResolvedValue({ packageId: 'real-package-id' } as any);
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+          return callback({
+            claim: {
+              update: jest.fn().mockResolvedValue({
+                ...mockClaim,
+                status: ClaimStatus.disbursed,
+              }),
+            },
+          });
+        });
+    }
+
     it('should create and schedule a Soroban transaction when onchain is enabled', async () => {
       const expectedClaim = {
         ...mockClaim,
@@ -226,6 +400,62 @@ describe('ClaimsService', () => {
 
       expect(result.status).toBe(ClaimStatus.disbursed);
       expect(result.campaign).toBeDefined();
+    });
+
+    it('propagates an explicit correlation ID to the transaction record and job', async () => {
+      arrangeSuccessfulDisburse();
+
+      await service.disburse('claim-123', undefined, 'corr-e2e-1');
+
+      expect(
+        mockSorobanTxLifecycleService.createTransaction,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          claimId: 'claim-123',
+          correlationId: 'corr-e2e-1',
+        }),
+      );
+      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalledWith(
+        'tx-123',
+        expect.objectContaining({ correlationId: 'corr-e2e-1' }),
+      );
+    });
+
+    it('reuses the ambient correlation ID when the caller does not supply one', async () => {
+      arrangeSuccessfulDisburse();
+      mockLoggerService.getCorrelationId.mockReturnValueOnce('corr-ambient-1');
+
+      await service.disburse('claim-123');
+
+      expect(
+        mockSorobanTxLifecycleService.createTransaction,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({ correlationId: 'corr-ambient-1' }),
+      );
+      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalledWith(
+        'tx-123',
+        expect.objectContaining({ correlationId: 'corr-ambient-1' }),
+      );
+    });
+
+    it('generates a traceable fallback correlation ID when no context exists', async () => {
+      arrangeSuccessfulDisburse();
+
+      await service.disburse('claim-123');
+
+      expect(
+        mockSorobanTxLifecycleService.createTransaction,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          correlationId: expect.stringMatching(/^disburse-claim-123-\d+$/),
+        }),
+      );
+      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalledWith(
+        'tx-123',
+        expect.objectContaining({
+          correlationId: expect.stringMatching(/^disburse-claim-123-\d+$/),
+        }),
+      );
     });
 
     it('should record metrics when Soroban transaction is scheduled', async () => {
@@ -340,12 +570,7 @@ describe('ClaimsService', () => {
           },
           {
             provide: LoggerService,
-            useValue: {
-              log: jest.fn(),
-              error: jest.fn(),
-              warn: jest.fn(),
-              debug: jest.fn(),
-            },
+            useValue: mockLoggerService,
           },
           {
             provide: MetricsService,
@@ -371,6 +596,10 @@ describe('ClaimsService', () => {
           {
             provide: SorobanTransactionScheduler,
             useValue: mockSorobanTxScheduler,
+          },
+          {
+            provide: VerificationService,
+            useValue: mockVerificationService,
           },
         ],
       }).compile();
@@ -416,15 +645,15 @@ describe('ClaimsService', () => {
       expect(transactionSpy).toHaveBeenCalled();
     });
 
-    it('should throw NotFoundException if claim does not exist', async () => {
+    it('should throw AppException if claim does not exist', async () => {
       jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue(null);
 
       await expect(service.disburse('non-existent')).rejects.toThrow(
-        NotFoundException,
+        AppException,
       );
     });
 
-    it('should throw BadRequestException if claim is not in approved status', async () => {
+    it('should throw AppException if claim is not in approved status', async () => {
       const unapprovedClaim = {
         ...mockClaim,
         status: ClaimStatus.verified,
@@ -433,9 +662,7 @@ describe('ClaimsService', () => {
         .spyOn(prismaService.claim, 'findUnique')
         .mockResolvedValue(unapprovedClaim);
 
-      await expect(service.disburse('claim-123')).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.disburse('claim-123')).rejects.toThrow(AppException);
     });
   });
 
@@ -541,6 +768,7 @@ describe('ClaimsService', () => {
       deletedAt: null,
       cancelledAt: null,
       cancelledBy: null,
+      cancelReasonCode: null,
       cancelReason: null,
       reissuedFromId: null,
       metadata: null,
@@ -565,9 +793,9 @@ describe('ClaimsService', () => {
     });
 
     it('countExport(): rejects an invalid date filter', async () => {
-      await expect(
-        service.countExport({ from: 'not-a-date' }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.countExport({ from: 'not-a-date' })).rejects.toThrow(
+        AppException,
+      );
     });
 
     it('streamExportRows(): pages through results with cursor-based pagination', async () => {
@@ -641,11 +869,46 @@ describe('ClaimsService', () => {
       }
 
       expect(chunks[0]).toBe(
-        'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress\r\n',
+        'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReasonCode,cancelReason,reissuedFromId,tokenAddress\r\n',
       );
       expect(chunks[1]).toContain('"claim-1"');
       expect(chunks[1]).toContain('"Has, a comma"');
       expect(chunks[1].endsWith('\r\n')).toBe(true);
+    });
+
+    it('streamExportCsv(): writes the reason code and the free-text detail to their own columns', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValueOnce([
+          makeRawClaim('claim-1', {
+            status: ClaimStatus.cancelled,
+            cancelReasonCode: CancelReasonCode.duplicate,
+            cancelReason: 'Duplicate of claim-0',
+          }),
+        ] as never)
+        .mockResolvedValueOnce([] as never);
+
+      const chunks: string[] = [];
+      for await (const chunk of service.streamExportCsv({})) {
+        chunks.push(chunk);
+      }
+
+      const columns = chunks[1]
+        .replace(/\r\n$/, '')
+        .split(',')
+        .map(c => c.replace(/^"|"$/g, ''));
+      const header = chunks[0]
+        .replace(/\r\n$/, '')
+        .split(',')
+        .map(c => c.replace(/^"|"$/g, ''));
+
+      const codeIndex = header.indexOf('cancelReasonCode');
+      const reasonIndex = header.indexOf('cancelReason');
+
+      expect(codeIndex).toBeGreaterThan(-1);
+      expect(reasonIndex).toBe(codeIndex + 1);
+      expect(columns[codeIndex]).toBe('duplicate');
+      expect(columns[reasonIndex]).toBe('Duplicate of claim-0');
     });
   });
 });

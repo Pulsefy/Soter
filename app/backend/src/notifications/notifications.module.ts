@@ -3,6 +3,8 @@ import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { NotificationsService } from './notifications.service';
 import { NotificationProcessor } from './notifications.processor';
+import { NotificationBackpressureService } from './notification-backpressure.service';
+import { NotificationQueueMetricsScheduler } from './notification-queue-metrics.scheduler';
 import { OutboxController } from './outbox.controller';
 import { NotificationsController } from './notifications.controller';
 import { JobsModule } from '../jobs/jobs.module';
@@ -36,7 +38,12 @@ const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
     LoggerModule,
   ],
   controllers: [OutboxController, NotificationsController],
-  providers: [NotificationsService, NotificationProcessor],
+  providers: [
+    NotificationsService,
+    NotificationProcessor,
+    NotificationBackpressureService,
+    NotificationQueueMetricsScheduler,
+  ],
   exports: [NotificationsService],
 })
 export class NotificationsModule {}

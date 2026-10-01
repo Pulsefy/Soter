@@ -1,11 +1,7 @@
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import { VerificationInboxEventsService } from './verification-inbox-events.service';
 
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Optional,
-} from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { Prisma, VerificationStatus } from '@prisma/client';
@@ -182,14 +178,22 @@ export class VerificationInboxService {
     });
 
     if (!verification) {
-      throw new NotFoundException('Verification request not found');
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Verification request not found',
+      );
     }
 
     if (
       verification.status === 'approved' ||
       verification.status === 'rejected'
     ) {
-      throw new BadRequestException('Verification already processed');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Verification already processed',
+      );
     }
 
     const updateData: Prisma.VerificationRequestUpdateInput = {
@@ -258,7 +262,11 @@ export class VerificationInboxService {
     });
 
     if (!verification) {
-      throw new NotFoundException('Verification request not found');
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Verification request not found',
+      );
     }
 
     // Get active lock status
@@ -312,7 +320,11 @@ export class VerificationInboxService {
     });
 
     if (!verification) {
-      throw new NotFoundException('Verification request not found');
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Verification request not found',
+      );
     }
 
     const note = await this.prisma.internalNote.create({
@@ -345,7 +357,11 @@ export class VerificationInboxService {
     });
 
     if (!verification) {
-      throw new NotFoundException('Verification request not found');
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        'Verification request not found',
+      );
     }
 
     return this.prisma.internalNote.findMany({

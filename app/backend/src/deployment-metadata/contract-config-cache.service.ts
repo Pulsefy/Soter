@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisService } from '../../cache/redis.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 import { DeploymentMetadataResponseDto } from './dto/deployment-metadata.dto';
 
 /**
@@ -8,6 +9,13 @@ import { DeploymentMetadataResponseDto } from './dto/deployment-metadata.dto';
  * Adjust via CONTRACT_CONFIG_CACHE_TTL_SECONDS env var.
  */
 const DEFAULT_TTL_SECONDS = 300;
+
+/**
+ * Retry configuration for scheduled/admin cache refreshes.
+ */
+const MAX_REFRESH_ATTEMPTS = 3;
+const INITIAL_RETRY_DELAY_MS = 1000;
+const CACHE_STALENESS_METRIC = 'deployment_metadata_cache_staleness_seconds';
 
 /**
  * Key helpers – all keys live under the `contract-config:` namespace.
@@ -36,10 +44,12 @@ const KEYS = {
 export class ContractConfigCacheService {
   private readonly logger = new Logger(ContractConfigCacheService.name);
   private readonly ttl: number;
+  private lastSuccessfulRefreshAt: Date | null = null;
 
   constructor(
     private readonly redis: RedisService,
     private readonly prisma: PrismaService,
+    private readonly metrics: MetricsService,
   ) {
     this.ttl =
       parseInt(process.env.CONTRACT_CONFIG_CACHE_TTL_SECONDS ?? '', 10) ||
@@ -118,6 +128,7 @@ export class ContractConfigCacheService {
       where: { network_contractName: { network, contractName } },
     });
     const result = row ? this.mapToResponse(row) : null;
+
     // Cache the result even when null so we don't hammer the DB on repeated
     // lookups for a contract that hasn't been deployed yet.
     await this.redis.set(key, result, this.ttl);
@@ -166,9 +177,11 @@ export class ContractConfigCacheService {
 
   /**
    * Warm the cache by loading all records from the DB.
-   * Drops existing keys first so stale entries are never served.
    *
-   * Used by the admin refresh endpoint.
+   * Transient failures are retried with exponential backoff within the same
+   * refresh operation. Existing cache entries are only invalidated after the
+   * database snapshot has been successfully loaded, so a failed refresh does
+   * not unnecessarily destroy the last known-good cache.
    */
   async refreshAll(): Promise<{
     refreshedAt: Date;
@@ -177,30 +190,91 @@ export class ContractConfigCacheService {
   }> {
     this.logger.log('contract-config cache refresh requested');
 
-    // 1. Wipe existing snapshot
-    await this.invalidateAll();
+    let lastError: unknown;
 
-    // 2. Load everything from Prisma
+    for (let attempt = 1; attempt <= MAX_REFRESH_ATTEMPTS; attempt++) {
+      try {
+        const result = await this.refreshOnce();
+
+        this.lastSuccessfulRefreshAt = result.refreshedAt;
+        this.metrics.setGauge(CACHE_STALENESS_METRIC, 0);
+
+        return result;
+      } catch (error) {
+        lastError = error;
+
+        if (attempt < MAX_REFRESH_ATTEMPTS) {
+          const delayMs = INITIAL_RETRY_DELAY_MS * 2 ** (attempt - 1);
+
+          this.logger.warn(
+            `contract-config cache refresh transient failure ` +
+              `(attempt ${attempt}/${MAX_REFRESH_ATTEMPTS}); ` +
+              `retrying in ${delayMs}ms`,
+          );
+
+          await this.sleep(delayMs);
+          continue;
+        }
+
+        const stalenessSeconds = this.lastSuccessfulRefreshAt
+          ? Math.max(
+              0,
+              (Date.now() - this.lastSuccessfulRefreshAt.getTime()) / 1000,
+            )
+          : this.ttl;
+
+        this.metrics.setGauge(CACHE_STALENESS_METRIC, stalenessSeconds);
+
+        const message = error instanceof Error ? error.message : String(error);
+        const stack = error instanceof Error ? error.stack : undefined;
+
+        this.logger.error(
+          `contract-config cache refresh failed after ` +
+            `${MAX_REFRESH_ATTEMPTS} attempts: ${message}`,
+          stack,
+        );
+      }
+    }
+
+    throw lastError;
+  }
+
+  // ─── Private ────────────────────────────────────────────────────────────────
+
+  /**
+   * Perform one complete cache refresh attempt.
+   */
+  private async refreshOnce(): Promise<{
+    refreshedAt: Date;
+    contractCount: number;
+    networkCount: number;
+  }> {
+    // 1. Load everything from Prisma first.
+    // Keep the existing cache intact if this fails.
     const rows = await this.prisma.deploymentMetadata.findMany({
       orderBy: { deployedAt: 'desc' },
     });
     const all = rows.map(r => this.mapToResponse(r));
 
-    // 3. Populate the "all" key
+    // 2. Wipe the previous snapshot only after the DB read succeeded.
+    await this.invalidateAll();
+
+    // 3. Populate the "all" key.
     await this.redis.set(KEYS.all(), all, this.ttl);
 
-    // 4. Populate per-network keys
+    // 4. Populate per-network keys.
     const byNetwork = new Map<string, DeploymentMetadataResponseDto[]>();
     for (const item of all) {
       const list = byNetwork.get(item.network) ?? [];
       list.push(item);
       byNetwork.set(item.network, list);
     }
+
     for (const [network, list] of byNetwork.entries()) {
       await this.redis.set(KEYS.byNetwork(network), list, this.ttl);
     }
 
-    // 5. Populate per-contract keys
+    // 5. Populate per-contract keys.
     for (const item of all) {
       await this.redis.set(
         KEYS.byNetworkAndName(item.network, item.contractName),
@@ -210,18 +284,22 @@ export class ContractConfigCacheService {
       await this.redis.set(KEYS.byContractId(item.contractId), item, this.ttl);
     }
 
+    const refreshedAt = new Date();
+
     this.logger.log(
       `contract-config cache warmed: ${all.length} contract(s), ${byNetwork.size} network(s)`,
     );
 
     return {
-      refreshedAt: new Date(),
+      refreshedAt,
       contractCount: all.length,
       networkCount: byNetwork.size,
     };
   }
 
-  // ─── Private ────────────────────────────────────────────────────────────────
+  private async sleep(delayMs: number): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
 
   private mapToResponse(metadata: any): DeploymentMetadataResponseDto {
     return {
@@ -234,6 +312,7 @@ export class ContractConfigCacheService {
       commitSha: metadata.commitSha ?? undefined,
       deployer: metadata.deployer ?? undefined,
       transactionHash: metadata.transactionHash ?? undefined,
+      contractVersion: metadata.contractVersion ?? undefined,
       metadata: metadata.metadata ?? undefined,
       createdAt: metadata.createdAt,
       updatedAt: metadata.updatedAt,

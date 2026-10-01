@@ -2,6 +2,8 @@
 
 Mobile application for field operations and pilots, built with Expo and TypeScript.
 
+> **Calling the backend?** See the [Frontend & Mobile API Integration Guide](../../doc/api-integration-guide.md) for the mobile request layer (`requestLayer.ts`) — retry/backoff, idempotency, correlation — and the offline queueing conventions (`syncQueue.ts`), plus the OpenAPI spec as the source of truth for request/response shapes.
+
 ## Features
 
 - **Home Screen**: Overview and quick actions.

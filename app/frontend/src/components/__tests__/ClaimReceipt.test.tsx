@@ -10,8 +10,8 @@ jest.mock('next-themes', () => ({
 }));
 
 jest.mock('@/lib/explorer', () => ({
-  buildExplorerUrl: (type: string, id: string) =>
-    `https://stellar.expert/explorer/testnet/${type}/${id}`,
+  buildExplorerUrl: (type: string, id: string, network?: string) =>
+    `https://stellar.expert/explorer/${network ?? 'testnet'}/${type}/${id}`,
 }));
 
 const baseClaim: ClaimReceiptData = {
@@ -173,6 +173,44 @@ describe('ClaimReceipt', () => {
     it('does not render action buttons in compact mode', () => {
       render(<ClaimReceipt claim={baseClaim} compact />);
       expect(screen.queryByTitle('Copy to clipboard')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('network and deployment metadata', () => {
+    it('does not render a network badge when network is not provided', () => {
+      render(<ClaimReceipt claim={baseClaim} />);
+      expect(screen.queryByTitle('Network')).not.toBeInTheDocument();
+    });
+
+    it('renders the resolved network badge', () => {
+      render(<ClaimReceipt claim={fullClaim} network="testnet" />);
+      expect(screen.getByTitle('Network')).toHaveTextContent('testnet');
+    });
+
+    it('uses the given network when building explorer links', () => {
+      render(<ClaimReceipt claim={fullClaim} network="mainnet" />);
+      const contractLink = screen.getByRole('link', { name: /CCONTRACTADDRESS/i });
+      expect(contractLink).toHaveAttribute(
+        'href',
+        'https://stellar.expert/explorer/mainnet/contract/CCONTRACTADDRESS'
+      );
+    });
+
+    it('shows deployment version and date when contractDeployment is provided', () => {
+      render(
+        <ClaimReceipt
+          claim={fullClaim}
+          network="testnet"
+          contractDeployment={{ version: '0.1.0', deployedAt: '2026-06-03' }}
+        />
+      );
+      expect(screen.getByText(/v0\.1\.0/)).toBeInTheDocument();
+      expect(screen.getByText(/deployed 2026-06-03/)).toBeInTheDocument();
+    });
+
+    it('does not show deployment metadata when not provided', () => {
+      render(<ClaimReceipt claim={fullClaim} network="testnet" />);
+      expect(screen.queryByText(/deployed/)).not.toBeInTheDocument();
     });
   });
 

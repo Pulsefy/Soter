@@ -179,6 +179,7 @@ export class JobStatusGateway
       () => void this.disconnectExpiredSockets(),
       EXPIRY_CHECK_INTERVAL_MS,
     );
+    this.expiryCheckTimer.unref();
   }
 
   /**

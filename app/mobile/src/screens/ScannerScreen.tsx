@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Text,
   View,
@@ -16,6 +16,13 @@ import { createScanDeduper } from './scanDeduper';
 import { useCameraPermission } from '../hooks/useCameraPermission';
 import { CameraPermissionDenied } from '../components/CameraPermissionDenied';
 import { useTranslation } from '../i18n/useTranslation';
+import {
+  recordItemDeduped,
+  recordItemFailed,
+  recordItemQueued,
+  recordScanReceived,
+  recordScanStarted,
+} from '../services/scannerBreadcrumbs';
 
 type ScannerScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Scanner'>;
 
@@ -65,18 +72,29 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
     statusMessage,
   } = useCameraPermission();
 
+  useEffect(() => {
+    recordScanStarted('single');
+  }, []);
+
   const handleBarCodeScanned = ({ data }: BarcodeScanningResult) => {
-    if (isDuplicateScan(data.trim())) return;
+    recordScanReceived('single');
+
+    if (isDuplicateScan(data.trim())) {
+      recordItemDeduped('single');
+      return;
+    }
 
     setScanned(true);
 
     const aidId = parseAidIdFromQRCode(data);
 
     if (aidId) {
+      recordItemQueued('single');
       navigation.replace('AidDetails', { aidId });
       return;
     }
 
+    recordItemFailed('single');
     Alert.alert(
       'Invalid QR Code',
       'This QR code is not a valid Soter package link. Please scan a Soter QR code.',

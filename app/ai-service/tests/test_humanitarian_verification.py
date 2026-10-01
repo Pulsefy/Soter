@@ -385,6 +385,69 @@ class TestHumanitarianVerificationService:
         assert result["provider"] == "groq"
         openai.llm_chat.assert_not_called()
 
+    def test_cost_ceiling_routes_to_configured_fallback(self, monkeypatch):
+        monkeypatch.setattr(
+            settings,
+            "llm_provider_cost_ceilings",
+            {
+                "openai": {
+                    "limit_usd": 1.0,
+                    "window": "hourly",
+                    "fallback_provider": "groq",
+                }
+            },
+        )
+        openai = MagicMock(spec=ModelProvider)
+        groq = MagicMock(spec=ModelProvider)
+        groq.llm_chat.return_value = LLMResponse(
+            content='{"verdict":"credible","confidence":0.9}',
+            provider="groq",
+            model="m",
+        )
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [
+            ("openai", openai),
+            ("groq", groq),
+        ]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(self.service, "_get_model_for_provider", lambda _: "m")
+        monkeypatch.setattr(
+            self.service.cost_ceiling,
+            "is_exceeded",
+            lambda name: name == "openai",
+        )
+
+        result = self.service.verify_claim(
+            aid_claim="Aid reached households.",
+            provider_preference="auto",
+        )
+
+        assert result["provider"] == "groq"
+        openai.llm_chat.assert_not_called()
+        groq.llm_chat.assert_called_once()
+
+    def test_cost_ceiling_without_fallback_routes_to_manual_review(self, monkeypatch):
+        monkeypatch.setattr(
+            settings,
+            "llm_provider_cost_ceilings",
+            {"openai": {"limit_usd": 1.0, "window": "hourly"}},
+        )
+        provider = MagicMock(spec=ModelProvider)
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(self.service.cost_ceiling, "is_exceeded", lambda _: True)
+
+        result = self.service.verify_claim(
+            aid_claim="Aid reached households.",
+            provider_preference="auto",
+        )
+
+        assert result["manual_review"] is True
+        assert result["reason"] == "provider_cost_ceiling"
+        assert result["verification"]["needs_review"] is True
+        provider.llm_chat.assert_not_called()
+
     def test_verify_claim_skips_open_circuit_provider(self, monkeypatch):
         """Providers with an OPEN circuit breaker are skipped, not retried."""
         openai = MagicMock(spec=ModelProvider)

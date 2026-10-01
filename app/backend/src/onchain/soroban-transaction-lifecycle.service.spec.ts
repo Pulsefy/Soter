@@ -1,9 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { Logger } from '@nestjs/common';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
 import { ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
 import { PrismaService } from '../prisma/prisma.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import { LoggerService } from '../logger/logger.service';
 import { ConfigService } from '@nestjs/config';
 import {
   SorobanTransactionStatus,
@@ -13,6 +14,7 @@ import {
 
 describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
   let service: SorobanTransactionLifecycleService;
+  let testingModules: TestingModule[] = [];
 
   const mockPrismaService = {
     sorobanTransaction: {
@@ -40,6 +42,19 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
     initEscrow: jest.fn(),
   };
 
+  // A single in-memory storage keeps nested correlation bindings working the
+  // same way the real logger service does.
+  const specAsyncLocalStorage = new AsyncLocalStorage<Map<string, unknown>>();
+
+  const mockLoggerService = {
+    log: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    getCorrelationId: jest.fn((): string | undefined => 'spec-correlation-id'),
+    getAsyncLocalStorage: jest.fn(() => specAsyncLocalStorage),
+  };
+
   /**
    * Builds the service with a specific STUCK_TRANSACTION_THRESHOLD_MS value so
    * config parsing and fallback can be exercised.
@@ -53,18 +68,20 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
       ),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    const module = await Test.createTestingModule({
       providers: [
         SorobanTransactionLifecycleService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: MetricsService, useValue: mockMetricsService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: LoggerService, useValue: mockLoggerService },
         {
           provide: ONCHAIN_ADAPTER_TOKEN,
           useValue: mockOnchainAdapter,
         },
       ],
     }).compile();
+    testingModules.push(module);
 
     return module.get<SorobanTransactionLifecycleService>(
       SorobanTransactionLifecycleService,
@@ -93,7 +110,9 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
     service = await buildService('300000');
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await Promise.all(testingModules.map(m => m.close()));
+    testingModules = [];
     jest.clearAllMocks();
   });
 
@@ -184,11 +203,6 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
     });
 
     it('classifies a non-retryable transaction as terminal and escalates it', async () => {
-      const serviceLogger = (service as unknown as { logger: Logger }).logger;
-      const loggerErrorSpy = jest
-        .spyOn(serviceLogger, 'error')
-        .mockImplementation(() => undefined);
-
       mockPrismaService.sorobanTransaction.findMany.mockResolvedValue([
         makeStuckTransaction({
           isRetryable: false,
@@ -209,12 +223,12 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
         { classification: 'terminal' },
       );
       // Terminal transactions get an explicit operator escalation.
-      expect(loggerErrorSpy).toHaveBeenCalledWith(
+      expect(mockLoggerService.error).toHaveBeenCalledWith(
         expect.stringContaining('operator intervention'),
+        undefined,
+        expect.any(String),
         expect.objectContaining({ transactionIds: ['tx-1'] }),
       );
-
-      loggerErrorSpy.mockRestore();
     });
 
     it('classifies a transaction whose retries are exhausted as terminal', async () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -30,16 +30,14 @@ import {
   Download,
   Edit3,
   Shield,
-  BookOpen,
   RefreshCw,
   Layers,
-  Clock,
   Zap,
 } from 'lucide-react';
 import { useWalletStore } from '@/lib/walletStore';
 import { useHealthStatus } from '@/hooks/useHealthStatus';
-import { useContractRegistry } from '@/hooks/useContractRegistry';
 import { useRunbook } from '@/hooks/useRunbook';
+import { ContractRegistryPanel } from '@/components/ContractRegistryPanel';
 import { enableDemoChecklist } from '@/lib/env';
 import { stellarNetwork } from '@/lib/env';
 import type { ChecklistItem as RunbookChecklistItem } from '@/types/runbook';
@@ -175,188 +173,6 @@ function PrerequisitesCard({ walletConnected }: { walletConnected: boolean }) {
           </li>
         ))}
       </ul>
-    </div>
-  );
-}
-
-/* ─── Contract Registry Card ─────────────────────────────────────────────── */
-
-function ContractRegistryCard() {
-  const t = useTranslations('demoChecklist');
-  const { state, data, error } = useContractRegistry();
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  const copyId = async (id: string, contractId: string) => {
-    try {
-      await navigator.clipboard.writeText(contractId);
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  if (state === 'loading') {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 space-y-3">
-        <div className="flex items-center gap-2">
-          <FileCode size={18} className="text-slate-500 animate-pulse" />
-          <h3 className="text-sm font-semibold">{t('registryTitle')}</h3>
-        </div>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          {t('registryLoading')}
-        </p>
-      </div>
-    );
-  }
-
-  if (state === 'error' || !data) {
-    return (
-      <div className="rounded-xl border border-red-200 bg-red-50/50 p-5 dark:border-red-900/50 dark:bg-red-950/20 space-y-2">
-        <div className="flex items-center gap-2">
-          <FileCode size={18} className="text-red-500" />
-          <h3 className="text-sm font-semibold text-red-700 dark:text-red-400">
-            {t('registryTitle')}
-          </h3>
-        </div>
-        <p className="text-xs text-red-600 dark:text-red-400">
-          {error?.message || t('registryError')}
-        </p>
-      </div>
-    );
-  }
-
-  const severityColor: Record<string, string> = {
-    low: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400',
-    medium: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400',
-    high: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',
-  };
-
-  return (
-    <div
-      id="contract-registry"
-      className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 space-y-4"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg">
-            <FileCode size={16} className="text-slate-600 dark:text-slate-400" />
-          </div>
-          <div>
-            <h3 className="text-sm font-semibold">{t('registryTitle')}</h3>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-xs leading-relaxed">
-              {t('registrySubtitle')}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
-        <dt className="text-slate-500 dark:text-slate-400 font-medium">
-          {t('registrySchemaVersion')}
-        </dt>
-        <dd className="font-mono text-slate-700 dark:text-slate-300">v{data.schema_version}</dd>
-        <dt className="text-slate-500 dark:text-slate-400 font-medium">
-          {t('registryGenerated')}
-        </dt>
-        <dd className="text-slate-700 dark:text-slate-300">
-          {new Date(data.generated_at).toLocaleString()}
-        </dd>
-      </dl>
-
-      <div className="space-y-3">
-        {Object.entries(data.contracts).map(([name, entry]) => {
-          const networks = Object.entries(entry.networks);
-          return (
-            <div
-              key={name}
-              className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 p-3 space-y-2.5"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Shield size={14} className="text-blue-500" />
-                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 font-mono">
-                    {name}
-                  </span>
-                </div>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-mono">
-                  crate v{entry.version}
-                </span>
-              </div>
-
-              {networks.length === 0 ? (
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
-                  {t('registryNoDeployments')}
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {networks.map(([network, dep]) => {
-                    const rowId = `${name}-${network}`;
-                    const isCopied = copiedId === rowId;
-                    return (
-                      <div
-                        key={network}
-                        className="rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2.5 space-y-1.5"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${severityColor[network === 'testnet' ? 'medium' : 'low']}`}>
-                            {network.toUpperCase()}
-                          </span>
-                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-                            v{dep.version}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <code className="text-[10px] font-mono text-slate-700 dark:text-slate-300 truncate" title={dep.contract_id}>
-                            {dep.contract_id.slice(0, 10)}…{dep.contract_id.slice(-8)}
-                          </code>
-                          <button
-                            onClick={() => copyId(rowId, dep.contract_id)}
-                            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
-                            title={t('registryCopyId')}
-                          >
-                            {isCopied ? (
-                              <Check size={12} className="text-green-500" />
-                            ) : (
-                              <Copy size={12} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
-                            )}
-                          </button>
-                        </div>
-                        <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                          <Clock size={10} />
-                          {dep.deployed_at}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
-        {[
-          { label: t('registrySourceCanonical'), value: data.source.canonical_path },
-          { label: t('registrySourceGenerator'), value: data.source.generator_script },
-          { label: t('registrySourceDeployment'), value: data.source.deployment_registry },
-        ].map((row) => (
-          <div key={row.label} className="flex items-start justify-between gap-2 text-[11px]">
-            <span className="text-slate-500 dark:text-slate-400 shrink-0">{row.label}</span>
-            <code className="font-mono text-slate-700 dark:text-slate-300 text-right break-all">
-              {row.value}
-            </code>
-          </div>
-        ))}
-      </div>
-
-      <div className="flex items-center justify-end pt-1">
-        <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-          <BookOpen size={11} />
-          {t('registryViewSource')}
-        </span>
-      </div>
     </div>
   );
 }
@@ -655,6 +471,21 @@ function SectionHeader({
 
 /* ─── Main page ──────────────────────────────────────────────────────────── */
 
+/** No-op subscribe: `hydrated` flips once on mount and never changes after. */
+const subscribeNoop = () => () => {};
+
+/** Reads the persisted checklist ticks; returns {} on the server or on error. */
+function readStoredCheckedSteps(storageKey: string): Record<string, boolean> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const stored = localStorage.getItem(storageKey);
+    return stored ? (JSON.parse(stored) as Record<string, boolean>) : {};
+  } catch {
+    /* ignore */
+    return {};
+  }
+}
+
 export default function DemoChecklistPage() {
   const router = useRouter();
   const t = useTranslations('demoChecklist');
@@ -663,30 +494,30 @@ export default function DemoChecklistPage() {
   const runbook = useRunbook();
   const walletConnected = Boolean(publicKey);
 
-  const [allowed, setAllowed] = useState(false);
-  const [checked, setChecked] = useState(false);
+  // Build-time constant: the route is enabled or not for the whole session.
+  const allowed = enableDemoChecklist;
+
+  // True only after hydration; the server snapshot renders nothing so lazily
+  // read localStorage state can never cause a hydration mismatch.
+  const hydrated = useSyncExternalStore(
+    subscribeNoop,
+    () => true,
+    () => false,
+  );
+
   const [activeTab, setActiveTab] = useState<TabId>('all');
 
+  // Redirecting a disabled route is a side effect on the router, not React state.
   useEffect(() => {
     if (!enableDemoChecklist) {
       router.replace('/');
-    } else {
-      setAllowed(true);
     }
-    setChecked(true);
   }, [router]);
 
   const STORAGE_KEY = 'soter-demo-checklist';
-  const [checkedSteps, setCheckedSteps] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) setCheckedSteps(JSON.parse(stored));
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  const [checkedSteps, setCheckedSteps] = useState<Record<string, boolean>>(() =>
+    readStoredCheckedSteps(STORAGE_KEY),
+  );
 
   const toggleStep = (id: string) => {
     setCheckedSteps((prev) => {
@@ -700,16 +531,22 @@ export default function DemoChecklistPage() {
     });
   };
 
-  const isAutoComplete = (item: RunbookChecklistItem): boolean => {
-    if (item.autoVerify === 'wallet') return walletConnected;
-    if (item.autoVerify === 'health') return healthState === 'ok';
-    return false;
-  };
+  const isAutoComplete = useCallback(
+    (item: RunbookChecklistItem): boolean => {
+      if (item.autoVerify === 'wallet') return walletConnected;
+      if (item.autoVerify === 'health') return healthState === 'ok';
+      return false;
+    },
+    [walletConnected, healthState],
+  );
 
-  const isStepDone = (item: RunbookChecklistItem): boolean => {
-    if (isAutoComplete(item)) return true;
-    return Boolean(checkedSteps[item.id]);
-  };
+  const isStepDone = useCallback(
+    (item: RunbookChecklistItem): boolean => {
+      if (isAutoComplete(item)) return true;
+      return Boolean(checkedSteps[item.id]);
+    },
+    [isAutoComplete, checkedSteps],
+  );
 
   const runbookSections = useMemo(() => {
     const sb = runbook.data?.sections;
@@ -728,7 +565,7 @@ export default function DemoChecklistPage() {
       live: count(runbookSections.live),
       post: count(runbookSections.post),
     };
-  }, [runbookSections, checkedSteps, walletConnected, healthState]);
+  }, [runbookSections, isStepDone]);
 
   const totalSteps =
     sectionCounts.pre[1] + sectionCounts.live[1] + sectionCounts.post[1];
@@ -775,8 +612,7 @@ export default function DemoChecklistPage() {
     },
   ];
 
-  if (!checked) return null;
-  if (!allowed) return null;
+  if (!allowed || !hydrated) return null;
 
   const renderItemList = (items: RunbookChecklistItem[]) => (
     <ol className="space-y-3">
@@ -1013,7 +849,7 @@ export default function DemoChecklistPage() {
           <aside className="space-y-4">
             <SystemHealthCard />
             <PrerequisitesCard walletConnected={walletConnected} />
-            <ContractRegistryCard />
+            <ContractRegistryPanel id="contract-registry" />
 
             <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 space-y-2">
               <h3 className="text-sm font-semibold flex items-center gap-2">

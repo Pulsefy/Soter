@@ -16,6 +16,17 @@
     "batch_create_packages_25": { "cpu_instructions": 2151640, "memory_bytes": 464943 },
     "batch_create_packages_50": { "cpu_instructions": 5906006, "memory_bytes": 1389268 },
     "batch_create_packages_100": { "cpu_instructions": 18226527, "memory_bytes": 4647918 },
-    "batch_create_packages_200": { "cpu_instructions": 61898137, "memory_bytes": 16805218 }
+    "batch_create_packages_200": { "cpu_instructions": 61898137, "memory_bytes": 16805218 },
+    "set_delegate": { "cpu_instructions": 256, "memory_bytes": 1024 },
+    "set_delegate_with_expiry": { "cpu_instructions": 256, "memory_bytes": 1024 },
+    "revoke_delegate": { "cpu_instructions": 8629, "memory_bytes": 143 },
+    "get_delegate": { "cpu_instructions": 256, "memory_bytes": 1024 },
+    "get_delegate_info": { "cpu_instructions": 256, "memory_bytes": 1024 },
+    "get_delegate_history": { "cpu_instructions": 256, "memory_bytes": 1024 },
+    "cleanup_expired_delegates": { "cpu_instructions": 3149419, "memory_bytes": 524024 },
+    "sweep_expired_delegates": { "cpu_instructions": 3112446, "memory_bytes": 513148 },
+    "batch_claim_25": { "cpu_instructions": 9266493, "memory_bytes": 1858893 },
+    "batch_revoke_25": { "cpu_instructions": 1976868, "memory_bytes": 328064 },
+    "batch_refund_25": { "cpu_instructions": 7130570, "memory_bytes": 1356925 }
   }
 }

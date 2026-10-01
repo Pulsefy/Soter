@@ -16,24 +16,57 @@ jobs:
   integration-harness:
     name: Testnet Integration Harness
     runs-on: ubuntu-latest
-    if: >
-      github.event_name == 'workflow_dispatch' || (secrets.SOROBAN_CONTRACT_ID != '' && secrets.SOROBAN_RPC_URL != '')
+# NOTE: GitHub Actions does not allow referencing the `secrets` context
+    # directly inside a job-level `if:` conditional. The previous version had:
+    #
+    #   if: >
+    #     github.event_name == 'workflow_dispatch' ||
+    #     (secrets.SOROBAN_CONTRACT_ID != '' && secrets.SOROBAN_RPC_URL != '')
+    #
+    # That made the workflow fail to validate on every trigger, strictly worse
+    # than the original flaky behaviour (#1173). Replaced by a first step that
+    # reads the secrets via `env:` and exposes a step output (`has-secrets`),
+    # which the subsequent steps gate on.
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Detect required secrets
+        id: secrets-check
+        env:
+          SOROBAN_CONTRACT_ID: ${{ secrets.SOROBAN_CONTRACT_ID }}
+          SOROBAN_RPC_URL: ${{ secrets.SOROBAN_RPC_URL }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "has-secrets=true" >> "$GITHUB_OUTPUT"
+            echo "Workflow dispatched manually — proceeding with the integration harness."
+            exit 0
+          fi
+          if [ -n "${SOROBAN_CONTRACT_ID}" ] && [ -n "${SOROBAN_RPC_URL}" ]; then
+            echo "has-secrets=true" >> "$GITHUB_OUTPUT"
+            echo "Required secrets present — proceeding with the integration harness."
+          else
+            echo "has-secrets=false" >> "$GITHUB_OUTPUT"
+            echo "Required secrets (SOROBAN_CONTRACT_ID, SOROBAN_RPC_URL) are not set."
+            echo "Skipping the integration harness on this run."
+          fi
+
       - name: Setup Node
+        if: steps.secrets-check.outputs.has-secrets == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install dependencies
+        if: steps.secrets-check.outputs.has-secrets == 'true'
         working-directory: tools/testnet-smoke
         run: |
           npm ci
 
       - name: Run integration harness
+if: steps.secrets-check.outputs.has-secrets == 'true'
         continue-on-error: true  # flake: testnet RPC/npm registry is transient; retries pass with no code change
         working-directory: tools/testnet-smoke
         env:

@@ -120,7 +120,15 @@
     "clearSyncedCache": "Borrar caché sincronizada",
     "yourPublicKey": "Tu clave pública",
     "stellarLabFaucet": "Grifo de Stellar Lab",
-    "friendbotApi": "API de Friendbot"
+    "friendbotApi": "API de Friendbot",
+    "syncFrequency": "Frecuencia de sincronización",
+    "syncFrequencyHint": "Elige con qué frecuencia se sincroniza la aplicación en segundo plano",
+    "syncFrequencyAggressive": "Frecuente",
+    "syncFrequencyNormal": "Normal",
+    "syncFrequencyConservative": "Conservadora",
+    "syncFrequencyAggressiveHint": "Sincroniza cada 5 minutos",
+    "syncFrequencyNormalHint": "Sincroniza cada 15 minutos (por defecto)",
+    "syncFrequencyConservativeHint": "Sincroniza cada 60 minutos"
   },
   "tasks": {
     "title": "Tareas",
@@ -200,7 +208,14 @@
     "step1": "Paso 1: Elige una foto",
     "step2": "Paso 2: Vista previa",
     "chooseAgain": "Elegir de nuevo",
-    "step3": "Paso 3: Subir"
+    "step3": "Paso 3: Subir",
+    "storageLowTitle": "Poco almacenamiento",
+    "storageLowBody": "Solo quedan unos {free} de almacenamiento libre después de contar las subidas pendientes. Capturar la evidencia puede fallar a mitad del proceso y la foto podría perderse.",
+    "storageCriticalTitle": "Almacenamiento casi lleno",
+    "storageCriticalBody": "Solo quedan {free} de almacenamiento libre. Libere espacio antes de capturar la evidencia.",
+    "storageBannerBody": "Almacenamiento libre: unos {free} (incluye {pending} retenidos por subidas pendientes). La captura puede fallar si se agota el espacio.",
+    "storageBannerA11y": "Advertencia de almacenamiento: queda poco espacio libre, la captura de evidencia puede fallar",
+    "storageContinue": "Continuar de todos modos"
   },
   "errors": {
     "networkError": "Error de red. Verifique su conexión.",

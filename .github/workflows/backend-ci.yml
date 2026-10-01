@@ -24,7 +24,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U soter -d soter_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -45,6 +45,19 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Wait for PostgreSQL
+        env:
+          DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_test
+        run: |
+          for i in {1..30}; do
+            if pg_isready -d "$DATABASE_URL"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready"
+          exit 1
 
       - name: Run Prisma migrations
         working-directory: app/backend
@@ -101,7 +114,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U soter -d soter_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -138,6 +151,24 @@ jobs:
         env:
           DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_test
 
+      - name: Generate OpenAPI spec (fresh snapshot for review)
+        working-directory: app/backend
+        run: SPEC_OUTPUT_PATH=openapi/openapi.generated.json pnpm run spec:generate
+        env:
+          DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_test
+          # Minimal stubs so NestJS can bootstrap without real services
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          NODE_ENV: test
+
+      - name: Upload generated OpenAPI spec
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-generated
+          path: app/backend/openapi/openapi.generated.json
+          if-no-files-found: warn
+
       - name: Check OpenAPI spec drift
         working-directory: app/backend
         run: pnpm run spec:check
@@ -151,3 +182,32 @@ jobs:
       - name: Lint OpenAPI spec
         working-directory: app/backend
         run: pnpm run spec:lint
+
+  contract-bindings:
+    name: Contract bindings — drift check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --filter backend --frozen-lockfile --ignore-scripts
+
+      # Guards that src/onchain/generated/aid-escrow.contract.ts still matches
+      # the committed contract interface spec. The contract-vs-WASM half of the
+      # check lives in Contract CI, which builds the Rust artifact.
+      - name: Check contract bindings drift
+        working-directory: app/backend
+        run: pnpm run contract:check
+

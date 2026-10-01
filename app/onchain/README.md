@@ -74,6 +74,37 @@ Events use **stable topic identifiers** (struct name in snake_case) so indexers 
 | `view_package_status(id)` | Returns only the status of a package. | None |
 | `get_aggregates(token)` | Returns total committed/claimed/expired stats. | None |
 
+## 🧾 Contract interface spec
+
+`contracts/aid_escrow/interface.xdr` is the machine-readable contract interface
+(the base64 `SCSpecEntry` XDR stream embedded in the WASM). It is the contract's
+published API surface and the source of truth for backend type generation — the
+backend never reads the WASM, only this file.
+
+Re-export it after changing any `#[contractimpl]` function, struct, enum, or
+error variant:
+
+```bash
+# Build the WASM and re-export the spec artifact
+./scripts/export-contract-spec.sh --build
+# or
+make spec
+```
+
+Then regenerate the backend bindings from it:
+
+```bash
+cd ../..
+pnpm --filter backend run contract:generate
+```
+
+Both artifacts are committed, and CI fails when they drift:
+
+| Command | What it checks |
+| :--- | :--- |
+| `make spec-check` | `interface.xdr` matches the spec embedded in the built WASM |
+| `pnpm --filter backend run contract:check` | Generated TypeScript types match `interface.xdr` |
+
 ## 🚀 Quick Start
 
 ### Prerequisites

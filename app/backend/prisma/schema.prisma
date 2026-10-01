@@ -23,6 +23,21 @@ enum ClaimStatus {
   cancelled
 }
 
+/// Structured reason a claim was cancelled. Reported on via the cancellation
+/// breakdown endpoint; `Claim.cancelReason` remains the free-text detail.
+enum CancelReasonCode {
+  /// Cancelled for a reason not captured by any other code. This is also the
+  /// backfill value for claims cancelled before this enum existed.
+  unspecified
+  duplicate
+  recipient_ineligible
+  evidence_rejected
+  fraud_flag
+  requester_withdrew
+  budget_reallocated
+  reissued
+}
+
 model AidPackage {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -231,7 +246,10 @@ model Claim {
   /// Set when this claim is cancelled
   cancelledAt    DateTime?
   cancelledBy    String?
+  /// Free-text operator detail explaining the cancellation.
   cancelReason   String?
+  /// Machine-readable cancellation reason, used for reporting.
+  cancelReasonCode CancelReasonCode?
 
   /// Points to the original claim this one replaces (reissue chain)
   reissuedFromId String?
@@ -259,6 +277,7 @@ model Claim {
   @@index([deletedAt])
   @@index([reissuedFromId])
   @@index([expiresAt])
+  @@index([cancelReasonCode])
   @@unique([importJobId, importRowNumber])
 }
 
@@ -366,6 +385,16 @@ model AuditLog {
   timestamp DateTime  @default(now())
   metadata  Json?
   deletedAt DateTime?
+
+  // Tamper-evident hash chain (see docs/audit-log-integrity.md).
+  // `sequence` orders the chain; `prevHash` links each entry to its
+  // predecessor; `entryHash` covers the entry content; `metadataCanonical`
+  // is the canonical JSON serialization of `metadata` covered by the hash.
+  // Legacy rows predating the chain keep all four fields null.
+  sequence          BigInt?  @unique
+  prevHash          String?
+  entryHash         String?
+  metadataCanonical String?
 
   @@index([entity, entityId])
   @@index([timestamp])
@@ -866,6 +895,7 @@ model DeploymentMetadata {
   commitSha    String?  // Git commit SHA of the code when deployed
   deployer     String?  // Address or ID of the deployer
   transactionHash String? // Hash of the deployment transaction
+  contractVersion Int? // Last on-chain contract version verified by the backend
   metadata     Json?    // Additional deployment metadata (environment variables, flags, etc.)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -1106,6 +1136,7 @@ model SearchIndexEntry {
 /// of starting over. Only one `running` build is allowed at a time;
 /// concurrent requests are rejected by SearchIndexService.
 model SearchIndexBuild {
+
   id                 String                @id @default(cuid())
   status             SearchIndexBuildStatus @default(running)
   mode               String                @default("rebuild") /// "rebuild" | "dry_run"
@@ -1124,5 +1155,49 @@ model SearchIndexBuild {
   updatedAt          DateTime              @updatedAt
 
   @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// LEDGER BACKFILL
+// ============================================================================
+
+enum BackfillStatus {
+  running
+  completed
+  failed
+  cancelled
+}
+
+/// Durable checkpoint for a range-based ledger backfill job. Progress is
+/// persisted here so an interrupted or failed backfill can resume from
+/// `lastProcessedLedger` instead of restarting from the beginning.
+/// `jobKey` is a deterministic key (e.g. "backfill:{start}:{end}") so that
+/// re-triggering the same range either resumes or is rejected if already running.
+model BackfillCheckpoint {
+  id                  String         @id @default(cuid())
+  /// Deterministic key — prevents duplicate concurrent runs for the same range.
+  jobKey              String         @unique
+  startLedger         Int
+  endLedger           Int
+  /// The last ledger sequence fully processed. Resume point on restart.
+  lastProcessedLedger Int            @default(0)
+  status              BackfillStatus @default(running)
+  campaignId          String?
+  batchSize           Int            @default(100)
+  processedCount      Int            @default(0)
+  skippedCount        Int            @default(0)
+  errorCount          Int            @default(0)
+  lastError           String?
+  triggeredBy         String?
+  startedAt           DateTime       @default(now())
+  completedAt         DateTime?
+  /// Heartbeat updated by the worker on each batch so stale jobs can be detected.
+  heartbeatAt         DateTime?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@index([status])
+  @@index([startLedger, endLedger])
   @@index([createdAt])
 }

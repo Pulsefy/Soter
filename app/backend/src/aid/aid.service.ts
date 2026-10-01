@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { RedisService } from '../../cache/redis.service';
@@ -122,7 +123,9 @@ export class AidService {
         : campaign?.ngoId === organizationId);
 
     if (!campaign || !belongsToOrganization || campaign.deletedAt) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'A valid campaign could not be resolved from campaignId or the authenticated organization',
       );
     }

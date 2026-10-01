@@ -1,9 +1,10 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DlqService } from './dlq.service';
 import { getQueueToken } from '@nestjs/bullmq';
 import { RETENTION_PURGE_QUEUE } from '../retention-policy/retention-purge.processor';
 import { AuditService } from '../audit/audit.service';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
+
 import { Job } from 'bullmq';
 
 describe('DlqService', () => {
@@ -101,7 +102,7 @@ describe('DlqService', () => {
     it('should throw NotFoundException if job not found in DLQ', async () => {
       dlqQueue.getJob.mockResolvedValue(null);
       await expect(service.replayJob('unknown', 'admin-1')).rejects.toThrow(
-        NotFoundException,
+        AppException,
       );
     });
 
@@ -114,7 +115,7 @@ describe('DlqService', () => {
       dlqQueue.getJob.mockResolvedValue(mockJob);
 
       await expect(service.replayJob('dlq-job-1', 'admin-1')).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
     });
 
@@ -127,7 +128,7 @@ describe('DlqService', () => {
       dlqQueue.getJob.mockResolvedValue(mockJob);
 
       await expect(service.replayJob('dlq-job-1', 'admin-1')).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
     });
   });

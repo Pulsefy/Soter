@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useVersion } from '@/hooks/useVersion';
+import { useVersionStore } from '@/lib/versionStore';
 import { ReleaseNotesModal } from '@/components/ReleaseNotesModal';
 import { ForceUpgradeScreen } from '@/components/ForceUpgradeScreen';
 
@@ -12,28 +13,32 @@ interface VersionProviderProps {
 export function VersionProvider({ children }: VersionProviderProps) {
   const {
     shouldBlockApp,
-    shouldShowNotes,
     loadVersionConfig,
     isLoading,
   } = useVersion();
   const [notesModalOpen, setNotesModalOpen] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
-  // Load version config on mount
+  // Load version config on mount. The modal is opened from the async
+  // continuation after the fetch resolves (not synchronously in the effect
+  // body), so mounting cannot cascade renders.
   useEffect(() => {
+    let cancelled = false;
     const initialize = async () => {
       await loadVersionConfig();
+      if (cancelled) return;
+      const { shouldShowReleaseNotes, forceUpgradeRequired } =
+        useVersionStore.getState();
+      if (shouldShowReleaseNotes && !forceUpgradeRequired) {
+        setNotesModalOpen(true);
+      }
       setInitialized(true);
     };
-    initialize();
+    void initialize();
+    return () => {
+      cancelled = true;
+    };
   }, [loadVersionConfig]);
-
-  // Show release notes modal when appropriate
-  useEffect(() => {
-    if (initialized && shouldShowNotes && !isLoading) {
-      setNotesModalOpen(true);
-    }
-  }, [initialized, shouldShowNotes, isLoading]);
 
   if (isLoading || !initialized) {
     // Show loading state or nothing while checking version

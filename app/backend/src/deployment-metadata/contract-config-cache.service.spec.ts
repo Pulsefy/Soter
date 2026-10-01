@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ContractConfigCacheService } from './contract-config-cache.service';
 import { RedisService } from '../../cache/redis.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
 
 describe('ContractConfigCacheService', () => {
   let service: ContractConfigCacheService;
@@ -38,12 +39,17 @@ describe('ContractConfigCacheService', () => {
     },
   };
 
+  const mockMetrics = {
+    setGauge: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ContractConfigCacheService,
         { provide: RedisService, useValue: mockRedis },
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: MetricsService, useValue: mockMetrics },
       ],
     }).compile();
 
@@ -54,13 +60,11 @@ describe('ContractConfigCacheService', () => {
     _prisma = module.get(PrismaService);
 
     jest.clearAllMocks();
-    // Redis set/del always succeeds by default
+
     mockRedis.set.mockResolvedValue(undefined);
     mockRedis.del.mockResolvedValue(undefined);
     mockRedis.delByPattern.mockResolvedValue(0);
   });
-
-  // ─── getAll ────────────────────────────────────────────────────────────────
 
   describe('getAll', () => {
     it('returns cached value on cache hit', async () => {
@@ -104,7 +108,6 @@ describe('ContractConfigCacheService', () => {
     });
 
     it('falls back to DB silently when Redis returns null (Redis unavailable)', async () => {
-      // RedisService.get swallows errors and returns null – simulate that
       mockRedis.get.mockResolvedValue(null);
       mockPrisma.deploymentMetadata.findMany.mockResolvedValue([record]);
 
@@ -113,8 +116,6 @@ describe('ContractConfigCacheService', () => {
       expect(result).toHaveLength(1);
     });
   });
-
-  // ─── getByNetwork ──────────────────────────────────────────────────────────
 
   describe('getByNetwork', () => {
     it('returns cached value on cache hit', async () => {
@@ -143,8 +144,6 @@ describe('ContractConfigCacheService', () => {
       expect(result).toHaveLength(1);
     });
   });
-
-  // ─── getByNetworkAndContractName ───────────────────────────────────────────
 
   describe('getByNetworkAndContractName', () => {
     it('returns cached value on hit', async () => {
@@ -196,7 +195,6 @@ describe('ContractConfigCacheService', () => {
       );
 
       expect(result).toBeNull();
-      // null result is cached to prevent repeated DB misses
       expect(mockRedis.set).toHaveBeenCalledWith(
         'contract-config:contract:testnet:Missing',
         null,
@@ -204,8 +202,6 @@ describe('ContractConfigCacheService', () => {
       );
     });
   });
-
-  // ─── getByContractId ───────────────────────────────────────────────────────
 
   describe('getByContractId', () => {
     it('returns cached value on hit', async () => {
@@ -244,8 +240,6 @@ describe('ContractConfigCacheService', () => {
     });
   });
 
-  // ─── invalidateAll ─────────────────────────────────────────────────────────
-
   describe('invalidateAll', () => {
     it('deletes all contract-config:* keys via pattern', async () => {
       mockRedis.delByPattern.mockResolvedValue(5);
@@ -265,8 +259,6 @@ describe('ContractConfigCacheService', () => {
     });
   });
 
-  // ─── refreshAll ────────────────────────────────────────────────────────────
-
   describe('refreshAll', () => {
     it('invalidates then re-warms all cache keys and returns stats', async () => {
       mockRedis.delByPattern.mockResolvedValue(3);
@@ -274,20 +266,45 @@ describe('ContractConfigCacheService', () => {
 
       const result = await service.refreshAll();
 
-      // Invalidation happened first
+      expect(mockPrisma.deploymentMetadata.findMany).toHaveBeenCalledTimes(1);
       expect(mockRedis.delByPattern).toHaveBeenCalledWith('contract-config:*');
 
-      // All four key types populated: all, byNetwork, byNetworkAndName, byContractId
       const setCalls = mockRedis.set.mock.calls.map(([k]) => k as string);
       expect(setCalls).toContain('contract-config:all');
       expect(setCalls).toContain('contract-config:network:testnet');
       expect(setCalls).toContain('contract-config:contract:testnet:AidEscrow');
       expect(setCalls).toContain('contract-config:id:CABC123');
 
-      // Stats
       expect(result.contractCount).toBe(1);
       expect(result.networkCount).toBe(1);
       expect(result.refreshedAt).toBeInstanceOf(Date);
+
+      expect(mockMetrics.setGauge).toHaveBeenCalledWith(
+        'deployment_metadata_cache_staleness_seconds',
+        0,
+      );
+    });
+
+    it('retries a transient failure and succeeds on the next attempt', async () => {
+      const transientError = new Error('temporary database timeout');
+
+      mockPrisma.deploymentMetadata.findMany
+        .mockRejectedValueOnce(transientError)
+        .mockResolvedValueOnce([record]);
+
+      jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
+
+      const result = await service.refreshAll();
+
+      expect(mockPrisma.deploymentMetadata.findMany).toHaveBeenCalledTimes(2);
+
+      expect(result.contractCount).toBe(1);
+      expect(result.networkCount).toBe(1);
+
+      expect(mockMetrics.setGauge).toHaveBeenCalledWith(
+        'deployment_metadata_cache_staleness_seconds',
+        0,
+      );
     });
 
     it('handles empty DB gracefully – 0 contracts, 0 networks', async () => {
@@ -298,7 +315,7 @@ describe('ContractConfigCacheService', () => {
 
       expect(result.contractCount).toBe(0);
       expect(result.networkCount).toBe(0);
-      // Only the "all" key is written (empty array)
+
       const setCalls = mockRedis.set.mock.calls.map(([k]) => k as string);
       expect(setCalls).toContain('contract-config:all');
     });
@@ -311,6 +328,7 @@ describe('ContractConfigCacheService', () => {
         contractId: 'CDEF456',
         network: 'mainnet',
       };
+
       mockRedis.delByPattern.mockResolvedValue(0);
       mockPrisma.deploymentMetadata.findMany.mockResolvedValue([
         record,
@@ -328,14 +346,41 @@ describe('ContractConfigCacheService', () => {
       expect(setCalls).toContain('contract-config:contract:mainnet:TokenVault');
       expect(setCalls).toContain('contract-config:id:CDEF456');
     });
-  });
 
-  // ─── safe behavior when Redis is unavailable ───────────────────────────────
+    it('logs persistent failure and exposes cache staleness after all retries fail', async () => {
+      const persistentError = new Error('database unavailable');
+
+      mockPrisma.deploymentMetadata.findMany.mockRejectedValue(persistentError);
+
+      const errorSpy = jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined);
+
+      jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
+
+      await expect(service.refreshAll()).rejects.toThrow(
+        'database unavailable',
+      );
+
+      expect(mockPrisma.deploymentMetadata.findMany).toHaveBeenCalledTimes(3);
+
+      expect(mockMetrics.setGauge).toHaveBeenCalledWith(
+        'deployment_metadata_cache_staleness_seconds',
+        expect.any(Number),
+      );
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'contract-config cache refresh failed after 3 attempts',
+        ),
+        expect.any(String),
+      );
+    });
+  });
 
   describe('safe fallback when Redis is unavailable', () => {
     it('getAll still returns DB data if Redis.get returns null', async () => {
       mockRedis.get.mockResolvedValue(null);
-      // Redis.set silently swallows errors in the real impl – simulate no-op
       mockRedis.set.mockResolvedValue(undefined);
       mockPrisma.deploymentMetadata.findMany.mockResolvedValue([record]);
 

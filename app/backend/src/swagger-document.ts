@@ -50,6 +50,13 @@ export async function createSwaggerDocument(): Promise<{
     }),
   );
 
+  // Boot the application before scanning it. SwaggerModule resolves each
+  // operation path through the HTTP adapter's registered route table, which
+  // is only populated once the application has been initialised. Generating
+  // the document before this point yields a document with an empty `paths`
+  // object.
+  await app.init();
+
   const document = SwaggerModule.createDocument(app, buildSwaggerConfig());
   return { app, document };
 }

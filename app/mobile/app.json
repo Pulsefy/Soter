@@ -58,7 +58,8 @@
             "networkInspector": false
           }
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

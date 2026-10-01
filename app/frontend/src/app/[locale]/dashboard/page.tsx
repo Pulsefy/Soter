@@ -1,13 +1,16 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import { MapSection } from '@/components/dashboard/MapSection';
-import { ExportControls } from '@/components/dashboard/ExportControls';
 import { DashboardSummaryCards } from '@/components/dashboard/DashboardSummaryCards';
+import { ExportControls } from '@/components/dashboard/ExportControls';
 //import React, { Suspense } from 'react';
 //import { DashboardContent } from '@/components/dashboard/DashboardContent';
 
 const DashboardContent = dynamic(
-  () => import('@/components/dashboard/DashboardContent').then(m => m.DashboardContent),
+  () =>
+    import('@/components/dashboard/DashboardContent').then(
+      m => m.DashboardContent,
+    ),
   {
     loading: () => <PackageListSkeleton />,
   },
@@ -36,20 +39,28 @@ export default function AidDashboard() {
           {/* Header */}
           <div className="flex flex-col md:flex-row items-center justify-between gap-6 border-b border-gray-100 dark:border-gray-800 pb-8">
             <div className="text-center md:text-left space-y-2">
-              <h1 className="text-5xl md:text-6xl font-bold tracking-tight">Aid Dashboard</h1>
+              <h1 className="text-5xl md:text-6xl font-bold tracking-tight">
+                Aid Dashboard
+              </h1>
               <p className="text-xl text-gray-600 dark:text-gray-400">
                 Onchain Aid, Fully Transparent
               </p>
             </div>
             <div className="flex flex-col items-end gap-2">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Operations Tooling</span>
-              <ExportControls context="Dashboard Summary" label="Export Analytics" />
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                Operations Tooling
+              </span>
+              <ExportControls
+                context="Dashboard Summary"
+                label="Export Analytics"
+              />
             </div>
           </div>
           <div className="text-center">
             <p className="text-lg text-gray-700 dark:text-gray-300 max-w-2xl mx-auto">
-              This dashboard displays humanitarian aid packages funded via Soter on the Stellar /
-              Soroban blockchain — every distribution anchored onchain and auditable by anyone.
+              This dashboard displays humanitarian aid packages funded via Soter
+              on the Stellar / Soroban blockchain — every distribution anchored
+              onchain and auditable by anyone.
             </p>
           </div>
 
@@ -90,5 +101,3 @@ function PackageListSkeleton() {
     </div>
   );
 }
-
-

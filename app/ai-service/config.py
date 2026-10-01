@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import secrets
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import Field, HttpUrl, model_validator
 from pydantic_core import PydanticUndefined
@@ -100,6 +100,9 @@ class Settings(BaseSettings):
             "llama-3.3-70b-versatile": {"prompt": 0.00059, "completion": 0.00079},
         }
     )
+    # Optional per-provider spend windows. Each entry accepts limit_usd,
+    # window ("hourly" or "daily"), and an optional fallback_provider.
+    llm_provider_cost_ceilings: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
     # Request safety limits
     max_request_body_bytes: int = 10 * 1024 * 1024
@@ -124,6 +127,17 @@ class Settings(BaseSettings):
         }
     )
     rate_limit_enabled: bool = True
+
+    # Per-organization rate limiting (issue #1200)
+    # Organization IDs mapped to rate limit tiers (e.g., "org-123": "100/minute")
+    # Typically loaded from a database or configuration service at startup.
+    # Organizations not in this mapping have no org-level rate limit ceiling.
+    org_rate_limit_tiers: Dict[str, str] = Field(default_factory=dict)
+    # API key to organization ID mappings (e.g., "key-abc": "org-123")
+    # Typically loaded from a database or configuration service at startup.
+    api_key_to_org_mapping: Dict[str, str] = Field(default_factory=dict)
+    # Enable/disable organization-level rate limiting independently
+    org_rate_limit_enabled: bool = True
 
     # Circuit Breaker settings
     circuit_breaker_failure_threshold: int = 3
@@ -159,6 +173,11 @@ class Settings(BaseSettings):
     # Load shedding settings
     load_shed_memory_threshold_percent: float = 90.0
     load_shed_max_celery_queue_depth: int = 100
+    # Graduated queue depth thresholds for priority-based shedding
+    load_shed_high_celery_queue_depth: Optional[int] = 75
+    load_shed_low_celery_queue_depth: Optional[int] = 50
+    # Provider health threshold for degraded state (0.0-1.0)
+    load_shed_provider_degraded_threshold: float = 0.3
 
     # Dead-letter replay settings
     dead_letter_max_replay_attempts: int = 5
@@ -494,6 +513,21 @@ class Settings(BaseSettings):
             except ValueError as exc:
                 _add(key, str(exc))
 
+        for provider, ceiling in self.llm_provider_cost_ceilings.items():
+            key = "LLM_PROVIDER_COST_CEILINGS"
+            if provider not in {"openai", "groq"}:
+                _add(key, f"unknown provider '{provider}'")
+            limit_usd = ceiling.get("limit_usd")
+            if not isinstance(limit_usd, (int, float)) or limit_usd < 0:
+                _add(key, f"provider '{provider}' limit_usd must be non-negative")
+            if ceiling.get("window") not in {"hourly", "daily"}:
+                _add(key, f"provider '{provider}' window must be hourly or daily")
+            fallback = ceiling.get("fallback_provider")
+            if fallback is not None and fallback not in {"openai", "groq"}:
+                _add(key, f"provider '{provider}' has an unknown fallback_provider")
+            elif fallback == provider:
+                _add(key, f"provider '{provider}' cannot fall back to itself")
+
         # --- Per-model LLM cost rates --------------------------------------
         for model_name, rates in self.llm_model_cost_per_1k_tokens.items():
             for direction in ("prompt", "completion"):
@@ -508,6 +542,44 @@ class Settings(BaseSettings):
                         "LLM_MODEL_COST_PER_1K_TOKENS",
                         f"model '{model_name}' has a negative '{direction}' rate",
                     )
+
+        provider_models = {"openai": self.openai_model, "groq": self.groq_model}
+        for provider, ceiling in self.llm_provider_cost_ceilings.items():
+            key = "LLM_PROVIDER_COST_CEILINGS"
+            provider_rates = self.llm_model_cost_per_1k_tokens.get(
+                provider_models.get(provider, ""), {}
+            )
+            if any(
+                provider_rates.get(direction) is None
+                for direction in ("prompt", "completion")
+            ):
+                _add(
+                    key,
+                    f"provider '{provider}' model must have configured prompt and completion rates",
+                )
+            fallback = ceiling.get("fallback_provider")
+            if fallback in provider_models:
+                fallback_rates = self.llm_model_cost_per_1k_tokens.get(
+                    provider_models[fallback], {}
+                )
+                if all(
+                    provider_rates.get(direction) is not None
+                    and fallback_rates.get(direction) is not None
+                    for direction in ("prompt", "completion")
+                ):
+                    no_more_expensive = all(
+                        fallback_rates[direction] <= provider_rates[direction]
+                        for direction in ("prompt", "completion")
+                    )
+                    strictly_cheaper = any(
+                        fallback_rates[direction] < provider_rates[direction]
+                        for direction in ("prompt", "completion")
+                    )
+                    if not no_more_expensive or not strictly_cheaper:
+                        _add(
+                            key,
+                            f"fallback '{fallback}' for provider '{provider}' must have lower configured token rates",
+                        )
 
         # --- Production requirements (defense in depth) ------------------
         # apply_environment_defaults already rejects this at construction

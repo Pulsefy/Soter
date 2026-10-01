@@ -1,10 +1,5 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-  Optional,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
@@ -21,6 +16,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LoggerService } from '../logger/logger.service';
 import { AuditService } from '../audit/audit.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import {
+  NotificationBackpressureService,
+  NOTIFICATION_MAX_ATTEMPTS,
+  NotificationProvider,
+  providerForType,
+} from './notification-backpressure.service';
 
 export interface ActivityFeedItem {
   id: string;
@@ -44,9 +45,35 @@ export class NotificationsService {
     @InjectQueue('notifications') private readonly notificationsQueue: Queue,
     private readonly prisma: PrismaService,
     private readonly loggerService: LoggerService,
+    private readonly backpressure: NotificationBackpressureService,
     @Optional() private readonly auditService?: AuditService,
     @Optional() private readonly metricsService?: MetricsService,
   ) {}
+
+  /**
+   * Options for a notification job (issue #1180).
+   *
+   * - `attempts` spans several circuit-breaker probe windows, so a
+   *   notification survives a provider outage instead of dead-lettering
+   *   seconds into it.
+   * - `backoff.type: 'custom'` routes every retry through the notification
+   *   backoff strategy, which escalates with both the attempt number and the
+   *   run of consecutive provider failures.
+   * - `delay` parks a freshly enqueued notification until the next probe
+   *   window while the circuit is cut off, so new sends queue up instead of
+   *   joining the outage.
+   */
+  private jobOptions(provider: NotificationProvider) {
+    const initialDelay = this.backpressure.getInitialDelay(provider);
+    return {
+      attempts: NOTIFICATION_MAX_ATTEMPTS,
+      backoff: {
+        type: 'custom' as const,
+        delay: this.backpressure.baseDelayMs,
+      },
+      ...(initialDelay > 0 ? { delay: initialDelay } : {}),
+    };
+  }
 
   async sendEmail(
     recipient: string,
@@ -79,13 +106,11 @@ export class NotificationsService {
       correlationId: propagatedCorrelationId,
     };
 
-    const job = await this.notificationsQueue.add('send-email', data, {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 5000,
-      },
-    });
+    const job = await this.notificationsQueue.add(
+      'send-email',
+      data,
+      this.jobOptions(providerForType(NotificationType.EMAIL)),
+    );
 
     // 3. Update outbox record to enqueued with the BullMQ job ID
     await this.prisma.notificationOutbox.update({
@@ -133,13 +158,11 @@ export class NotificationsService {
       correlationId: propagatedCorrelationId,
     };
 
-    const job = await this.notificationsQueue.add('send-sms', data, {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 5000,
-      },
-    });
+    const job = await this.notificationsQueue.add(
+      'send-sms',
+      data,
+      this.jobOptions(providerForType(NotificationType.SMS)),
+    );
 
     // 3. Update outbox record to enqueued with the BullMQ job ID
     await this.prisma.notificationOutbox.update({
@@ -264,9 +287,15 @@ export class NotificationsService {
       where: { id },
     });
     if (!record)
-      throw new NotFoundException(`Outbox record with id "${id}" not found`);
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Outbox record with id "${id}" not found`,
+      );
     if (record.status !== 'dead_letter') {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Only dead-lettered notifications can be replayed',
       );
     }
@@ -280,7 +309,9 @@ export class NotificationsService {
       },
     });
     if (claimed.count !== 1) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Notification replay is already in progress',
       );
     }
@@ -305,7 +336,7 @@ export class NotificationsService {
               ? (this.parseMetadata(record.metadata).correlationId as string)
               : undefined,
         } satisfies NotificationJobData,
-        { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
+        this.jobOptions(providerForType(record.type)),
       );
       await this.prisma.notificationOutbox.update({
         where: { id },

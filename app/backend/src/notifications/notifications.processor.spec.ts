@@ -6,6 +6,10 @@ import { Job } from 'bullmq';
 import { DlqService } from '../jobs/dlq.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import {
+  NotificationBackpressureService,
+  ProviderCircuitOpenError,
+} from './notification-backpressure.service';
+import {
   EMAIL_ADAPTER,
   SMS_ADAPTER,
 } from './adapters/delivery-adapter.interface';
@@ -16,11 +20,20 @@ describe('NotificationProcessor', () => {
     notificationOutbox: {
       update: jest.Mock;
     };
+    notificationDeliveryAttempt: {
+      create: jest.Mock;
+    };
   };
   let metricsMock: {
     incrementCallbackFailure: jest.Mock;
     incrementNotificationDeliveryAttempt: jest.Mock;
     incrementNotificationDeliveryFailureByCategory: jest.Mock;
+    setNotificationDeadLetterDepth: jest.Mock;
+  };
+  let backpressureMock: {
+    assertAttemptAllowed: jest.Mock;
+    recordSuccess: jest.Mock;
+    recordFailure: jest.Mock;
   };
   let emailAdapterMock: {
     send: jest.Mock;
@@ -54,12 +67,22 @@ describe('NotificationProcessor', () => {
     prismaMock = {
       notificationOutbox: {
         update: jest.fn().mockResolvedValue({}),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      notificationDeliveryAttempt: {
+        create: jest.fn().mockResolvedValue({}),
       },
     };
     metricsMock = {
       incrementCallbackFailure: jest.fn(),
       incrementNotificationDeliveryAttempt: jest.fn(),
       incrementNotificationDeliveryFailureByCategory: jest.fn(),
+      setNotificationDeadLetterDepth: jest.fn(),
+    };
+    backpressureMock = {
+      assertAttemptAllowed: jest.fn(),
+      recordSuccess: jest.fn(),
+      recordFailure: jest.fn(),
     };
     emailAdapterMock = {
       send: jest.fn().mockResolvedValue({
@@ -90,6 +113,10 @@ describe('NotificationProcessor', () => {
         {
           provide: MetricsService,
           useValue: metricsMock,
+        },
+        {
+          provide: NotificationBackpressureService,
+          useValue: backpressureMock,
         },
         {
           provide: EMAIL_ADAPTER,
@@ -154,6 +181,68 @@ describe('NotificationProcessor', () => {
       const job = makeJob({ outboxId: 'outbox-abc' });
 
       await expect(processor.process(job)).rejects.toThrow('DB error');
+    });
+
+    it('should check the circuit breaker before touching the provider', async () => {
+      const callOrder: string[] = [];
+      backpressureMock.assertAttemptAllowed.mockImplementation(() => {
+        callOrder.push('gate');
+      });
+      emailAdapterMock.send.mockImplementation(() => {
+        callOrder.push('send');
+        return Promise.resolve({ success: true, providerMessageId: 'msg-1' });
+      });
+
+      await processor.process(makeJob());
+
+      expect(backpressureMock.assertAttemptAllowed).toHaveBeenCalledWith(
+        'email',
+      );
+      expect(callOrder).toEqual(['gate', 'send']);
+    });
+
+    it('should skip the provider entirely while the circuit is cut off', async () => {
+      backpressureMock.assertAttemptAllowed.mockImplementation(() => {
+        throw new ProviderCircuitOpenError('email', 30_000);
+      });
+      const job = makeJob({ outboxId: 'outbox-abc' });
+
+      await expect(processor.process(job)).rejects.toBeInstanceOf(
+        ProviderCircuitOpenError,
+      );
+
+      expect(emailAdapterMock.send).not.toHaveBeenCalled();
+      expect(backpressureMock.recordFailure).not.toHaveBeenCalled();
+      expect(prismaMock.notificationOutbox.update).not.toHaveBeenCalled();
+    });
+
+    it('should record a successful delivery against the provider circuit', async () => {
+      await processor.process(makeJob());
+
+      expect(backpressureMock.recordSuccess).toHaveBeenCalledWith('email');
+      expect(backpressureMock.recordFailure).not.toHaveBeenCalled();
+    });
+
+    it('should record a failed delivery attempt against the provider circuit', async () => {
+      emailAdapterMock.send.mockResolvedValue({
+        success: false,
+        error: 'SMTP unavailable',
+      });
+      const job = makeJob();
+
+      await expect(processor.process(job)).rejects.toThrow('SMTP unavailable');
+
+      expect(backpressureMock.recordFailure).toHaveBeenCalledWith('email');
+      expect(backpressureMock.recordSuccess).not.toHaveBeenCalled();
+    });
+
+    it('should route SMS jobs to the sms provider circuit', async () => {
+      const job = makeJob({ type: NotificationType.SMS });
+
+      await processor.process(job);
+
+      expect(backpressureMock.assertAttemptAllowed).toHaveBeenCalledWith('sms');
+      expect(backpressureMock.recordSuccess).toHaveBeenCalledWith('sms');
     });
   });
 
@@ -258,6 +347,36 @@ describe('NotificationProcessor', () => {
       const error = new Error('Job failed');
 
       await expect(processor.onFailed(job, error)).resolves.toBeUndefined();
+    });
+
+    it('should not count a circuit-breaker holdback as a delivery failure', async () => {
+      const job = makeJob({ outboxId: 'outbox-abc' });
+      job.opts = { attempts: 8 };
+      job.attemptsMade = 2;
+      const error = new ProviderCircuitOpenError('email', 60_000);
+
+      await processor.onFailed(job, error);
+
+      // The outbox still records the retry, but no provider was contacted so
+      // no delivery-failure bookkeeping may happen.
+      expect(prismaMock.notificationOutbox.update).toHaveBeenCalledWith({
+        where: { id: 'outbox-abc' },
+        data: {
+          status: 'enqueued',
+          retryCount: { increment: 1 },
+          lastError: expect.stringContaining('circuit-broken'),
+        },
+      });
+      expect(metricsMock.incrementCallbackFailure).not.toHaveBeenCalled();
+      expect(
+        metricsMock.incrementNotificationDeliveryAttempt,
+      ).not.toHaveBeenCalled();
+      expect(
+        metricsMock.incrementNotificationDeliveryFailureByCategory,
+      ).not.toHaveBeenCalled();
+      expect(
+        prismaMock.notificationDeliveryAttempt.create,
+      ).not.toHaveBeenCalled();
     });
   });
 });
