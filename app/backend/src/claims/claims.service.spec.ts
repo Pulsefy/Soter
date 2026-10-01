@@ -13,7 +13,12 @@ import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
-import { ClaimStatus, Prisma, SorobanOperationType } from '@prisma/client';
+import {
+  CancelReasonCode,
+  ClaimStatus,
+  Prisma,
+  SorobanOperationType,
+} from '@prisma/client';
 import { SorobanTransactionLifecycleService } from '../onchain/soroban-transaction-lifecycle.service';
 import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
 import { VerificationService } from '../verification/verification.service';
@@ -834,6 +839,7 @@ describe('ClaimsService', () => {
       deletedAt: null,
       cancelledAt: null,
       cancelledBy: null,
+      cancelReasonCode: null,
       cancelReason: null,
       reissuedFromId: null,
       metadata: null,
@@ -934,11 +940,46 @@ describe('ClaimsService', () => {
       }
 
       expect(chunks[0]).toBe(
-        'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress\r\n',
+        'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReasonCode,cancelReason,reissuedFromId,tokenAddress\r\n',
       );
       expect(chunks[1]).toContain('"claim-1"');
       expect(chunks[1]).toContain('"Has, a comma"');
       expect(chunks[1].endsWith('\r\n')).toBe(true);
+    });
+
+    it('streamExportCsv(): writes the reason code and the free-text detail to their own columns', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findMany')
+        .mockResolvedValueOnce([
+          makeRawClaim('claim-1', {
+            status: ClaimStatus.cancelled,
+            cancelReasonCode: CancelReasonCode.duplicate,
+            cancelReason: 'Duplicate of claim-0',
+          }),
+        ] as never)
+        .mockResolvedValueOnce([] as never);
+
+      const chunks: string[] = [];
+      for await (const chunk of service.streamExportCsv({})) {
+        chunks.push(chunk);
+      }
+
+      const columns = chunks[1]
+        .replace(/\r\n$/, '')
+        .split(',')
+        .map(c => c.replace(/^"|"$/g, ''));
+      const header = chunks[0]
+        .replace(/\r\n$/, '')
+        .split(',')
+        .map(c => c.replace(/^"|"$/g, ''));
+
+      const codeIndex = header.indexOf('cancelReasonCode');
+      const reasonIndex = header.indexOf('cancelReason');
+
+      expect(codeIndex).toBeGreaterThan(-1);
+      expect(reasonIndex).toBe(codeIndex + 1);
+      expect(columns[codeIndex]).toBe('duplicate');
+      expect(columns[reasonIndex]).toBe('Duplicate of claim-0');
     });
   });
 });

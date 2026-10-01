@@ -8,6 +8,7 @@ import { ClaimReceiptDto, SendReceiptShareDto } from './dto/claim-receipt.dto';
 import { explorerTxUrl } from '../common/utils/explorer-url.util';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
 import {
+  CancelReasonCode,
   ClaimStatus,
   Prisma,
   SorobanOperationType,
@@ -42,6 +43,7 @@ export interface ClaimExportRow {
   updatedAt: Date;
   cancelledAt: Date | null;
   cancelledBy: string | null;
+  cancelReasonCode: string | null;
   cancelReason: string | null;
   reissuedFromId: string | null;
   tokenAddress: string | null;
@@ -62,6 +64,7 @@ interface RawClaimExportRow {
   deletedAt: Date | null;
   cancelledAt: Date | null;
   cancelledBy: string | null;
+  cancelReasonCode: CancelReasonCode | null;
   cancelReason: string | null;
   reissuedFromId: string | null;
   metadata: unknown;
@@ -1183,7 +1186,7 @@ export class ClaimsService {
   private static readonly EXPORT_BATCH_SIZE = 500;
 
   private static readonly CSV_HEADER =
-    'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReason,reissuedFromId,tokenAddress';
+    'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReasonCode,cancelReason,reissuedFromId,tokenAddress';
 
   private buildExportWhere(
     query: ExportClaimsQueryDto,
@@ -1248,6 +1251,7 @@ export class ClaimsService {
       updatedAt: c.updatedAt,
       cancelledAt: c.cancelledAt ?? null,
       cancelledBy: c.cancelledBy ?? null,
+      cancelReasonCode: c.cancelReasonCode ?? null,
       cancelReason: c.cancelReason ?? null,
       reissuedFromId: c.reissuedFromId ?? null,
       tokenAddress: (claimMetadata?.tokenAddress ??
@@ -1295,6 +1299,7 @@ export class ClaimsService {
         escapeCsvField(row.updatedAt.toISOString()),
         escapeCsvField(row.cancelledAt?.toISOString() ?? ''),
         escapeCsvField(row.cancelledBy),
+        escapeCsvField(row.cancelReasonCode),
         escapeCsvField(row.cancelReason),
         escapeCsvField(row.reissuedFromId),
         escapeCsvField(row.tokenAddress),

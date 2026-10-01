@@ -41,6 +41,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(Error::SurplusWithdrawalPending as u32, 26);
     assert_eq!(Error::SurplusWithdrawalNotPending as u32, 27);
     assert_eq!(Error::SurplusWithdrawalTimelockActive as u32, 28);
+    assert_eq!(Error::InvalidMerkleRoot as u32, 29);
 }
 
 #[test]
@@ -76,10 +77,11 @@ fn error_discriminants_are_contiguous_and_unique() {
         Error::SurplusWithdrawalPending as u32,
         Error::SurplusWithdrawalNotPending as u32,
         Error::SurplusWithdrawalTimelockActive as u32,
+        Error::InvalidMerkleRoot as u32,
     ];
     codes.sort_unstable();
     codes.dedup();
-    assert_eq!(codes.len(), 28, "error codes must be unique");
+    assert_eq!(codes.len(), 29, "error codes must be unique");
     for (i, code) in codes.iter().enumerate() {
         assert_eq!(
             *code,

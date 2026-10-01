@@ -142,3 +142,42 @@ export class MapDataQuery {
   @ApiPropertyOptional({ example: 'delivered' })
   status?: string;
 }
+
+export class AidPackageAggregatesDto {
+  @ApiProperty({ example: '5000000000' })
+  totalCommitted: string;
+
+  @ApiProperty({ example: '2000000000' })
+  totalClaimed: string;
+
+  @ApiProperty({ example: '500000000' })
+  totalExpiredCancelled: string;
+}
+
+export class TokenAggregatesDto {
+  @ApiProperty({
+    example: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+  })
+  tokenAddress: string;
+
+  @ApiProperty({ type: AidPackageAggregatesDto })
+  aggregates: AidPackageAggregatesDto;
+}
+
+export class ContractAggregatesDto {
+  @ApiProperty({ type: AidPackageAggregatesDto })
+  aggregates: AidPackageAggregatesDto;
+
+  @ApiProperty({ type: [TokenAggregatesDto], required: false })
+  tokenAggregates?: TokenAggregatesDto[];
+
+  @ApiProperty({ example: '2026-03-30T12:30:00.000Z' })
+  timestamp: string;
+}
+
+export class ContractAggregatesQuery {
+  @ApiPropertyOptional({
+    example: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+  })
+  token?: string;
+}

@@ -23,6 +23,21 @@ enum ClaimStatus {
   cancelled
 }
 
+/// Structured reason a claim was cancelled. Reported on via the cancellation
+/// breakdown endpoint; `Claim.cancelReason` remains the free-text detail.
+enum CancelReasonCode {
+  /// Cancelled for a reason not captured by any other code. This is also the
+  /// backfill value for claims cancelled before this enum existed.
+  unspecified
+  duplicate
+  recipient_ineligible
+  evidence_rejected
+  fraud_flag
+  requester_withdrew
+  budget_reallocated
+  reissued
+}
+
 model AidPackage {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -231,7 +246,10 @@ model Claim {
   /// Set when this claim is cancelled
   cancelledAt    DateTime?
   cancelledBy    String?
+  /// Free-text operator detail explaining the cancellation.
   cancelReason   String?
+  /// Machine-readable cancellation reason, used for reporting.
+  cancelReasonCode CancelReasonCode?
 
   /// Points to the original claim this one replaces (reissue chain)
   reissuedFromId String?
@@ -259,6 +277,7 @@ model Claim {
   @@index([deletedAt])
   @@index([reissuedFromId])
   @@index([expiresAt])
+  @@index([cancelReasonCode])
   @@unique([importJobId, importRowNumber])
 }
 

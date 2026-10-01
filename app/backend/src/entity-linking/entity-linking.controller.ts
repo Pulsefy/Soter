@@ -30,9 +30,24 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 
-interface ReviewerUser {
+interface AuthenticatedUser {
+  role?: string;
+  ngoId?: string;
+  orgId?: string;
   sub?: string;
   apiKeyId?: string;
+}
+
+/**
+ * Extract the caller's organisation ID from the authenticated user context.
+ * Admin-role callers receive `undefined` so they bypass org-scope enforcement
+ * in the service layer (platform-level access).
+ */
+function extractOrgId(req: ExpressRequest): string | undefined {
+  const user = req.user as AuthenticatedUser | undefined;
+  if (!user) return undefined;
+  if (user.role === AppRole.admin) return undefined;
+  return user.orgId ?? user.ngoId ?? undefined;
 }
 
 @Controller('entity-linking')
@@ -51,9 +66,12 @@ export class EntityLinkingController {
     description:
       'Create a link between an extracted entity and a canonical registry record with confidence scoring',
   })
-  async linkEntity(@Body() dto: CreateEntityLinkDto) {
+  async linkEntity(
+    @Body() dto: CreateEntityLinkDto,
+    @Request() req: ExpressRequest,
+  ) {
     this.logger.log(`Creating entity link for ${dto.extractedName}`);
-    return this.entityLinkingService.linkEntity(dto);
+    return this.entityLinkingService.linkEntity(dto, extractOrgId(req));
   }
 
   @Get('links')
@@ -87,8 +105,11 @@ export class EntityLinkingController {
   })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  async queryLinks(@Query() query: EntityLinkQueryDto) {
-    return this.entityLinkingService.queryLinks(query);
+  async queryLinks(
+    @Query() query: EntityLinkQueryDto,
+    @Request() req: ExpressRequest,
+  ) {
+    return this.entityLinkingService.queryLinks(query, extractOrgId(req));
   }
 
   @Get('campaign/:campaignId')
@@ -105,9 +126,14 @@ export class EntityLinkingController {
   })
   async getLinksByCampaign(
     @Param('campaignId') campaignId: string,
-    @Query('entityType') entityType?: string,
+    @Query('entityType') entityType: string | undefined,
+    @Request() req: ExpressRequest,
   ) {
-    return this.entityLinkingService.getLinksByCampaign(campaignId, entityType);
+    return this.entityLinkingService.getLinksByCampaign(
+      campaignId,
+      entityType,
+      extractOrgId(req),
+    );
   }
 
   @Get('claim/:claimId')
@@ -123,9 +149,14 @@ export class EntityLinkingController {
   })
   async getLinksByClaim(
     @Param('claimId') claimId: string,
-    @Query('entityType') entityType?: string,
+    @Query('entityType') entityType: string | undefined,
+    @Request() req: ExpressRequest,
   ) {
-    return this.entityLinkingService.getLinksByClaim(claimId, entityType);
+    return this.entityLinkingService.getLinksByClaim(
+      claimId,
+      entityType,
+      extractOrgId(req),
+    );
   }
 
   @Get('verification/:verificationId')
@@ -142,11 +173,13 @@ export class EntityLinkingController {
   })
   async getLinksByVerification(
     @Param('verificationId') verificationId: string,
-    @Query('entityType') entityType?: string,
+    @Query('entityType') entityType: string | undefined,
+    @Request() req: ExpressRequest,
   ) {
     return this.entityLinkingService.getLinksByVerification(
       verificationId,
       entityType,
+      extractOrgId(req),
     );
   }
 
@@ -168,8 +201,11 @@ export class EntityLinkingController {
   })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  async getReviewQueue(@Query() query: EntityLinkReviewQueueQueryDto) {
-    return this.entityLinkingService.getReviewQueue(query);
+  async getReviewQueue(
+    @Query() query: EntityLinkReviewQueueQueryDto,
+    @Request() req: ExpressRequest,
+  ) {
+    return this.entityLinkingService.getReviewQueue(query, extractOrgId(req));
   }
 
   @Patch('review/:linkId')
@@ -184,13 +220,18 @@ export class EntityLinkingController {
     @Body() dto: ReviewEntityLinkDto,
     @Request() req: ExpressRequest,
   ) {
-    const user = req.user as ReviewerUser | undefined;
+    const user = req.user as AuthenticatedUser | undefined;
     const reviewerId: string = user?.sub ?? user?.apiKeyId ?? 'system';
 
     this.logger.log(
       `Reviewer ${reviewerId} decided "${dto.action}" on entity link ${linkId}`,
     );
-    return this.entityLinkingService.decideReview(linkId, dto, reviewerId);
+    return this.entityLinkingService.decideReview(
+      linkId,
+      dto,
+      reviewerId,
+      extractOrgId(req),
+    );
   }
 
   @Get('registry/search')
