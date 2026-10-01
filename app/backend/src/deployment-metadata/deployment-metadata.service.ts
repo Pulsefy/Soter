@@ -1,4 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ConflictException,
+  Inject,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, DeploymentMetadata } from '@prisma/client';
 import {
@@ -7,6 +13,11 @@ import {
   DeploymentMetadataResponseDto,
 } from './dto/deployment-metadata.dto';
 import { ContractConfigCacheService } from './contract-config-cache.service';
+import {
+  ONCHAIN_ADAPTER_TOKEN,
+  OnchainAdapter,
+} from '../onchain/onchain.adapter';
+import { MigrateDeploymentResponseDto } from './dto/deployment-metadata.dto';
 
 @Injectable()
 export class DeploymentMetadataService {
@@ -15,6 +26,8 @@ export class DeploymentMetadataService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly contractConfigCache: ContractConfigCacheService,
+    @Inject(ONCHAIN_ADAPTER_TOKEN)
+    private readonly onchainAdapter: OnchainAdapter,
   ) {}
 
   /**
@@ -38,6 +51,7 @@ export class DeploymentMetadataService {
         commitSha: dto.commitSha ?? null,
         deployer: dto.deployer ?? null,
         transactionHash: dto.transactionHash ?? null,
+        contractVersion: dto.contractVersion ?? null,
         // Use Prisma.DbNull instead of standard null variables for Json fields
         metadata: (dto.metadata as Prisma.InputJsonValue) ?? Prisma.DbNull,
       },
@@ -102,6 +116,7 @@ export class DeploymentMetadataService {
         commitSha: dto.commitSha,
         deployer: dto.deployer,
         transactionHash: dto.transactionHash,
+        contractVersion: dto.contractVersion,
         // Ensure explicit fallback behavior for Json type check compliance
         metadata:
           dto.metadata === null
@@ -112,6 +127,58 @@ export class DeploymentMetadataService {
 
     await this.contractConfigCache.invalidateAll();
     return this.mapToResponse(metadata);
+  }
+
+  /**
+   * Migrate a deployment and persist its version only after on-chain
+   * verification succeeds.
+   */
+  async migrate(
+    id: string,
+    newVersion: number,
+  ): Promise<MigrateDeploymentResponseDto> {
+    const deployment = await this.prisma.deploymentMetadata.findUnique({
+      where: { id },
+    });
+    if (!deployment) {
+      throw new NotFoundException(`Deployment metadata ${id} not found`);
+    }
+
+    const previousVersion = await this.onchainAdapter.getContractVersion({
+      contractId: deployment.contractId,
+    });
+    if (newVersion <= previousVersion) {
+      throw new ConflictException(
+        `Contract ${deployment.contractId} is already at version ${previousVersion}; migration target must be greater`,
+      );
+    }
+    const migration = await this.onchainAdapter.migrateContract({
+      contractId: deployment.contractId,
+      newVersion,
+    });
+    const verifiedVersion = await this.onchainAdapter.getContractVersion({
+      contractId: deployment.contractId,
+    });
+
+    if (verifiedVersion !== newVersion || verifiedVersion === previousVersion) {
+      throw new ConflictException(
+        `Contract ${deployment.contractId} reported version ${verifiedVersion} after migration; expected ${newVersion}`,
+      );
+    }
+
+    const updated = await this.prisma.deploymentMetadata.update({
+      where: { id },
+      data: { contractVersion: verifiedVersion },
+    });
+    await this.contractConfigCache.invalidateAll();
+
+    return {
+      deployment: this.mapToResponse(updated),
+      previousVersion,
+      verifiedVersion,
+      transactionHash: migration.transactionHash,
+      migratedAt: migration.timestamp,
+    };
   }
 
   /**
@@ -154,6 +221,7 @@ export class DeploymentMetadataService {
       commitSha: metadata.commitSha ?? undefined,
       deployer: metadata.deployer ?? undefined,
       transactionHash: metadata.transactionHash ?? undefined,
+      contractVersion: metadata.contractVersion ?? undefined,
       metadata:
         (metadata.metadata as Record<string, unknown> | null) ?? undefined,
       createdAt: metadata.createdAt,

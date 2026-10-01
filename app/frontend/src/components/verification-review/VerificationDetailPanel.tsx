@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { useNetworkGuard } from '@/hooks/useNetworkGuard';
 import { StatusBadge, RiskBadge } from './StatusBadge';
 import { ReviewActionDialog } from './ReviewActionDialog';
+import type { ReviewActionType } from './ReviewActionDialog';
 import {
   useVerificationDetail,
   useVerificationNotes,
@@ -17,6 +18,8 @@ import type { RiskLevel } from '@/types/verification-review';
 interface VerificationDetailPanelProps {
   verificationId: string;
   onClose: () => void;
+  /** Notifies the parent queue once a decision is accepted, so it can move focus. */
+  onDecision?: (action: ReviewActionType) => void;
 }
 
 function AiScoreBar({ score }: { score: number }) {
@@ -48,6 +51,7 @@ function AiScoreBar({ score }: { score: number }) {
 export function VerificationDetailPanel({
   verificationId,
   onClose,
+  onDecision,
 }: VerificationDetailPanelProps) {
   const { data: item, isLoading } = useVerificationDetail(verificationId);
   const { data: notes } = useVerificationNotes(verificationId);
@@ -285,6 +289,7 @@ export function VerificationDetailPanel({
           action={activeAction}
           open={!!activeAction}
           onOpenChange={open => !open && setActiveAction(null)}
+          onSuccess={onDecision}
         />
       )}
     </>

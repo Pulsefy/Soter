@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   generateDeviceDiagnostics,
   SupportDiagnosticsBundle,
@@ -13,12 +13,9 @@ export function DeviceDiagnosticsExport() {
   const [showJsonPreview, setShowJsonPreview] = useState<boolean>(false);
   const [downloadSuccess, setDownloadSuccess] = useState<boolean>(false);
 
-  useEffect(() => {
-    fetchDiagnostics();
-  }, []);
-
-  const fetchDiagnostics = async () => {
-    setLoading(true);
+  // No synchronous setState here so the mount effect does not cascade renders;
+  // `loading` starts as true and the refresh button flips it explicitly.
+  const fetchDiagnostics = useCallback(async () => {
     try {
       const data = await generateDeviceDiagnostics();
       setDiagnostics(data);
@@ -27,7 +24,21 @@ export function DeviceDiagnosticsExport() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const refreshDiagnostics = useCallback(() => {
+    setLoading(true);
+    void fetchDiagnostics();
+  }, [fetchDiagnostics]);
+
+  useEffect(() => {
+    // Canonical data-fetching effect shape (react.dev): an effect-local async
+    // function fires the initial load; no setState runs synchronously on mount.
+    async function startFetching() {
+      await fetchDiagnostics();
+    }
+    void startFetching();
+  }, [fetchDiagnostics]);
 
   const handleCopy = async () => {
     if (!diagnostics) return;
@@ -87,7 +98,7 @@ export function DeviceDiagnosticsExport() {
         </div>
 
         <button
-          onClick={fetchDiagnostics}
+          onClick={refreshDiagnostics}
           disabled={loading}
           className="self-start text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
         >

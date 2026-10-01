@@ -35,7 +35,26 @@ import {
   GetTransactionStatusParams,
   GetTransactionStatusResult,
   TxStatus,
+  ContractVersionParams,
+  MigrateContractParams,
+  MigrateContractResult,
+  AdminState,
+  AdminTransferParams,
+  AdminTransferResult,
+  TransferAdminParams,
+  PendingWithdrawal,
+  ProposeSurplusWithdrawalParams,
+  SurplusWithdrawalParams,
+  SurplusWithdrawalResult,
 } from './onchain.adapter';
+import {
+  parsePendingWithdrawal,
+  timelockRemainingSeconds,
+} from './utils/pending-withdrawal';
+import {
+  isSurplusWithdrawalTimelockError,
+  SurplusWithdrawalTimelockNotElapsedError,
+} from './utils/surplus-withdrawal.errors';
 
 /**
  * Narrow an RPC result to a plain object so its fields can be read.
@@ -118,10 +137,11 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
   private async invokeContract(
     method: string,
     args: unknown[],
+    contractId = this.contractId,
   ): Promise<unknown> {
     const sim = await rpcCall(this.http, this.rpcUrl, 'simulateTransaction', {
       transaction: JSON.stringify({
-        contractId: this.contractId,
+        contractId,
         method,
         args,
       }),
@@ -132,7 +152,7 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     }
     const result = await rpcCall(this.http, this.rpcUrl, 'sendTransaction', {
       transaction: JSON.stringify({
-        contractId: this.contractId,
+        contractId,
         method,
         args,
         networkPassphrase: this.networkPassphrase,
@@ -325,6 +345,41 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     };
   }
 
+  async getContractVersion(params: ContractVersionParams): Promise<number> {
+    const result = await this.invokeContract(
+      'get_version',
+      [],
+      params.contractId,
+    );
+    const version = Number(result);
+    if (!Number.isInteger(version) || version < 0) {
+      throw new Error(
+        `Invalid contract version returned for ${params.contractId}`,
+      );
+    }
+    return version;
+  }
+
+  async migrateContract(
+    params: MigrateContractParams,
+  ): Promise<MigrateContractResult> {
+    const previousVersion = await this.getContractVersion({
+      contractId: params.contractId,
+    });
+    await this.invokeContract(
+      'migrate',
+      [params.newVersion],
+      params.contractId,
+    );
+    return {
+      contractId: params.contractId,
+      transactionHash: '',
+      previousVersion,
+      newVersion: params.newVersion,
+      timestamp: new Date(),
+    };
+  }
+
   async getPauseState(): Promise<PauseState> {
     const result = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
       contractId: this.contractId,
@@ -332,6 +387,165 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     });
     return {
       isPaused: typeof result === 'boolean' ? result : false,
+      timestamp: new Date(),
+    };
+  }
+
+  async getAdminState(params: AdminTransferParams = {}): Promise<AdminState> {
+    const contractId = params.contractId ?? this.contractId;
+    const admin = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId,
+      key: 'admin',
+    });
+    const pendingAdmin = await rpcCall(
+      this.http,
+      this.rpcUrl,
+      'getContractData',
+      { contractId, key: 'pending_admin' },
+    );
+    return {
+      adminAddress: readString(admin, ''),
+      pendingAdminAddress:
+        typeof pendingAdmin === 'string' && pendingAdmin.length > 0
+          ? pendingAdmin
+          : null,
+      timestamp: new Date(),
+    };
+  }
+
+  async transferAdmin(
+    params: TransferAdminParams,
+  ): Promise<AdminTransferResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract(
+      'transfer_admin',
+      [params.newAdminAddress],
+      contractId,
+    );
+    return this.buildAdminTransferResult(contractId);
+  }
+
+  async acceptAdmin(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract('accept_admin', [], contractId);
+    return this.buildAdminTransferResult(contractId);
+  }
+
+  async cancelAdminTransfer(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract('cancel_admin_transfer', [], contractId);
+    return this.buildAdminTransferResult(contractId);
+  }
+
+  private async buildAdminTransferResult(
+    contractId: string,
+  ): Promise<AdminTransferResult> {
+    const state = await this.getAdminState({ contractId });
+    return {
+      contractId,
+      transactionHash: '',
+      adminAddress: state.adminAddress,
+      pendingAdminAddress: state.pendingAdminAddress,
+      timestamp: state.timestamp,
+    };
+  }
+
+  async getPendingWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<PendingWithdrawal | null> {
+    const contractId = params.contractId ?? this.contractId;
+    const result = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId,
+      key: 'pending_withdrawal',
+    });
+    return parsePendingWithdrawal(result);
+  }
+
+  async proposeSurplusWithdrawal(
+    params: ProposeSurplusWithdrawalParams,
+  ): Promise<SurplusWithdrawalResult> {
+    const contractId = params.contractId ?? this.contractId;
+    const to = params.to?.trim();
+    const token = params.token?.trim();
+    const amount = params.amount?.trim();
+
+    if (!to) {
+      throw new Error('to is required to propose a surplus withdrawal');
+    }
+    if (!token) {
+      throw new Error('token is required to propose a surplus withdrawal');
+    }
+    if (!amount || !/^\d+$/.test(amount) || BigInt(amount) <= 0n) {
+      throw new Error(
+        'amount must be a positive integer string in the token base unit',
+      );
+    }
+
+    await this.invokeContract(
+      'propose_surplus_withdrawal',
+      [to, amount, token],
+      contractId,
+    );
+
+    return {
+      contractId,
+      transactionHash: '',
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
+      timestamp: new Date(),
+    };
+  }
+
+  async cancelSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract('cancel_surplus_withdrawal', [], contractId);
+    return {
+      contractId,
+      transactionHash: '',
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
+      timestamp: new Date(),
+    };
+  }
+
+  async executeSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    const contractId = params.contractId ?? this.contractId;
+    const pending = await this.getPendingWithdrawal({ contractId });
+
+    if (pending) {
+      const remaining = timelockRemainingSeconds(pending);
+      if (remaining > 0) {
+        throw new SurplusWithdrawalTimelockNotElapsedError(
+          `SurplusWithdrawalTimelockActive: withdrawal of ${pending.amount} to ` +
+            `${pending.to} becomes executable in ${remaining}s ` +
+            `(at ledger timestamp ${pending.executableAt})`,
+          pending.executableAt,
+        );
+      }
+    }
+
+    try {
+      await this.invokeContract('execute_surplus_withdrawal', [], contractId);
+    } catch (error) {
+      if (isSurplusWithdrawalTimelockError(error)) {
+        throw new SurplusWithdrawalTimelockNotElapsedError(
+          'SurplusWithdrawalTimelockActive: the surplus withdrawal timelock delay has not elapsed',
+          pending?.executableAt ?? null,
+        );
+      }
+      throw error;
+    }
+
+    return {
+      contractId,
+      transactionHash: '',
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
       timestamp: new Date(),
     };
   }

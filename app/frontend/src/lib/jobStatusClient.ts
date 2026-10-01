@@ -24,11 +24,11 @@ export interface JobStatusInfo {
   type: string;
   status: JobStatus;
   progress?: number;
-  result?: any;
+  result?: unknown;
   error?: {
     code: string;
     message: string;
-    details?: any;
+    details?: unknown;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -41,7 +41,7 @@ export interface JobStatusEvent {
   correlationId?: string;
   emittedAt: Date;
   isTerminal: boolean;
-  metadata?: any;
+  metadata?: unknown;
 }
 
 export interface SubscriptionOptions {
@@ -57,7 +57,41 @@ export interface StatusCallback {
 }
 
 export interface ErrorCallback {
-  (error: any): void;
+  (error: unknown): void;
+}
+
+/** Payload emitted by the server on `connected`. */
+interface ConnectedPayload {
+  [key: string]: unknown;
+}
+
+/** Payload emitted by the server on `unsubscribed`. */
+interface UnsubscribedPayload {
+  jobId: string;
+}
+
+/** Payload emitted by the server on `pong`. */
+interface PongPayload {
+  timestamp?: unknown;
+}
+
+/** Payload emitted by the server on `jobStatus`. */
+interface JobStatusPayload {
+  subscriptionId?: string;
+  event: JobStatusEvent;
+}
+
+/** Acknowledgment payload emitted by the server on `subscribed`. */
+interface SubscribedAck {
+  jobId: string;
+  subscriptionId?: string;
+  missedUpdates?: JobStatusEvent[];
+}
+
+/** Error payload emitted by the server on `error`. */
+interface ServerErrorPayload {
+  jobId?: string;
+  [key: string]: unknown;
 }
 
 /**
@@ -110,7 +144,7 @@ export class JobStatusClient {
           resolve();
         });
 
-        this.socket.on('connect_error', (error: any) => {
+        this.socket.on('connect_error', (error: Error) => {
           this.debug('Connection error:', error);
           reject(error);
         });
@@ -120,17 +154,17 @@ export class JobStatusClient {
           this.clearKeepAlive();
         });
 
-        this.socket.on('connected', (data: any) => {
+        this.socket.on('connected', (data: ConnectedPayload) => {
           this.debug('Server acknowledgment:', data);
         });
 
         this.socket.on('jobStatus', this.handleJobStatus.bind(this));
         this.socket.on('subscribed', this.handleSubscribed.bind(this));
-        this.socket.on('unsubscribed', (data: any) => {
+        this.socket.on('unsubscribed', (data: UnsubscribedPayload) => {
           this.debug(`Unsubscribed from job: ${data.jobId}`);
         });
         this.socket.on('error', this.handleError.bind(this));
-        this.socket.on('pong', (data: any) => {
+        this.socket.on('pong', (data: PongPayload) => {
           this.debug('Pong received:', data.timestamp);
         });
       } catch (error) {
@@ -296,8 +330,8 @@ export class JobStatusClient {
   /**
    * Private: Handle incoming job status
    */
-  private handleJobStatus(data: any): void {
-    const { subscriptionId, event } = data;
+  private handleJobStatus(data: JobStatusPayload): void {
+    const { event } = data;
     const jobId = event.job.id;
     const subscription = this.subscriptions.get(jobId);
 
@@ -313,7 +347,7 @@ export class JobStatusClient {
   /**
    * Private: Handle subscription acknowledgment
    */
-  private handleSubscribed(ack: any): void {
+  private handleSubscribed(ack: SubscribedAck): void {
     this.debug(`Subscribed to job ${ack.jobId}:`, ack);
 
     // Deliver missed updates if any
@@ -328,7 +362,7 @@ export class JobStatusClient {
   /**
    * Private: Handle errors
    */
-  private handleError(error: any): void {
+  private handleError(error: ServerErrorPayload): void {
     this.debug('Error from server:', error);
 
     // Notify error callbacks
@@ -377,7 +411,7 @@ export class JobStatusClient {
   /**
    * Private: Debug logging
    */
-  private debug(...args: any[]): void {
+  private debug(...args: unknown[]): void {
     if (this.options.debug) {
       console.log('[JobStatusClient]', ...args);
     }
@@ -395,7 +429,7 @@ export function useJobStatus(
   options: SubscriptionOptions = {}
 ) {
   const [status, setStatus] = useState<JobStatusInfo | null>(null);
-  const [error, setError] = useState<any>(null);
+  const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const clientRef = useRef<JobStatusClient | null>(null);
 
@@ -439,9 +473,9 @@ export function useJobStatus(
 
     const cleanup = initializeClient();
     return () => {
-      cleanup?.then((fn: any) => fn?.());
+      cleanup?.then((fn?: () => void) => fn?.());
     };
-  }, [jobId, baseUrl, token]);
+  }, [jobId, baseUrl, token, options]);
 
   useEffect(() => {
     return () => {

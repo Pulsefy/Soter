@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+import { spawnSync } from 'child_process';
 import request from 'supertest';
 import express from 'express';
 import { Pool } from 'pg';
@@ -36,7 +37,6 @@ function buildConnectionString(params: {
     database = DEFAULT_DATABASE,
   } = params;
 
-  // Ensure password is present
   if (!password || password.trim() === '') {
     throw new Error('Password cannot be empty. Please set a valid password.');
   }
@@ -48,8 +48,6 @@ function buildConnectionString(params: {
 let baseUrl: string;
 try {
   if (process.env.DATABASE_URL) {
-    // Validate that the connection string has a password
-
     const hasPassword = /:\/\/[^:]+:[^@]+@/.test(process.env.DATABASE_URL);
     if (!hasPassword) {
       console.warn(
@@ -67,17 +65,51 @@ try {
   baseUrl = buildConnectionString({});
 }
 
+/**
+ * Synchronous TCP reachability probe via a child process.
+ * Returns true if the port accepts a connection within 500 ms.
+ * Runs synchronously so Jest can decide describe vs describe.skip
+ * at module-collection time.
+ */
+function isTcpPortOpenSync(host: string, port: number): boolean {
+  const script = `
+    const net = require('net');
+    const s = new net.Socket();
+    let done = false;
+    const finish = (open) => { if (done) return; done = true; s.destroy(); process.exit(open ? 0 : 1); };
+    s.setTimeout(500);
+    s.on('connect', () => finish(true));
+    s.on('timeout', () => finish(false));
+    s.on('error', () => finish(false));
+    s.connect(${port}, '${host}');
+  `;
+  const result = spawnSync(process.execPath, ['-e', script], { timeout: 1500 });
+  return result.status === 0;
+}
+
+/**
+ * Parse host and port from a postgres connection string.
+ */
+function parseHostPort(url: string): { host: string; port: number } {
+  try {
+    const parsed = new URL(url);
+    return {
+      host: parsed.hostname || 'localhost',
+      port: parsed.port ? parseInt(parsed.port, 10) : 5432,
+    };
+  } catch {
+    return { host: 'localhost', port: 5432 };
+  }
+}
+
 const testDbUrl = baseUrl.replace(/\/[^/]+$/, `/${testDbName}`);
 
 let pool: Pool;
 let store: IdempotencyStore;
 let app: express.Application;
 
-// Check if we should run the tests (skip if no database)
-let hasValidDatabase = false;
-
 /**
- * Test database connection with retry logic
+ * Test database connection
  */
 async function testDatabaseConnection(
   connectionString: string,
@@ -103,23 +135,20 @@ async function testDatabaseConnection(
 }
 
 /**
- * Create a test database with retry logic
+ * Create a test database
  */
 async function createTestDatabase(
   adminPool: Pool,
   dbName: string,
 ): Promise<void> {
   try {
-    // Check if database already exists
     const result = await adminPool.query(
       'SELECT 1 FROM pg_database WHERE datname = $1',
       [dbName],
     );
-
     if (result.rows.length === 0) {
       await adminPool.query(`CREATE DATABASE ${dbName}`);
     } else {
-      // Drop and recreate to ensure clean state
       await adminPool.query(`DROP DATABASE IF EXISTS ${dbName}`);
       await adminPool.query(`CREATE DATABASE ${dbName}`);
     }
@@ -130,7 +159,7 @@ async function createTestDatabase(
 }
 
 /**
- * Drop test database with error handling
+ * Drop test database
  */
 async function dropTestDatabase(
   adminPool: Pool,
@@ -174,225 +203,222 @@ function createTestApp(store: IdempotencyStore): express.Application {
   return app;
 }
 
-// Run beforeAll to check database connection and set hasValidDatabase
-beforeAll(async () => {
-  hasValidDatabase = await testDatabaseConnection(baseUrl);
-  if (hasValidDatabase) {
+// Probe the database port synchronously at module-collection time so that
+// Jest can select describe vs describe.skip before any async lifecycle hooks
+// run.  This is necessary because Jest evaluates describe() calls
+// synchronously — a flag set inside beforeAll() is always false at the time
+// the outer (hasValidDatabase ? describe : describe.skip) expression runs.
+const { host: dbHost, port: dbPort } = parseHostPort(baseUrl);
+const dbReachable = isTcpPortOpenSync(dbHost, dbPort);
+
+if (!dbReachable) {
+  console.log(
+    `⚠️  Postgres not reachable at ${dbHost}:${dbPort} — skipping Idempotency integration tests.`,
+  );
+}
+
+const describeIfDb = dbReachable ? describe : describe.skip;
+
+describeIfDb('Idempotency integration tests', () => {
+  beforeAll(async () => {
+    const connected = await testDatabaseConnection(baseUrl);
+    if (!connected) {
+      throw new Error(
+        `TCP port ${dbPort} is open on ${dbHost} but PG authentication failed. ` +
+          'Check DATABASE_URL credentials.',
+      );
+    }
+
     console.log(
       '✅ Database connection successful. Running integration tests.',
     );
-  } else {
-    console.log('⚠️ Database connection failed. Skipping integration tests.');
-  }
-}, 10000);
 
-// Use describe or describe.skip based on database availability
-(hasValidDatabase ? describe : describe.skip)(
-  'Idempotency integration tests',
-  () => {
-    beforeAll(async () => {
-      let adminPool: Pool | null = null;
+    let adminPool: Pool | null = null;
 
-      try {
-        // Create admin connection
-        adminPool = new Pool({
-          connectionString: baseUrl,
-          max: 2,
-        });
+    try {
+      adminPool = new Pool({ connectionString: baseUrl, max: 2 });
+      await createTestDatabase(adminPool, testDbName);
 
-        // Create test database
-        await createTestDatabase(adminPool, testDbName);
+      pool = new Pool({
+        connectionString: testDbUrl,
+        max: 5,
+        idleTimeoutMillis: 10000,
+      });
 
-        // Connect to the test database
-        pool = new Pool({
-          connectionString: testDbUrl,
-          max: 5,
-          idleTimeoutMillis: 10000,
-        });
-
-        // Create store
-        store = new IdempotencyStore(pool);
-
-        // Create table
-        await createIdempotencyTable(pool);
-
-        // Create app
-        app = createTestApp(store);
-      } catch (error) {
-        console.error('❌ Failed to set up test database:', error.message);
-        throw error;
-      } finally {
-        if (adminPool) {
-          await adminPool.end();
-        }
+      store = new IdempotencyStore(pool);
+      await createIdempotencyTable(pool);
+      app = createTestApp(store);
+    } catch (error) {
+      console.error('❌ Failed to set up test database:', error.message);
+      throw error;
+    } finally {
+      if (adminPool) {
+        await adminPool.end();
       }
-    }, 30000);
+    }
+  }, 30000);
 
-    afterAll(async () => {
-      let adminPool: Pool | null = null;
+  afterAll(async () => {
+    let adminPool: Pool | null = null;
 
-      try {
-        // Clean up test data
-        if (pool) {
-          await pool.query('DROP TABLE IF EXISTS idempotency_records;');
-          await pool.end();
-        }
-
-        // Drop test database
-        if (baseUrl) {
-          adminPool = new Pool({ connectionString: baseUrl });
-          await dropTestDatabase(adminPool, testDbName);
-        }
-      } catch (error) {
-        console.warn('⚠️ Error during test cleanup:', error.message);
-      } finally {
-        if (adminPool) {
-          await adminPool.end();
-        }
+    try {
+      if (pool) {
+        await pool.query('DROP TABLE IF EXISTS idempotency_records;');
+        await pool.end();
       }
-    }, 30000);
 
-    it('Missing key returns 400', async () => {
-      const res = await request(app)
-        .post('/v1/transactions/submit')
-        .send({ transactionXdr: 'AAAAAAABLC0=' });
+      if (baseUrl) {
+        adminPool = new Pool({ connectionString: baseUrl });
+        await dropTestDatabase(adminPool, testDbName);
+      }
+    } catch (error) {
+      console.warn('⚠️ Error during test cleanup:', error.message);
+    } finally {
+      if (adminPool) {
+        await adminPool.end();
+      }
+    }
+  }, 30000);
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('Missing');
-    });
+  it('Missing key returns 400', async () => {
+    const res = await request(app)
+      .post('/v1/transactions/submit')
+      .send({ transactionXdr: 'AAAAAAABLC0=' });
 
-    it('Invalid key returns 400', async () => {
-      const res = await request(app)
-        .post('/v1/transactions/submit')
-        .set('Idempotency-Key', 'bad key!')
-        .send({ transactionXdr: 'AAAAAAABLC0=' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Missing');
+  });
 
-      expect(res.status).toBe(400);
-    });
+  it('Invalid key returns 400', async () => {
+    const res = await request(app)
+      .post('/v1/transactions/submit')
+      .set('Idempotency-Key', 'bad key!')
+      .send({ transactionXdr: 'AAAAAAABLC0=' });
 
-    it('First request succeeds', async () => {
-      const res = await request(app)
-        .post('/v1/transactions/submit')
-        .set('Idempotency-Key', 'key-1')
-        .send({ transactionXdr: 'AAAAAAABLC0=' });
+    expect(res.status).toBe(400);
+  });
 
-      expect(res.status).toBe(200);
-      expect(res.headers['x-idempotent-replayed']).toBeUndefined();
-    });
+  it('First request succeeds', async () => {
+    const res = await request(app)
+      .post('/v1/transactions/submit')
+      .set('Idempotency-Key', 'key-1')
+      .send({ transactionXdr: 'AAAAAAABLC0=' });
 
-    it('Duplicate request replays cached response', async () => {
-      const res1 = await request(app)
-        .post('/v1/transactions/submit')
-        .set('Idempotency-Key', 'key-2')
-        .send({ transactionXdr: 'AAAAAAABLC0=' });
+    expect(res.status).toBe(200);
+    expect(res.headers['x-idempotent-replayed']).toBeUndefined();
+  });
 
-      const res2 = await request(app)
-        .post('/v1/transactions/submit')
-        .set('Idempotency-Key', 'key-2')
-        .send({ transactionXdr: 'AAAAAAABLC0=' });
+  it('Duplicate request replays cached response', async () => {
+    const res1 = await request(app)
+      .post('/v1/transactions/submit')
+      .set('Idempotency-Key', 'key-2')
+      .send({ transactionXdr: 'AAAAAAABLC0=' });
 
-      expect(res2.status).toBe(200);
-      expect(res2.headers['x-idempotent-replayed']).toBe('true');
-      expect(res2.body.hash).toEqual(res1.body.hash);
-    });
+    const res2 = await request(app)
+      .post('/v1/transactions/submit')
+      .set('Idempotency-Key', 'key-2')
+      .send({ transactionXdr: 'AAAAAAABLC0=' });
 
-    it('Mismatched body returns 409', async () => {
-      await request(app)
-        .post('/v1/transactions/submit')
-        .set('Idempotency-Key', 'key-3')
-        .send({ transactionXdr: 'AAAAAAABLC0=' });
+    expect(res2.status).toBe(200);
+    expect(res2.headers['x-idempotent-replayed']).toBe('true');
+    expect(res2.body.hash).toEqual(res1.body.hash);
+  });
 
-      const res = await request(app)
-        .post('/v1/transactions/submit')
-        .set('Idempotency-Key', 'key-3')
-        .send({ transactionXdr: 'B' });
+  it('Mismatched body returns 409', async () => {
+    await request(app)
+      .post('/v1/transactions/submit')
+      .set('Idempotency-Key', 'key-3')
+      .send({ transactionXdr: 'AAAAAAABLC0=' });
 
-      expect(res.status).toBe(409);
-      expect(res.body.error).toContain('fingerprint');
-    });
+    const res = await request(app)
+      .post('/v1/transactions/submit')
+      .set('Idempotency-Key', 'key-3')
+      .send({ transactionXdr: 'B' });
 
-    it('Processing record returns 409', async () => {
-      const validBody = { transactionXdr: 'AAAAAAABLC0=' };
-      const validFingerprint =
-        RequestFingerprint.fromBody(validBody).asString();
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('fingerprint');
+  });
 
-      await pool.query(
-        `
-          INSERT INTO idempotency_records (
-            idempotency_key,
-            request_fingerprint,
-            status
-          )
-          VALUES ($1, $2, 'processing')
-        `,
-        ['key-4', validFingerprint],
-      );
+  it('Processing record returns 409', async () => {
+    const validBody = { transactionXdr: 'AAAAAAABLC0=' };
+    const validFingerprint = RequestFingerprint.fromBody(validBody).asString();
 
-      const res = await request(app)
-        .post('/v1/transactions/submit')
-        .set('Idempotency-Key', 'key-4')
-        .send(validBody);
+    await pool.query(
+      `
+        INSERT INTO idempotency_records (
+          idempotency_key,
+          request_fingerprint,
+          status
+        )
+        VALUES ($1, $2, 'processing')
+      `,
+      ['key-4', validFingerprint],
+    );
 
-      expect(res.status).toBe(409);
-      expect(res.body.error).toContain('processed');
-    });
+    const res = await request(app)
+      .post('/v1/transactions/submit')
+      .set('Idempotency-Key', 'key-4')
+      .send(validBody);
 
-    it('GET /v1/transactions/:hash returns 404', async () => {
-      const res = await request(app).get('/v1/transactions/some-hash');
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('processed');
+  });
 
-      expect(res.status).toBe(404);
-    });
+  it('GET /v1/transactions/:hash returns 404', async () => {
+    const res = await request(app).get('/v1/transactions/some-hash');
 
-    it('Handles request body with arrays for fingerprinting', async () => {
-      const bodyWithArray = {
-        transactionXdr: 'AAAA',
-        args: [1, 2, 3],
-      };
+    expect(res.status).toBe(404);
+  });
 
-      const res = await request(app)
-        .post('/v1/transactions/submit')
-        .set('Idempotency-Key', 'key-array')
-        .send(bodyWithArray);
+  it('Handles request body with arrays for fingerprinting', async () => {
+    const bodyWithArray = {
+      transactionXdr: 'AAAA',
+      args: [1, 2, 3],
+    };
 
-      expect(res.status).toBe(200);
-    });
+    const res = await request(app)
+      .post('/v1/transactions/submit')
+      .set('Idempotency-Key', 'key-array')
+      .send(bodyWithArray);
 
-    it('Too long key returns 400', async () => {
-      const longKey = 'a'.repeat(129);
+    expect(res.status).toBe(200);
+  });
 
-      const res = await request(app)
-        .post('/v1/transactions/submit')
-        .set('Idempotency-Key', longKey)
-        .send({ transactionXdr: 'AAAAAAABLC0=' });
+  it('Too long key returns 400', async () => {
+    const longKey = 'a'.repeat(129);
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('maximum length');
-    });
+    const res = await request(app)
+      .post('/v1/transactions/submit')
+      .set('Idempotency-Key', longKey)
+      .send({ transactionXdr: 'AAAAAAABLC0=' });
 
-    it('Cleanup deletes expired records', async () => {
-      await pool.query(
-        `
-          INSERT INTO idempotency_records (
-            idempotency_key,
-            request_fingerprint,
-            status,
-            created_at,
-            updated_at
-          )
-          VALUES (
-            $1,
-            $2,
-            'succeeded',
-            now() - interval '48 hours',
-            now() - interval '48 hours'
-          )
-        `,
-        ['expired-key', 'fake-fingerprint'],
-      );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('maximum length');
+  });
 
-      const deleted = await store.cleanup(24);
+  it('Cleanup deletes expired records', async () => {
+    await pool.query(
+      `
+        INSERT INTO idempotency_records (
+          idempotency_key,
+          request_fingerprint,
+          status,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1,
+          $2,
+          'succeeded',
+          now() - interval '48 hours',
+          now() - interval '48 hours'
+        )
+      `,
+      ['expired-key', 'fake-fingerprint'],
+    );
 
-      expect(deleted).toBe(1);
-    });
-  },
-);
+    const deleted = await store.cleanup(24);
+
+    expect(deleted).toBe(1);
+  });
+});

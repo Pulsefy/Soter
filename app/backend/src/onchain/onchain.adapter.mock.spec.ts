@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MockOnchainAdapter } from './onchain.adapter.mock';
+import { SurplusWithdrawalTimelockNotElapsedError } from './utils/surplus-withdrawal.errors';
 
 describe('MockOnchainAdapter', () => {
   let adapter: MockOnchainAdapter;
@@ -404,6 +405,158 @@ describe('MockOnchainAdapter', () => {
           operatorAddress: 'admin',
         }),
       ).rejects.toThrow('Aid package has expired');
+    });
+  });
+
+  describe('timelocked surplus withdrawal', () => {
+    const CONTRACT = 'C_TIMELOCK_TEST';
+    const TO = 'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
+    const TOKEN =
+      'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
+    const proposal = {
+      contractId: CONTRACT,
+      to: TO,
+      token: TOKEN,
+      amount: '1000',
+    };
+
+    beforeEach(() => {
+      // Reproduce a matured timelock without waiting out the contract's
+      // one-day delay, so the execute leg is reachable in a unit test.
+      adapter.mockSurplusWithdrawalDelaySeconds = 0;
+    });
+
+    it("defaults the delay to the contract's one-day timelock", () => {
+      const fresh = new MockOnchainAdapter();
+      expect(fresh.mockSurplusWithdrawalDelaySeconds).toBe(86_400);
+    });
+
+    it('reports no pending withdrawal initially', async () => {
+      await expect(
+        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
+      ).resolves.toBeNull();
+    });
+
+    it('records the proposal and its executable timestamp', async () => {
+      const before = Math.floor(Date.now() / 1000);
+      adapter.mockSurplusWithdrawalDelaySeconds = 3600;
+
+      const result = await adapter.proposeSurplusWithdrawal(proposal);
+
+      expect(result.pendingWithdrawal).toMatchObject({
+        to: TO,
+        token: TOKEN,
+        amount: '1000',
+      });
+      expect(result.pendingWithdrawal!.executableAt).toBeGreaterThanOrEqual(
+        before + 3600,
+      );
+      await expect(
+        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
+      ).resolves.toEqual(result.pendingWithdrawal);
+    });
+
+    it('moves no funds at the propose leg', async () => {
+      const result = await adapter.proposeSurplusWithdrawal(proposal);
+      expect(result.pendingWithdrawal).not.toBeNull();
+    });
+
+    it('refuses a second proposal while one is pending', async () => {
+      await adapter.proposeSurplusWithdrawal(proposal);
+
+      await expect(
+        adapter.proposeSurplusWithdrawal({ ...proposal, amount: '2000' }),
+      ).rejects.toThrow('SurplusWithdrawalPending');
+    });
+
+    it('rejects an execute before the timelock has elapsed', async () => {
+      adapter.mockSurplusWithdrawalDelaySeconds = 3600;
+      await adapter.proposeSurplusWithdrawal(proposal);
+
+      const error = await adapter
+        .executeSurplusWithdrawal({ contractId: CONTRACT })
+        .catch(e => e);
+
+      expect(error).toBeInstanceOf(SurplusWithdrawalTimelockNotElapsedError);
+      expect(error.executableAt).toBeGreaterThan(0);
+      // The proposal survives a premature attempt.
+      await expect(
+        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
+      ).resolves.not.toBeNull();
+    });
+
+    it('executes once the timelock has elapsed and clears the proposal', async () => {
+      await adapter.proposeSurplusWithdrawal(proposal);
+
+      const result = await adapter.executeSurplusWithdrawal({
+        contractId: CONTRACT,
+      });
+
+      expect(result.pendingWithdrawal).toBeNull();
+      expect(result.transactionHash).toBeTruthy();
+      await expect(
+        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
+      ).resolves.toBeNull();
+    });
+
+    it('cancels without moving funds and leaves nothing pending', async () => {
+      await adapter.proposeSurplusWithdrawal(proposal);
+
+      const result = await adapter.cancelSurplusWithdrawal({
+        contractId: CONTRACT,
+      });
+
+      expect(result.pendingWithdrawal).toBeNull();
+      await expect(
+        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
+      ).resolves.toBeNull();
+    });
+
+    it('allows a new proposal after a cancellation', async () => {
+      await adapter.proposeSurplusWithdrawal(proposal);
+      await adapter.cancelSurplusWithdrawal({ contractId: CONTRACT });
+
+      await expect(
+        adapter.proposeSurplusWithdrawal(proposal),
+      ).resolves.toMatchObject({ pendingWithdrawal: expect.any(Object) });
+    });
+
+    it('rejects cancelling when nothing is pending', async () => {
+      await expect(
+        adapter.cancelSurplusWithdrawal({ contractId: CONTRACT }),
+      ).rejects.toThrow('SurplusWithdrawalNotPending');
+    });
+
+    it('rejects executing when nothing is pending', async () => {
+      await expect(
+        adapter.executeSurplusWithdrawal({ contractId: CONTRACT }),
+      ).rejects.toThrow('SurplusWithdrawalNotPending');
+    });
+
+    it('keeps proposals isolated per contract', async () => {
+      await adapter.proposeSurplusWithdrawal(proposal);
+
+      await expect(
+        adapter.getPendingWithdrawal({ contractId: 'C_OTHER' }),
+      ).resolves.toBeNull();
+      // Cancelling the other contract must not touch this one's proposal.
+      await expect(
+        adapter.cancelSurplusWithdrawal({ contractId: 'C_OTHER' }),
+      ).rejects.toThrow('SurplusWithdrawalNotPending');
+      await expect(
+        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
+      ).resolves.not.toBeNull();
+    });
+
+    it.each([
+      ['a zero amount', { amount: '0' }],
+      ['a non-numeric amount', { amount: 'abc' }],
+      ['a missing destination', { to: '' }],
+      ['a missing token', { token: '' }],
+    ])('rejects %s', async (_label, override) => {
+      await expect(
+        adapter.proposeSurplusWithdrawal({ ...proposal, ...override }),
+      ).rejects.toThrow();
     });
   });
 });

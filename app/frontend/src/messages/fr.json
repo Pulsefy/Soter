@@ -226,6 +226,38 @@
     "verificationReviewPage": "Révision de Vérification",
     "resetChecklist": "Réinitialiser la progression"
   },
+  "emptyStates": {
+    "campaigns": {
+      "eyebrow": "Aucune campagne pour le moment",
+      "title": "Créez votre première campagne",
+      "description": "Votre organisation n'a pas encore de campagne. Créez-en une pour commencer à financer des distributions d'aide, ou chargez des valeurs d'exemple pour découvrir le flux de travail.",
+      "createAction": "Créer une campagne",
+      "sampleAction": "Charger des valeurs d'exemple",
+      "helpAction": "Voir l'aide",
+      "sampleTip": "Chargez des valeurs d'exemple dans le formulaire pour générer rapidement un contenu de test réaliste.",
+      "helpTip": "Ouvrez l'aide pour les notes de configuration, y compris le mode simulation et les parcours selon le rôle.",
+      "filtered": "Aucune campagne ne correspond au filtre actuel."
+    },
+    "dashboard": {
+      "noPackages": {
+        "eyebrow": "Aucun colis pour le moment",
+        "operatorTitle": "Aucun colis d'aide n'a encore été publié",
+        "operatorDescription": "Cet espace de travail n'a pas encore de données de colis. Créez une campagne pour publier des colis d'aide et remplir ce tableau de bord.",
+        "viewerTitle": "Aucun colis d'aide n'est encore disponible à consulter",
+        "viewerDescription": "Aucune donnée de distribution en direct n'est disponible dans cet environnement, mais les flux de vérification et d'exemple restent accessibles.",
+        "operatorAction": "Créer une campagne",
+        "viewerAction": "Essayer le flux de vérification",
+        "secondaryAction": "Voir l'aide"
+      },
+      "noMatches": {
+        "eyebrow": "Aucun résultat",
+        "title": "Aucun colis d'aide ne correspond aux filtres actuels",
+        "description": "Essayez d'élargir la recherche, d'effacer les filtres ou de changer les sélections de jeton et de statut.",
+        "resetAction": "Réinitialiser les filtres du tableau de bord",
+        "secondaryAction": "Voir l'aide"
+      }
+    }
+  },
   "faucet": {
     "title": "Assistant de Faucet Testnet",
     "subtitle": "Outil de Développement Stellar / Soroban",

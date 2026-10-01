@@ -120,7 +120,15 @@
     "clearSyncedCache": "Borrar caché sincronizada",
     "yourPublicKey": "Tu clave pública",
     "stellarLabFaucet": "Grifo de Stellar Lab",
-    "friendbotApi": "API de Friendbot"
+    "friendbotApi": "API de Friendbot",
+    "syncFrequency": "Frecuencia de sincronización",
+    "syncFrequencyHint": "Elige con qué frecuencia se sincroniza la aplicación en segundo plano",
+    "syncFrequencyAggressive": "Frecuente",
+    "syncFrequencyNormal": "Normal",
+    "syncFrequencyConservative": "Conservadora",
+    "syncFrequencyAggressiveHint": "Sincroniza cada 5 minutos",
+    "syncFrequencyNormalHint": "Sincroniza cada 15 minutos (por defecto)",
+    "syncFrequencyConservativeHint": "Sincroniza cada 60 minutos"
   },
   "tasks": {
     "title": "Tareas",

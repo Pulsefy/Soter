@@ -196,10 +196,10 @@ export function VersionDemo() {
           How it works:
         </h3>
         <ul className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
-          <li>• "Normal": Shows release notes modal (once per version)</li>
-          <li>• "Force Upgrade": Blocks app with upgrade screen</li>
-          <li>• "Up to Date": No modal, app works normally</li>
-          <li>• "Mark as Seen": Stores version locally, hides modal</li>
+          <li>• &quot;Normal&quot;: Shows release notes modal (once per version)</li>
+          <li>• &quot;Force Upgrade&quot;: Blocks app with upgrade screen</li>
+          <li>• &quot;Up to Date&quot;: No modal, app works normally</li>
+          <li>• &quot;Mark as Seen&quot;: Stores version locally, hides modal</li>
           <li>• Storage persists across page reloads</li>
         </ul>
       </div>

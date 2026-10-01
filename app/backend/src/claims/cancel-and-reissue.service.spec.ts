@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
-import { ClaimStatus } from '@prisma/client';
+import { CancelReasonCode, ClaimStatus } from '@prisma/client';
 import { CLAIM_EVENT } from './claim.events';
 
 describe('CancelAndReissueService', () => {
@@ -96,6 +96,7 @@ describe('CancelAndReissueService', () => {
 
       await service.cancel('claim-123', {
         operatorId: 'operator-1',
+        code: CancelReasonCode.duplicate,
         reason: 'Test reason',
       });
 
@@ -139,13 +140,228 @@ describe('CancelAndReissueService', () => {
         },
       );
 
-      await service.cancel('claim-123', { operatorId: 'operator-1' });
+      await service.cancel('claim-123', {
+        operatorId: 'operator-1',
+        code: CancelReasonCode.duplicate,
+      });
 
       const metadata = (auditService.record as jest.Mock).mock.calls[0][0]
         .metadata;
       expect(metadata.claimId).toBe('claim-123');
       expect(metadata.reason).toBeUndefined();
+      expect(metadata.reasonCode).toBe(CancelReasonCode.duplicate);
       expect(metadata.unlockedAmount).toBe(100);
+    });
+
+    it('should record the structured code alongside the free-text detail', async () => {
+      mockPrismaService.claim.findUnique.mockResolvedValue(mockClaim);
+
+      const claimUpdate = jest.fn().mockResolvedValue({
+        ...mockClaim,
+        status: ClaimStatus.cancelled,
+      });
+      const ledgerCreate = jest.fn().mockResolvedValue({});
+      mockPrismaService.$transaction.mockImplementation(
+        (fn: (tx: any) => Promise<any>) =>
+          fn({
+            claim: { update: claimUpdate },
+            balanceLedger: { create: ledgerCreate },
+          }),
+      );
+
+      await service.cancel('claim-123', {
+        operatorId: 'operator-1',
+        code: CancelReasonCode.fraud_flag,
+        reason: 'Beneficiary appears on two sanction lists',
+      });
+
+      const updateData = claimUpdate.mock.calls[0][0].data;
+      expect(updateData.cancelReasonCode).toBe(CancelReasonCode.fraud_flag);
+      // Free-text detail is preserved, not replaced by the code.
+      expect(updateData.cancelReason).toBe(
+        'Beneficiary appears on two sanction lists',
+      );
+
+      const metadata = (auditService.record as jest.Mock).mock.calls[0][0]
+        .metadata;
+      expect(metadata.reasonCode).toBe(CancelReasonCode.fraud_flag);
+
+      // The code is recorded on the ledger note so the unlocked entry is
+      // greppable without joining back to the claim.
+      expect(ledgerCreate.mock.calls[0][0].data.note).toContain('fraud_flag');
+    });
+
+    it('should store a null detail while still recording the code', async () => {
+      mockPrismaService.claim.findUnique.mockResolvedValue(mockClaim);
+
+      const claimUpdate = jest.fn().mockResolvedValue({
+        ...mockClaim,
+        status: ClaimStatus.cancelled,
+      });
+      mockPrismaService.$transaction.mockImplementation(
+        (fn: (tx: any) => Promise<any>) =>
+          fn({
+            claim: { update: claimUpdate },
+            balanceLedger: { create: jest.fn().mockResolvedValue({}) },
+          }),
+      );
+
+      await service.cancel('claim-123', {
+        operatorId: 'operator-1',
+        code: CancelReasonCode.recipient_ineligible,
+      });
+
+      const updateData = claimUpdate.mock.calls[0][0].data;
+      expect(updateData.cancelReasonCode).toBe(
+        CancelReasonCode.recipient_ineligible,
+      );
+      expect(updateData.cancelReason).toBeNull();
+    });
+  });
+
+  describe('getCancellationReport', () => {
+    const groupBy = jest.fn();
+    const aggregate = jest.fn();
+    const count = jest.fn();
+
+    beforeEach(() => {
+      (mockPrismaService.claim as any).groupBy = groupBy;
+      (mockPrismaService.claim as any).aggregate = aggregate;
+      (mockPrismaService.claim as any).count = count;
+    });
+
+    it('groups counts and amounts by code, largest bucket first', async () => {
+      groupBy.mockResolvedValue([
+        {
+          cancelReasonCode: CancelReasonCode.duplicate,
+          _count: { _all: 4 },
+          _sum: { amount: 400 },
+        },
+        {
+          cancelReasonCode: CancelReasonCode.fraud_flag,
+          _count: { _all: 9 },
+          _sum: { amount: 9000 },
+        },
+        {
+          cancelReasonCode: CancelReasonCode.evidence_rejected,
+          _count: { _all: 1 },
+          _sum: { amount: null },
+        },
+      ]);
+      aggregate.mockResolvedValue({
+        _count: { _all: 14 },
+        _sum: { amount: 9400 },
+      });
+      count.mockResolvedValue(0);
+
+      const report = await service.getCancellationReport({});
+
+      expect(report.breakdown).toEqual([
+        {
+          code: CancelReasonCode.fraud_flag,
+          count: 9,
+          totalAmount: 9000,
+        },
+        { code: CancelReasonCode.duplicate, count: 4, totalAmount: 400 },
+        {
+          code: CancelReasonCode.evidence_rejected,
+          count: 1,
+          totalAmount: 0,
+        },
+      ]);
+      expect(report.totalCancelled).toBe(14);
+      expect(report.totalAmount).toBe(9400);
+      expect(report.uncodedCount).toBe(0);
+    });
+
+    it('excludes NULL codes from the breakdown but still counts them', async () => {
+      // groupBy returns a null bucket when some rows have no code; those must
+      // not surface as a bogus "null" code in the breakdown.
+      groupBy.mockResolvedValue([
+        {
+          cancelReasonCode: CancelReasonCode.duplicate,
+          _count: { _all: 2 },
+          _sum: { amount: 200 },
+        },
+        { cancelReasonCode: null, _count: { _all: 3 }, _sum: { amount: 300 } },
+      ]);
+      aggregate.mockResolvedValue({
+        _count: { _all: 5 },
+        _sum: { amount: 500 },
+      });
+      count.mockResolvedValue(3);
+
+      const report = await service.getCancellationReport({});
+
+      expect(report.breakdown).toEqual([
+        { code: CancelReasonCode.duplicate, count: 2, totalAmount: 200 },
+      ]);
+      expect(report.uncodedCount).toBe(3);
+      // Totals must still reconcile with the full set of cancelled claims.
+      expect(
+        report.breakdown.reduce((sum, b) => sum + b.count, 0) +
+          report.uncodedCount,
+      ).toBe(report.totalCancelled);
+    });
+
+    it('scopes the query to cancelled, non-deleted claims', async () => {
+      groupBy.mockResolvedValue([]);
+      aggregate.mockResolvedValue({
+        _count: { _all: 0 },
+        _sum: { amount: null },
+      });
+      count.mockResolvedValue(0);
+
+      await service.getCancellationReport({});
+
+      expect(groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          by: ['cancelReasonCode'],
+          where: { status: ClaimStatus.cancelled, deletedAt: null },
+        }),
+      );
+    });
+
+    it('filters on cancelledAt rather than createdAt', async () => {
+      groupBy.mockResolvedValue([]);
+      aggregate.mockResolvedValue({
+        _count: { _all: 0 },
+        _sum: { amount: null },
+      });
+      count.mockResolvedValue(0);
+
+      await service.getCancellationReport({
+        from: '2026-01-01T00:00:00.000Z',
+        to: '2026-02-01T00:00:00.000Z',
+      });
+
+      const where = groupBy.mock.calls[0][0].where;
+      expect(where.cancelledAt).toEqual({
+        gte: new Date('2026-01-01T00:00:00.000Z'),
+        lte: new Date('2026-02-01T00:00:00.000Z'),
+      });
+      expect(where.createdAt).toBeUndefined();
+    });
+
+    it('applies the campaignId filter', async () => {
+      groupBy.mockResolvedValue([]);
+      aggregate.mockResolvedValue({
+        _count: { _all: 0 },
+        _sum: { amount: null },
+      });
+      count.mockResolvedValue(0);
+
+      await service.getCancellationReport({ campaignId: 'campaign-1' });
+
+      expect(groupBy.mock.calls[0][0].where).toMatchObject({
+        campaignId: 'campaign-1',
+      });
+    });
+
+    it('rejects an unparseable date filter', async () => {
+      await expect(
+        service.getCancellationReport({ from: 'not-a-date' }),
+      ).rejects.toThrow(AppException);
     });
   });
 
@@ -249,6 +465,43 @@ describe('CancelAndReissueService', () => {
       expect(reissueCall.metadata.newClaimId).toBe('claim-789');
       expect(reissueCall.metadata.originalClaimId).toBe('claim-123');
     });
+
+    it('should code the original claim as `reissued` and carry the code on both events', async () => {
+      mockPrismaService.claim.findUnique.mockResolvedValue(mockClaim);
+
+      const claimUpdate = jest.fn().mockResolvedValue({
+        ...mockClaim,
+        status: ClaimStatus.cancelled,
+      });
+      mockPrismaService.$transaction.mockImplementation(
+        (fn: (tx: any) => Promise<any>) =>
+          fn({
+            claim: {
+              update: claimUpdate,
+              create: jest.fn().mockResolvedValue({
+                id: 'claim-456',
+                campaignId: 'campaign-1',
+                amount: 100,
+                status: ClaimStatus.requested,
+                reissuedFromId: 'claim-123',
+              }),
+            },
+            balanceLedger: { create: jest.fn().mockResolvedValue({}) },
+          }),
+      );
+
+      await service.reissue('claim-123', { operatorId: 'operator-1' });
+
+      // A reissue is always a `reissued` cancellation — the operator does not
+      // get to label it something else, so the breakdown stays trustworthy.
+      expect(claimUpdate.mock.calls[0][0].data.cancelReasonCode).toBe(
+        CancelReasonCode.reissued,
+      );
+
+      const calls = (auditService.record as jest.Mock).mock.calls;
+      expect(calls[0][0].metadata.reasonCode).toBe(CancelReasonCode.reissued);
+      expect(calls[1][0].metadata.reasonCode).toBe(CancelReasonCode.reissued);
+    });
   });
 
   describe('error cases', () => {
@@ -256,7 +509,10 @@ describe('CancelAndReissueService', () => {
       mockPrismaService.claim.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.cancel('nonexistent', { operatorId: 'op-1' }),
+        service.cancel('nonexistent', {
+          operatorId: 'op-1',
+          code: CancelReasonCode.duplicate,
+        }),
       ).rejects.toThrow(AppException);
       expect(auditService.record).not.toHaveBeenCalled();
     });
@@ -268,7 +524,10 @@ describe('CancelAndReissueService', () => {
       });
 
       await expect(
-        service.cancel('claim-123', { operatorId: 'op-1' }),
+        service.cancel('claim-123', {
+          operatorId: 'op-1',
+          code: CancelReasonCode.duplicate,
+        }),
       ).rejects.toThrow(AppException);
       expect(auditService.record).not.toHaveBeenCalled();
     });
@@ -280,7 +539,10 @@ describe('CancelAndReissueService', () => {
       });
 
       await expect(
-        service.cancel('claim-123', { operatorId: 'op-1' }),
+        service.cancel('claim-123', {
+          operatorId: 'op-1',
+          code: CancelReasonCode.duplicate,
+        }),
       ).rejects.toThrow(AppException);
       expect(auditService.record).not.toHaveBeenCalled();
     });

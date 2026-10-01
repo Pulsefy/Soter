@@ -270,4 +270,12 @@ export const Error = {
    * elapsed.  Wait until `executable_at` and try again.
    */
   28: { message: 'SurplusWithdrawalTimelockActive' },
+  /**
+   * Package metadata included a `merkle_root` value that is not a
+   * well-formed 64-character hex string (32 bytes). Rejected at creation
+   * time so a malformed root can never silently disable the allowlist
+   * gate (see `merkle_root_from_metadata`, which would otherwise treat
+   * it as "no Merkle gate configured").
+   */
+  29: { message: 'InvalidMerkleRoot' },
 };

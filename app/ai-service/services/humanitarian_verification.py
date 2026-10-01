@@ -279,6 +279,60 @@ class HumanitarianVerificationService:
 
         return all(not self._get_breaker(p).allow_request() for p in providers)
 
+    def flag_for_manual_review(
+        self,
+        aid_claim: str,
+        supporting_evidence: Optional[List[str]] = None,
+        context_factors: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Return a structured payload indicating a claim has been routed to manual review.
+
+        Called when ``all_providers_unavailable()`` is True. The payload
+        is surfaced directly to the caller (and therefore to the backend)
+        so the claim visibly enters the human-review queue rather than
+        being silently discarded.
+
+        Recovery is automatic: once the circuit-breaker ``recovery_timeout``
+        has elapsed, the next ``allow_request()`` call transitions the
+        breaker from OPEN -> HALF_OPEN and normal AI-assisted verification
+        resumes without manual intervention (see
+        :meth:`check_recovery`).
+        """
+        reason = (
+            "All AI providers are currently unavailable; "
+            "claim queued for human review."
+        )
+        logger.warning(
+            "manual_review_flagged: all providers unavailable, routing claim to human review. "
+            "aid_claim_preview=%s",
+            (aid_claim or "")[:80],
+        )
+        return {
+            "flagged_for_manual_review": True,
+            "manual_review_reason": reason,
+            "aid_claim": aid_claim,
+            "supporting_evidence": supporting_evidence or [],
+            "context_factors": context_factors or {},
+        }
+
+    def check_recovery(self) -> bool:
+        """Return True if at least one provider has recovered and can accept requests.
+
+        Recovery is automatic: the circuit breaker transitions from OPEN to
+        HALF_OPEN when ``recovery_timeout`` seconds have elapsed and
+        ``allow_request()`` is called. This method is a convenience probe
+        for callers that need to know whether normal routing can resume
+        without external intervention.
+        """
+        if settings.test_provider_mode:
+            return True
+
+        providers = self.registry.available_llm_providers()
+        if not providers:
+            return False
+
+        return any(self._get_breaker(p).allow_request() for p in providers)
+
     def get_model_version(self, provider_preference: str = "auto") -> str:
         providers = self.registry.resolve_llm(provider_preference)
         if not providers:

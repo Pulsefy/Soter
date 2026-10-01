@@ -1,28 +1,29 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useVersionStore, VersionService } from '@/lib/versionStore';
-import type { VersionConfig } from '@/types/version';
 
 export function useVersion() {
   const store = useVersionStore();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Stable identity: consumers (e.g. VersionProvider) run this inside an effect
+  // keyed on the function, so a new reference each render would loop forever.
   const loadVersionConfig = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const config = await VersionService.fetchVersionConfig();
-      store.setVersionConfig(config);
+      useVersionStore.getState().setVersionConfig(config);
     } catch (err) {
       setError('Failed to load version information');
       console.error('Version config load error:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [store.setVersionConfig]);
+  }, []);
 
   const handleContinue = () => {
     if (store.releaseNotes) {

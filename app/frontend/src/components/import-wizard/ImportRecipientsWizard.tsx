@@ -39,6 +39,7 @@ interface ImportRecipientsWizardProps {
 export function ImportRecipientsWizard({ campaignId }: ImportRecipientsWizardProps) {
   const { toast } = useToast();
   const { isMismatch } = useNetworkGuard();
+  const tErrors = useTranslations('errors');
   const [step, setStep] = useState<WizardStep>(1);
   const [file, setFile] = useState<File | null>(null);
   const [parsedData, setParsedData] = useState<ParsedCsvData | null>(null);

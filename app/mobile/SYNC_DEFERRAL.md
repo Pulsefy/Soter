@@ -34,15 +34,23 @@ This implementation adds battery and network awareness to the background sync sy
 - Deferral history is stored in the sync action metadata
 - Users can view deferral reasons in the Submission Queue inspection modal
 
+### 6. Configurable Background Sync Frequency
+- Field workers can adjust background sync frequency in Settings:
+  - **Aggressive**: Syncs approximately every 5 minutes
+  - **Normal (Default)**: Syncs approximately every 15 minutes
+  - **Conservative**: Syncs approximately every 60 minutes
+- The frequency setting composes with, rather than overrides, battery and network deferral logic
+- Persists across app restarts via `@soter/sync-frequency`
+
 ## Architecture
 
 ### New Components
 
 #### SyncDeferralContext
-A new React context that provides:
+A React context that provides:
 - Real-time battery level monitoring
 - Network connection type detection (metered vs unmetered)
-- User preferences for metered connection sync
+- User preferences for metered connection sync and background sync frequency
 - Force sync override state
 - Deferral decision logic
 

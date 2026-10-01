@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useTranslations } from 'next-intl';
 import { useAidPackages } from '@/hooks/useAidPackages';
 import { Pagination } from '@/components/Pagination';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
@@ -66,6 +67,7 @@ interface FilteredPackageListProps {
 }
 
 export const FilteredPackageList = React.memo(function FilteredPackageList({ filters, page = 1, size = 10, onPageChange }: FilteredPackageListProps) {
+  const t = useTranslations();
   const { data: response, isLoading, error } = useAidPackages(filters, { page, size });
   const packages = response?.data ?? [];
   const totalItems = response?.total ?? 0;
@@ -75,7 +77,10 @@ export const FilteredPackageList = React.memo(function FilteredPackageList({ fil
 
   if (error) {
     return (
-      <div className="p-4 border border-red-200 rounded-lg bg-red-50 dark:bg-red-950/30 dark:border-red-900 text-red-700 dark:text-red-400 text-sm">
+      <div
+        data-testid="packages-error"
+        className="p-4 border border-red-200 rounded-lg bg-red-50 dark:bg-red-950/30 dark:border-red-900 text-red-700 dark:text-red-400 text-sm"
+      >
         Error loading packages: {error.message}
       </div>
     );
@@ -84,7 +89,10 @@ export const FilteredPackageList = React.memo(function FilteredPackageList({ fil
   return (
     <>
       {/* Desktop table */}
-      <div className="hidden md:block overflow-x-auto">
+      <div
+        className="hidden md:block overflow-x-auto"
+        data-testid={isLoading ? 'packages-loading' : undefined}
+      >
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 dark:border-gray-800 text-left">
@@ -129,38 +137,69 @@ export const FilteredPackageList = React.memo(function FilteredPackageList({ fil
             ) : (
               <tr>
                 <td colSpan={TABLE_HEADERS.length} className="py-12 text-center">
-                  <div className="mx-auto max-w-3xl text-left">
+                  <div className="mx-auto max-w-3xl text-left" data-testid="packages-empty-state">
                     <AppEmptyState
                       compact
-                      eyebrow={hasFilters ? 'No Matches' : 'No Packages Yet'}
+                      eyebrow={
+                        hasFilters
+                          ? t('emptyStates.dashboard.noMatches.eyebrow')
+                          : t('emptyStates.dashboard.noPackages.eyebrow')
+                      }
                       title={
                         hasFilters
-                          ? 'No aid packages match the current filters'
+                          ? t('emptyStates.dashboard.noMatches.title')
                           : isOperationsRole(role)
-                            ? 'No aid packages have been published yet'
-                            : 'No aid packages are available to browse yet'
+                            ? t('emptyStates.dashboard.noPackages.operatorTitle')
+                            : t('emptyStates.dashboard.noPackages.viewerTitle')
                       }
                       description={
                         hasFilters
-                          ? 'Try widening the search, clearing filters, or switching token and status selections.'
+                          ? t('emptyStates.dashboard.noMatches.description')
                           : isOperationsRole(role)
-                            ? 'This workspace does not have package data yet. Contributors can switch on mock responses or create campaign data to populate downstream views.'
-                            : 'There is no live distribution data in this environment yet, but you can still explore verification and sample workflows.'
+                            ? t('emptyStates.dashboard.noPackages.operatorDescription')
+                            : t('emptyStates.dashboard.noPackages.viewerDescription')
                       }
                       actions={
                         hasFilters
                           ? [
-                              { href: '/dashboard', label: 'Reset dashboard filters', icon: 'next' },
-                              { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                              {
+                                href: '/dashboard',
+                                label: t('emptyStates.dashboard.noMatches.resetAction'),
+                                icon: 'next',
+                              },
+                              {
+                                href: '/help',
+                                label: t('emptyStates.dashboard.noMatches.secondaryAction'),
+                                icon: 'docs',
+                                variant: 'secondary',
+                              },
                             ]
                           : isOperationsRole(role)
                             ? [
-                                { href: '/campaigns', label: 'Create sample campaign', icon: 'sample' },
-                                { href: '/help', label: 'Open contributor help', icon: 'docs', variant: 'secondary' },
+                                {
+                                  href: '/campaigns',
+                                  label: t('emptyStates.dashboard.noPackages.operatorAction'),
+                                  icon: 'next',
+                                },
+                                {
+                                  href: '/help',
+                                  label: t('emptyStates.dashboard.noPackages.secondaryAction'),
+                                  icon: 'docs',
+                                  variant: 'secondary',
+                                },
                               ]
                             : [
-                                { href: '/', label: 'Try verification flow', icon: 'next' },
-                                { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                                {
+                                  href: '/',
+                                  label: t('emptyStates.dashboard.noPackages.viewerAction'),
+                                  icon: 'next',
+                                },
+                                {
+                                  href: '/help',
+                                  label: t('emptyStates.dashboard.noPackages.secondaryAction'),
+                                  icon: 'docs',
+                                  variant: 'secondary',
+                                },
                               ]
                       }
                     />
@@ -190,35 +229,59 @@ export const FilteredPackageList = React.memo(function FilteredPackageList({ fil
         ) : packages && packages.length > 0 ? (
           packages.map(pkg => <PackageCard key={pkg.id} pkg={pkg} />)
         ) : (
-          <AppEmptyState
-            compact
-            eyebrow={hasFilters ? 'No Matches' : 'No Packages Yet'}
-            title={
-              hasFilters
-                ? 'No aid packages match the current filters'
-                : isOperationsRole(role)
-                  ? 'No aid packages have been published yet'
-                  : 'No aid packages are available to browse yet'
-            }
-            description={
-              hasFilters
-                ? 'Try widening the search, clearing filters, or switching token and status selections.'
-                : isOperationsRole(role)
-                  ? 'Create a sample campaign or enable mock responses to make the dashboard easier to review.'
-                  : 'This environment does not have live aid packages yet, but the rest of the product can still be explored with sample flows.'
-            }
-            actions={
-              isOperationsRole(role)
-                ? [
-                    { href: '/campaigns', label: 'Create sample campaign', icon: 'sample' },
-                    { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
-                  ]
-                : [
-                    { href: '/', label: 'Try verification flow', icon: 'next' },
-                    { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
-                  ]
-            }
-          />
+          <div data-testid="packages-empty-state-mobile">
+            <AppEmptyState
+              compact
+              eyebrow={
+                hasFilters
+                  ? t('emptyStates.dashboard.noMatches.eyebrow')
+                  : t('emptyStates.dashboard.noPackages.eyebrow')
+              }
+              title={
+                hasFilters
+                  ? t('emptyStates.dashboard.noMatches.title')
+                  : isOperationsRole(role)
+                    ? t('emptyStates.dashboard.noPackages.operatorTitle')
+                    : t('emptyStates.dashboard.noPackages.viewerTitle')
+              }
+              description={
+                hasFilters
+                  ? t('emptyStates.dashboard.noMatches.description')
+                  : isOperationsRole(role)
+                    ? t('emptyStates.dashboard.noPackages.operatorDescription')
+                    : t('emptyStates.dashboard.noPackages.viewerDescription')
+              }
+              actions={
+                isOperationsRole(role)
+                  ? [
+                      {
+                        href: '/campaigns',
+                        label: t('emptyStates.dashboard.noPackages.operatorAction'),
+                        icon: 'next',
+                      },
+                      {
+                        href: '/help',
+                        label: t('emptyStates.dashboard.noPackages.secondaryAction'),
+                        icon: 'docs',
+                        variant: 'secondary',
+                      },
+                    ]
+                  : [
+                      {
+                        href: '/',
+                        label: t('emptyStates.dashboard.noPackages.viewerAction'),
+                        icon: 'next',
+                      },
+                      {
+                        href: '/help',
+                        label: t('emptyStates.dashboard.noPackages.secondaryAction'),
+                        icon: 'docs',
+                        variant: 'secondary',
+                      },
+                    ]
+              }
+            />
+          </div>
         )}
       </div>
 

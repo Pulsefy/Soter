@@ -257,6 +257,15 @@ export const CONTRACT_ERROR_CATALOG: readonly ContractErrorEntry[] = [
     httpStatusCode: 400,
     integrationErrorCode: 'ONCHAIN_CONTRACT_ERROR',
   },
+  {
+    code: 29,
+    name: 'InvalidMerkleRoot',
+    meaning:
+      'Package metadata merkle_root is not a well-formed 32-byte hex string',
+    retryable: false,
+    httpStatusCode: 400,
+    integrationErrorCode: 'ONCHAIN_CONTRACT_ERROR',
+  },
 ] as const;
 
 /**

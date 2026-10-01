@@ -104,7 +104,8 @@ export class ApiKeyGuard implements CanActivate {
 
       request.user = {
         role: record.role,
-        ngoId: record.ngoId,
+        ngoId: record.ngoId ?? record.orgId,
+        orgId: record.orgId ?? record.ngoId,
         apiKeyId: record.id,
         authType: 'apiKey',
         scopes: parseScopes(record.scopes),

@@ -29,9 +29,142 @@ export class EntityLinkingService {
   ) {}
 
   /**
+   * Verify that the given sourceId belongs to the caller's organisation.
+   * Throws 403 if ownership cannot be confirmed. Admin-role callers pass
+   * orgId = undefined to skip the check entirely.
+   */
+  private async assertSourceOwnership(
+    sourceType: string,
+    sourceId: string,
+    orgId: string,
+  ): Promise<void> {
+    switch (sourceType) {
+      case 'campaign': {
+        const campaign = await this.prisma.campaign.findFirst({
+          where: { id: sourceId, orgId },
+          select: { id: true },
+        });
+        if (!campaign) {
+          throw new AppException(
+            ERROR_CODES.FORBIDDEN,
+            403,
+            'Access denied: campaign does not belong to your organisation',
+          );
+        }
+        break;
+      }
+
+      case 'claim': {
+        const claim = await this.prisma.claim.findFirst({
+          where: { id: sourceId, campaign: { orgId } },
+          select: { id: true },
+        });
+        if (!claim) {
+          throw new AppException(
+            ERROR_CODES.FORBIDDEN,
+            403,
+            'Access denied: claim does not belong to your organisation',
+          );
+        }
+        break;
+      }
+
+      case 'verification': {
+        const verification = await this.prisma.verificationRequest.findFirst({
+          where: { id: sourceId, orgId },
+          select: { id: true },
+        });
+        if (!verification) {
+          throw new AppException(
+            ERROR_CODES.FORBIDDEN,
+            403,
+            'Access denied: verification does not belong to your organisation',
+          );
+        }
+        break;
+      }
+
+      default:
+        throw new AppException(
+          ERROR_CODES.FORBIDDEN,
+          403,
+          'Access denied: unsupported source type',
+        );
+    }
+  }
+
+  /**
+   * Resolve the owning orgId for a given entity link by tracing back through
+   * its source. Returns null when the source is unrecognised or orphaned.
+   */
+  private async resolveLinkOrgId(
+    sourceType: string,
+    sourceId: string,
+  ): Promise<string | null> {
+    switch (sourceType) {
+      case 'campaign': {
+        const campaign = await this.prisma.campaign.findFirst({
+          where: { id: sourceId },
+          select: { orgId: true },
+        });
+        return campaign?.orgId ?? null;
+      }
+
+      case 'claim': {
+        const claim = await this.prisma.claim.findFirst({
+          where: { id: sourceId },
+          select: { campaign: { select: { orgId: true } } },
+        });
+        return claim?.campaign?.orgId ?? null;
+      }
+
+      case 'verification': {
+        const verification = await this.prisma.verificationRequest.findFirst({
+          where: { id: sourceId },
+          select: { orgId: true },
+        });
+        return verification?.orgId ?? null;
+      }
+
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Collect all sourceIds owned by an org across all source types so list and
+   * queue queries can be scoped without an N+1 per row.
+   */
+  private async resolveOwnedSourceIds(orgId: string): Promise<string[]> {
+    const [campaigns, claims, verifications] = await Promise.all([
+      this.prisma.campaign.findMany({
+        where: { orgId },
+        select: { id: true },
+      }),
+      this.prisma.claim.findMany({
+        where: { campaign: { orgId } },
+        select: { id: true },
+      }),
+      this.prisma.verificationRequest.findMany({
+        where: { orgId },
+        select: { id: true },
+      }),
+    ]);
+
+    return [
+      ...campaigns.map(c => c.id),
+      ...claims.map(c => c.id),
+      ...verifications.map(v => v.id),
+    ];
+  }
+
+  /**
    * Link an extracted entity to a canonical registry record
    */
-  async linkEntity(dto: CreateEntityLinkDto): Promise<LinkEntityResult> {
+  async linkEntity(
+    dto: CreateEntityLinkDto,
+    orgId?: string,
+  ): Promise<LinkEntityResult> {
     this.logger.log(
       `Linking entity "${dto.extractedName}" to ${dto.entityType} registry`,
     );
@@ -43,6 +176,12 @@ export class EntityLinkingService {
         400,
         'Confidence score must be between 0 and 1',
       );
+    }
+
+    // Enforce org-scope: a non-admin caller may only create links for sources
+    // belonging to their own organisation.
+    if (orgId) {
+      await this.assertSourceOwnership(dto.sourceType, dto.sourceId, orgId);
     }
 
     // Find or create registry record
@@ -150,7 +289,10 @@ export class EntityLinkingService {
    * configured threshold). Oldest-queued first, so reviewers work through
    * the backlog in order.
    */
-  async getReviewQueue(query: EntityLinkReviewQueueQueryDto): Promise<{
+  async getReviewQueue(
+    query: EntityLinkReviewQueueQueryDto,
+    orgId?: string,
+  ): Promise<{
     data: LinkEntityResult[];
     total: number;
     page: number;
@@ -170,6 +312,12 @@ export class EntityLinkingService {
 
     if (query.sourceType) {
       where.sourceType = query.sourceType;
+    }
+
+    // Scope to the caller's own sources so org B cannot see org A's queue items
+    if (orgId) {
+      const ownedSourceIds = await this.resolveOwnedSourceIds(orgId);
+      where.sourceId = { in: ownedSourceIds };
     }
 
     const [links, total] = await Promise.all([
@@ -207,6 +355,7 @@ export class EntityLinkingService {
     linkId: string,
     dto: ReviewEntityLinkDto,
     reviewerId: string,
+    orgId?: string,
   ): Promise<LinkEntityResult> {
     const link = await this.prisma.entityLink.findUnique({
       where: { id: linkId },
@@ -218,6 +367,21 @@ export class EntityLinkingService {
         404,
         `Entity link ${linkId} not found`,
       );
+    }
+
+    // Enforce org-scope: verify the link's source belongs to the caller's org
+    if (orgId) {
+      const linkOrgId = await this.resolveLinkOrgId(
+        link.sourceType,
+        link.sourceId,
+      );
+      if (linkOrgId !== orgId) {
+        throw new AppException(
+          ERROR_CODES.FORBIDDEN,
+          403,
+          'Access denied: entity link does not belong to your organisation',
+        );
+      }
     }
 
     if (link.reviewStatus !== EntityLinkReviewStatus.pending_review) {
@@ -351,7 +515,10 @@ export class EntityLinkingService {
   /**
    * Query entity links by various criteria
    */
-  async queryLinks(query: EntityLinkQueryDto): Promise<{
+  async queryLinks(
+    query: EntityLinkQueryDto,
+    orgId?: string,
+  ): Promise<{
     data: LinkEntityResult[];
     total: number;
     page: number;
@@ -387,6 +554,12 @@ export class EntityLinkingService {
       where.reviewStatus = query.reviewStatus;
     }
 
+    // Scope to the caller's own sources
+    if (orgId) {
+      const ownedSourceIds = await this.resolveOwnedSourceIds(orgId);
+      where.sourceId = { in: ownedSourceIds };
+    }
+
     const [links, total] = await Promise.all([
       this.prisma.entityLink.findMany({
         where,
@@ -411,7 +584,13 @@ export class EntityLinkingService {
   async getLinksByCampaign(
     campaignId: string,
     entityType?: string,
+    orgId?: string,
   ): Promise<LinkEntityResult[]> {
+    // Verify the campaign belongs to the caller's organisation
+    if (orgId) {
+      await this.assertSourceOwnership('campaign', campaignId, orgId);
+    }
+
     const where: Prisma.EntityLinkWhereInput = {
       sourceType: 'campaign',
       sourceId: campaignId,
@@ -435,7 +614,13 @@ export class EntityLinkingService {
   async getLinksByClaim(
     claimId: string,
     entityType?: string,
+    orgId?: string,
   ): Promise<LinkEntityResult[]> {
+    // Verify the claim (via its campaign) belongs to the caller's organisation
+    if (orgId) {
+      await this.assertSourceOwnership('claim', claimId, orgId);
+    }
+
     const where: Prisma.EntityLinkWhereInput = {
       sourceType: 'claim',
       sourceId: claimId,
@@ -459,7 +644,13 @@ export class EntityLinkingService {
   async getLinksByVerification(
     verificationId: string,
     entityType?: string,
+    orgId?: string,
   ): Promise<LinkEntityResult[]> {
+    // Verify the verification request belongs to the caller's organisation
+    if (orgId) {
+      await this.assertSourceOwnership('verification', verificationId, orgId);
+    }
+
     const where: Prisma.EntityLinkWhereInput = {
       sourceType: 'verification',
       sourceId: verificationId,

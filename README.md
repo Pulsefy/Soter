@@ -122,6 +122,7 @@ Cross-cutting docs live in [`doc/`](doc/):
 - [Architecture decision log](doc/decisions/README.md) — append-only record of significant architecture decisions and why they were made.
 - [Claims-to-verification flow](doc/claims-verification-flow.md) — the claim and verification lifecycles, how they connect, and the target wiring state.
 - [Frontend & mobile API integration guide](doc/api-integration-guide.md) — how to call the backend from each client, demo/mock behavior, and the OpenAPI source of truth.
+- [Security model and sensitive data handling](doc/security-model.md) — trust boundaries, sensitive-data inventory, authentication per boundary, redaction/retention/purge behavior, and the known gaps.
 
 ## Contributing
 

@@ -80,6 +80,8 @@ import { AidEscrowService } from '../src/onchain/aid-escrow.service';
 import { LedgerAdminController } from '../src/onchain/ledger-admin.controller';
 import { LedgerBackfillService } from '../src/onchain/ledger-backfill.service';
 import { LedgerReconciliationService } from '../src/onchain/ledger-reconciliation.service';
+import { AdminTransferController } from '../src/onchain/admin-transfer.controller';
+import { AdminTransferService } from '../src/onchain/admin-transfer.service';
 
 import { InvitesController } from '../src/orgs/invites.controller';
 import { InvitesService } from '../src/orgs/invites.service';
@@ -154,6 +156,7 @@ const stub = <T>(value: T) => ({ useValue: value });
     MetricsController,
     AidEscrowController,
     LedgerAdminController,
+    AdminTransferController,
     InvitesController,
     RecipientImportController,
     RecipientsController,
@@ -200,6 +203,7 @@ const stub = <T>(value: T) => ({ useValue: value });
     { provide: AidEscrowService, ...stub({}) },
     { provide: LedgerBackfillService, ...stub({}) },
     { provide: LedgerReconciliationService, ...stub({}) },
+    { provide: AdminTransferService, ...stub({}) },
     { provide: InvitesService, ...stub({}) },
     { provide: RecipientImportService, ...stub({}) },
     { provide: RecipientsService, ...stub({}) },

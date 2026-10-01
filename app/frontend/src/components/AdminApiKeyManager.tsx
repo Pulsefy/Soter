@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { Trash2, RefreshCw, Key, Shield, Copy, Check } from 'lucide-react';
 import { useToast } from './ToastProvider';
 import { useBiometricGate } from '@/hooks/useBiometricGate';
@@ -24,14 +24,12 @@ export const AdminApiKeyManager: React.FC = () => {
   
   const { toast } = useToast();
   const biometricGate = useBiometricGate();
-  const adminService = createProtectedAdminService();
+  // Stable across renders so effects keyed on `loadKeys` do not re-run in a loop.
+  const adminService = useMemo(() => createProtectedAdminService(), []);
 
-  useEffect(() => {
-    loadKeys();
-  }, []);
-
-  const loadKeys = async () => {
-    setLoading(true);
+  // No synchronous setState here so the mount effect does not cascade renders;
+  // `loading` starts as true and stays honest because getKeys() is async.
+  const loadKeys = useCallback(async () => {
     try {
       const data = await adminService.getKeys();
       setKeys(data);
@@ -41,7 +39,17 @@ export const AdminApiKeyManager: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [adminService, toast]);
+
+  useEffect(() => {
+    // Canonical data-fetching effect shape (react.dev): an effect-local async
+    // function fires the load; loadKeys only sets state after its internal
+    // awaits, so mounting never cascades a synchronous re-render.
+    async function startLoading() {
+      await loadKeys();
+    }
+    void startLoading();
+  }, [loadKeys]);
 
   const handleRevoke = async (key: ApiKey) => {
     setSelectedKey(key);
@@ -57,7 +65,7 @@ export const AdminApiKeyManager: React.FC = () => {
 
   const handleCreateKey = async () => {
     try {
-      const newKey = await adminService.createKey(biometricGate);
+      await adminService.createKey(biometricGate);
       toast('Key created', 'New API key generated successfully', 'success');
       await loadKeys();
     } catch (error) {
@@ -200,8 +208,8 @@ export const AdminApiKeyManager: React.FC = () => {
               </tr>
             ) : (
               keys.map((key) => {
-                const isGracePeriod = (key as any).status === 'grace_period';
-                const isExpired = (key as any).status === 'expired' || !key.isActive;
+                const isGracePeriod = key.status === 'grace_period';
+                const isExpired = key.status === 'expired' || !key.isActive;
 
                 return (
                   <tr key={key.id}>
@@ -218,7 +226,7 @@ export const AdminApiKeyManager: React.FC = () => {
                     <td className="px-4 py-3 whitespace-nowrap">
                       {isGracePeriod ? (
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800">
-                          Grace Period ({(key as any).graceWindowRemaining ?? '24h'} left)
+                          Grace Period ({key.graceWindowRemaining ?? '24h'} left)
                         </span>
                       ) : isExpired ? (
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800">

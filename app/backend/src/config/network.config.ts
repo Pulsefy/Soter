@@ -13,6 +13,8 @@ export interface NetworkProfile {
   passphrase: string;
   /** Default Soroban RPC URL used when STELLAR_RPC_URL is not set. */
   defaultRpcUrl: string;
+  /** Default Horizon REST URL used when STELLAR_HORIZON_URL is not set. */
+  defaultHorizonUrl: string;
   /** stellar.expert base URL for building explorer links. */
   explorerBase: string;
   /** Keywords that, if found in an RPC URL, indicate it belongs to a different network. */
@@ -23,18 +25,21 @@ export const NETWORK_PROFILES: Record<NetworkName, NetworkProfile> = {
   testnet: {
     passphrase: 'Test SDF Network ; September 2015',
     defaultRpcUrl: 'https://soroban-testnet.stellar.org',
+    defaultHorizonUrl: 'https://horizon-testnet.stellar.org',
     explorerBase: 'https://stellar.expert/explorer/testnet',
     foreignRpcKeywords: ['mainnet'],
   },
   futurenet: {
     passphrase: 'Test SDF Future Network ; October 2022',
     defaultRpcUrl: 'https://rpc-futurenet.stellar.org',
+    defaultHorizonUrl: 'https://horizon-futurenet.stellar.org',
     explorerBase: 'https://stellar.expert/explorer/futurenet',
     foreignRpcKeywords: ['mainnet'],
   },
   mainnet: {
     passphrase: 'Public Global Stellar Network ; September 2015',
     defaultRpcUrl: 'https://mainnet.sorobanrpc.com',
+    defaultHorizonUrl: 'https://horizon.stellar.org',
     explorerBase: 'https://stellar.expert/explorer/public',
     foreignRpcKeywords: ['testnet', 'futurenet'],
   },

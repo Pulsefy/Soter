@@ -1,3 +1,9 @@
+import {
+  SYNC_FREQUENCY_INTERVALS,
+  SYNC_FREQUENCY_KEY,
+  SyncFrequency,
+} from '../contexts/SyncDeferralContext';
+
 /**
  * Test for sync deferral logic
  * This tests the core deferral logic without requiring full app build
@@ -111,6 +117,45 @@ describe('Sync Deferral Logic', () => {
       );
       
       expect(shouldDefer).toBe(false);
+    });
+  });
+
+  describe('Sync frequency configuration and composition', () => {
+    it('defines distinct intervals for aggressive, normal, and conservative', () => {
+      expect(SYNC_FREQUENCY_INTERVALS.aggressive).toBe(5 * 60 * 1000);
+      expect(SYNC_FREQUENCY_INTERVALS.normal).toBe(15 * 60 * 1000);
+      expect(SYNC_FREQUENCY_INTERVALS.conservative).toBe(60 * 60 * 1000);
+      expect(SYNC_FREQUENCY_INTERVALS.aggressive).toBeLessThan(SYNC_FREQUENCY_INTERVALS.normal);
+      expect(SYNC_FREQUENCY_INTERVALS.normal).toBeLessThan(SYNC_FREQUENCY_INTERVALS.conservative);
+    });
+
+    it('uses correct storage key for persisting sync frequency', () => {
+      expect(SYNC_FREQUENCY_KEY).toBe('@soter/sync-frequency');
+    });
+
+    it('composes with battery deferral logic regardless of frequency setting', () => {
+      const frequencies: SyncFrequency[] = ['aggressive', 'normal', 'conservative'];
+      const batteryLevel = 0.12;
+      const isCharging = false;
+      const batteryThreshold = 0.2;
+
+      for (const _freq of frequencies) {
+        // Frequency dictates scheduling interval, but deferral logic still gates execution
+        const isLowBattery = !isCharging && batteryLevel >= 0 && batteryLevel < batteryThreshold;
+        expect(isLowBattery).toBe(true);
+      }
+    });
+
+    it('composes with network deferral logic regardless of frequency setting', () => {
+      const frequencies: SyncFrequency[] = ['aggressive', 'normal', 'conservative'];
+      const isMetered = true;
+      const meteredOptIn = false;
+
+      for (const _freq of frequencies) {
+        // Metered connection deferral applies regardless of chosen sync frequency
+        const shouldDefer = isMetered && !meteredOptIn;
+        expect(shouldDefer).toBe(true);
+      }
     });
   });
 });

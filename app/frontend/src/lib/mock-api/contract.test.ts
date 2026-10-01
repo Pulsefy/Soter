@@ -34,7 +34,11 @@ import type { AidPackage, PaginatedResponse } from '@/types/aid-package';
 import type { Campaign, CampaignTimelineMilestone } from '@/types/campaign';
 import type { ContractRegistryResponse } from '@/types/contract-registry';
 import type { RunbookResponse } from '@/types/runbook';
-import type { InternalNote } from '@/types/verification-review';
+import type {
+  InternalNote,
+  VerificationInboxResponse,
+  VerificationStats,
+} from '@/types/verification-review';
 
 /* -------------------------------------------------------------------------- */
 /* Structural validation helpers                                              */
@@ -619,6 +623,8 @@ const EXPECTED_REGISTRY_KEYS = [
   '/auth/webauthn/register/verify',
   '/auth/webauthn/auth/options',
   '/auth/webauthn/auth/verify',
+  '/v1/verification-inbox',
+  '/v1/verification-inbox/stats',
   '/v1/verification-inbox/:id',
   '/campaigns',
   '/campaigns/:id',
@@ -1108,17 +1114,103 @@ describe('Mock handler contract vs. real API shape', () => {
     });
   });
 
+  describe('GET /v1/verification-inbox (paginated queue)', () => {
+    it('returns the paginated VerificationInboxResponse envelope', async () => {
+      const payload = await jsonResponse(
+        await mockFetch('/v1/verification-inbox', `${API_BASE}/v1/verification-inbox`),
+        200,
+      );
+      const body = expectObject(payload, 'inbox');
+      const items = expectArray(body.items, 'inbox.items');
+      expect(items.length).toBeGreaterThan(0);
+      expectNumber(body.total, 'inbox.total');
+      expectNumber(body.page, 'inbox.page');
+      expectNumber(body.limit, 'inbox.limit');
+      expectNumber(body.totalPages, 'inbox.totalPages');
+
+      const item = expectObject(items[0], 'inbox.items[0]');
+      expectString(item.id, 'inbox.items[0].id');
+      expectEnum(
+        item.status,
+        ['pending_review', 'approved', 'rejected', 'needs_resubmission'] as const,
+        'inbox.items[0].status',
+      );
+      expectIsoDateTime(item.createdAt, 'inbox.items[0].createdAt');
+      expectString(item.deepLink, 'inbox.items[0].deepLink');
+
+      const contract: VerificationInboxResponse = body as unknown as VerificationInboxResponse;
+      expect(contract.items.length).toBe(items.length);
+    });
+
+    it('honours status filtering and pagination parameters', async () => {
+      const filtered = await jsonResponse(
+        await mockFetch('/v1/verification-inbox', `${API_BASE}/v1/verification-inbox?status=pending_review&limit=2`),
+        200,
+      );
+      const body = expectObject(filtered, 'inboxFiltered');
+      const items = expectArray(body.items, 'inboxFiltered.items');
+      expect(items.length).toBeLessThanOrEqual(2);
+      for (const raw of items) {
+        const item = expectObject(raw, 'inboxFiltered.items[]');
+        expect(item.status).toBe('pending_review');
+      }
+      expectNumber(body.limit, 'inboxFiltered.limit');
+      expect(body.limit).toBe(2);
+    });
+  });
+
+  describe('GET /v1/verification-inbox/stats (VerificationStats)', () => {
+    it('returns per-status counts plus the queue total', async () => {
+      const payload = await jsonResponse(
+        await mockFetch('/v1/verification-inbox/stats', `${API_BASE}/v1/verification-inbox/stats`),
+        200,
+      );
+      const body = expectObject(payload, 'inboxStats');
+      for (const key of [
+        'pending_review',
+        'approved',
+        'rejected',
+        'needs_resubmission',
+      ] as const) {
+        expectNumber(body[key], `inboxStats.${key}`);
+      }
+      expectNumber(body.total, 'inboxStats.total');
+
+      const contract: VerificationStats = body as unknown as VerificationStats;
+      expect(contract.total).toBeGreaterThan(0);
+    });
+  });
+
+  describe('GET /v1/verification-inbox/:id', () => {
+    it('returns the item for a known id and 404 for an unknown one', async () => {
+      const detail = await jsonResponse(
+        await mockFetch('/v1/verification-inbox/:id', `${API_BASE}/v1/verification-inbox/vfy-001`),
+        200,
+      );
+      const item = expectObject(detail, 'inboxItem');
+      expect(item.id).toBe('vfy-001');
+      expectIsoDateTime(item.createdAt, 'inboxItem.createdAt');
+      expectString(item.deepLink, 'inboxItem.deepLink');
+
+      const notFound = await jsonResponse(
+        await mockFetch('/v1/verification-inbox/:id', `${API_BASE}/v1/verification-inbox/unknown`),
+        404,
+      );
+      expectString(expectObject(notFound, 'inboxNotFound').message, 'inboxNotFound.message');
+    });
+  });
+
   describe('POST /v1/verification-inbox/:id/notes', () => {
     it('returns an InternalNote for a known request', async () => {
       const payload = await jsonResponse(
-        await mockFetch('/v1/verification-inbox/:id', `${API_BASE}/v1/verification-inbox/mock-1/notes`, {
+        await mockFetch('/v1/verification-inbox/:id', `${API_BASE}/v1/verification-inbox/vfy-001/notes`, {
           method: 'POST',
           body: JSON.stringify({ content: 'Looks good', category: 'review' }),
         }),
         201,
       );
       const note = expectInternalNote(payload);
-      expect(note.entityId).toBe('mock-1');
+      expect(note.entityId).toBe('vfy-001');
       expect(note.content).toBe('Looks good');
     });
 
@@ -1133,7 +1225,9 @@ describe('Mock handler contract vs. real API shape', () => {
       expectString(expectObject(notFound, 'noteError').message, 'noteError.message');
 
       const notImplemented = await jsonResponse(
-        await mockFetch('/v1/verification-inbox/:id', `${API_BASE}/v1/verification-inbox/mock-1`),
+        await mockFetch('/v1/verification-inbox/:id', `${API_BASE}/v1/verification-inbox/vfy-001`, {
+          method: 'PUT',
+        }),
         405,
       );
       expectErrorEnvelope(notImplemented);
