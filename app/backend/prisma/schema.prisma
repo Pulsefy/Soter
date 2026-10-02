@@ -269,6 +269,7 @@ model Claim {
   balanceLedger     BalanceLedger[]
   sorobanTransactions SorobanTransaction[]
   sorobanEventCorrelations SorobanEventCorrelation[]
+  disbursementAttempts DisbursementAttempt[]
 
   @@index([status])
   @@index([campaignId])
@@ -350,7 +351,11 @@ model SorobanTransaction {
   
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
-  
+
+  /// Disbursement attempts that reference this transaction, so a retry can be
+  /// traced back to the onchain submission it belongs to.
+  disbursementAttempts DisbursementAttempt[]
+
   @@index([claimId])
   @@index([status])
   @@index([operation])
