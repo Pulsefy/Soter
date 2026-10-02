@@ -175,6 +175,25 @@ export function DeviceDiagnosticsExport() {
 
             <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
               <span className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Battery &amp; Sync
+              </span>
+              <p className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">
+                {diagnostics.battery.available
+                  ? `${diagnostics.battery.levelPercent}%${diagnostics.battery.charging ? ' (charging)' : ''}`
+                  : 'Unavailable'}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Threshold {diagnostics.battery.batteryThresholdPercent}% ·{' '}
+                {diagnostics.battery.available
+                  ? diagnostics.battery.syncDeferredForBattery
+                    ? 'Sync deferred (battery)'
+                    : 'Sync active'
+                  : 'Sync state unknown'}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+              <span className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 Recent Errors Logged
               </span>
               <p className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">

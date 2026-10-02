@@ -313,6 +313,10 @@
     "networkStatus": "État du réseau :",
     "networkType": "Type de réseau :",
     "internetReachable": "Internet accessible :",
+    "batteryLevel": "Niveau de batterie :",
+    "batteryCharging": "Batterie en charge :",
+    "batteryThreshold": "Seuil de batterie :",
+    "syncDeferredBattery": "Synchronisation différée (batterie) :",
     "environment": "Environnement : "
   },
   "camera": {
