@@ -57,6 +57,97 @@ export class GlobalStatsDto {
   computedAt: string;
 }
 
+export class OnchainAggregatesDto {
+  @ApiProperty({
+    example: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+  })
+  tokenAddress: string;
+
+  @ApiProperty({
+    example: '5000000000',
+    description: 'Funds currently locked (packages still in Created status).',
+  })
+  totalLocked: string;
+
+  @ApiProperty({
+    example: '2000000000',
+    description:
+      'Funds claimed (packages in Claimed status, including disbursements).',
+  })
+  totalClaimed: string;
+
+  @ApiProperty({
+    example: '500000000',
+    description: 'Funds released (Expired, Cancelled, or Refunded packages).',
+  })
+  totalExpiredCancelled: string;
+
+  @ApiProperty({ example: '2026-03-30T10:00:00Z' })
+  fetchedAt: string;
+
+  @ApiProperty({
+    example: false,
+    description: 'Whether these aggregates were served from cache.',
+  })
+  cached: boolean;
+}
+
+export class DivergenceFieldDto {
+  @ApiProperty({ example: 'totalDisbursed' })
+  field: string;
+
+  @ApiProperty({ example: 250000 })
+  database: number;
+
+  @ApiProperty({ example: 250000 })
+  onchain: number;
+
+  @ApiProperty({ example: 0 })
+  delta: number;
+
+  @ApiProperty({ example: false })
+  divergent: boolean;
+}
+
+export class DivergenceReportDto {
+  @ApiProperty({ example: false })
+  hasDivergence: boolean;
+
+  @ApiProperty({ example: 0.01 })
+  tolerance: number;
+
+  @ApiProperty({ type: [DivergenceFieldDto] })
+  fields: DivergenceFieldDto[];
+}
+
+export class OnchainSummaryDto {
+  @ApiProperty({
+    example: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+  })
+  token: string;
+
+  @ApiProperty({ type: GlobalStatsDto })
+  summary: GlobalStatsDto;
+
+  @ApiProperty({ type: OnchainAggregatesDto })
+  onchain: OnchainAggregatesDto;
+
+  @ApiProperty({ type: DivergenceReportDto })
+  divergence: DivergenceReportDto;
+
+  @ApiProperty({ example: '2026-03-30T10:00:00Z' })
+  computedAt: string;
+}
+
+export class OnchainSummaryQuery {
+  @ApiPropertyOptional({
+    example: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+    description:
+      'Token (Stellar Asset Contract) address to read aggregates for.',
+  })
+  token?: string;
+}
+
 export class MapDataPoint {
   @ApiProperty({ example: 'pkg-123' })
   id: string;

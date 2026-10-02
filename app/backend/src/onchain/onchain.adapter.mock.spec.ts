@@ -408,155 +408,88 @@ describe('MockOnchainAdapter', () => {
     });
   });
 
-  describe('timelocked surplus withdrawal', () => {
-    const CONTRACT = 'C_TIMELOCK_TEST';
-    const TO = 'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
-    const TOKEN =
-      'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
-    const proposal = {
-      contractId: CONTRACT,
-      to: TO,
-      token: TOKEN,
-      amount: '1000',
-    };
+  describe('getAggregates', () => {
+    const TOKEN_A =
+      'GAAAAAAAACCCCCCCCCCRRRRRRRRRRHHHHHHHHHHNNNNNNNNNNGGGGGGGGXX';
+    const TOKEN_B =
+      'GBBBBBBBBBDDDDDDDDDDSSSSSSSSSSKKKKKKKKKKMMMMMMMMMMGGGGGGGGYY';
 
-    beforeEach(() => {
-      // Reproduce a matured timelock without waiting out the contract's
-      // one-day delay, so the execute leg is reachable in a unit test.
-      adapter.mockSurplusWithdrawalDelaySeconds = 0;
-    });
+    it('returns committed and claimed totals for a token', async () => {
+      const expiresAt = Math.floor(Date.now() / 1000) + 3600;
 
-    it("defaults the delay to the contract's one-day timelock", () => {
-      const fresh = new MockOnchainAdapter();
-      expect(fresh.mockSurplusWithdrawalDelaySeconds).toBe(86_400);
-    });
-
-    it('reports no pending withdrawal initially', async () => {
-      await expect(
-        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
-      ).resolves.toBeNull();
-    });
-
-    it('records the proposal and its executable timestamp', async () => {
-      const before = Math.floor(Date.now() / 1000);
-      adapter.mockSurplusWithdrawalDelaySeconds = 3600;
-
-      const result = await adapter.proposeSurplusWithdrawal(proposal);
-
-      expect(result.pendingWithdrawal).toMatchObject({
-        to: TO,
-        token: TOKEN,
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId: 'agg-1',
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
         amount: '1000',
+        tokenAddress: TOKEN_A,
+        expiresAt,
       });
-      expect(result.pendingWithdrawal!.executableAt).toBeGreaterThanOrEqual(
-        before + 3600,
-      );
-      await expect(
-        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
-      ).resolves.toEqual(result.pendingWithdrawal);
-    });
-
-    it('moves no funds at the propose leg', async () => {
-      const result = await adapter.proposeSurplusWithdrawal(proposal);
-      expect(result.pendingWithdrawal).not.toBeNull();
-    });
-
-    it('refuses a second proposal while one is pending', async () => {
-      await adapter.proposeSurplusWithdrawal(proposal);
-
-      await expect(
-        adapter.proposeSurplusWithdrawal({ ...proposal, amount: '2000' }),
-      ).rejects.toThrow('SurplusWithdrawalPending');
-    });
-
-    it('rejects an execute before the timelock has elapsed', async () => {
-      adapter.mockSurplusWithdrawalDelaySeconds = 3600;
-      await adapter.proposeSurplusWithdrawal(proposal);
-
-      const error = await adapter
-        .executeSurplusWithdrawal({ contractId: CONTRACT })
-        .catch(e => e);
-
-      expect(error).toBeInstanceOf(SurplusWithdrawalTimelockNotElapsedError);
-      expect(error.executableAt).toBeGreaterThan(0);
-      // The proposal survives a premature attempt.
-      await expect(
-        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
-      ).resolves.not.toBeNull();
-    });
-
-    it('executes once the timelock has elapsed and clears the proposal', async () => {
-      await adapter.proposeSurplusWithdrawal(proposal);
-
-      const result = await adapter.executeSurplusWithdrawal({
-        contractId: CONTRACT,
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId: 'agg-2',
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '400',
+        tokenAddress: TOKEN_A,
+        expiresAt,
       });
 
-      expect(result.pendingWithdrawal).toBeNull();
-      expect(result.transactionHash).toBeTruthy();
-      await expect(
-        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
-      ).resolves.toBeNull();
-    });
-
-    it('cancels without moving funds and leaves nothing pending', async () => {
-      await adapter.proposeSurplusWithdrawal(proposal);
-
-      const result = await adapter.cancelSurplusWithdrawal({
-        contractId: CONTRACT,
+      // Fully claim the second package so it leaves the committed total.
+      await adapter.claimAidPackage({
+        packageId: 'agg-2',
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '400',
       });
 
-      expect(result.pendingWithdrawal).toBeNull();
-      await expect(
-        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
-      ).resolves.toBeNull();
+      const result = await adapter.getAggregates(TOKEN_A);
+
+      expect(result.tokenAddress).toBe(TOKEN_A);
+      expect(result.aggregates.totalCommitted).toBe('1000');
+      expect(result.aggregates.totalClaimed).toBe('400');
+      expect(result.aggregates.totalExpiredCancelled).toBe('0');
+      expect(result.timestamp).toBeInstanceOf(Date);
     });
 
-    it('allows a new proposal after a cancellation', async () => {
-      await adapter.proposeSurplusWithdrawal(proposal);
-      await adapter.cancelSurplusWithdrawal({ contractId: CONTRACT });
+    it('excludes packages belonging to other tokens', async () => {
+      const expiresAt = Math.floor(Date.now() / 1000) + 3600;
 
-      await expect(
-        adapter.proposeSurplusWithdrawal(proposal),
-      ).resolves.toMatchObject({ pendingWithdrawal: expect.any(Object) });
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId: 'agg-token-a',
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '500',
+        tokenAddress: TOKEN_A,
+        expiresAt,
+      });
+      await adapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId: 'agg-token-b',
+        recipientAddress:
+          'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        amount: '900',
+        tokenAddress: TOKEN_B,
+        expiresAt,
+      });
+
+      const aggregatesA = await adapter.getAggregates(TOKEN_A);
+      const aggregatesB = await adapter.getAggregates(TOKEN_B);
+
+      expect(aggregatesA.aggregates.totalCommitted).toBe('500');
+      expect(aggregatesB.aggregates.totalCommitted).toBe('900');
     });
 
-    it('rejects cancelling when nothing is pending', async () => {
-      await expect(
-        adapter.cancelSurplusWithdrawal({ contractId: CONTRACT }),
-      ).rejects.toThrow('SurplusWithdrawalNotPending');
-    });
+    it('returns zeroed aggregates for an unknown token', async () => {
+      const result = await adapter.getAggregates(TOKEN_A);
 
-    it('rejects executing when nothing is pending', async () => {
-      await expect(
-        adapter.executeSurplusWithdrawal({ contractId: CONTRACT }),
-      ).rejects.toThrow('SurplusWithdrawalNotPending');
-    });
-
-    it('keeps proposals isolated per contract', async () => {
-      await adapter.proposeSurplusWithdrawal(proposal);
-
-      await expect(
-        adapter.getPendingWithdrawal({ contractId: 'C_OTHER' }),
-      ).resolves.toBeNull();
-      // Cancelling the other contract must not touch this one's proposal.
-      await expect(
-        adapter.cancelSurplusWithdrawal({ contractId: 'C_OTHER' }),
-      ).rejects.toThrow('SurplusWithdrawalNotPending');
-      await expect(
-        adapter.getPendingWithdrawal({ contractId: CONTRACT }),
-      ).resolves.not.toBeNull();
-    });
-
-    it.each([
-      ['a zero amount', { amount: '0' }],
-      ['a non-numeric amount', { amount: 'abc' }],
-      ['a missing destination', { to: '' }],
-      ['a missing token', { token: '' }],
-    ])('rejects %s', async (_label, override) => {
-      await expect(
-        adapter.proposeSurplusWithdrawal({ ...proposal, ...override }),
-      ).rejects.toThrow();
+      expect(result.aggregates).toEqual({
+        totalCommitted: '0',
+        totalClaimed: '0',
+        totalExpiredCancelled: '0',
+      });
     });
   });
 });

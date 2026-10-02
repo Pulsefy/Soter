@@ -22,6 +22,7 @@ import {
   GetAidPackageResult,
   GetAidPackageCountParams,
   GetAidPackageCountResult,
+  GetAggregatesResult,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
   CreateClaimParams,
@@ -308,6 +309,20 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     });
     const agg = asRecord(result);
     return {
+      aggregates: {
+        totalCommitted: readString(agg.total_committed, '0'),
+        totalClaimed: readString(agg.total_claimed, '0'),
+        totalExpiredCancelled: readString(agg.total_expired_cancelled, '0'),
+      },
+      timestamp: new Date(),
+    };
+  }
+
+  async getAggregates(token: string): Promise<GetAggregatesResult> {
+    const result = await this.invokeContract('get_aggregates', [token]);
+    const agg = asRecord(result);
+    return {
+      tokenAddress: token,
       aggregates: {
         totalCommitted: readString(agg.total_committed, '0'),
         totalClaimed: readString(agg.total_claimed, '0'),

@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClaimStatus } from '@prisma/client';
@@ -11,8 +11,10 @@ import {
   BreakdownEntry,
   TimeframeBucket,
   GeoJsonFeatureCollection,
-  ContractAggregatesDto,
-  ContractAggregatesQuery,
+  DivergenceFieldDto,
+  OnchainAggregatesDto,
+  OnchainSummaryDto,
+  OnchainSummaryQuery,
 } from './dto';
 import { RedisService } from '../../cache/redis.service';
 import { PrivacyService } from './privacy.service';
@@ -21,6 +23,8 @@ import {
   OnchainAdapter,
   ONCHAIN_ADAPTER_TOKEN,
 } from '../onchain/onchain.adapter';
+import { getCacheTTL } from '../common/config/cache.config';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 
 // export type MapDataPoint = {
 //   id: string;
@@ -83,6 +87,26 @@ import {
 const CACHE_TTL_SECONDS = 300; // 5 minutes
 
 const DEFAULT_LOOKBACK_DAYS = 30;
+
+/** Namespace for the cached, direct-from-contract token aggregates. */
+const ONCHAIN_AGGREGATES_CACHE_PREFIX = 'analytics:onchain-aggregates';
+
+/** Metric/endpoint label used for the on-chain aggregates cache. */
+const ONCHAIN_AGGREGATES_CACHE_ENDPOINT = 'onchain-aggregates';
+
+/**
+ * Stellar Asset Contracts use 7 decimal places by default, so a contract
+ * amount of `2500000000` base units is `250` display units. Kept configurable
+ * because a token issuer can pick a different precision.
+ */
+const DEFAULT_TOKEN_DECIMALS = 7;
+
+/**
+ * Absolute difference (in display units) tolerated before the database-derived
+ * and on-chain totals are considered divergent. Small so real drift is caught,
+ * non-zero so rounding in the database side does not raise false positives.
+ */
+const DEFAULT_DIVERGENCE_TOLERANCE = 0.01;
 
 /** Fallback values when campaign metadata fields are absent. */
 const FALLBACK_REGION = 'Unknown';
@@ -170,6 +194,146 @@ export class AnalyticsService {
 
     await this.redis.set(cacheKey, result, CACHE_TTL_SECONDS);
     return result;
+  }
+
+  /**
+   * Return the existing database-derived dashboard summary alongside the
+   * on-chain aggregates for a token, flagging any divergence between the two.
+   *
+   * The database summary keeps describing the off-chain operational workload;
+   * the on-chain block is the contract's authoritative view. The on-chain read
+   * is cached (see {@link getOnchainAggregates}) so a dashboard load cannot
+   * turn into a Soroban RPC call every time.
+   *
+   * @example
+   * GET /analytics/onchain-summary?token=GATEMH...
+   */
+  async getOnchainSummary(
+    query: OnchainSummaryQuery = {},
+  ): Promise<OnchainSummaryDto> {
+    const token = query.token?.trim();
+    if (!token) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'A token address is required to read on-chain aggregates.',
+      );
+    }
+
+    const [summary, onchain] = await Promise.all([
+      this.getGlobalStats({}),
+      this.getOnchainAggregates(token),
+    ]);
+
+    const tolerance = this.divergenceTolerance();
+    const decimals = this.tokenDecimals();
+    const fields: DivergenceFieldDto[] = [
+      this.buildDivergenceField(
+        'totalDisbursed',
+        summary.totalAidDisbursed,
+        this.fromBaseUnits(onchain.totalClaimed, decimals),
+        tolerance,
+      ),
+    ];
+
+    const hasDivergence = fields.some(field => field.divergent);
+    if (hasDivergence) {
+      this.logger.warn(
+        `On-chain aggregate divergence for token ${token}: ` +
+          fields
+            .filter(field => field.divergent)
+            .map(
+              field =>
+                `${field.field} database=${field.database} onchain=${field.onchain} delta=${field.delta}`,
+            )
+            .join(', '),
+      );
+    }
+
+    return {
+      token,
+      summary,
+      onchain,
+      divergence: { hasDivergence, tolerance, fields },
+      computedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Read the contract's aggregates for a token, cached in Redis so the RPC
+   * endpoint is hit at most once per cache window regardless of how many
+   * dashboards are open.
+   */
+  private async getOnchainAggregates(
+    token: string,
+  ): Promise<OnchainAggregatesDto> {
+    const cacheKey = `${ONCHAIN_AGGREGATES_CACHE_PREFIX}:${token}`;
+
+    const cached = await this.redis.get<OnchainAggregatesDto>(cacheKey);
+    if (cached) {
+      this.logger.debug(`Cache hit: ${cacheKey}`);
+      this.metrics.recordAnalyticsCacheResult(
+        ONCHAIN_AGGREGATES_CACHE_ENDPOINT,
+        'hit',
+      );
+      return { ...cached, cached: true };
+    }
+
+    this.logger.debug(`Cache miss: ${cacheKey} — reading Soroban RPC`);
+    this.metrics.recordAnalyticsCacheResult(
+      ONCHAIN_AGGREGATES_CACHE_ENDPOINT,
+      'miss',
+    );
+
+    const result = await this.onchainAdapter.getAggregates(token);
+    const value: OnchainAggregatesDto = {
+      tokenAddress: result.tokenAddress,
+      totalLocked: result.aggregates.totalCommitted,
+      totalClaimed: result.aggregates.totalClaimed,
+      totalExpiredCancelled: result.aggregates.totalExpiredCancelled,
+      fetchedAt: result.timestamp.toISOString(),
+      cached: false,
+    };
+
+    await this.redis.set(cacheKey, value, getCacheTTL().ONCHAIN_AGGREGATES);
+    return value;
+  }
+
+  /** Convert a base-unit (stroop) amount string to display units. */
+  private fromBaseUnits(amount: string, decimals: number): number {
+    const parsed = Number(amount);
+    if (!Number.isFinite(parsed)) return 0;
+    return parsed / Math.pow(10, decimals);
+  }
+
+  private tokenDecimals(): number {
+    const raw = parseInt(process.env.SOROBAN_TOKEN_DECIMALS ?? '', 10);
+    return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_TOKEN_DECIMALS;
+  }
+
+  private divergenceTolerance(): number {
+    const raw = parseFloat(
+      process.env.ONCHAIN_AGGREGATES_DIVERGENCE_TOLERANCE ?? '',
+    );
+    return Number.isFinite(raw) && raw >= 0
+      ? raw
+      : DEFAULT_DIVERGENCE_TOLERANCE;
+  }
+
+  private buildDivergenceField(
+    field: string,
+    database: number,
+    onchain: number,
+    tolerance: number,
+  ): DivergenceFieldDto {
+    const delta = Math.round((database - onchain) * 100) / 100;
+    return {
+      field,
+      database,
+      onchain,
+      delta,
+      divergent: Math.abs(delta) > tolerance,
+    };
   }
 
   /**

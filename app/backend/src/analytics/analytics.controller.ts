@@ -41,6 +41,7 @@
  * Exposes the two analytics endpoints consumed by the global dashboard:
  *
  *   GET /analytics/global-stats   — aggregated totals + breakdowns
+ *   GET /analytics/onchain-summary — DB summary + on-chain aggregates + drift
  *   GET /analytics/map-data       — anonymised Leaflet map points
  *
  * Both endpoints are read-only and accept optional query parameters for
@@ -59,6 +60,7 @@ import {
   ApiTags,
   ApiOperation,
   ApiOkResponse,
+  ApiBadRequestResponse,
   ApiQuery,
 } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator';
@@ -69,8 +71,7 @@ import {
   GeoJsonFeatureCollection,
   GlobalStatsQuery,
   MapDataQuery,
-  ContractAggregatesDto,
-  ContractAggregatesQuery,
+  OnchainSummaryDto,
 } from './dto';
 
 @ApiTags('Analytics')
@@ -105,6 +106,36 @@ export class AnalyticsController {
     const query: GlobalStatsQuery = { from, to, region, token };
     this.logger.log(`GET /analytics/global-stats ${JSON.stringify(query)}`);
     return this.analyticsService.getGlobalStats(query);
+  }
+
+  @Public()
+  @Get('onchain-summary')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get dashboard summary with on-chain aggregates',
+    description:
+      'Returns the existing database-derived dashboard summary alongside the ' +
+      'authoritative per-token aggregates read directly from the AidEscrow ' +
+      'contract, and flags any divergence between the two. The on-chain read ' +
+      'is cached so dashboard loads do not hammer the Soroban RPC endpoint.',
+  })
+  @ApiOkResponse({
+    description: 'Summary and on-chain aggregates retrieved successfully.',
+    type: OnchainSummaryDto,
+  })
+  @ApiBadRequestResponse({ description: 'A token address is required.' })
+  @ApiQuery({
+    name: 'token',
+    required: true,
+    type: String,
+    description:
+      'Token (Stellar Asset Contract) address to read aggregates for.',
+  })
+  async getOnchainSummary(
+    @Query('token') token?: string,
+  ): Promise<OnchainSummaryDto> {
+    this.logger.log(`GET /analytics/onchain-summary token=${token ?? ''}`);
+    return this.analyticsService.getOnchainSummary({ token });
   }
 
   @Public()

@@ -32,6 +32,7 @@ import {
   GetAidPackageResult,
   GetAidPackageCountParams,
   GetAidPackageCountResult,
+  GetAggregatesResult,
   AidPackage,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
@@ -679,6 +680,33 @@ export class SorobanAdapter implements OnchainAdapter {
 
     const data = (result as Partial<Aggregates> | undefined) ?? {};
     return {
+      aggregates: {
+        totalCommitted: String(data.total_committed ?? '0'),
+        totalClaimed: String(data.total_claimed ?? '0'),
+        totalExpiredCancelled: String(data.total_expired_cancelled ?? '0'),
+      },
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Read the authoritative locked / claimed / released totals for a token
+   * straight from the contract's `get_aggregates` entrypoint.
+   */
+  async getAggregates(token: string): Promise<GetAggregatesResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] getAggregates token=${token}`);
+
+    const result = await this.simulateReadOnly(
+      'get_aggregates',
+      [this.scvAddress(token)],
+      cid,
+    );
+
+    const data = (result as Partial<Aggregates> | undefined) ?? {};
+    return {
+      tokenAddress: token,
       aggregates: {
         totalCommitted: String(data.total_committed ?? '0'),
         totalClaimed: String(data.total_claimed ?? '0'),
