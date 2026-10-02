@@ -115,6 +115,16 @@ This lets testers and field users confirm the API target without navigating to a
 - `pnpm web`: Run in web browser for testing
 - `pnpm test`: Run Jest test suite
 - `pnpm lint`: Run ESLint for code quality checks
+- `pnpm e2e:android`: Run the end-to-end field-flow suite on a connected emulator/device (see [E2E_TESTING.md](./E2E_TESTING.md))
+- `pnpm measure:cold-start`: Measure cold-start-to-interactive time (see [COLD_START_BUDGET.md](./COLD_START_BUDGET.md))
+
+## Testing
+
+Unit tests live in `src/__tests__` and run with `pnpm test`. The core
+field flows (scan, evidence capture, offline queue, sync on reconnect) are
+covered by the Maestro-based end-to-end harness in `e2e/`; see
+[E2E_TESTING.md](./E2E_TESTING.md) for what it covers and how to run it
+locally and in CI.
 
 ## Troubleshooting
 

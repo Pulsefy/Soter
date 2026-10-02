@@ -311,6 +311,7 @@ export const SubmissionQueueScreen: React.FC<Props> = () => {
             disabled={isSyncing}
             accessibilityRole="button"
             accessibilityLabel="Sync queued submissions now"
+            testID="sync-now-button"
           >
             <Text style={styles.refreshButtonText}>
               {isSyncing ? 'Syncing...' : 'Sync Now'}

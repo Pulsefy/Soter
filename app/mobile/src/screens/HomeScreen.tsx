@@ -264,6 +264,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityRole="button"
             accessibilityLabel={t('home.submissionQueue')}
             accessibilityHint={t('home.queueHint')}
+            testID="submission-queue-button"
             onPress={() => navigation.navigate('SubmissionQueue')}
             activeOpacity={0.7}
           >
@@ -277,6 +278,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityRole="button"
             accessibilityLabel={t('home.viewAidDetails')}
             accessibilityHint={t('home.aidDetailsHint')}
+            testID="view-aid-details-button"
             onPress={() => navigation.navigate('AidDetails', { aidId: '1' })}
             activeOpacity={0.7}
           >
@@ -306,6 +308,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         accessibilityRole="button"
         accessibilityLabel={t('home.scanQrCode')}
         accessibilityHint={t('home.scanQrHint')}
+        testID="scan-fab"
       >
         <Text style={styles.scannerFabIcon} accessibilityElementsHidden>📷</Text>
       </TouchableOpacity>

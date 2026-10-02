@@ -1,0 +1,153 @@
+name: Mobile E2E
+
+# Drives the Soter mobile app as a user against an Android emulator: scan,
+# evidence capture, offline queueing, and sync-on-reconnect (issue #932).
+# See app/mobile/E2E_TESTING.md for what this covers and how to run it
+# locally.
+#
+# The app under test is a dedicated E2E build whose API target is the
+# deterministic mock backend started by the harness
+# (app/mobile/e2e/mockBackend.js) at http://10.0.2.2:3000 — the same port the
+# app already falls back to on Android, so the flows reach it whether or not
+# EXPO_PUBLIC_API_URL gets inlined into the bundle at build time.
+
+on:
+  push:
+    paths:
+      - 'app/mobile/**'
+      - '.github/workflows/mobile-e2e.yml'
+    branches: [ main ]
+  pull_request:
+    paths:
+      - 'app/mobile/**'
+      - '.github/workflows/mobile-e2e.yml'
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # v4 defaults to platform-tools only; emulator + system images are
+      # installed by the emulator-runner step below (same rationale as the
+      # cold-start workflow).
+      - uses: android-actions/setup-android@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The E2E-only controls are gated by a literal in
+      # `src/e2e/e2eBuildFlag.ts` rather than by an environment variable, so
+      # the flag cannot be lost to bundler/env-inlining subtleties in a release
+      # build (see the doc comment on that file). This flips it for this build
+      # only — the file is never committed in the enabled state, and the job is
+      # throwaway, so there is nothing to restore afterwards.
+      - name: Enable E2E test seams
+        working-directory: app/mobile
+        run: |
+          node e2e/enable-e2e-build.js
+          grep -n "E2E_BUILD_ENABLED" src/e2e/e2eBuildFlag.ts
+
+      # Maestro drives the flows. Its Android support is self-contained and
+      # it ships its own JDK, so only the binary on PATH is needed here.
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Maestro
+        run: maestro --version
+
+      # Required for the Android emulator to use hardware acceleration on
+      # GitHub-hosted Linux runners.
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Generate native Android project
+        working-directory: app/mobile
+        run: CI=1 npx expo prebuild --platform android
+        env:
+          CI: '1'
+
+      # The E2E build bakes in two things the harness depends on:
+      #   - the `E2E_BUILD_ENABLED` literal flipped by the step above enables
+      #     the deterministic simulate-scan / simulate-capture controls (the
+      #     emulator cannot present a QR to the camera or drive the native
+      #     picker). The suite's first assertion on `e2e-simulate-scan` is
+      #     what validates it end to end, which is also why the switch is a
+      #     source literal: an env var can be lost by the bundler without any
+      #     signal, and the failure then looks like an app bug.
+      #     EXPO_PUBLIC_E2E=1 is kept as the second switch for local
+      #     dev-server builds and as a belt-and-braces for this one.
+      #   - EXPO_PUBLIC_API_URL points at the mock backend on the host,
+      #     reached from the emulator as 10.0.2.2. It is deliberately the same
+      #     URL the app falls back to on Android, so the flows still reach the
+      #     mock if the bundler drops the inlining.
+      # Sentry auto-upload is disabled for the same reason as the cold-start
+      # workflow (no release credential is wired into CI).
+      - name: Build E2E release APK
+        working-directory: app/mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+        env:
+          SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+          SENTRY_DISABLE_NATIVE_DEBUG_UPLOAD: 'true'
+          EXPO_PUBLIC_E2E: '1'
+          EXPO_PUBLIC_API_URL: 'http://10.0.2.2:3000'
+          EXPO_PUBLIC_ENV_NAME: 'e2e'
+          EXPO_PUBLIC_NETWORK: 'testnet'
+
+      - name: Run core field-flow E2E suite
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 27
+          target: default
+          arch: x86_64
+          profile: Nexus 6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -memory 2048 -cores 2
+          disable-animations: true
+          working-directory: app/mobile
+          script: |
+            node e2e/run-e2e.js
+
+      - name: Upload E2E report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-e2e-report
+          path: |
+            app/mobile/e2e/report.json
+            app/mobile/e2e/report.md
+          if-no-files-found: warn
+
+      # Screenshots, device logcat and view hierarchies. Maestro only writes
+      # step screenshots for failing steps, so on a green run this may be
+      # mostly logs — still the first thing to look at when it is not green.
+      - name: Upload E2E failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-e2e-artifacts
+          path: app/mobile/e2e/artifacts
+          if-no-files-found: warn

@@ -1,0 +1,73 @@
+# Core field flow: capture evidence while offline and confirm it is queued.
+#
+# The harness puts the device in airplane mode before launching this flow.
+# NetInfo reports offline, so the evidence upload must be persisted to the
+# sync queue (AsyncStorage) instead of being attempted, and must be visible
+# in the submission queue for inspection.
+appId: org.pulsefy.soter.mobile
+name: offline-queue
+tags:
+  - e2e
+  - offline
+---
+- launchApp:
+    clearState: true
+
+# Wait for Home to render before opening the link; see
+# evidence-capture-queue.yaml for why the deep link cannot be sent earlier.
+- extendedWaitUntil:
+    visible:
+      id: "scan-fab"
+    timeout: 60000
+
+- openLink: "soter://aid/E2E-AID-1/evidence"
+
+- extendedWaitUntil:
+    visible:
+      id: "e2e-simulate-capture"
+    timeout: 60000
+
+# The screen warns the worker that uploads will be queued. That notice is the
+# last element of the form, below the fold on a phone-sized viewport, so
+# scroll to it — the warning has to be there before the worker acts, not
+# after.
+- scrollUntilVisible:
+    element:
+      text: "Offline mode: evidence upload will queue and resend when the device reconnects."
+    direction: DOWN
+    timeout: 30000
+- assertVisible: "Offline mode: evidence upload will queue and resend when the device reconnects."
+
+# Back up to the capture controls, which sit at the top of the form.
+- scrollUntilVisible:
+    element:
+      id: "e2e-simulate-capture"
+    direction: UP
+    timeout: 30000
+
+# Capture, then queue the upload. The preview card the capture inserts pushes
+# the upload button below the fold again.
+- tapOn:
+    id: "e2e-simulate-capture"
+- scrollUntilVisible:
+    element:
+      id: "upload-evidence-button"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: "upload-evidence-button"
+    enabled: true
+
+# The upload is queued, not attempted.
+- extendedWaitUntil:
+    visible: "Upload queued and will send when connectivity returns."
+    timeout: 60000
+
+# It survives navigation and is inspectable in the submission queue.
+- openLink: "soter://queue"
+- extendedWaitUntil:
+    visible: "Submission Queue"
+    timeout: 60000
+- assertVisible: ".*Offline.*"
+- assertVisible: ".*1 pending.*"
+- assertVisible: "Evidence Upload"

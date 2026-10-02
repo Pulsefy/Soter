@@ -43,11 +43,17 @@ const linking = {
     screens: {
       Home: '',
       AidOverview: 'aid',
+      // EvidenceUpload is declared before AidDetails so the more specific
+      // `aid/:aidId/evidence` path matches first. It is used by the E2E
+      // harness (issue #932) to open evidence capture directly, and by
+      // notification deep links (see DEEP_LINK_SCREEN_MAP).
+      EvidenceUpload: 'aid/:aidId/evidence',
       AidDetails: 'aid/:aidId',
       ClaimReceipt: 'claim/:claimId',
       Settings: 'settings',
       Health: 'health',
       Scanner: 'scanner',
+      SubmissionQueue: 'queue',
     },
   },
 };

@@ -529,6 +529,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       <TouchableOpacity
         accessibilityRole="button"
         style={[styles.button, { backgroundColor: colors.success }]}
+        testID="aid-details-upload-evidence"
         onPress={() => navigation.navigate('EvidenceUpload', { aidId })}
         activeOpacity={0.8}
       >

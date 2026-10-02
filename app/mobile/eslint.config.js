@@ -8,9 +8,10 @@ export default defineConfig([
   },
   {
     // Plain CommonJS Node scripts (cold-start measurement tooling, issue
-    // #931) and their Jest tests: not covered by the TypeScript/React
-    // Native globals the rest of this config assumes.
-    files: ['scripts/**/*.js'],
+    // #931) and the end-to-end harness (issue #932) plus their Jest tests:
+    // not covered by the TypeScript/React Native globals the rest of this
+    // config assumes.
+    files: ['scripts/**/*.js', 'e2e/**/*.js'],
     languageOptions: {
       globals: {
         require: 'readonly',
@@ -28,6 +29,11 @@ export default defineConfig([
         beforeAll: 'readonly',
         afterAll: 'readonly',
         jest: 'readonly',
+        Buffer: 'readonly',
+        URL: 'readonly',
+        fetch: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
       },
     },
   },

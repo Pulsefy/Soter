@@ -111,7 +111,7 @@ Helpful starting points:
 
 - Backend: `cd app/backend && npm test` and `npm run test:e2e`
 - Frontend: `cd app/frontend && pnpm lint && pnpm type-check && pnpm test`
-- Mobile: `cd app/mobile && pnpm test && pnpm lint`
+- Mobile: `cd app/mobile && pnpm test && pnpm lint`; core field flows end-to-end: `pnpm e2e:android` (see [app/mobile/E2E_TESTING.md](app/mobile/E2E_TESTING.md))
 - AI service: `cd app/ai-service && pytest`
 
 ## Documentation

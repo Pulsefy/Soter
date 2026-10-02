@@ -34,6 +34,19 @@ pnpm test
 
 This runs Jest tests for your React Native components and utilities. Tests are located in files with `.test.ts` or `.test.tsx` extensions.
 
+The core field flows — scan, evidence capture, offline queue, and
+sync-on-reconnect — are covered by an end-to-end harness that runs the app
+on an Android emulator via Maestro:
+
+```bash
+pnpm e2e:android
+```
+
+See [E2E_TESTING.md](./E2E_TESTING.md) for prerequisites, the dedicated E2E
+app build it expects, and what the flows cover. Run it when your change
+touches a screen, service, native permission, or persistence path used by
+those flows.
+
 ### Running Linting
 
 Ensure your code follows our coding standards:

@@ -10,7 +10,8 @@
     "test": "jest",
     "lint": "expo lint",
     "i18n:check": "node scripts/check-i18n.mjs",
-    "measure:cold-start": "node scripts/measure-cold-start.js"
+    "measure:cold-start": "node scripts/measure-cold-start.js",
+    "e2e:android": "node e2e/run-e2e.js"
   },
   "dependencies": {
     "@babel/runtime": "^7.29.7",

@@ -23,6 +23,11 @@ import {
   recordScanReceived,
   recordScanStarted,
 } from '../services/scannerBreadcrumbs';
+import {
+  E2E_SCAN_PAYLOAD,
+  E2E_SIMULATE_SCAN_LABEL,
+  isE2ETestModeEnabled,
+} from '../e2e/testMode';
 
 type ScannerScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Scanner'>;
 
@@ -192,6 +197,20 @@ export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
               Switch to Bulk Mode
             </Text>
           </TouchableOpacity>
+
+          {isE2ETestModeEnabled() ? (
+            <TouchableOpacity
+              style={styles.e2eButton}
+              accessibilityRole="button"
+              accessibilityLabel="E2E simulate a successful QR scan"
+              testID="e2e-simulate-scan"
+              onPress={() =>
+                handleBarCodeScanned({ data: E2E_SCAN_PAYLOAD } as BarcodeScanningResult)
+              }
+            >
+              <Text style={styles.e2eButtonText}>{E2E_SIMULATE_SCAN_LABEL}</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
 
@@ -308,6 +327,20 @@ const styles = StyleSheet.create({
   },
   bulkModeText: {
     fontSize: 14,
+    fontWeight: '600',
+  },
+  e2eButton: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(253,230,138,0.15)',
+  },
+  e2eButtonText: {
+    color: '#FDE68A',
+    fontSize: 13,
     fontWeight: '600',
   },
 });

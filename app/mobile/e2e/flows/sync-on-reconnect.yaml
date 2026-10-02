@@ -1,0 +1,67 @@
+# Core field flow: queued work drains automatically when connectivity returns.
+#
+# This is the transition unit tests cannot reach: the app is running and
+# offline while an upload is queued, then the network comes back and the
+# sync queue's reconnect path (`useNetworkStatus` → `flushPendingNetworkActions`)
+# drains it without the worker doing anything.
+#
+# The harness starts this flow with the device in airplane mode and restores
+# connectivity after `--reconnect-delay-ms` (default 60s), which is the window
+# the flow spends queueing and confirming the offline state. The
+# `extendedWaitUntil` calls then observe the reconnect rather than gating it.
+appId: org.pulsefy.soter.mobile
+name: sync-on-reconnect
+tags:
+  - e2e
+  - offline
+  - sync
+---
+- launchApp:
+    clearState: true
+
+# Wait for Home to render before opening the link; see
+# evidence-capture-queue.yaml for why the deep link cannot be sent earlier.
+- extendedWaitUntil:
+    visible:
+      id: "scan-fab"
+    timeout: 60000
+
+# Queue an upload while offline.
+- openLink: "soter://aid/E2E-AID-1/evidence"
+- extendedWaitUntil:
+    visible:
+      id: "e2e-simulate-capture"
+    timeout: 60000
+- tapOn:
+    id: "e2e-simulate-capture"
+# The preview card the capture inserts pushes the upload button below the
+# fold, so scroll to it before tapping.
+- scrollUntilVisible:
+    element:
+      id: "upload-evidence-button"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: "upload-evidence-button"
+    enabled: true
+- extendedWaitUntil:
+    visible: "Upload queued and will send when connectivity returns."
+    timeout: 60000
+
+# Confirm it is queued and the app knows it is offline.
+- openLink: "soter://queue"
+- extendedWaitUntil:
+    visible: "Submission Queue"
+    timeout: 60000
+- assertVisible: ".*Offline.*"
+- assertVisible: "Evidence Upload"
+
+# The orchestrator now restores connectivity. The app must notice on its own
+# and drain the queue. The harness restores connectivity on a fixed schedule,
+# so these waits only need to observe the result, not cause it.
+- extendedWaitUntil:
+    visible: ".*Online.*"
+    timeout: 180000
+- extendedWaitUntil:
+    visible: "No queued submissions"
+    timeout: 120000
