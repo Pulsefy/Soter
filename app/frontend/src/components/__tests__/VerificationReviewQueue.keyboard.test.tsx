@@ -53,7 +53,12 @@ const mockInboxItems = [
   },
 ];
 
-jest.mock('@/lib/mock-api/client', () => {
+// `ReviewQueue` -> `useVerificationInbox` -> `lib/verification-inbox-api` talks
+// to the live client in `lib/api-client`, which falls back to the global
+// `fetch`; stubbing the demo client here left the queue requesting the network
+// in jsdom, where `fetch` is undefined and every case rendered the load error.
+jest.mock('@/lib/api-client', () => {
+  const actual = jest.requireActual('@/lib/api-client');
   const ok = (body: unknown) => ({
     ok: true,
     status: 200,
@@ -61,6 +66,8 @@ jest.mock('@/lib/mock-api/client', () => {
   });
 
   return {
+    ...actual,
+    resolveApiUrl: () => 'http://localhost:4000',
     fetchClient: jest.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
       const method = (init?.method ?? 'GET').toUpperCase();
@@ -246,3 +253,4 @@ describe('verification review queue keyboard navigation', () => {
     await waitFor(() => expect(document.activeElement).toBe(second));
   });
 });
+

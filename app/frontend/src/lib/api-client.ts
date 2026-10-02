@@ -53,3 +53,27 @@ export async function apiFetch(
   const url = /^https?:\/\//i.test(input) ? input : apiEndpoint(input);
   return fetch(url, init);
 }
+
+/**
+ * Live-client alias for {@link apiFetch}.
+ *
+ * Keeps the name callers already use for the mock client's `fetchClient`, so
+ * migrated call sites read the same — but with the one difference that
+ * matters: an absolute URL is sent to the backend as-is and a bare resource
+ * path is resolved against `${API_BASE_URL}/api/v1`. Nothing is intercepted
+ * and nothing is fabricated when `NEXT_PUBLIC_API_URL` is unset.
+ */
+export const fetchClient = apiFetch;
+
+/**
+ * Resolved backend base URL for callers that build their own endpoint path.
+ *
+ * A few routes are not under the versioned `/api/v1` prefix — health, runbook
+ * and `lib/verification-inbox-api.ts` (which addresses
+ * `${API_BASE_URL}/v1/verification-inbox`). Those callers compose the URL
+ * themselves and only need the resolved base, which is what this returns:
+ * the same value as `API_BASE_URL`, already stripped of any trailing slash.
+ */
+export function resolveApiUrl(): string {
+  return API_BASE_URL;
+}

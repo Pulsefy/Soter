@@ -1,14 +1,12 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { fetchClient } from '@/lib/mock-api/client';
+import { fetchClient, resolveApiUrl } from '@/lib/api-client';
 import type {
   RunbookResponse,
   RunbookResult,
   RunbookState,
 } from '@/types/runbook';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 const POLL_INTERVAL_MS = 120_000;
 
@@ -17,7 +15,7 @@ async function fetchRunbook(): Promise<RunbookResponse> {
   const timeoutId = setTimeout(() => controller.abort(), 10_000);
 
   try {
-    const response = await fetchClient(`${API_URL}/runbook`, {
+    const response = await fetchClient(`${resolveApiUrl()}/runbook`, {
       signal: controller.signal,
       cache: 'no-store',
     });

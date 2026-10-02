@@ -36,6 +36,32 @@ async function setUpDashboard(page: Page, theme: 'light' | 'dark') {
     }),
   );
 
+  // The `HealthBadge` in the app shell polls the liveness endpoint through
+  // `lib/api-client.ts`, which sends every call to the backend as-is. Nothing
+  // intercepts it any more, so — like the other backend routes above — it has
+  // to be stubbed explicitly: an unstubbed `/health` is a network error, which
+  // renders "Backend status: Down" instead of the verified "Healthy" baseline.
+  // The payload mirrors the backend's `LivenessResponse`
+  // (app/backend/src/health/health.service.ts), where `status: 'ok'` is what
+  // the badge maps to Healthy.
+  await page.route(/^http:\/\/localhost:4000\/health$/, route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: MOCK_API_HEADERS,
+      body: JSON.stringify({
+        status: 'ok',
+        service: 'backend',
+        version: '1.4.0',
+        environment: 'test',
+        timestamp: '2026-01-01T00:00:00.000Z',
+        checks: {
+          process: { status: 'up', details: { uptimeSeconds: 12345 } },
+        },
+      }),
+    }),
+  );
+
   await page.route('http://localhost:4000/analytics/map-data', route =>
     route.fulfill({
       status: 200,

@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ClaimReceipt, ClaimReceiptData } from '@/components/ClaimReceipt';
 import { AlertCircle, Loader2, Clock, FileSearch } from 'lucide-react';
-import { fetchClient } from '@/lib/mock-api/client';
+import { fetchClient } from '@/lib/api-client';
 import { useContractRegistry } from '@/hooks/useContractRegistry';
 import { stellarNetwork } from '@/lib/env';
 
@@ -61,6 +61,15 @@ export default function ClaimReceiptPage() {
     const loadReceipt = async () => {
       setState({ kind: 'loading' });
       try {
+        if (!process.env.NEXT_PUBLIC_API_URL) {
+          setState({
+            kind: 'error',
+            message:
+              'API URL is not configured. Set NEXT_PUBLIC_API_URL to load claim receipts.',
+          });
+          return;
+        }
+
         const response = await fetchClient(
           `${API_URL}/claims/${encodeURIComponent(identifier)}/receipt`,
           {
