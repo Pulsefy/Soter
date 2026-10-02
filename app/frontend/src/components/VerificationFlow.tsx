@@ -5,7 +5,7 @@ import { ErrorInline } from './ErrorInline';
 import Link from 'next/link';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
-import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
+import { startEvidenceVerification } from '@/lib/verification-api';
 import { useToast } from '@/components/ToastProvider';
 import { normalizeError } from '@/lib/error-utils';
 import type {
@@ -507,7 +507,7 @@ export const VerificationFlow: React.FC = () => {
             if (cancelled) return;
             
             const normalized = normalizeError(err);
-            setApiError(err as any);
+            setApiError(err instanceof Error ? err : String(err));
             
             let errorMessage = normalized.message;
             if (normalized.code) {
@@ -535,7 +535,7 @@ export const VerificationFlow: React.FC = () => {
         return () => {
             cancelled = true;
         };
-    }, [step, trackJob]);
+    }, [step, trackJob, tErrors, toast]);
 
     /* ── Derived IDs ─────────────────────────────────────────────────────────── */
 

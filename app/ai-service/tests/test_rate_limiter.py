@@ -225,3 +225,160 @@ def test_rate_limiting_disabled(client, monkeypatch):
     for _ in range(4):
         res = client.post("/v1/ai/inference", json=payload, headers=headers)
         assert res.status_code == 200
+
+
+# ============================================================================
+# Backward Compatibility Tests (Organization Rate Limiting)
+# ============================================================================
+# These tests verify that the new organization-level rate limiting does not
+# interfere with existing per-key rate limiting behavior.
+
+
+def test_backward_compat_unmapped_keys_unaffected(client, monkeypatch):
+    """
+    Test that unmapped API keys (not in organization mappings) are completely
+    unaffected by organization-level limiting.
+
+    This ensures backward compatibility: existing keys continue to work exactly
+    as before, subject only to per-key limits.
+    """
+    from services.org_rate_limiter import org_rate_limiter, api_key_org_mapping
+
+    monkeypatch.setattr(settings, "test_provider_mode", True)
+    monkeypatch.setattr(settings, "org_rate_limit_enabled", True)
+
+    # Set up org limit (but don't map this key)
+    org_rate_limiter.set_organization_tier("org-test", "2/minute")
+    # key-unmapped is intentionally NOT mapped to any org
+
+    # Set very generous per-key limit
+    rate_limiter.set_endpoint_override("/v1/ai/inference", "100/minute")
+
+    headers = {"X-API-Key": "key-unmapped"}
+    payload = {"type": "inference", "data": {"query": "test"}}
+
+    # Should be able to make many requests (org limiting doesn't apply)
+    for i in range(10):
+        res = client.post("/v1/ai/inference", json=payload, headers=headers)
+        assert res.status_code == 200, f"Request {i+1} should succeed for unmapped key"
+
+    # Clean up
+    org_rate_limiter.reset()
+    org_rate_limiter.clear_organization_tiers()
+    api_key_org_mapping.clear_mapping()
+
+
+def test_backward_compat_per_key_still_enforced(client, monkeypatch):
+    """
+    Test that per-key rate limits are still enforced even when organization
+    limits are enabled.
+
+    This ensures the two levels of limiting work together correctly.
+    """
+    from services.org_rate_limiter import org_rate_limiter, api_key_org_mapping
+
+    monkeypatch.setattr(settings, "test_provider_mode", True)
+    monkeypatch.setattr(settings, "org_rate_limit_enabled", True)
+
+    # Map key to org with high limit
+    api_key_org_mapping.set_mapping("key-test", "org-high-limit")
+    org_rate_limiter.set_organization_tier("org-high-limit", "100/minute")
+
+    # But set per-key limit low
+    rate_limiter.set_endpoint_override("/v1/ai/inference", "2/minute")
+
+    headers = {"X-API-Key": "key-test"}
+    payload = {"type": "inference", "data": {"query": "test"}}
+
+    # 2 requests succeed (per-key limit)
+    for i in range(2):
+        res = client.post("/v1/ai/inference", json=payload, headers=headers)
+        assert res.status_code == 200
+
+    # 3rd request fails due to per-key limit (not org limit)
+    res = client.post("/v1/ai/inference", json=payload, headers=headers)
+    assert res.status_code == 429
+
+    # Verify it's per-key error, not org error
+    error = res.json()
+    assert error["error"]["code"] == "RATE_LIMIT_EXCEEDED"
+    assert "endpoint" in error["error"]["details"]
+    assert "organization_id" not in error["error"]["details"]
+
+    # Clean up
+    org_rate_limiter.reset()
+    org_rate_limiter.clear_organization_tiers()
+    api_key_org_mapping.clear_mapping()
+
+
+def test_backward_compat_org_limiting_disabled_by_default(client, monkeypatch):
+    """
+    Test that organization limiting is disabled by default, preserving
+    existing behavior.
+
+    When ORG_RATE_LIMIT_ENABLED is false (or not set), organization limits
+    should not be enforced.
+    """
+    from services.org_rate_limiter import org_rate_limiter, api_key_org_mapping
+
+    monkeypatch.setattr(settings, "test_provider_mode", True)
+    monkeypatch.setattr(settings, "org_rate_limit_enabled", False)
+
+    # Configure org limits
+    org_rate_limiter.set_organization_tier("org-test", "2/minute")
+    api_key_org_mapping.set_mapping("key-test", "org-test")
+
+    # Set generous per-key limit
+    rate_limiter.set_endpoint_override("/v1/ai/inference", "100/minute")
+
+    headers = {"X-API-Key": "key-test"}
+    payload = {"type": "inference", "data": {"query": "test"}}
+
+    # Should be able to make more than 2 requests (org limit is disabled)
+    for i in range(5):
+        res = client.post("/v1/ai/inference", json=payload, headers=headers)
+        assert res.status_code == 200
+
+    # Clean up
+    org_rate_limiter.reset()
+    org_rate_limiter.clear_organization_tiers()
+    api_key_org_mapping.clear_mapping()
+
+
+def test_backward_compat_no_org_config_no_behavior_change(client, monkeypatch):
+    """
+    Test that when no organization configuration is present, behavior is
+    identical to before the feature was added.
+
+    This is the most common case in production: with empty org_rate_limit_tiers
+    and api_key_to_org_mapping.
+    """
+    from services.org_rate_limiter import org_rate_limiter, api_key_org_mapping
+
+    monkeypatch.setattr(settings, "test_provider_mode", True)
+    monkeypatch.setattr(settings, "org_rate_limit_enabled", True)
+
+    # Don't configure any org limits or mappings (empty)
+    org_rate_limiter.clear_organization_tiers()
+    api_key_org_mapping.clear_mapping()
+
+    # Set per-key limit
+    rate_limiter.set_endpoint_override("/v1/ai/inference", "3/minute")
+
+    headers = {"X-API-Key": "any-key"}
+    payload = {"type": "inference", "data": {"query": "test"}}
+
+    # Per-key limits should work exactly as before
+    for i in range(3):
+        res = client.post("/v1/ai/inference", json=payload, headers=headers)
+        assert res.status_code == 200
+
+    # 4th request hits per-key limit
+    res = client.post("/v1/ai/inference", json=payload, headers=headers)
+    assert res.status_code == 429
+    assert res.json()["error"]["code"] == "RATE_LIMIT_EXCEEDED"
+
+    # Clean up
+    org_rate_limiter.reset()
+    org_rate_limiter.clear_organization_tiers()
+    api_key_org_mapping.clear_mapping()

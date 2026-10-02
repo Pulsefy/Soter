@@ -312,6 +312,7 @@ export class ContractConfigCacheService {
       commitSha: metadata.commitSha ?? undefined,
       deployer: metadata.deployer ?? undefined,
       transactionHash: metadata.transactionHash ?? undefined,
+      contractVersion: metadata.contractVersion ?? undefined,
       metadata: metadata.metadata ?? undefined,
       createdAt: metadata.createdAt,
       updatedAt: metadata.updatedAt,

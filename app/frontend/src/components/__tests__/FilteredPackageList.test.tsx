@@ -9,6 +9,22 @@ jest.mock('lucide-react', () => ({
   ChevronRight: (props: Record<string, unknown>) => <svg data-testid="icon-next" {...props} />,
 }));
 
+// Resolve empty-state copy from the real message catalog so the assertions
+// below also prove the strings live in the i18n catalog.
+jest.mock('next-intl', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const messages = require('@/messages/en.json');
+  const resolve = (path: string): string => {
+    let node: unknown = messages;
+    for (const part of path.split('.')) {
+      if (typeof node !== 'object' || node === null) return path;
+      node = (node as Record<string, unknown>)[part];
+    }
+    return typeof node === 'string' ? node : path;
+  };
+  return { useTranslations: () => (key: string) => resolve(key) };
+});
+
 // Mock fetchClient to avoid loading handlers.ts (which has unresolved inbox references)
 jest.mock('@/lib/mock-api/client', () => ({
   fetchClient: jest.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ data: [], total: 0, page: 1, size: 10, totalPages: 0 }) }),
@@ -16,7 +32,7 @@ jest.mock('@/lib/mock-api/client', () => ({
 
 jest.mock('@/hooks/useAidPackages');
 jest.mock('@/components/empty-state/AppEmptyState', () => ({
-  AppEmptyState: ({ compact, eyebrow, title }: { compact?: boolean; eyebrow?: string; title?: string }) => (
+  AppEmptyState: ({ eyebrow, title }: { compact?: boolean; eyebrow?: string; title?: string }) => (
     <div data-testid="empty-state">
       <span>{eyebrow}</span>
       <span>{title}</span>

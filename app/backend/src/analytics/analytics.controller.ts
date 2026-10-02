@@ -187,4 +187,27 @@ export class AnalyticsController {
     this.logger.log(`GET /analytics/map-anonymized ${JSON.stringify(query)}`);
     return this.analyticsService.getMapAnonymizedData(query);
   }
+
+  @Public()
+  @Get('contract-aggregates')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get contract aggregates',
+    description:
+      'Returns aggregated statistics from the onchain contract including total committed, claimed, and expired amounts.',
+  })
+  @ApiOkResponse({
+    description: 'Contract aggregates retrieved successfully.',
+    type: ContractAggregatesDto,
+  })
+  @ApiQuery({ name: 'token', required: false, type: String })
+  async getContractAggregates(
+    @Query('token') token?: string,
+  ): Promise<ContractAggregatesDto> {
+    const query: ContractAggregatesQuery = { token };
+    this.logger.log(
+      `GET /analytics/contract-aggregates ${JSON.stringify(query)}`,
+    );
+    return this.analyticsService.getContractAggregates(query);
+  }
 }

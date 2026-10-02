@@ -77,8 +77,26 @@ GET /v1/ai/decision-audit/{record_id}
   unfiltered dump of every decision is neither useful for an investigation nor
   a safe default.
 * Supplying several identifiers narrows the result (logical AND).
-* `limit` defaults to 100, capped at 500. Records come back newest first.
+* `limit` defaults to 100, capped at 500 for JSON. Records come back newest first.
+* Optional `created_after` / `created_before` (Unix timestamps) bound a date range.
 * Responses use the standard `ResultEnvelope`.
+
+### Export (issue #1206)
+
+For a compliance review of a filtered set (e.g. all decisions for a campaign
+over a date range), add `format=csv` or `format=ndjson`:
+
+```
+GET /v1/ai/decision-audit?campaign_ref=campaign-2024-001&created_after=1704067200&created_before=1706745599&format=ndjson
+GET /v1/ai/decision-audit?campaign_ref=campaign-2024-001&format=csv&limit=1000&offset=0
+```
+
+* Export uses the **same identifier requirement and filters** as the JSON query
+  (and the same redaction already applied at write time).
+* The response is **streamed** (`StreamingResponse`) so large exports are not
+  buffered fully in memory; paginate with `offset` / `limit` (export limit cap
+  5000) when the filtered set is huge.
+* `Content-Disposition: attachment` makes the payload downloadable.
 
 **Typical investigation:** a claim was rejected weeks ago. Query by
 `claim_id`, read `outcome` and `reasons`, then read `provider`, `model`, and

@@ -37,6 +37,7 @@ export function AppEmptyState({
 }: AppEmptyStateProps) {
   return (
     <div
+      data-testid="app-empty-state"
       className={`rounded-xl border border-dashed border-slate-300 bg-slate-50 ${
         compact ? 'p-5' : 'p-8'
       } dark:border-slate-700 dark:bg-slate-950`}

@@ -381,12 +381,18 @@ class DecisionAuditStore:
         claim_id: Optional[str] = None,
         campaign_ref: Optional[str] = None,
         decision_type: Optional[str] = None,
+        created_after: Optional[float] = None,
+        created_before: Optional[float] = None,
+        offset: int = 0,
         limit: int = 100,
     ) -> List[DecisionAuditRecord]:
         """Return matching records, newest first.
 
         Supplying several identifiers intersects them (logical AND), so an
         operator can narrow to "this claim, on this campaign" precisely.
+        Optional ``created_after`` / ``created_before`` bound the result to a
+        date range (Unix timestamps). ``offset`` skips leading matches for
+        paginated exports (issue #1206).
         """
         with self._lock:
             candidate_ids: Optional[Set[str]] = None
@@ -410,7 +416,14 @@ class DecisionAuditStore:
             if decision_type:
                 matches = [r for r in matches if r.decision_type == decision_type]
 
+            if created_after is not None:
+                matches = [r for r in matches if r.created_at >= created_after]
+            if created_before is not None:
+                matches = [r for r in matches if r.created_at <= created_before]
+
             matches.sort(key=lambda r: r.created_at, reverse=True)
+            if offset and offset > 0:
+                matches = matches[offset:]
             if limit and limit > 0:
                 matches = matches[:limit]
             return matches

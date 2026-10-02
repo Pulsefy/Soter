@@ -2252,99 +2252,6 @@
         "title": "ResultEnvelope[List[ClaimFraudResult]]",
         "type": "object"
       },
-      "ResultEnvelope_List_Dict_str__Any___": {
-        "properties": {
-          "anchor_metadata": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AnchorMetadata"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "confidence": {
-            "anyOf": [
-              {
-                "maximum": 1.0,
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Aggregate confidence score in [0, 1].",
-            "examples": [
-              0.92
-            ],
-            "title": "Confidence"
-          },
-          "prompt_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Version of the prompt template used for verification.",
-            "examples": [
-              "v1"
-            ],
-            "title": "Prompt Version"
-          },
-          "reasons": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Human-readable explanations or reasons for the result.",
-            "examples": [
-              [
-                "Liveness verification passed"
-              ]
-            ],
-            "title": "Reasons"
-          },
-          "result": {
-            "items": {
-              "type": "object"
-            },
-            "title": "Result",
-            "type": "array"
-          },
-          "trace_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Request-scoped correlation ID for distributed tracing.",
-            "examples": [
-              "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-            ],
-            "title": "Trace Id"
-          }
-        },
-        "required": [
-          "result"
-        ],
-        "title": "ResultEnvelope[List[Dict[str, Any]]]",
-        "type": "object"
-      },
       "ResultEnvelope_OCRData_": {
         "properties": {
           "anchor_metadata": {
@@ -3176,7 +3083,7 @@
     },
     "/v1/ai/decision-audit": {
       "get": {
-        "description": "Return decision audit records matching the supplied identifiers.\n\nAt least one of ``trace_id``, ``claim_id``, or ``campaign_ref`` is\nrequired: an unfiltered dump of every decision is neither a useful\ninvestigation tool nor a safe default. Supplying several narrows the\nresult (logical AND). Records come back newest first.",
+        "description": "Return or export decision audit records matching the supplied filters.\n\nAt least one of ``trace_id``, ``claim_id``, or ``campaign_ref`` is\nrequired. Supplying several narrows the result (logical AND). Records\ncome back newest first.\n\nSet ``format=csv`` or ``format=ndjson`` for a streamed downloadable export\nthat uses the same filters and redaction as the JSON query. Paginate large\nexports with ``offset`` and ``limit`` (export limit cap is higher than the\nJSON query cap).",
         "operationId": "query_decision_audit_v1_ai_decision_audit_get",
         "parameters": [
           {
@@ -3252,12 +3159,79 @@
             }
           },
           {
+            "description": "Include only records with created_at >= this Unix timestamp.",
+            "in": "query",
+            "name": "created_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Include only records with created_at >= this Unix timestamp.",
+              "title": "Created After"
+            }
+          },
+          {
+            "description": "Include only records with created_at <= this Unix timestamp.",
+            "in": "query",
+            "name": "created_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Include only records with created_at <= this Unix timestamp.",
+              "title": "Created Before"
+            }
+          },
+          {
+            "description": "Response format: omit/json for ResultEnvelope JSON; csv or ndjson for a downloadable streamed export (issue #1206).",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Response format: omit/json for ResultEnvelope JSON; csv or ndjson for a downloadable streamed export (issue #1206).",
+              "title": "Format"
+            }
+          },
+          {
+            "description": "Number of matching records to skip (pagination for export).",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of matching records to skip (pagination for export).",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 100,
-              "maximum": 500,
+              "maximum": 5000,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
@@ -3268,9 +3242,7 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResultEnvelope_List_Dict_str__Any___"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"

@@ -41,6 +41,18 @@ describe('EntityLinkingService', () => {
       findFirst: jest.fn(),
       findMany: jest.fn(),
     },
+    campaign: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
+    claim: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
+    verificationRequest: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
   };
 
   const mockAuditService = {
@@ -640,6 +652,190 @@ describe('EntityLinkingService', () => {
       expect(result).toHaveLength(1);
       expect(result[0].name).toBe('Relief Project A');
       expect(result[0].entityType).toBe('project');
+    });
+  });
+
+  describe('multi-tenant isolation (org scoping)', () => {
+    const callerOrgId = 'org-alpha';
+    const foreignOrgId = 'org-beta';
+
+    describe('linkEntity ownership enforcement', () => {
+      it('throws FORBIDDEN when linking to a campaign not owned by caller org', async () => {
+        mockPrisma.campaign.findFirst.mockResolvedValue(null);
+
+        await expect(
+          service.linkEntity(
+            {
+              sourceType: 'campaign',
+              sourceId: 'camp-foreign',
+              extractedName: 'Test Org',
+              entityType: 'organization',
+              confidenceScore: 0.95,
+            },
+            callerOrgId,
+          ),
+        ).rejects.toThrow(AppException);
+
+        expect(mockPrisma.campaign.findFirst).toHaveBeenCalledWith({
+          where: { id: 'camp-foreign', orgId: callerOrgId },
+          select: { id: true },
+        });
+      });
+
+      it('allows link creation when campaign belongs to caller org', async () => {
+        mockPrisma.campaign.findFirst.mockResolvedValue({ id: 'camp-own' });
+        mockPrisma.registryOrganization.findFirst.mockResolvedValue({
+          id: 'org-rec-1',
+          name: 'Test Org',
+        });
+        mockPrisma.entityLink.create.mockResolvedValue({
+          id: 'link-own',
+          sourceType: 'campaign',
+          sourceId: 'camp-own',
+          extractedName: 'Test Org',
+          entityType: 'organization',
+          confidenceScore: 0.95,
+          matchMethod: 'exact',
+          reviewStatus: 'auto_accepted',
+          isActive: true,
+        });
+
+        const result = await service.linkEntity(
+          {
+            sourceType: 'campaign',
+            sourceId: 'camp-own',
+            extractedName: 'Test Org',
+            entityType: 'organization',
+            confidenceScore: 0.95,
+          },
+          callerOrgId,
+        );
+
+        expect(result.id).toBe('link-own');
+      });
+
+      it('bypasses ownership check when orgId is undefined (admin caller)', async () => {
+        mockPrisma.registryOrganization.findFirst.mockResolvedValue({
+          id: 'org-rec-1',
+          name: 'Test Org',
+        });
+        mockPrisma.entityLink.create.mockResolvedValue({
+          id: 'link-admin',
+          sourceType: 'campaign',
+          sourceId: 'camp-any',
+          extractedName: 'Test Org',
+          entityType: 'organization',
+          confidenceScore: 0.95,
+          matchMethod: 'exact',
+          reviewStatus: 'auto_accepted',
+          isActive: true,
+        });
+
+        await service.linkEntity({
+          sourceType: 'campaign',
+          sourceId: 'camp-any',
+          extractedName: 'Test Org',
+          entityType: 'organization',
+          confidenceScore: 0.95,
+        });
+
+        expect(mockPrisma.campaign.findFirst).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('getLinksByCampaign ownership enforcement', () => {
+      it('throws FORBIDDEN when accessing campaign of another org', async () => {
+        mockPrisma.campaign.findFirst.mockResolvedValue(null);
+
+        await expect(
+          service.getLinksByCampaign('camp-foreign', undefined, callerOrgId),
+        ).rejects.toThrow(AppException);
+      });
+    });
+
+    describe('getLinksByClaim ownership enforcement', () => {
+      it('throws FORBIDDEN when accessing claim of another org', async () => {
+        mockPrisma.claim.findFirst.mockResolvedValue(null);
+
+        await expect(
+          service.getLinksByClaim('claim-foreign', undefined, callerOrgId),
+        ).rejects.toThrow(AppException);
+      });
+    });
+
+    describe('getLinksByVerification ownership enforcement', () => {
+      it('throws FORBIDDEN when accessing verification of another org', async () => {
+        mockPrisma.verificationRequest.findFirst.mockResolvedValue(null);
+
+        await expect(
+          service.getLinksByVerification('ver-foreign', undefined, callerOrgId),
+        ).rejects.toThrow(AppException);
+      });
+    });
+
+    describe('decideReview ownership enforcement', () => {
+      it('throws FORBIDDEN when link belongs to another org', async () => {
+        mockPrisma.entityLink.findUnique.mockResolvedValue({
+          id: 'link-foreign',
+          sourceType: 'campaign',
+          sourceId: 'camp-foreign',
+          reviewStatus: 'pending_review',
+        });
+        mockPrisma.campaign.findFirst.mockResolvedValue({
+          orgId: foreignOrgId,
+        });
+
+        await expect(
+          service.decideReview(
+            'link-foreign',
+            { action: 'accept' },
+            'reviewer-1',
+            callerOrgId,
+          ),
+        ).rejects.toThrow(AppException);
+      });
+    });
+
+    describe('queryLinks and getReviewQueue scoping', () => {
+      it('scopes queryLinks with owned source IDs when orgId is provided', async () => {
+        mockPrisma.campaign.findMany.mockResolvedValue([{ id: 'c1' }]);
+        mockPrisma.claim.findMany.mockResolvedValue([{ id: 'cl1' }]);
+        mockPrisma.verificationRequest.findMany.mockResolvedValue([
+          { id: 'v1' },
+        ]);
+        mockPrisma.entityLink.findMany.mockResolvedValue([]);
+        mockPrisma.entityLink.count.mockResolvedValue(0);
+
+        await service.queryLinks({}, callerOrgId);
+
+        expect(mockPrisma.entityLink.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              sourceId: { in: ['c1', 'cl1', 'v1'] },
+            }),
+          }),
+        );
+      });
+
+      it('scopes getReviewQueue with owned source IDs when orgId is provided', async () => {
+        mockPrisma.campaign.findMany.mockResolvedValue([{ id: 'c1' }]);
+        mockPrisma.claim.findMany.mockResolvedValue([{ id: 'cl1' }]);
+        mockPrisma.verificationRequest.findMany.mockResolvedValue([
+          { id: 'v1' },
+        ]);
+        mockPrisma.entityLink.findMany.mockResolvedValue([]);
+        mockPrisma.entityLink.count.mockResolvedValue(0);
+
+        await service.getReviewQueue({}, callerOrgId);
+
+        expect(mockPrisma.entityLink.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              sourceId: { in: ['c1', 'cl1', 'v1'] },
+            }),
+          }),
+        );
+      });
     });
   });
 });

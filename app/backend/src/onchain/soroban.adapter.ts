@@ -43,9 +43,28 @@ import {
   GetTransactionStatusParams,
   GetTransactionStatusResult,
   TxStatus,
+  ContractVersionParams,
+  MigrateContractParams,
+  MigrateContractResult,
+  AdminState,
+  AdminTransferParams,
+  AdminTransferResult,
+  TransferAdminParams,
+  PendingWithdrawal,
+  ProposeSurplusWithdrawalParams,
+  SurplusWithdrawalParams,
+  SurplusWithdrawalResult,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
+import {
+  parsePendingWithdrawal,
+  timelockRemainingSeconds,
+} from './utils/pending-withdrawal';
+import {
+  isSurplusWithdrawalTimelockError,
+  SurplusWithdrawalTimelockNotElapsedError,
+} from './utils/surplus-withdrawal.errors';
 import {
   Aggregates,
   Package,
@@ -172,10 +191,11 @@ export class SorobanAdapter implements OnchainAdapter {
     method: string,
     args: xdr.ScVal[],
     correlationId: string,
+    contractId = this.contractId,
   ): Promise<{ hash: string; result: any }> {
     const server = this.getServer();
     const kp = this.getKeypair();
-    const contract = new Contract(this.contractId);
+    const contract = new Contract(contractId);
     const pubKey = kp.publicKey();
 
     const account = await withRetryTimeout(
@@ -267,10 +287,11 @@ export class SorobanAdapter implements OnchainAdapter {
     method: string,
     args: xdr.ScVal[],
     correlationId: string,
+    contractId = this.contractId,
   ): Promise<unknown> {
     const server = this.getServer();
     const kp = this.getKeypair();
-    const contract = new Contract(this.contractId);
+    const contract = new Contract(contractId);
     const pubKey = kp.publicKey();
 
     const account = await withRetryTimeout(
@@ -751,6 +772,50 @@ export class SorobanAdapter implements OnchainAdapter {
     };
   }
 
+  async getContractVersion(params: ContractVersionParams): Promise<number> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    const version = await this.simulateReadOnly(
+      'get_version',
+      [],
+      cid,
+      params.contractId,
+    );
+    const parsed = Number(version);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      throw new Error(
+        `Invalid contract version returned for ${params.contractId}`,
+      );
+    }
+    return parsed;
+  }
+
+  async migrateContract(
+    params: MigrateContractParams,
+  ): Promise<MigrateContractResult> {
+    this.ensureConfigured();
+    if (!Number.isInteger(params.newVersion) || params.newVersion <= 0) {
+      throw new Error('Migration target version must be a positive integer');
+    }
+    const cid = this.correlationId();
+    const previousVersion = await this.getContractVersion({
+      contractId: params.contractId,
+    });
+    const { hash } = await this.submitContractOp(
+      'migrate',
+      [this.scvU32(params.newVersion)],
+      cid,
+      params.contractId,
+    );
+    return {
+      contractId: params.contractId,
+      transactionHash: hash,
+      previousVersion,
+      newVersion: params.newVersion,
+      timestamp: new Date(),
+    };
+  }
+
   async getPauseState(): Promise<PauseState> {
     this.ensureConfigured();
     const cid = this.correlationId();
@@ -760,6 +825,317 @@ export class SorobanAdapter implements OnchainAdapter {
 
     return {
       isPaused: result === true,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Normalize an `Option<Address>` return value. Soroban encodes `None` as
+   * either a void ScVal or a null native value depending on the SDK version,
+   * so both are collapsed to `null` here.
+   */
+  private normalizeOptionalAddress(value: unknown): string | null {
+    if (typeof value === 'string') {
+      return value.length > 0 ? value : null;
+    }
+    if (typeof value === 'number') {
+      return String(value);
+    }
+    return null;
+  }
+
+  /**
+   * Coerce a decoded ScVal into a non-null string, tolerating null/void.
+   */
+  private readAddress(value: unknown): string {
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      return String(value);
+    }
+    return '';
+  }
+
+  /**
+   * Read the admin pair, tolerating `get_pending_admin` being unavailable so
+   * a pending-transfer lookup can never fail an otherwise valid state read.
+   */
+  private async readAdminState(
+    correlationId: string,
+    contractId = this.contractId,
+  ): Promise<AdminState> {
+    const adminAddress = await this.simulateReadOnly(
+      'get_admin',
+      [],
+      correlationId,
+      contractId,
+    );
+
+    let pendingAdminAddress: string | null = null;
+    try {
+      pendingAdminAddress = this.normalizeOptionalAddress(
+        await this.simulateReadOnly(
+          'get_pending_admin',
+          [],
+          correlationId,
+          contractId,
+        ),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `[${correlationId}] get_pending_admin failed for ${contractId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    return {
+      adminAddress: this.readAddress(adminAddress),
+      pendingAdminAddress,
+      timestamp: new Date(),
+    };
+  }
+
+  async getAdminState(params: AdminTransferParams = {}): Promise<AdminState> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] getAdminState`);
+
+    return this.readAdminState(cid, params.contractId ?? this.contractId);
+  }
+
+  async transferAdmin(
+    params: TransferAdminParams,
+  ): Promise<AdminTransferResult> {
+    this.ensureConfigured();
+    const newAdminAddress = params.newAdminAddress?.trim();
+    if (!newAdminAddress) {
+      throw new Error('newAdminAddress is required to propose an admin');
+    }
+
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(
+      `[${cid}] transferAdmin contract=${contractId} newAdmin=${newAdminAddress}`,
+    );
+
+    const { hash } = await this.submitContractOp(
+      'transfer_admin',
+      [this.scvAddress(newAdminAddress)],
+      cid,
+      contractId,
+    );
+    const state = await this.readAdminState(cid, contractId);
+
+    return {
+      contractId,
+      transactionHash: hash,
+      adminAddress: state.adminAddress,
+      pendingAdminAddress: state.pendingAdminAddress,
+      timestamp: new Date(),
+    };
+  }
+
+  async acceptAdmin(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    this.ensureConfigured();
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] acceptAdmin contract=${contractId}`);
+
+    const { hash } = await this.submitContractOp(
+      'accept_admin',
+      [],
+      cid,
+      contractId,
+    );
+    const state = await this.readAdminState(cid, contractId);
+
+    return {
+      contractId,
+      transactionHash: hash,
+      adminAddress: state.adminAddress,
+      pendingAdminAddress: state.pendingAdminAddress,
+      timestamp: new Date(),
+    };
+  }
+
+  async cancelAdminTransfer(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    this.ensureConfigured();
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] cancelAdminTransfer contract=${contractId}`);
+
+    const { hash } = await this.submitContractOp(
+      'cancel_admin_transfer',
+      [],
+      cid,
+      contractId,
+    );
+    const state = await this.readAdminState(cid, contractId);
+
+    return {
+      contractId,
+      transactionHash: hash,
+      adminAddress: state.adminAddress,
+      pendingAdminAddress: state.pendingAdminAddress,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Read the pending surplus withdrawal proposal, or `null` when none exists.
+   *
+   * `get_pending_withdrawal` is a plain getter, so it goes through the
+   * read-only simulation path rather than a signed submission.
+   */
+  async getPendingWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<PendingWithdrawal | null> {
+    this.ensureConfigured();
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] getPendingWithdrawal contract=${contractId}`);
+
+    return parsePendingWithdrawal(
+      await this.simulateReadOnly(
+        'get_pending_withdrawal',
+        [],
+        cid,
+        contractId,
+      ),
+    );
+  }
+
+  /**
+   * Step one of the timelocked withdrawal: record the intent to move funds and
+   * start the contract's delay. Nothing is transferred by this call.
+   */
+  async proposeSurplusWithdrawal(
+    params: ProposeSurplusWithdrawalParams,
+  ): Promise<SurplusWithdrawalResult> {
+    this.ensureConfigured();
+    const to = params.to?.trim();
+    const token = params.token?.trim();
+    const amount = params.amount?.trim();
+
+    if (!to) {
+      throw new Error('to is required to propose a surplus withdrawal');
+    }
+    if (!token) {
+      throw new Error('token is required to propose a surplus withdrawal');
+    }
+    if (!amount || !/^\d+$/.test(amount) || BigInt(amount) <= 0n) {
+      throw new Error(
+        'amount must be a positive integer string in the token base unit',
+      );
+    }
+
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(
+      `[${cid}] proposeSurplusWithdrawal contract=${contractId} to=${to} token=${token} amount=${amount}`,
+    );
+
+    const { hash } = await this.submitContractOp(
+      'propose_surplus_withdrawal',
+      [this.scvAddress(to), this.scvI128(amount), this.scvAddress(token)],
+      cid,
+      contractId,
+    );
+
+    return {
+      contractId,
+      transactionHash: hash,
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Abandon a pending proposal. Moves no funds.
+   */
+  async cancelSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    this.ensureConfigured();
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] cancelSurplusWithdrawal contract=${contractId}`);
+
+    const { hash } = await this.submitContractOp(
+      'cancel_surplus_withdrawal',
+      [],
+      cid,
+      contractId,
+    );
+
+    return {
+      contractId,
+      transactionHash: hash,
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Step two of the timelocked withdrawal: transfer the proposed funds.
+   *
+   * The delay is checked before submitting so a premature attempt reports the
+   * remaining wait instead of paying for a simulation that the contract will
+   * reject anyway; a contract-side `SurplusWithdrawalTimelockActive` is mapped
+   * onto the same distinct error.
+   */
+  async executeSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    this.ensureConfigured();
+    const contractId = params.contractId ?? this.contractId;
+    const cid = this.correlationId();
+
+    const pending = await this.getPendingWithdrawal({ contractId });
+    if (pending) {
+      const remaining = timelockRemainingSeconds(pending);
+      if (remaining > 0) {
+        throw new SurplusWithdrawalTimelockNotElapsedError(
+          `SurplusWithdrawalTimelockActive: withdrawal of ${pending.amount} to ` +
+            `${pending.to} becomes executable in ${remaining}s ` +
+            `(at ledger timestamp ${pending.executableAt})`,
+          pending.executableAt,
+        );
+      }
+    }
+
+    this.logger.log(
+      `[${cid}] executeSurplusWithdrawal contract=${contractId} amount=${pending?.amount ?? 'unknown'}`,
+    );
+
+    let hash: string;
+    try {
+      ({ hash } = await this.submitContractOp(
+        'execute_surplus_withdrawal',
+        [],
+        cid,
+        contractId,
+      ));
+    } catch (error) {
+      if (isSurplusWithdrawalTimelockError(error)) {
+        throw new SurplusWithdrawalTimelockNotElapsedError(
+          'SurplusWithdrawalTimelockActive: the surplus withdrawal timelock delay has not elapsed',
+          pending?.executableAt ?? null,
+        );
+      }
+      throw error;
+    }
+
+    return {
+      contractId,
+      transactionHash: hash,
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
       timestamp: new Date(),
     };
   }

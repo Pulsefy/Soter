@@ -120,7 +120,15 @@
     "clearSyncedCache": "Clear synced cache",
     "yourPublicKey": "Your Public Key",
     "stellarLabFaucet": "Stellar Lab faucet",
-    "friendbotApi": "Friendbot API"
+    "friendbotApi": "Friendbot API",
+    "syncFrequency": "Sync Frequency",
+    "syncFrequencyHint": "Choose how often the app syncs in the background",
+    "syncFrequencyAggressive": "Aggressive",
+    "syncFrequencyNormal": "Normal",
+    "syncFrequencyConservative": "Conservative",
+    "syncFrequencyAggressiveHint": "Syncs every 5 minutes",
+    "syncFrequencyNormalHint": "Syncs every 15 minutes (default)",
+    "syncFrequencyConservativeHint": "Syncs every 60 minutes"
   },
   "tasks": {
     "title": "Tasks",

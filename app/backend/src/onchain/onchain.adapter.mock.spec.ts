@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MockOnchainAdapter } from './onchain.adapter.mock';
+import { SurplusWithdrawalTimelockNotElapsedError } from './utils/surplus-withdrawal.errors';
 
 describe('MockOnchainAdapter', () => {
   let adapter: MockOnchainAdapter;

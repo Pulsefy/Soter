@@ -1,7 +1,16 @@
-import { Injectable, Logger, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ConflictException,
+  NotImplementedException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import {
+  OnChainLedgerEntry,
+  StellarLedgerSource,
+} from './stellar-ledger-source';
 
 export interface BackfillJobData {
   startLedger: number;
@@ -46,6 +55,7 @@ export class LedgerBackfillService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue('onchain') private readonly onchainQueue: Queue,
+    private readonly ledgerSource: StellarLedgerSource,
   ) {}
 
   /**
@@ -56,6 +66,10 @@ export class LedgerBackfillService {
    *   from `lastProcessedLedger` so processing resumes rather than restarts.
    * - If a `running` checkpoint exists, a ConflictException is thrown.
    * - If a `completed` checkpoint exists, the existing result is returned directly.
+   *
+   * Refuses to start when no live on-chain source is configured: a backfill
+   * with nothing to copy would record zero movements and report success, which
+   * is indistinguishable from a genuinely complete range.
    */
   async triggerBackfill(
     startLedger: number,
@@ -64,11 +78,18 @@ export class LedgerBackfillService {
     batchSize: number = 100,
     triggeredBy?: string,
   ): Promise<BackfillResult> {
+    if (!this.ledgerSource.isEnabled()) {
+      throw new NotImplementedException(
+        `Backfill is not available against live data: ${this.ledgerSource.describeUnavailable()} ` +
+          'Configure AID_ESCROW_CONTRACT_ID with STELLAR_RPC_URL / STELLAR_HORIZON_URL before backfilling.',
+      );
+    }
+
     const jobKey = buildJobKey(startLedger, endLedger, campaignId);
     const totalCount = endLedger - startLedger + 1;
 
     this.logger.log(
-      `[backfill] Trigger request — range=${startLedger}-${endLedger} key=${jobKey}`,
+      `[backfill] Trigger request — range=${startLedger}-${endLedger} key=${jobKey} source=${this.ledgerSource.sourceKind}`,
     );
 
     // Look up an existing checkpoint for this range.
@@ -378,6 +399,7 @@ export class LedgerBackfillService {
   ): Promise<{ processed: number; skipped: number }> {
     let processed = 0;
     let skipped = 0;
+    const unattributable: OnChainLedgerEntry[] = [];
 
     // Check for existing ledger entries to ensure idempotency.
     const existingEntries = await this.prisma.balanceLedger.findMany({
@@ -391,8 +413,13 @@ export class LedgerBackfillService {
 
     const existingIds = new Set(existingEntries.map(e => e.id));
 
-    // Fetch ledger data from on-chain (stubbed; real impl calls Horizon API).
-    const ledgerData = this.fetchLedgerRange(startLedger, endLedger);
+    // Genuine on-chain data, read through the shared Stellar client. Throws
+    // rather than yielding an empty range, so an unreachable node fails the
+    // batch instead of quietly skipping the whole window.
+    const ledgerData = await this.ledgerSource.fetchLedgerEntries({
+      startLedger,
+      endLedger,
+    });
 
     for (const entry of ledgerData) {
       if (existingIds.has(entry.id)) {
@@ -400,19 +427,37 @@ export class LedgerBackfillService {
         continue;
       }
 
+      // `BalanceLedger.campaignId` is a required foreign key and the on-chain
+      // event stream carries no campaign attribution (see EVENTS.md), so a
+      // range backfilled without a campaign cannot be persisted. Surfacing that
+      // as an unattributable entry keeps the rows honest instead of inventing a
+      // campaign they never belonged to.
+      if (!campaignId) {
+        unattributable.push(entry);
+        continue;
+      }
+
       await this.prisma.balanceLedger.create({
         data: {
           id: entry.id,
-          campaignId: entry.campaignId ?? campaignId,
-          claimId: entry.claimId,
+          campaignId,
+          claimId: null,
           eventType: entry.eventType,
           amount: entry.amount,
-          note: entry.note,
+          note: this.buildNote(entry),
           createdAt: entry.createdAt,
         },
       });
 
       processed++;
+    }
+
+    if (unattributable.length > 0) {
+      throw new Error(
+        `Ledgers ${startLedger}-${endLedger}: ${unattributable.length} on-chain movement(s) cannot be stored without a campaignId ` +
+          '(BalanceLedger.campaignId is required and the contract event stream carries no campaign attribution). ' +
+          'Re-run the backfill with a campaignId.',
+      );
     }
 
     this.logger.debug(
@@ -422,9 +467,12 @@ export class LedgerBackfillService {
     return { processed, skipped };
   }
 
-  /** Placeholder for a real Stellar Horizon API call. */
-  private fetchLedgerRange(_startLedger: number, _endLedger: number): any[] {
-    return [];
+  /** Provenance string stored alongside every backfilled row. */
+  private buildNote(entry: OnChainLedgerEntry): string {
+    return (
+      `onchain:${entry.source} ledger=${entry.ledger} tx=${entry.txHash}` +
+      (entry.packageId ? ` package=${entry.packageId}` : '')
+    );
   }
 
   private mapJobStateToStatus(state: string): BackfillResult['status'] {

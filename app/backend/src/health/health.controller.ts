@@ -101,7 +101,7 @@ export class HealthController {
   @ApiOperation({
     summary: 'Readiness probe',
     description:
-      'Checks Postgres, Redis, the AI service, and Soroban RPC with per-dependency timeouts. ' +
+      'Checks Postgres, Redis, the AI service, Soroban RPC, and the configured on-chain adapter with per-dependency timeouts. ' +
       'Results are cached briefly to protect against probe load. Responds 200 when ready or ' +
       'degraded (non-critical dependency down), and 503 when a required dependency is down.',
   })
@@ -131,6 +131,16 @@ export class HealthController {
             latencyMs: 0,
             details: { reason: 'STELLAR_RPC_URL not configured' },
           },
+          onchainAdapter: {
+            status: 'up',
+            latencyMs: 5,
+            details: {
+              adapter: 'mock',
+              connected: true,
+              contractName: 'Soroban AidEscrow Contract',
+              contractVersion: '1.0.0',
+            },
+          },
         },
       },
     },
@@ -159,6 +169,16 @@ export class HealthController {
             status: 'skipped',
             latencyMs: 0,
             details: { reason: 'STELLAR_RPC_URL not configured' },
+          },
+          onchainAdapter: {
+            status: 'up',
+            latencyMs: 5,
+            details: {
+              adapter: 'mock',
+              connected: true,
+              contractName: 'Soroban AidEscrow Contract',
+              contractVersion: '1.0.0',
+            },
           },
         },
       },
@@ -199,13 +219,32 @@ export class HealthController {
   @ApiOperation({
     summary: 'On-chain contract health probe (internal use)',
     description:
-      'Performs a read-only contract call to verify connectivity to Soroban RPC and contract functionality. Requires authentication.',
+      'Performs a read-only contract call to verify connectivity to the configured on-chain adapter (mock or Soroban) and contract functionality. Reports active adapter and latency.',
   })
   @ApiOkResponse({
     description: 'On-chain health check completed successfully',
+    schema: {
+      example: {
+        status: 'up',
+        latencyMs: 5,
+        adapter: 'mock',
+        metadata: {
+          version: '1.0.0',
+          name: 'Soroban AidEscrow Contract',
+        },
+      },
+    },
   })
   @ApiServiceUnavailableResponse({
     description: 'On-chain health check failed',
+    schema: {
+      example: {
+        status: 'down',
+        latencyMs: 3001,
+        adapter: 'soroban',
+        error: 'Connection timed out',
+      },
+    },
   })
   async onchainHealth(@Res({ passthrough: true }) res: Response) {
     const result = await this.healthService.checkOnchainContract();

@@ -17,6 +17,7 @@ import { config } from '../config';
 
 const METERED_OPT_IN_KEY = '@soter/metered-opt-in';
 const FORCE_SYNC_OVERRIDE_KEY = '@soter/force-sync-override';
+export const SYNC_FREQUENCY_KEY = '@soter/sync-frequency';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,6 +28,14 @@ export type DeferralReason =
   | 'metered-connection'
   | 'large-upload'
   | 'none';
+
+export type SyncFrequency = 'aggressive' | 'normal' | 'conservative';
+
+export const SYNC_FREQUENCY_INTERVALS: Record<SyncFrequency, number> = {
+  aggressive: 5 * 60 * 1000,    // 5 minutes
+  normal: 15 * 60 * 1000,        // 15 minutes
+  conservative: 60 * 60 * 1000,  // 60 minutes
+};
 
 export interface SyncDeferralState {
   /** Current battery level (0-1), or -1 if unavailable */
@@ -43,6 +52,8 @@ export interface SyncDeferralState {
   deferralReason: DeferralReason;
   /** Estimated upload size in bytes for current sync operation */
   estimatedUploadSize: number;
+  /** Current background sync frequency setting */
+  syncFrequency: SyncFrequency;
 }
 
 export interface SyncDeferralActions {
@@ -54,6 +65,8 @@ export interface SyncDeferralActions {
   clearForceSync: () => Promise<void>;
   /** Set estimated upload size for the current operation */
   setEstimatedUploadSize: (size: number) => void;
+  /** Set user-configured background sync frequency */
+  setSyncFrequency: (frequency: SyncFrequency) => Promise<void>;
   /** Check if an action should be deferred based on current conditions */
   shouldDeferAction: (actionType: string, isUrgent?: boolean) => { deferred: boolean; reason: DeferralReason };
   /** Get human-readable explanation of current deferral status */
@@ -74,10 +87,12 @@ const defaultValue: SyncDeferralContextValue = {
   forceSyncOverride: false,
   deferralReason: 'none',
   estimatedUploadSize: 0,
+  syncFrequency: 'normal',
   setMeteredOptIn: async () => {},
   forceSync: async () => {},
   clearForceSync: async () => {},
   setEstimatedUploadSize: () => {},
+  setSyncFrequency: async () => {},
   shouldDeferAction: () => ({ deferred: false, reason: 'none' }),
   getDeferralExplanation: () => '',
 };
@@ -97,18 +112,27 @@ export const SyncDeferralProvider: React.FC<React.PropsWithChildren> = ({
   const [meteredOptIn, setMeteredOptInState] = useState<boolean>(false);
   const [forceSyncOverride, setForceSyncOverrideState] = useState<boolean>(false);
   const [estimatedUploadSize, setEstimatedUploadSize] = useState<number>(0);
+  const [syncFrequency, setSyncFrequencyState] = useState<SyncFrequency>('normal');
 
   // -----------------------------------------------------------------------
   // Load persisted preferences
   // -----------------------------------------------------------------------
   useEffect(() => {
     const loadPrefs = async () => {
-      const [optInRaw, forceSyncRaw] = await Promise.all([
+      const [optInRaw, forceSyncRaw, syncFrequencyRaw] = await Promise.all([
         AsyncStorage.getItem(METERED_OPT_IN_KEY),
         AsyncStorage.getItem(FORCE_SYNC_OVERRIDE_KEY),
+        AsyncStorage.getItem(SYNC_FREQUENCY_KEY),
       ]);
       if (optInRaw === 'true') setMeteredOptInState(true);
       if (forceSyncRaw === 'true') setForceSyncOverrideState(true);
+      if (
+        syncFrequencyRaw === 'aggressive' ||
+        syncFrequencyRaw === 'normal' ||
+        syncFrequencyRaw === 'conservative'
+      ) {
+        setSyncFrequencyState(syncFrequencyRaw);
+      }
     };
     void loadPrefs();
   }, []);
@@ -188,6 +212,11 @@ export const SyncDeferralProvider: React.FC<React.PropsWithChildren> = ({
   const setMeteredOptIn = useCallback(async (optIn: boolean) => {
     setMeteredOptInState(optIn);
     await AsyncStorage.setItem(METERED_OPT_IN_KEY, String(optIn));
+  }, []);
+
+  const setSyncFrequency = useCallback(async (frequency: SyncFrequency) => {
+    setSyncFrequencyState(frequency);
+    await AsyncStorage.setItem(SYNC_FREQUENCY_KEY, frequency);
   }, []);
 
   const forceSync = useCallback(async () => {
@@ -276,7 +305,9 @@ export const SyncDeferralProvider: React.FC<React.PropsWithChildren> = ({
       forceSyncOverride,
       deferralReason,
       estimatedUploadSize,
+      syncFrequency,
       setMeteredOptIn,
+      setSyncFrequency,
       forceSync,
       clearForceSync,
       setEstimatedUploadSize,
@@ -291,7 +322,9 @@ export const SyncDeferralProvider: React.FC<React.PropsWithChildren> = ({
       forceSyncOverride,
       deferralReason,
       estimatedUploadSize,
+      syncFrequency,
       setMeteredOptIn,
+      setSyncFrequency,
       forceSync,
       clearForceSync,
       shouldDeferAction,

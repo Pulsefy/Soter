@@ -380,6 +380,38 @@ export class AnalyticsService {
     };
   }
 
+  /**
+   * Return contract aggregates for the dashboard.
+   *
+   * Results are cached in Redis for `CACHE_TTL_SECONDS`.  The cache key
+   * includes the token parameter so different tokens are cached independently.
+   *
+   * @example
+   * GET /analytics/contract-aggregates?token=GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN
+   */
+  async getContractAggregates(
+    query: ContractAggregatesQuery = {},
+  ): Promise<ContractAggregatesDto> {
+    const cacheKey = this.buildCacheKey(
+      'contract-aggregates',
+      query as Record<string, unknown>,
+    );
+
+    const cached = await this.redis.get<ContractAggregatesDto>(cacheKey);
+    if (cached) {
+      this.logger.debug(`Cache hit: ${cacheKey}`);
+      this.metrics.recordAnalyticsCacheResult('contract-aggregates', 'hit');
+      return cached;
+    }
+
+    this.logger.debug(`Cache miss: ${cacheKey} — querying onchain adapter`);
+    this.metrics.recordAnalyticsCacheResult('contract-aggregates', 'miss');
+    const result = await this.computeContractAggregates(query);
+
+    await this.redis.set(cacheKey, result, CACHE_TTL_SECONDS);
+    return result;
+  }
+
   private async computeGlobalStats(
     query: GlobalStatsQuery,
   ): Promise<GlobalStatsDto> {
@@ -559,6 +591,36 @@ export class AnalyticsService {
     });
 
     return { points, computedAt: new Date().toISOString() };
+  }
+
+  private async computeContractAggregates(
+    query: ContractAggregatesQuery,
+  ): Promise<ContractAggregatesDto> {
+    const { token } = query;
+
+    // Use default token if not provided
+    const tokenAddress =
+      token || 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
+
+    this.logger.debug(
+      'Retrieving contract aggregates for token:',
+      tokenAddress,
+    );
+
+    const result = await this.onchainAdapter.getAidPackageCount({
+      token: tokenAddress,
+    });
+
+    this.logger.debug('Contract aggregates retrieved:', {
+      totalCommitted: result.aggregates.totalCommitted,
+      totalClaimed: result.aggregates.totalClaimed,
+    });
+
+    return {
+      aggregates: result.aggregates,
+      tokenAggregates: result.tokenAggregates,
+      timestamp: result.timestamp.toISOString(),
+    };
   }
 
   private buildMetadataFilter(

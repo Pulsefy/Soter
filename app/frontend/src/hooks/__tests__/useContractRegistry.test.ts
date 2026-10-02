@@ -136,6 +136,34 @@ describe('useContractRegistry (real registry artifact)', () => {
     expect(result.current.error).toBeInstanceOf(Error);
   });
 
+  it('resolves a contract/network pair from a deployed contract ID via findByContractId', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(realGeneratorRegistry),
+    });
+
+    const { result } = renderHook(() => useContractRegistry(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('ready');
+    });
+
+    expect(
+      result.current.findByContractId(
+        'CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG',
+      ),
+    ).toEqual({
+      name: 'aid_escrow',
+      network: 'testnet',
+      deployment: realGeneratorRegistry.contracts.aid_escrow.networks.testnet,
+    });
+
+    expect(result.current.findByContractId('C_UNKNOWN')).toBeNull();
+    expect(result.current.findByContractId('')).toBeNull();
+  });
+
   it('reports error state for a malformed (non-generator) payload', async () => {
     // Simulates the registry artifact drifting: contracts entry missing
     mockFetch.mockResolvedValue({

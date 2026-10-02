@@ -12,6 +12,10 @@ import { getCacheTTL } from '../common/config/cache.config';
 import { GlobalStatsDto } from './dto';
 import { ClaimStatus } from '@prisma/client';
 import { mockDeep, DeepMockProxy } from 'jest-mock-extended';
+import {
+  OnchainAdapter,
+  ONCHAIN_ADAPTER_TOKEN,
+} from '../onchain/onchain.adapter';
 
 describe('AnalyticsService', () => {
   const TOKEN = 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
@@ -287,6 +291,69 @@ describe('AnalyticsService', () => {
       expect(
         metricsMock.incrementAnalyticsCacheInvalidation,
       ).toHaveBeenCalledWith('campaign_updated');
+    });
+  });
+
+  describe('getContractAggregates()', () => {
+    it('returns cached value and records cache hit', async () => {
+      const cached = {
+        aggregates: {
+          totalCommitted: '5000000000',
+          totalClaimed: '2000000000',
+          totalExpiredCancelled: '500000000',
+        },
+        timestamp: '2026-03-30T12:30:00.000Z',
+      } as any;
+      redisMock.get.mockResolvedValue(cached);
+
+      const result = await service.getContractAggregates({});
+
+      expect(result).toBe(cached);
+      expect(metricsMock.recordAnalyticsCacheResult).toHaveBeenCalledWith(
+        'contract-aggregates',
+        'hit',
+      );
+      expect(onchainAdapterMock.getAidPackageCount).not.toHaveBeenCalled();
+    });
+
+    it('computes and caches on miss, records cache miss', async () => {
+      redisMock.get.mockResolvedValue(null);
+      onchainAdapterMock.getAidPackageCount.mockResolvedValue({
+        aggregates: {
+          totalCommitted: '5000000000',
+          totalClaimed: '2000000000',
+          totalExpiredCancelled: '500000000',
+        },
+        timestamp: new Date(),
+      });
+
+      await service.getContractAggregates({});
+
+      expect(metricsMock.recordAnalyticsCacheResult).toHaveBeenCalledWith(
+        'contract-aggregates',
+        'miss',
+      );
+      expect(onchainAdapterMock.getAidPackageCount).toHaveBeenCalled();
+      expect(redisMock.set).toHaveBeenCalled();
+    });
+
+    it('uses provided token parameter', async () => {
+      redisMock.get.mockResolvedValue(null);
+      onchainAdapterMock.getAidPackageCount.mockResolvedValue({
+        aggregates: {
+          totalCommitted: '5000000000',
+          totalClaimed: '2000000000',
+          totalExpiredCancelled: '500000000',
+        },
+        timestamp: new Date(),
+      });
+
+      const token = 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
+      await service.getContractAggregates({ token });
+
+      expect(onchainAdapterMock.getAidPackageCount).toHaveBeenCalledWith({
+        token,
+      });
     });
   });
 });
