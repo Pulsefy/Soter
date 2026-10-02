@@ -22,6 +22,8 @@ import {
   GetAidPackageResult,
   GetAidPackageCountParams,
   GetAidPackageCountResult,
+  GetCampaignTokenTotalsParams,
+  GetCampaignTokenTotalsResult,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
   ContractMetadata,
@@ -183,7 +185,7 @@ export class MockOnchainAdapter implements OnchainAdapter {
       expiresAt: params.expiresAt,
       claimedAmount: '0',
       remainingAmount: params.amount,
-      metadata: {},
+      metadata: params.metadata ?? {},
     };
     this.mockPackages.set(params.packageId, pkg);
 
@@ -480,6 +482,45 @@ export class MockOnchainAdapter implements OnchainAdapter {
         totalCommitted: '5000000000',
         totalClaimed: '2000000000',
         totalExpiredCancelled: '500000000',
+      },
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Per-campaign, per-token totals derived from the packages this mock has
+   * created. Packages carry their `campaign_ref` in metadata, so a mock
+   * campaign created through `createAidPackage` participates in reconciliation
+   * exactly like a real one.
+   */
+  async getCampaignTokenTotals(
+    params: GetCampaignTokenTotalsParams,
+  ): Promise<GetCampaignTokenTotalsResult> {
+    await Promise.resolve();
+
+    let totalLocked = BigInt(0);
+    let totalClaimed = BigInt(0);
+
+    for (const pkg of this.mockPackages.values()) {
+      if (pkg.token !== params.tokenAddress) {
+        continue;
+      }
+      if (pkg.metadata.campaign_ref !== params.campaignRef) {
+        continue;
+      }
+
+      totalClaimed += BigInt(pkg.claimedAmount || '0');
+      if (pkg.status === 'Created') {
+        totalLocked += BigInt(pkg.remainingAmount || pkg.amount || '0');
+      }
+    }
+
+    return {
+      totals: {
+        campaignRef: params.campaignRef,
+        tokenAddress: params.tokenAddress,
+        totalLocked: totalLocked.toString(),
+        totalClaimed: totalClaimed.toString(),
       },
       timestamp: new Date(),
     };

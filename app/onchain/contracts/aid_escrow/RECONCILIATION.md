@@ -153,3 +153,34 @@ The event stream (see `EVENTS.md`) is the primary, low-latency way the backend
 keeps its cache fresh. Reconciliation is the **safety net** that catches missed
 or mis-applied events (dropped subscriptions, reorgs, indexing bugs) by
 periodically comparing the derived cache against authoritative contract reads.
+
+## Backend implementation: BalanceLedger vs on-chain totals
+
+The backend implements the locked-total comparison for the off-chain
+`BalanceLedger`:
+
+- **Read path** — `OnchainAdapter.getCampaignTokenTotals({ campaignRef, token })`
+  reads `get_campaign_token_locked` and `get_campaign_token_claimed`, the
+  per-campaign counterparts to `get_total_locked` / `get_total_claimed` (and
+  therefore to `get_aggregates`). `get_aggregates(token)` remains the token-wide
+  read used elsewhere; a campaign-scoped comparison needs the scoped reads
+  because a single token can back several campaigns.
+- **Comparison** — `LedgerReconciliationService.reconcileBalances()` sums the
+  campaign's `BalanceLedger.amount` rows (the running sum the schema documents
+  as the current locked balance) and compares it with the on-chain locked total,
+  per campaign/token. Campaign/token pairs are derived from the token address
+  recorded on the campaign's Soroban transactions, or supplied explicitly via
+  `LEDGER_RECONCILIATION_CAMPAIGNS`.
+- **Tolerance** — a discrepancy is only reported when `|actual - expected|`
+  exceeds `max(LEDGER_RECONCILIATION_TOLERANCE_ABSOLUTE, expected *
+  LEDGER_RECONCILIATION_TOLERANCE_PERCENT / 100)`.
+- **Reporting** — every discrepancy carries campaign, token, expected (on-chain),
+  actual (ledger), difference, tolerance and severity; it is emitted as a
+  `logger.warn` and a `ledger_reconciliation_discrepancy_total` metric, and
+  persisted as an immutable `AuditLog` entry (`LedgerBalanceReconciliation`)
+  when the pass is not a dry run.
+- **Scheduling and on-demand** — an hourly `@Cron` job runs the pass
+  (`LEDGER_RECONCILIATION_CRON` overrides the schedule). Admins can trigger it
+  on demand via `POST /api/v1/admin/ledger/reconcile/balances` (`dryRun: true`
+  reports without persisting) and read the last report from
+  `GET /api/v1/admin/ledger/reconcile/balances/latest`.

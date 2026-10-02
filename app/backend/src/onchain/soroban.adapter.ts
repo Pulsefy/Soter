@@ -32,6 +32,8 @@ import {
   GetAidPackageResult,
   GetAidPackageCountParams,
   GetAidPackageCountResult,
+  GetCampaignTokenTotalsParams,
+  GetCampaignTokenTotalsResult,
   AidPackage,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
@@ -683,6 +685,51 @@ export class SorobanAdapter implements OnchainAdapter {
         totalCommitted: String(data.total_committed ?? '0'),
         totalClaimed: String(data.total_claimed ?? '0'),
         totalExpiredCancelled: String(data.total_expired_cancelled ?? '0'),
+      },
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Per-campaign, per-token totals: the contract's `campaign_ref`-scoped
+   * counterparts to `get_aggregates`. A token can back several campaigns, so a
+   * campaign-scoped reconciliation needs these reads rather than the token-wide
+   * aggregate.
+   */
+  async getCampaignTokenTotals(
+    params: GetCampaignTokenTotalsParams,
+  ): Promise<GetCampaignTokenTotalsResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(
+      `[${cid}] getCampaignTokenTotals campaign=${params.campaignRef} token=${params.tokenAddress}`,
+    );
+
+    const [locked, claimed] = await Promise.all([
+      this.simulateReadOnly(
+        'get_campaign_token_locked',
+        [
+          this.scvString(params.campaignRef),
+          this.scvAddress(params.tokenAddress),
+        ],
+        cid,
+      ),
+      this.simulateReadOnly(
+        'get_campaign_token_claimed',
+        [
+          this.scvString(params.campaignRef),
+          this.scvAddress(params.tokenAddress),
+        ],
+        cid,
+      ),
+    ]);
+
+    return {
+      totals: {
+        campaignRef: params.campaignRef,
+        tokenAddress: params.tokenAddress,
+        totalLocked: String(locked ?? '0'),
+        totalClaimed: String(claimed ?? '0'),
       },
       timestamp: new Date(),
     };

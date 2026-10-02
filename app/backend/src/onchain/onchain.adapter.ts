@@ -138,6 +138,27 @@ export interface GetAidPackageCountResult {
   timestamp: Date;
 }
 
+export interface GetCampaignTokenTotalsParams {
+  /** Off-chain campaign id, passed to the contract as its `campaign_ref`. */
+  campaignRef: string;
+  /** Token address (SAC id) the campaign's packages were funded in. */
+  tokenAddress: string;
+}
+
+export interface CampaignTokenTotals {
+  campaignRef: string;
+  tokenAddress: string;
+  /** Amount the contract still considers locked for the campaign/token. */
+  totalLocked: string;
+  /** Cumulative amount claimed for the campaign/token. */
+  totalClaimed: string;
+}
+
+export interface GetCampaignTokenTotalsResult {
+  totals: CampaignTokenTotals;
+  timestamp: Date;
+}
+
 export interface GetTokenBalanceParams {
   tokenAddress: string;
   accountAddress: string;
@@ -401,6 +422,18 @@ export interface OnchainAdapter {
   getAidPackageCount(
     params: GetAidPackageCountParams,
   ): Promise<GetAidPackageCountResult>;
+
+  /**
+   * Optional per-campaign, per-token locked/claimed totals.
+   *
+   * `getAidPackageCount` returns token-wide totals summed across every
+   * campaign; this narrower read is the counterpart used to reconcile a single
+   * campaign's off-chain `BalanceLedger` against the contract. Implemented by
+   * every shipped adapter, optional so external test doubles stay valid.
+   */
+  getCampaignTokenTotals?(
+    params: GetCampaignTokenTotalsParams,
+  ): Promise<GetCampaignTokenTotalsResult>;
 
   /**
    * Get token balance for a specific account

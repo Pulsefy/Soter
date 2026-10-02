@@ -339,6 +339,92 @@ export class LedgerAdminController {
     );
   }
 
+  @Post('reconcile/balances')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reconcile BalanceLedger totals against on-chain totals',
+    description:
+      'Compares the off-chain BalanceLedger net total for each campaign/token ' +
+      'against the contract locked total and reports discrepancies beyond the ' +
+      'configured tolerance. Read-only: it never corrects data. Pass ' +
+      '`dryRun: true` to inspect the report without persisting an audit trail ' +
+      'or emitting discrepancy metrics.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        dryRun: {
+          type: 'boolean',
+          description: 'Report only, without persisting discrepancies.',
+        },
+        campaignId: {
+          type: 'string',
+          description: 'Restrict the pass to a single campaign.',
+        },
+        tokenAddress: {
+          type: 'string',
+          description: 'Restrict the pass to a single token address.',
+        },
+        tolerancePercent: {
+          type: 'number',
+          description: 'Relative tolerance as a percent of the on-chain total.',
+        },
+        toleranceAbsolute: {
+          type: 'string',
+          description: 'Absolute tolerance floor in stroops.',
+        },
+        campaigns: {
+          type: 'array',
+          description: 'Explicit campaign/token pairs to check.',
+          items: {
+            type: 'object',
+            properties: {
+              campaignId: { type: 'string' },
+              tokenAddress: { type: 'string' },
+            },
+            required: ['campaignId', 'tokenAddress'],
+          },
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Balance reconciliation report generated successfully.',
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid request parameters.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - admin role required.',
+  })
+  async triggerBalanceReconciliation(
+    @Body()
+    body: {
+      dryRun?: boolean;
+      campaignId?: string;
+      tokenAddress?: string;
+      tolerancePercent?: number;
+      toleranceAbsolute?: string;
+      campaigns?: Array<{ campaignId: string; tokenAddress: string }>;
+    } = {},
+  ) {
+    return this.reconciliationService.reconcileBalances({
+      dryRun: body.dryRun === true,
+      source: 'manual',
+      campaignId: body.campaignId,
+      tokenAddress: body.tokenAddress,
+      tolerancePercent: body.tolerancePercent,
+      toleranceAbsolute: body.toleranceAbsolute,
+      campaigns: body.campaigns,
+    });
+  }
+
   @Get('reconcile/:jobId')
   @Version('1')
   @Roles(AppRole.admin)
@@ -367,6 +453,35 @@ export class LedgerAdminController {
       throw new Error('Job not found');
     }
     return status;
+  }
+
+  @Get('reconcile/balances/latest')
+  @Version('1')
+  @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'Get the latest balance reconciliation report',
+    description:
+      'Returns the most recent BalanceLedger-vs-on-chain reconciliation ' +
+      'report produced by this instance, whether scheduled or manual.',
+  })
+  @ApiOkResponse({
+    description: 'Latest balance reconciliation report retrieved successfully.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Unauthorized - valid JWT token required.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - admin role required.',
+  })
+  async getLatestBalanceReconciliation() {
+    const report =
+      this.reconciliationService.getLastBalanceReconciliationReport();
+    if (!report) {
+      throw new Error(
+        'No balance reconciliation report has been generated yet',
+      );
+    }
+    return report;
   }
 
   @Get('soroban/stuck')

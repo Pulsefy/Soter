@@ -22,6 +22,8 @@ import {
   GetAidPackageResult,
   GetAidPackageCountParams,
   GetAidPackageCountResult,
+  GetCampaignTokenTotalsParams,
+  GetCampaignTokenTotalsResult,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
   CreateClaimParams,
@@ -312,6 +314,33 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
         totalCommitted: readString(agg.total_committed, '0'),
         totalClaimed: readString(agg.total_claimed, '0'),
         totalExpiredCancelled: readString(agg.total_expired_cancelled, '0'),
+      },
+      timestamp: new Date(),
+    };
+  }
+
+  async getCampaignTokenTotals(
+    params: GetCampaignTokenTotalsParams,
+  ): Promise<GetCampaignTokenTotalsResult> {
+    const campaignRef = params.campaignRef;
+    const [locked, claimed] = await Promise.all([
+      rpcCall(this.http, this.rpcUrl, 'getContractData', {
+        contractId: this.contractId,
+        key: 'campaign_token_locked_' + campaignRef + '_' + params.tokenAddress,
+      }),
+      rpcCall(this.http, this.rpcUrl, 'getContractData', {
+        contractId: this.contractId,
+        key:
+          'campaign_token_claimed_' + campaignRef + '_' + params.tokenAddress,
+      }),
+    ]);
+
+    return {
+      totals: {
+        campaignRef,
+        tokenAddress: params.tokenAddress,
+        totalLocked: readString(locked, '0'),
+        totalClaimed: readString(claimed, '0'),
       },
       timestamp: new Date(),
     };
