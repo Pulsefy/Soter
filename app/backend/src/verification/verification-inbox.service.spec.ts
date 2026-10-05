@@ -43,6 +43,34 @@ describe('VerificationInboxService', () => {
     service = module.get<VerificationInboxService>(VerificationInboxService);
   });
 
+  describe('getInbox()', () => {
+    it('queries active requests by status in newest-first order', async () => {
+      prismaMock.verificationRequest.findMany.mockResolvedValue([
+        baseVerification,
+      ]);
+      prismaMock.verificationRequest.count.mockResolvedValue(1);
+      prismaMock.reviewLock.findMany.mockResolvedValue([]);
+
+      await service.getInbox('pending_review', 2, 10);
+
+      expect(prismaMock.verificationRequest.findMany).toHaveBeenCalledWith({
+        where: {
+          deletedAt: null,
+          status: 'pending_review',
+        },
+        skip: 10,
+        take: 10,
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(prismaMock.verificationRequest.count).toHaveBeenCalledWith({
+        where: {
+          deletedAt: null,
+          status: 'pending_review',
+        },
+      });
+    });
+  });
+
   describe('updateStatus()', () => {
     it('throws NotFoundException when verification not found', async () => {
       prismaMock.verificationRequest.findUnique.mockResolvedValue(null);
