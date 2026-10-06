@@ -11,6 +11,8 @@ import { EncryptionModule } from '../common/encryption/encryption.module';
 import { BudgetService } from '../common/budget/budget.service';
 import { CommonServicesModule } from '../common/services/common-services.module';
 import { VerificationModule } from '../verification/verification.module';
+import { DisbursementIdempotencyService } from './disbursement-idempotency.service';
+import { DisbursementReconciliationService } from './disbursement-reconciliation.service';
 
 @Module({
   imports: [
@@ -24,7 +26,13 @@ import { VerificationModule } from '../verification/verification.module';
     VerificationModule,
   ],
   controllers: [ClaimsController],
-  providers: [ClaimsService, CancelAndReissueService, BudgetService],
-  exports: [CancelAndReissueService],
+  providers: [
+    ClaimsService,
+    CancelAndReissueService,
+    BudgetService,
+    DisbursementIdempotencyService,
+    DisbursementReconciliationService,
+  ],
+  exports: [CancelAndReissueService, DisbursementIdempotencyService],
 })
 export class ClaimsModule {}
