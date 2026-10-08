@@ -1,7 +1,7 @@
 import { ConflictException, NotImplementedException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getQueueToken } from '@nestjs/bullmq';
-import { LedgerBackfillService } from './ledger-backfill.service';
+import { DryRunResult, LedgerBackfillService } from './ledger-backfill.service';
 import { StellarLedgerSource } from './stellar-ledger-source';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -196,6 +196,102 @@ describe('LedgerBackfillService', () => {
       expect(result.status).toBe('completed');
       expect(result.processedCount).toBe(1001);
       expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── triggerBackfill (dryRun) ───────────────────────────────────────────────
+
+  describe('triggerBackfill with dryRun', () => {
+    it('reports what would happen without creating a checkpoint or enqueuing a job', async () => {
+      mockPrisma.balanceLedger.findMany.mockResolvedValue([]);
+
+      const result = await service.triggerBackfill(
+        1000,
+        2000,
+        undefined,
+        100,
+        undefined,
+        true,
+      );
+
+      expect(mockPrisma.backfillCheckpoint.create).not.toHaveBeenCalled();
+      expect(mockPrisma.backfillCheckpoint.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.balanceLedger.create).not.toHaveBeenCalled();
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        dryRun: true,
+        jobKey: 'backfill:1000:2000',
+        startLedger: 1000,
+        endLedger: 2000,
+        totalCount: 1001,
+      });
+    });
+
+    it('reuses the same detection logic as a real run to compute counts and a sample', async () => {
+      mockPrisma.balanceLedger.findMany.mockResolvedValue([{ id: 'led_1' }]);
+      mockLedgerSource.fetchLedgerEntries.mockResolvedValue([
+        makeEntry({ id: 'led_1', eventType: 'lock', amount: 100 }),
+        makeEntry({ id: 'led_2', eventType: 'disburse', amount: 50 }),
+      ]);
+
+      const result = (await service.triggerBackfill(
+        1,
+        1,
+        'camp_1',
+        100,
+        undefined,
+        true,
+      )) as DryRunResult;
+
+      expect(mockPrisma.balanceLedger.create).not.toHaveBeenCalled();
+      expect(result.wouldCreateCount).toBe(1);
+      expect(result.wouldSkipCount).toBe(1);
+      expect(result.unattributableCount).toBe(0);
+      expect(result.byEntityType).toEqual({
+        lock: { toCreate: 0, toSkip: 1, unattributable: 0 },
+        disburse: { toCreate: 1, toSkip: 0, unattributable: 0 },
+      });
+      expect(result.sample).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'led_1', action: 'skip' }),
+          expect.objectContaining({
+            id: 'led_2',
+            action: 'create',
+            txHash: 'abc123',
+          }),
+        ]),
+      );
+    });
+
+    it('flags entries a real run would refuse to store when no campaignId is given', async () => {
+      mockPrisma.balanceLedger.findMany.mockResolvedValue([]);
+      mockLedgerSource.fetchLedgerEntries.mockResolvedValue([
+        makeEntry({ id: 'led_3' }),
+      ]);
+
+      const result = (await service.triggerBackfill(
+        1,
+        1,
+        undefined,
+        100,
+        undefined,
+        true,
+      )) as DryRunResult;
+
+      expect(result.wouldCreateCount).toBe(0);
+      expect(result.unattributableCount).toBe(1);
+      expect(result.sample[0]).toMatchObject({
+        id: 'led_3',
+        action: 'unattributable',
+      });
+    });
+
+    it('refuses a dry run when no live on-chain source is configured', async () => {
+      mockLedgerSource.isEnabled.mockReturnValue(false);
+
+      await expect(
+        service.triggerBackfill(1, 1, 'camp_1', 100, undefined, true),
+      ).rejects.toThrow(NotImplementedException);
     });
   });
 
