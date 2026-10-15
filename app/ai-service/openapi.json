@@ -421,8 +421,138 @@
         "title": "BatchOCRSummary",
         "type": "object"
       },
+      "Body_process_multipage_ocr_ai_ocr_multi_page_post": {
+        "properties": {
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Logical document identifier grouping the pages",
+            "title": "Document Id"
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional document type (e.g. id_card, passport) used to pick a per-document-type review threshold",
+            "title": "Document Type"
+          },
+          "language_hint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LanguageHint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Language hint for OCR"
+          },
+          "pages": {
+            "description": "Two or more page images belonging to one logical document",
+            "items": {
+              "format": "binary",
+              "type": "string"
+            },
+            "title": "Pages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pages"
+        ],
+        "title": "Body_process_multipage_ocr_ai_ocr_multi_page_post",
+        "type": "object"
+      },
+      "Body_process_multipage_ocr_v1_ai_ocr_multi_page_post": {
+        "properties": {
+          "anchor_metadata": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "JSON encoded AnchorMetadata",
+            "title": "Anchor Metadata"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Logical document identifier grouping the pages",
+            "title": "Document Id"
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional document type (e.g. id_card, passport) used to pick a per-document-type review threshold",
+            "title": "Document Type"
+          },
+          "language_hint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LanguageHint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Language hint for OCR"
+          },
+          "pages": {
+            "description": "Two or more page images belonging to one logical document",
+            "items": {
+              "format": "binary",
+              "type": "string"
+            },
+            "title": "Pages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pages"
+        ],
+        "title": "Body_process_multipage_ocr_v1_ai_ocr_multi_page_post",
+        "type": "object"
+      },
       "Body_process_ocr_ai_ocr_post": {
         "properties": {
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Logical document identifier grouping the pages",
+            "title": "Document Id"
+          },
           "document_type": {
             "anyOf": [
               {
@@ -436,10 +566,17 @@
             "title": "Document Type"
           },
           "image": {
-            "description": "Image file to process",
-            "format": "binary",
-            "title": "Image",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "binary",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Single image file to process",
+            "title": "Image"
           },
           "language_hint": {
             "anyOf": [
@@ -451,11 +588,18 @@
               }
             ],
             "description": "Language hint for OCR"
+          },
+          "pages": {
+            "default": [],
+            "description": "Multiple page images belonging to one logical document",
+            "items": {
+              "format": "binary",
+              "type": "string"
+            },
+            "title": "Pages",
+            "type": "array"
           }
         },
-        "required": [
-          "image"
-        ],
         "title": "Body_process_ocr_ai_ocr_post",
         "type": "object"
       },
@@ -473,6 +617,18 @@
             "description": "JSON encoded AnchorMetadata",
             "title": "Anchor Metadata"
           },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Logical document identifier grouping the pages",
+            "title": "Document Id"
+          },
           "document_type": {
             "anyOf": [
               {
@@ -486,10 +642,17 @@
             "title": "Document Type"
           },
           "image": {
-            "description": "Image file to process",
-            "format": "binary",
-            "title": "Image",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "binary",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Single image file to process",
+            "title": "Image"
           },
           "language_hint": {
             "anyOf": [
@@ -501,11 +664,18 @@
               }
             ],
             "description": "Language hint for OCR"
+          },
+          "pages": {
+            "default": [],
+            "description": "Multiple page images belonging to one logical document",
+            "items": {
+              "format": "binary",
+              "type": "string"
+            },
+            "title": "Pages",
+            "type": "array"
           }
         },
-        "required": [
-          "image"
-        ],
         "title": "Body_process_ocr_v1_ai_ocr_post",
         "type": "object"
       },
@@ -564,6 +734,18 @@
             "description": "JSON encoded AnchorMetadata",
             "title": "Anchor Metadata"
           },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Logical document identifier grouping the pages",
+            "title": "Document Id"
+          },
           "document_type": {
             "anyOf": [
               {
@@ -577,10 +759,17 @@
             "title": "Document Type"
           },
           "image": {
-            "description": "Image file to process",
-            "format": "binary",
-            "title": "Image",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "binary",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Single image file to process",
+            "title": "Image"
           },
           "language_hint": {
             "anyOf": [
@@ -592,11 +781,18 @@
               }
             ],
             "description": "Language hint for OCR"
+          },
+          "pages": {
+            "default": [],
+            "description": "Multiple page images belonging to one logical document",
+            "items": {
+              "format": "binary",
+              "type": "string"
+            },
+            "title": "Pages",
+            "type": "array"
           }
         },
-        "required": [
-          "image"
-        ],
         "title": "Body_queue_ocr_job_v1_ai_ocr_jobs_post",
         "type": "object"
       },
@@ -1454,20 +1650,24 @@
           {
             "confidence": 0.925,
             "confidence_band": "high",
+            "document_id": "doc-12345",
             "document_type": "id_card",
             "fields": {
               "full_name": {
                 "confidence": 0.95,
+                "page": 1,
                 "value": "John Doe"
               },
               "id_number": {
                 "confidence": 0.9,
+                "page": 2,
                 "value": "123456789"
               }
             },
             "needs_review": false,
+            "page_count": 2,
             "processing_time_ms": 1500,
-            "raw_text": "John Doe\nID: 123456789",
+            "raw_text": "--- Page 1 ---\nJohn Doe\n\n--- Page 2 ---\nID: 123456789",
             "review_threshold": 0.75
           }
         ],
@@ -1503,6 +1703,39 @@
               "high"
             ]
           },
+          "conflicts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "$ref": "#/components/schemas/OCRFieldResult"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conflicting field extractions across pages. When present, the primary extraction in `fields` was chosen by highest confidence, and all differing extractions are retained here for auditing.",
+            "title": "Conflicts"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Logical document identifier grouping the pages",
+            "examples": [
+              "doc-12345"
+            ],
+            "title": "Document Id"
+          },
           "document_type": {
             "anyOf": [
               {
@@ -1526,10 +1759,12 @@
               {
                 "full_name": {
                   "confidence": 0.95,
+                  "page": 1,
                   "value": "John Doe"
                 },
                 "id_number": {
                   "confidence": 0.9,
+                  "page": 2,
                   "value": "123456789"
                 }
               }
@@ -1545,6 +1780,37 @@
             ],
             "title": "Needs Review",
             "type": "boolean"
+          },
+          "page_count": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total number of pages processed in this document",
+            "examples": [
+              2
+            ],
+            "title": "Page Count"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/OCRPageData"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-page breakdown of raw text and extracted fields",
+            "title": "Pages"
           },
           "processing_time_ms": {
             "examples": [
@@ -1590,6 +1856,7 @@
         "examples": [
           {
             "confidence": 0.95,
+            "page": 1,
             "value": "John Doe"
           }
         ],
@@ -1601,6 +1868,21 @@
             ],
             "title": "Confidence",
             "type": "number"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1-based page number where the field was extracted",
+            "examples": [
+              1
+            ],
+            "title": "Page"
           },
           "value": {
             "examples": [
@@ -1614,6 +1896,50 @@
           "value"
         ],
         "title": "OCRFieldResult",
+        "type": "object"
+      },
+      "OCRPageData": {
+        "description": "Per-page breakdown of raw text and extracted fields.",
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean confidence across fields detected on this page",
+            "title": "Confidence"
+          },
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OCRFieldResult"
+            },
+            "description": "Fields extracted from this page",
+            "title": "Fields",
+            "type": "object"
+          },
+          "page": {
+            "description": "1-based page number",
+            "examples": [
+              1
+            ],
+            "title": "Page",
+            "type": "integer"
+          },
+          "raw_text": {
+            "description": "Raw text extracted from this page",
+            "title": "Raw Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page",
+          "raw_text"
+        ],
+        "title": "OCRPageData",
         "type": "object"
       },
       "OCRResponse": {
@@ -2769,7 +3095,53 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_process_ocr_ai_ocr_post"
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Body_process_ocr_ai_ocr_post"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OCRResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Process Ocr",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/ai/ocr/multi-page": {
+      "post": {
+        "description": "Extract and aggregate text fields across multiple pages of a single logical document.",
+        "operationId": "process_multipage_ocr_ai_ocr_multi_page_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_process_multipage_ocr_ai_ocr_multi_page_post"
               }
             }
           },
@@ -2797,7 +3169,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Process Ocr",
+        "summary": "Process Multipage Ocr",
         "tags": [
           "ai"
         ]
@@ -3702,17 +4074,21 @@
     },
     "/v1/ai/ocr": {
       "post": {
-        "description": "Extract text fields from an uploaded document image.",
+        "description": "Extract text fields from an uploaded document image (single or multi-page).",
         "operationId": "process_ocr_v1_ai_ocr_post",
         "requestBody": {
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_process_ocr_v1_ai_ocr_post"
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Body_process_ocr_v1_ai_ocr_post"
+                  }
+                ],
+                "title": "Body"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -3881,17 +4257,21 @@
     },
     "/v1/ai/ocr/jobs": {
       "post": {
-        "description": "Queue OCR processing and return immediately with a pollable job URL.",
+        "description": "Queue OCR processing (single or multi-page) and return immediately with a pollable job URL.",
         "operationId": "queue_ocr_job_v1_ai_ocr_jobs_post",
         "requestBody": {
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_queue_ocr_job_v1_ai_ocr_jobs_post"
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Body_queue_ocr_job_v1_ai_ocr_jobs_post"
+                  }
+                ],
+                "title": "Body"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "202": {
@@ -3916,6 +4296,48 @@
           }
         },
         "summary": "Queue Ocr Job",
+        "tags": [
+          "ocr"
+        ]
+      }
+    },
+    "/v1/ai/ocr/multi-page": {
+      "post": {
+        "description": "Extract and aggregate text fields across multiple pages of a single logical document.",
+        "operationId": "process_multipage_ocr_v1_ai_ocr_multi_page_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_process_multipage_ocr_v1_ai_ocr_multi_page_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnvelope_OCRData_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Process Multipage Ocr",
         "tags": [
           "ocr"
         ]

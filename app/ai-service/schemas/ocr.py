@@ -108,18 +108,49 @@ class OCRConfidenceBand(str, Enum):
 class OCRFieldResult(BaseModel):
     value: str = Field(examples=["John Doe"])
     confidence: float = Field(0.0, examples=[0.95])
+    page: Optional[int] = Field(
+        None,
+        description="1-based page number where the field was extracted",
+        examples=[1],
+    )
 
     model_config = {
-        "json_schema_extra": {"examples": [{"value": "John Doe", "confidence": 0.95}]}
+        "json_schema_extra": {
+            "examples": [{"value": "John Doe", "confidence": 0.95, "page": 1}]
+        }
     }
 
 
+class OCRPageData(BaseModel):
+    """Per-page breakdown of raw text and extracted fields."""
+
+    page: int = Field(description="1-based page number", examples=[1])
+    raw_text: str = Field(description="Raw text extracted from this page")
+    fields: dict[str, OCRFieldResult] = Field(
+        default_factory=dict, description="Fields extracted from this page"
+    )
+    confidence: Optional[float] = Field(
+        None, description="Mean confidence across fields detected on this page"
+    )
+
+
 class OCRData(BaseModel):
+    document_id: Optional[str] = Field(
+        None,
+        description="Logical document identifier grouping the pages",
+        examples=["doc-12345"],
+    )
+    page_count: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Total number of pages processed in this document",
+        examples=[2],
+    )
     fields: dict[str, OCRFieldResult] = Field(
         examples=[
             {
-                "full_name": {"value": "John Doe", "confidence": 0.95},
-                "id_number": {"value": "123456789", "confidence": 0.90},
+                "full_name": {"value": "John Doe", "confidence": 0.95, "page": 1},
+                "id_number": {"value": "123456789", "confidence": 0.90, "page": 2},
             }
         ]
     )
@@ -164,16 +195,38 @@ class OCRData(BaseModel):
         description="Document type used to select the review threshold, when supplied.",
         examples=["id_card"],
     )
+    conflicts: Optional[dict[str, list[OCRFieldResult]]] = Field(
+        None,
+        description=(
+            "Conflicting field extractions across pages. When present, the "
+            "primary extraction in `fields` was chosen by highest confidence, "
+            "and all differing extractions are retained here for auditing."
+        ),
+    )
+    pages: Optional[list[OCRPageData]] = Field(
+        None,
+        description="Per-page breakdown of raw text and extracted fields",
+    )
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
+                    "document_id": "doc-12345",
+                    "page_count": 2,
                     "fields": {
-                        "full_name": {"value": "John Doe", "confidence": 0.95},
-                        "id_number": {"value": "123456789", "confidence": 0.90},
+                        "full_name": {
+                            "value": "John Doe",
+                            "confidence": 0.95,
+                            "page": 1,
+                        },
+                        "id_number": {
+                            "value": "123456789",
+                            "confidence": 0.90,
+                            "page": 2,
+                        },
                     },
-                    "raw_text": "John Doe\nID: 123456789",
+                    "raw_text": "--- Page 1 ---\nJohn Doe\n\n--- Page 2 ---\nID: 123456789",
                     "processing_time_ms": 1500,
                     "confidence": 0.925,
                     "confidence_band": "high",

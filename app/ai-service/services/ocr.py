@@ -20,6 +20,7 @@ from services.providers import ProviderRegistry, OCRField, OCRResponse
 class FieldMatch:
     value: str
     confidence: float
+    page: Optional[int] = None
 
 
 @dataclass
@@ -27,6 +28,28 @@ class OCRResult:
     fields: dict[str, FieldMatch]
     raw_text: str
     processing_time_ms: int
+    provider: Optional[str] = None
+
+
+@dataclass
+class PageOCRResult:
+    page: int
+    fields: dict[str, FieldMatch]
+    raw_text: str
+    processing_time_ms: int
+    confidence: Optional[float] = None
+
+
+@dataclass
+class MultiPageOCRResult:
+    fields: dict[str, FieldMatch]
+    raw_text: str
+    processing_time_ms: int
+    document_id: Optional[str] = None
+    page_count: int = 1
+    conflicts: Optional[dict[str, list[FieldMatch]]] = None
+    conflict_reasons: Optional[list[str]] = None
+    pages: Optional[list[PageOCRResult]] = None
     provider: Optional[str] = None
 
 
@@ -149,4 +172,119 @@ class OCRService:
         raise ProviderExhaustedError(
             "All OCR providers were attempted and exhausted: " + " | ".join(errors),
             details={"attempted": errors},
+        )
+
+    def process_document_pages(
+        self,
+        pages: List[Image.Image],
+        document_id: Optional[str] = None,
+        language_hint: Optional[str] = None,
+    ) -> MultiPageOCRResult:
+        if not pages:
+            return MultiPageOCRResult(
+                fields={},
+                raw_text="",
+                processing_time_ms=0,
+                document_id=document_id,
+                page_count=0,
+            )
+
+        page_results: List[PageOCRResult] = []
+        total_processing_time_ms = 0
+        last_provider: Optional[str] = None
+
+        # Extract fields per page
+        for idx, page_img in enumerate(pages):
+            page_num = idx + 1
+            result = self.process_image(page_img, language_hint=language_hint)
+            total_processing_time_ms += result.processing_time_ms
+            if result.provider:
+                last_provider = result.provider
+
+            # Attribute each extracted field to this page
+            page_fields: Dict[str, FieldMatch] = {}
+            for fname, fmatch in result.fields.items():
+                page_fields[fname] = FieldMatch(
+                    value=fmatch.value,
+                    confidence=fmatch.confidence,
+                    page=page_num,
+                )
+
+            page_conf = (
+                round(
+                    sum(f.confidence for f in page_fields.values()) / len(page_fields),
+                    4,
+                )
+                if page_fields
+                else None
+            )
+
+            page_results.append(
+                PageOCRResult(
+                    page=page_num,
+                    fields=page_fields,
+                    raw_text=result.raw_text,
+                    processing_time_ms=result.processing_time_ms,
+                    confidence=page_conf,
+                )
+            )
+
+        # Aggregate fields across pages
+        field_occurrences: Dict[str, List[FieldMatch]] = {}
+        for pr in page_results:
+            for fname, fmatch in pr.fields.items():
+                field_occurrences.setdefault(fname, []).append(fmatch)
+
+        combined_fields: Dict[str, FieldMatch] = {}
+        conflicts: Dict[str, List[FieldMatch]] = {}
+        conflict_reasons: List[str] = []
+
+        for fname, occurrences in field_occurrences.items():
+            if len(occurrences) == 1:
+                combined_fields[fname] = occurrences[0]
+                continue
+
+            # Check if all occurrences share identical normalized text
+            distinct_values: Dict[str, FieldMatch] = {}
+            for occ in occurrences:
+                normalized = occ.value.strip().casefold()
+                if normalized not in distinct_values:
+                    distinct_values[normalized] = occ
+
+            # Select candidate with highest confidence (tie-breaker: earlier page)
+            best = max(
+                occurrences,
+                key=lambda x: (x.confidence, -(x.page if x.page is not None else 0)),
+            )
+            combined_fields[fname] = best
+
+            if len(distinct_values) > 1:
+                # Conflicting extractions across pages!
+                conflicts[fname] = occurrences
+                details = ", ".join(
+                    f"'{occ.value}' (page {occ.page}, confidence {occ.confidence:.2f})"
+                    for occ in occurrences
+                )
+                conflict_reasons.append(
+                    f"Conflicting values detected across pages for field '{fname}': {details}"
+                )
+
+        # Combine raw text across pages
+        if len(page_results) == 1:
+            raw_text = page_results[0].raw_text
+        else:
+            raw_text = "\n\n".join(
+                f"--- Page {pr.page} ---\n{pr.raw_text}" for pr in page_results
+            )
+
+        return MultiPageOCRResult(
+            fields=combined_fields,
+            raw_text=raw_text,
+            processing_time_ms=total_processing_time_ms,
+            document_id=document_id,
+            page_count=len(pages),
+            conflicts=conflicts if conflicts else None,
+            conflict_reasons=conflict_reasons if conflict_reasons else None,
+            pages=page_results,
+            provider=last_provider,
         )

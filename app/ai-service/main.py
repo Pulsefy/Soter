@@ -924,6 +924,10 @@ async def validation_exception_handler(request, exc: RequestValidationError):
         ctx = error.get("ctx")
         if ctx and "error" in ctx:
             ctx["error"] = str(ctx["error"])
+        if "input" in error:
+            inp = error["input"]
+            if not isinstance(inp, (str, int, float, bool, type(None))):
+                error["input"] = str(inp)
     logger.error(f"Validation error: {errors}")
     return JSONResponse(
         status_code=422,
