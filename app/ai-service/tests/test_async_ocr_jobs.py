@@ -17,6 +17,22 @@ def mock_healthy_resources():
         yield
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limiters():
+    from services.rate_limiter import rate_limiter
+    from services.org_rate_limiter import org_rate_limiter, api_key_org_mapping
+
+    rate_limiter.reset()
+    org_rate_limiter.reset()
+    org_rate_limiter.clear_organization_tiers()
+    api_key_org_mapping.clear_mapping()
+    yield
+    rate_limiter.reset()
+    org_rate_limiter.reset()
+    org_rate_limiter.clear_organization_tiers()
+    api_key_org_mapping.clear_mapping()
+
+
 @pytest.fixture()
 def client():
     return TestClient(main.app, follow_redirects=False)

@@ -261,11 +261,21 @@ def _route_label_patterns() -> List[Tuple["re.Pattern[str]", str]]:
     global _ROUTE_LABEL_PATTERNS
     if _ROUTE_LABEL_PATTERNS is None:
         patterns: List[Tuple["re.Pattern[str]", str]] = []
-        for route in getattr(_APP, "routes", None) or []:
-            regex = getattr(route, "path_regex", None)
-            template = getattr(route, "path", None)
+
+        def _collect(route_or_router: Any) -> None:
+            regex = getattr(route_or_router, "path_regex", None)
+            template = getattr(route_or_router, "path", None)
             if regex is not None and template is not None:
                 patterns.append((regex, template))
+            if hasattr(route_or_router, "effective_candidates"):
+                for c in route_or_router.effective_candidates():
+                    _collect(c)
+            if hasattr(route_or_router, "routes"):
+                for r in route_or_router.routes:
+                    _collect(r)
+
+        if _APP is not None:
+            _collect(_APP)
         _ROUTE_LABEL_PATTERNS = patterns
     return _ROUTE_LABEL_PATTERNS
 
