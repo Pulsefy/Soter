@@ -232,6 +232,10 @@ curl -X POST "http://localhost:8000/v1/ai/dead-letter/callback:task-123/replay" 
   -H "X-User-Role: operator" -H "X-User-Id: alice"
 ```
 
+## Operations and Resilience
+
+For in-depth operational runbooks, provider failover mechanics, per-organization rate limit tiers, cost ceilings, circuit breaker alerting, and combined incident troubleshooting, see the [AI Service Operations Playbook](AI_SERVICE_OPERATIONS.md).
+
 ## Project Structure
 
 ```

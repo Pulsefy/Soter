@@ -25,7 +25,7 @@ Soter is a humanitarian aid distribution platform built on the Stellar ecosystem
 - Smart Contracts (Soroban/Rust): AidEscrow escrow + claim flows ([onchain README](app/onchain/README.md))
 - Frontend (Next.js): admin/donor UI, dashboards, wallet flows ([frontend README](app/frontend/README.md))
 - Mobile (Expo): field operations + pilot flows ([mobile README](app/mobile/README.md))
-- AI Service (FastAPI): OCR/anonymization/fraud checks for verification flows ([ai-service README](app/ai-service/README.md) · [API reference](app/ai-service/openapi.json))
+- AI Service (FastAPI): OCR/anonymization/fraud checks for verification flows ([ai-service README](app/ai-service/README.md) · [operations guide](app/ai-service/AI_SERVICE_OPERATIONS.md) · [API reference](app/ai-service/openapi.json))
 
 ## Tech stack
 
@@ -106,6 +106,7 @@ pnpm start
 Helpful starting points:
 - Backend Soroban integration notes: [SOROBAN_INTEGRATION.md](app/backend/src/onchain/SOROBAN_INTEGRATION.md)
 - Contract docs and method/event reference: [onchain README](app/onchain/README.md)
+- AI Service operations and resilience guide: [AI_SERVICE_OPERATIONS.md](app/ai-service/AI_SERVICE_OPERATIONS.md)
 
 ## Testing
 
