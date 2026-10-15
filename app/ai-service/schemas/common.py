@@ -76,3 +76,12 @@ class ResultEnvelope(BaseModel, Generic[T]):
         description="Version of the prompt template used for verification.",
         examples=["v1"],
     )
+    from_cooldown: bool = Field(
+        default=False,
+        description=(
+            "True when this response was returned from the verification cooldown "
+            "cache rather than computed fresh.  The result reflects the outcome "
+            "of the most-recent completed verification within the cooldown window."
+        ),
+        examples=[False],
+    )
