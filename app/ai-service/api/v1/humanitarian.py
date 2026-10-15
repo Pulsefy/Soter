@@ -22,6 +22,10 @@ from services.evidence_access_control import (
     EvidenceAccessControl,
     EvidenceAccessControlError,
 )
+from services.verification_cooldown import (
+    build_humanitarian_key,
+    get_cooldown_service,
+)
 from request_limits import clamp_request_timeout
 
 logger = logging.getLogger(__name__)
@@ -402,6 +406,72 @@ async def verify_humanitarian_claim(
             request.artifact_ids, artifact_access_control
         )
 
+        # ------------------------------------------------------------------
+        # Verification cooldown check.
+        #
+        # Performed *after* all access-control gates so unauthenticated callers
+        # still get a 400/403 rather than a cached result they are not entitled
+        # to see.  If the same claim identity was verified recently we return
+        # the prior result immediately with ``from_cooldown=True`` and skip the
+        # paid provider call entirely.
+        # ------------------------------------------------------------------
+        cooldown_svc = getattr(http_request.app.state, "cooldown_service", None)
+        if cooldown_svc is None:
+            cooldown_svc = get_cooldown_service()
+
+        cooldown_key = build_humanitarian_key(
+            claim_id=getattr(request.anchor_metadata, "claim_id", None),
+            aid_claim=request.aid_claim,
+            artifact_ids=list(request.artifact_ids),
+        )
+        in_cooldown, prior_result = cooldown_svc.check(cooldown_key)
+        if in_cooldown and prior_result is not None:
+            logger.info(
+                "humanitarian_verification_cooldown_hit",
+                extra={
+                    "event": "humanitarian_verification_cooldown_hit",
+                    "cooldown_key": cooldown_key,
+                    "correlation_id": correlation_id,
+                    "org_id": x_org_id,
+                },
+            )
+            # Extract envelope fields from the cached raw result so the
+            # response is structurally identical to a fresh one.
+            cached_verification: Dict[str, Any] = (
+                prior_result.get("verification")
+                if isinstance(prior_result, dict)
+                else {}
+            ) or {}
+            cached_confidence: Optional[float] = None
+            raw_conf = cached_verification.get("confidence")
+            if isinstance(raw_conf, (int, float)):
+                cached_confidence = round(float(max(0.0, min(1.0, raw_conf))), 4)
+            cached_reasons: Optional[List[str]] = None
+            for _key in ("reasoning", "reason", "summary", "explanation"):
+                _r = cached_verification.get(_key)
+                if isinstance(_r, str) and _r:
+                    cached_reasons = [_r]
+                    break
+                if isinstance(_r, list) and _r:
+                    cached_reasons = [str(r) for r in _r]
+                    break
+            cached_prompt_version: Optional[str] = None
+            if isinstance(prior_result, dict) and isinstance(
+                prior_result.get("prompt_version"), str
+            ):
+                cached_prompt_version = prior_result["prompt_version"]
+            elif isinstance(prompt_version, str):
+                cached_prompt_version = prompt_version
+            return ResultEnvelope[Dict[str, Any]](
+                result=prior_result,
+                confidence=cached_confidence,
+                reasons=cached_reasons,
+                anchor_metadata=request.anchor_metadata,
+                trace_id=correlation_id or None,
+                prompt_version=cached_prompt_version,
+                from_cooldown=True,
+            )
+
         raw = await _verify_claim_cached(
             humanitarian_verification_service,
             aid_claim=request.aid_claim,
@@ -475,6 +545,10 @@ async def verify_humanitarian_claim(
             envelope_prompt_version = raw["prompt_version"]
         elif isinstance(prompt_version, str):
             envelope_prompt_version = prompt_version
+
+        # Record this fresh result so subsequent requests within the cooldown
+        # window are served from the store instead of re-invoking the provider.
+        cooldown_svc.record(cooldown_key, raw)
 
         return ResultEnvelope[Dict[str, Any]](
             result=raw,

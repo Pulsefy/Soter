@@ -11,6 +11,7 @@ from schemas.common import ResultEnvelope
 from schemas.fraud import ClaimFraudResult, ClaimMetadata, FraudDetectionRequest
 from services.decision_audit import get_store as get_decision_audit_store
 from services.fraud_detection import FRAUD_RULES_VERSION, detect_fraud
+from services.verification_cooldown import build_fraud_key, get_cooldown_service
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,46 @@ async def detect_fraud_endpoint(
     from main import correlation_id_var
 
     try:
+        # ------------------------------------------------------------------
+        # Verification cooldown check.
+        #
+        # The fraud endpoint is a batch operation: we key the cooldown on the
+        # anchor ``claim_id`` (if present) because that is the stable identity
+        # handle for the logical claim being examined.  Batches without an
+        # anchor claim_id are not deduplicated — the caller can distinguish
+        # them from cached responses via ``from_cooldown``.
+        # ------------------------------------------------------------------
+        cooldown_svc = getattr(http_request.app.state, "cooldown_service", None)
+        if cooldown_svc is None:
+            cooldown_svc = get_cooldown_service()
+
+        anchor_claim_id = getattr(request.anchor_metadata, "claim_id", None)
+        cooldown_key = build_fraud_key(anchor_claim_id)
+        if cooldown_key is not None:
+            in_cooldown, prior_result = cooldown_svc.check(cooldown_key)
+            if in_cooldown and prior_result is not None:
+                logger.info(
+                    "fraud_detection_cooldown_hit",
+                    extra={
+                        "event": "fraud_detection_cooldown_hit",
+                        "cooldown_key": cooldown_key,
+                        "correlation_id": getattr(
+                            http_request.state, "correlation_id", ""
+                        ),
+                    },
+                )
+                cached_confidence = prior_result.get("confidence")
+                return ResultEnvelope[List[ClaimFraudResult]](
+                    result=prior_result["results"],
+                    confidence=cached_confidence,
+                    reasons=prior_result.get("reasons"),
+                    anchor_metadata=request.anchor_metadata,
+                    trace_id=correlation_id_var.get() or None,
+                    from_cooldown=True,
+                )
+        else:
+            in_cooldown = False
+
         results = detect_fraud(request.claims)
 
         flagged = [r for r in results if r.is_flagged]
@@ -166,6 +207,14 @@ async def detect_fraud_endpoint(
         # Audit before returning: the record is the reason the disbursement
         # decision can be reconstructed later.
         _write_audit_records(http_request, request, results)
+
+        # Record this fresh result so subsequent requests within the cooldown
+        # window are served from the store instead of re-running the model.
+        if cooldown_key is not None:
+            cooldown_svc.record(
+                cooldown_key,
+                {"results": results, "confidence": confidence, "reasons": reasons},
+            )
 
         return ResultEnvelope[List[ClaimFraudResult]](
             result=results,

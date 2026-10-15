@@ -201,6 +201,15 @@ class Settings(BaseSettings):
         120  # AI verification responses, keyed by claim/artifact/model version
     )
 
+    # Verification cooldown (in seconds).
+    # Minimum interval that must pass before the same claim identity can be
+    # re-verified.  Requests that arrive within this window receive the prior
+    # result immediately (with ``from_cooldown=true`` in the envelope) instead
+    # of triggering a fresh, paid provider call.  This prevents a caller
+    # retrying on perceived failure — or an adversary probing how a claim
+    # scores — from generating runaway AI costs.  Set to 0 to disable.
+    verification_cooldown_seconds: float = 60.0
+
     # Fraud detection decision thresholds.
     # A claim's normalised fraud_risk_score (0 = lowest risk, 1 = highest
     # risk) is banded into pass / review / reject. Defaults below were
