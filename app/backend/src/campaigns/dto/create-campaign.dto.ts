@@ -7,6 +7,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Max,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -38,6 +39,21 @@ export class CreateCampaignDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional per-campaign confidence threshold override in [0, 1]. When omitted, the global default is used.',
+    example: 0.85,
+    minimum: 0,
+    maximum: 1,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  confidenceThreshold?: number;
+}
 
   @ApiPropertyOptional({
     description: 'Current status of the campaign.',
