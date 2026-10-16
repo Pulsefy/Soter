@@ -152,9 +152,10 @@ class RateLimiterService:
         default_limit = getattr(settings, "rate_limit_per_key_default", "60/minute")
         return parse_rate_limit(default_limit)
 
-    def check(self, request: Request) -> RateLimitResult:
+    def check(self, request: Request, cost: int = 1) -> RateLimitResult:
         """
         Evaluate rate limit for the incoming request using a sliding window algorithm.
+        Supports consuming multiple units of rate limit budget via the `cost` parameter.
         """
         path = request.url.path
         method = request.method
@@ -181,7 +182,7 @@ class RateLimiterService:
 
         # Try Redis sliding window if Redis is available and configured
         redis_result = self._check_redis(
-            storage_key, limit, window_seconds, now, window_start, path, method, api_key
+            storage_key, limit, window_seconds, now, window_start, path, method, api_key, cost=cost
         )
         if redis_result is not None:
             return redis_result
@@ -196,8 +197,13 @@ class RateLimiterService:
 
             current_count = len(records)
 
-            if current_count >= limit:
-                earliest = records[0]
+            if current_count + cost > limit:
+                if current_count >= limit:
+                    earliest = records[0]
+                else:
+                    needed_to_free = (current_count + cost) - limit
+                    idx = min(needed_to_free - 1, len(records) - 1)
+                    earliest = records[idx]
                 retry_after = max(1, int(math.ceil(earliest + window_seconds - now)))
                 reset_seconds = retry_after
                 return RateLimitResult(
@@ -212,9 +218,10 @@ class RateLimiterService:
                     window_seconds=window_seconds,
                 )
 
-            # Record this request
-            records.append(now)
-            remaining = max(0, limit - current_count - 1)
+            # Record this request with cost
+            for _ in range(cost):
+                records.append(now)
+            remaining = max(0, limit - current_count - cost)
             earliest = records[0]
             reset_seconds = max(1, int(math.ceil(earliest + window_seconds - now)))
 
@@ -240,6 +247,7 @@ class RateLimiterService:
         path: str,
         method: str,
         api_key: str,
+        cost: int = 1,
     ) -> Optional[RateLimitResult]:
         """Attempt to check rate limit in Redis if available."""
         if getattr(settings, "app_env", "") == "test":
@@ -260,14 +268,19 @@ class RateLimiterService:
             pipe = client.pipeline()
             pipe.zremrangebyscore(rkey, 0, window_start)
             pipe.zcard(rkey)
-            pipe.zrange(rkey, 0, 0, withscores=True)
+            pipe.zrange(rkey, 0, -1, withscores=True)
             results = pipe.execute()
 
             current_count = results[1]
-            oldest_entries = results[2]
+            entries = results[2]
 
-            if current_count >= limit:
-                earliest = oldest_entries[0][1] if oldest_entries else window_start
+            if current_count + cost > limit:
+                if current_count >= limit:
+                    earliest = entries[0][1] if entries else window_start
+                else:
+                    needed_to_free = (current_count + cost) - limit
+                    idx = min(needed_to_free - 1, len(entries) - 1)
+                    earliest = entries[idx][1] if entries else window_start
                 retry_after = max(1, int(math.ceil(earliest + window_seconds - now)))
                 return RateLimitResult(
                     allowed=False,
@@ -281,15 +294,16 @@ class RateLimiterService:
                     window_seconds=window_seconds,
                 )
 
-            # Add current timestamp to sorted set
+            # Add cost entries with unique member names to sorted set
             pipe = client.pipeline()
-            pipe.zadd(rkey, {str(now): now})
+            items_to_add = {f"{now}:{i}": now for i in range(cost)}
+            pipe.zadd(rkey, items_to_add)
             pipe.expire(rkey, window_seconds + 5)
             pipe.execute()
 
-            earliest = oldest_entries[0][1] if oldest_entries else now
+            earliest = entries[0][1] if entries else now
             reset_seconds = max(1, int(math.ceil(earliest + window_seconds - now)))
-            remaining = max(0, limit - current_count - 1)
+            remaining = max(0, limit - current_count - cost)
 
             return RateLimitResult(
                 allowed=True,

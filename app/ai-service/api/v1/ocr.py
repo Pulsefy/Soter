@@ -201,6 +201,26 @@ async def queue_batch_ocr_jobs(
             },
         )
 
+    # Proportional rate limiting for batch processing:
+    # Middleware already accounted for 1 request. If the batch contains >1 items,
+    # evaluate the additional cost (len(files) - 1) against the caller's budget.
+    batch_size = len(files)
+    if batch_size > 1:
+        additional_cost = batch_size - 1
+        from services.rate_limiter import rate_limiter, build_rate_limit_response, extract_api_key
+        rl_res = rate_limiter.check(request, cost=additional_cost)
+        if not rl_res.allowed:
+            return build_rate_limit_response(rl_res)
+        request.state.rate_limit_result = rl_res
+
+        from services.org_rate_limiter import org_rate_limiter, build_organization_rate_limit_response
+        api_key = extract_api_key(request)
+        org_res = org_rate_limiter.check(api_key, cost=additional_cost)
+        if org_res is not None:
+            if not org_res.allowed:
+                return build_organization_rate_limit_response(org_res)
+            request.state.org_rate_limit_result = org_res
+
     hint = language_hint.value if language_hint else None
     batch = ocr_batch_store.create_batch(
         anchor_metadata=anchor_metadata, language_hint=hint

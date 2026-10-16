@@ -121,6 +121,13 @@ curl -X POST "http://localhost:8000/ai/ocr" -F "image=@document.jpg"
 
 **Rate limit:** 10 requests/minute per IP
 
+### Rate Limiting & Batch Proportional Consumption
+
+The AI service applies per-key and per-organization sliding-window rate limits across endpoints:
+- Default per-key limit: 60 requests/minute (`RATE_LIMIT_PER_KEY_DEFAULT`).
+- Endpoint overrides (`RATE_LIMIT_ENDPOINT_OVERRIDES`), including `10/minute` for `/v1/ai/ocr/batch` and `/ai/ocr/batch`.
+- **Batch endpoints proportional consumption**: Batch endpoints (such as `POST /v1/ai/ocr/batch` and `POST /ai/ocr/batch`) consume rate-limit budget proportionally to the batch size (`N` documents consume `N` rate limit units). If a batch submission would exceed the caller's remaining budget within the window, the request is rejected with HTTP 429 (`RATE_LIMIT_EXCEEDED` or `ORGANIZATION_RATE_LIMIT_EXCEEDED`) and standard retry headers (`Retry-After`, `X-RateLimit-*`).
+
 ### Request Safety Limits
 
 Write requests to `/v1/*` and legacy `/ai/*` endpoints are limited by default to

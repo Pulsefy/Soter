@@ -8,6 +8,7 @@ The AI Service now enforces **per-organization rate limits** in addition to per-
 
 - **Per-Key Rate Limits**: Each API key has an independent rate limit (existing behavior, preserved).
 - **Per-Organization Rate Limits**: All API keys belonging to an organization share a single rate limit budget (new).
+- **Batch Proportional Consumption**: Batch endpoints (e.g. `/v1/ai/ocr/batch` and `/ai/ocr/batch`) consume budget proportionally to the batch size (each document consumes 1 unit). If a batch would exceed either key or organization limits, the entire request is rejected with HTTP 429.
 - **Enforcement**: Requests from any key belonging to an organization count against that organization's shared budget.
 - **Isolation**: Different organizations have completely independent rate limit budgets.
 - **Gradual Adoption**: Organizations without a configured tier bypass organization-level limiting entirely.

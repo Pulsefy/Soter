@@ -131,6 +131,8 @@ class Settings(BaseSettings):
             "/v1/ai/anonymize": "30/minute",
             "/ai/anonymize": "30/minute",
             "/v1/ai/fraud/detect": "20/minute",
+            "/v1/ai/ocr/batch": "10/minute",
+            "/ai/ocr/batch": "10/minute",
         }
     )
     rate_limit_enabled: bool = True
