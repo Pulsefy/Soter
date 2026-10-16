@@ -366,9 +366,15 @@ class Settings(BaseSettings):
             _add("OPENAI_API_KEY", "is set but blank")
         if self.groq_api_key is not None and not self.groq_api_key.strip():
             _add("GROQ_API_KEY", "is set but blank")
-        if self.openai_fallback_api_key is not None and not self.openai_fallback_api_key.strip():
+        if (
+            self.openai_fallback_api_key is not None
+            and not self.openai_fallback_api_key.strip()
+        ):
             _add("OPENAI_FALLBACK_API_KEY", "is set but blank")
-        if self.groq_fallback_api_key is not None and not self.groq_fallback_api_key.strip():
+        if (
+            self.groq_fallback_api_key is not None
+            and not self.groq_fallback_api_key.strip()
+        ):
             _add("GROQ_FALLBACK_API_KEY", "is set but blank")
 
         # --- Callback/webhook signing secret -----------------------------
@@ -785,9 +791,15 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_API_KEY is set but blank")
         if self.groq_api_key is not None and not self.groq_api_key.strip():
             raise ValueError("GROQ_API_KEY is set but blank")
-        if self.openai_fallback_api_key is not None and not self.openai_fallback_api_key.strip():
+        if (
+            self.openai_fallback_api_key is not None
+            and not self.openai_fallback_api_key.strip()
+        ):
             raise ValueError("OPENAI_FALLBACK_API_KEY is set but blank")
-        if self.groq_fallback_api_key is not None and not self.groq_fallback_api_key.strip():
+        if (
+            self.groq_fallback_api_key is not None
+            and not self.groq_fallback_api_key.strip()
+        ):
             raise ValueError("GROQ_FALLBACK_API_KEY is set but blank")
 
 
