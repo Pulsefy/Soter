@@ -47,7 +47,7 @@ export class BudgetService {
    *
    * NOTE: this performs a plain read-then-compare and is only safe when the
    * caller does not need protection against a concurrent caller doing the
-   * same check for the same campaign at (roughly) the same time â€” e.g.
+   * same check for the same campaign at (roughly) the same time — e.g.
    * one-off/administrative checks. Anything that creates a lock/disburse
    * entry as a result of this check (claim creation, disbursement) MUST use
    * `reserveBudget` instead, inside the same transaction that writes the
