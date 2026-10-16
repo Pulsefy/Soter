@@ -1,6 +1,7 @@
 """Abstract provider interface and concrete implementations for LLM and OCR.
 
 Issue #615 — Provider Interface for LLM + OCR
+Issue #1411 — Add Provider API Key Rotation Support
 
 Defines a uniform ``ModelProvider`` abstraction with two capability methods:
 
@@ -10,6 +11,10 @@ Defines a uniform ``ModelProvider`` abstraction with two capability methods:
 Concrete providers implement only the capabilities they support; unsupported
 operations raise ``NotImplementedError``.  A thin ``ProviderRegistry`` resolves
 the right provider for a given capability and provider name.
+
+Authentication failures (401 Unauthorized, 403 Forbidden) trigger a fallback
+key retry: if a primary key fails with an auth error and a fallback key is
+configured, the request is retried once using the fallback key.
 """
 
 from __future__ import annotations
@@ -34,6 +39,18 @@ logger = logging.getLogger(__name__)
 KNOWN_LLM_PROVIDERS = frozenset({"openai", "groq", "test"})
 KNOWN_OCR_PROVIDERS = frozenset({"test", "tesseract"})
 KNOWN_CAPABILITIES = frozenset({"llm", "ocr"})
+
+
+def is_authentication_error(status_code: int) -> bool:
+    """Determine if an HTTP error is an authentication failure (issue #1411).
+
+    Args:
+        status_code: HTTP status code from the provider response.
+
+    Returns:
+        True if the status code indicates authentication failure (401 or 403).
+    """
+    return status_code in (401, 403)
 
 
 def validate_fallback_order(setting_name: str, order: "List[str]") -> None:
@@ -194,6 +211,7 @@ class OpenAIProvider(ModelProvider):
         return self._call_chat_completion(
             base_url="https://api.openai.com/v1/chat/completions",
             api_key=settings.openai_api_key,
+            fallback_api_key=settings.openai_fallback_api_key,
             model=resolved_model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -208,6 +226,7 @@ class OpenAIProvider(ModelProvider):
         system_prompt: str,
         user_prompt: str,
         timeout: Optional[float] = None,
+        fallback_api_key: Optional[str] = None,
     ) -> LLMResponse:
         provider_name = "openai" if "openai" in base_url else "groq"
         if settings.ai_deterministic_mode:
@@ -231,16 +250,18 @@ class OpenAIProvider(ModelProvider):
                 {"role": "user", "content": user_prompt},
             ],
         }
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
         req_timeout = (
             timeout if timeout is not None else float(settings.llm_timeout_seconds)
         )
         start = time.time()
 
+        # Attempt with primary key
+        auth_error: Optional[int] = None
         try:
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
             with httpx.Client(timeout=req_timeout) as client:
                 response = client.post(base_url, json=payload, headers=headers)
                 response.raise_for_status()
@@ -252,20 +273,70 @@ class OpenAIProvider(ModelProvider):
                 details={"provider": provider_name, "timeout_seconds": req_timeout},
             ) from exc
         except httpx.HTTPStatusError as exc:
-            raise AIServiceError(
-                message=f"LLM request failed with status {exc.response.status_code}",
-                code="AI_PROVIDER_ERROR",
-                details={
-                    "provider": provider_name,
-                    "status_code": exc.response.status_code,
-                },
-            ) from exc
+            # Check if this is an authentication failure and a fallback key is available
+            status_code = exc.response.status_code
+            if is_authentication_error(status_code) and fallback_api_key:
+                auth_error = status_code
+                logger.info(
+                    "Primary key authentication failed with %d for %s; attempting fallback",
+                    status_code,
+                    provider_name,
+                )
+                # Will retry with fallback key below
+            else:
+                raise AIServiceError(
+                    message=f"LLM request failed with status {status_code}",
+                    code="AI_PROVIDER_ERROR",
+                    details={
+                        "provider": provider_name,
+                        "status_code": status_code,
+                    },
+                ) from exc
         except Exception as exc:
             raise AIServiceError(
                 message=f"LLM connection error: {exc}",
                 code="AI_CONNECTION_ERROR",
                 details={"provider": provider_name},
             ) from exc
+
+        # If primary key failed with auth error and fallback is configured, retry with fallback
+        if auth_error is not None:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {fallback_api_key}",
+                    "Content-Type": "application/json",
+                }
+                with httpx.Client(timeout=req_timeout) as client:
+                    response = client.post(base_url, json=payload, headers=headers)
+                    response.raise_for_status()
+                    data = response.json()
+                logger.info(
+                    "Fallback key succeeded for %s after primary key failed with %d",
+                    provider_name,
+                    auth_error,
+                )
+            except httpx.TimeoutException as exc:
+                raise AIServiceError(
+                    message=f"LLM request timed out after {req_timeout}s",
+                    code="AI_TIMEOUT",
+                    details={"provider": provider_name, "timeout_seconds": req_timeout},
+                ) from exc
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                raise AIServiceError(
+                    message=f"LLM request failed with status {status_code}",
+                    code="AI_PROVIDER_ERROR",
+                    details={
+                        "provider": provider_name,
+                        "status_code": status_code,
+                    },
+                ) from exc
+            except Exception as exc:
+                raise AIServiceError(
+                    message=f"LLM connection error: {exc}",
+                    code="AI_CONNECTION_ERROR",
+                    details={"provider": provider_name},
+                ) from exc
 
         try:
             content = data["choices"][0]["message"]["content"]
@@ -320,6 +391,7 @@ class GroqProvider(ModelProvider):
         return OpenAIProvider._call_chat_completion(
             base_url="https://api.groq.com/openai/v1/chat/completions",
             api_key=settings.groq_api_key,
+            fallback_api_key=settings.groq_fallback_api_key,
             model=resolved_model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
