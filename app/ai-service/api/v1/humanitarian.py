@@ -488,6 +488,7 @@ async def verify_humanitarian_claim(
         )
 
         if stream:
+
             async def stream_events():
                 events: asyncio.Queue = asyncio.Queue()
                 loop = asyncio.get_running_loop()
