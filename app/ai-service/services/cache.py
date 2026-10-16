@@ -30,6 +30,10 @@ class CacheService:
         """
         self.settings = settings
         self.enabled = True
+        # Bounded wait for a follower before it retries independently.
+        self.single_flight_wait_timeout = getattr(
+            settings, "single_flight_wait_timeout", 30.0
+        )
 
         try:
             # Parse Redis URL
@@ -205,6 +209,7 @@ _inflight_computations: Dict[str, asyncio.Event] = {}
 _inflight_results: Dict[str, Any] = {}
 _inflight_errors: Dict[str, Exception] = {}
 _inflight_lock = asyncio.Lock()
+_inflight_owners: Dict[str, int] = {}
 
 
 async def _cleanup_inflight(cache_key: str, delay_seconds: float = 1.0):
@@ -221,6 +226,7 @@ async def _cleanup_inflight(cache_key: str, delay_seconds: float = 1.0):
         _inflight_computations.pop(cache_key, None)
         _inflight_results.pop(cache_key, None)
         _inflight_errors.pop(cache_key, None)
+        _inflight_owners.pop(cache_key, None)
 
 
 def cached_response(
@@ -392,6 +398,7 @@ def cached_response(
                     # We're the first request, create an event for others to wait on
                     event = asyncio.Event()
                     _inflight_computations[flight_key] = event
+                    _inflight_owners[flight_key] = id(event)
                     is_computing = True
                     logger.debug(f"Created new event for key: {flight_key}")
 
@@ -431,7 +438,22 @@ def cached_response(
             else:
                 # We're waiting for the computation to complete
                 logger.debug(f"Waiting for event on key: {flight_key}")
-                await event.wait()
+                wait_timeout = getattr(cache, "single_flight_wait_timeout", 30.0)
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=wait_timeout)
+                except asyncio.TimeoutError:
+                    # Leader failed or stalled; retry independently after a
+                    # bounded wait rather than blocking indefinitely.
+                    logger.warning(
+                        f"Single-flight wait timed out for key: {flight_key}; "
+                        "retrying independently"
+                    )
+                    metrics.SINGLE_FLIGHT_TIMEOUT.labels(prefix=prefix).inc()
+                    result = await func(*args, **kwargs)
+                    cache.set(cache_key, result, ttl_seconds)
+                    if content_cache_key is not None:
+                        cache.set(content_cache_key, result, ttl_seconds)
+                    return result
                 logger.debug(f"Event completed for key: {flight_key}")
 
                 # After event is set, check for result or error
@@ -441,7 +463,21 @@ def cached_response(
                         cache.set(cache_key, result, ttl_seconds)
                     return result
                 elif flight_key in _inflight_errors:
-                    raise _inflight_errors[flight_key]
+                    # Leader failed. Retry independently instead of propagating
+                    # the leader's error to this waiting request.
+                    logger.debug(
+                        f"Leader failed for key: {flight_key}; retrying independently"
+                    )
+                    metrics.SINGLE_FLIGHT_RETRY.labels(prefix=prefix).inc()
+                    async with _inflight_lock:
+                        _inflight_errors.pop(flight_key, None)
+                        _inflight_computations.pop(flight_key, None)
+                        _inflight_owners.pop(flight_key, None)
+                    result = await func(*args, **kwargs)
+                    cache.set(cache_key, result, ttl_seconds)
+                    if content_cache_key is not None:
+                        cache.set(content_cache_key, result, ttl_seconds)
+                    return result
                 else:
                     # This shouldn't happen, but fall back to direct computation
                     logger.warning(f"No result found after event for key: {flight_key}")
