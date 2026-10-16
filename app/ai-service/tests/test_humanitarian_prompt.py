@@ -36,9 +36,13 @@ class CustomTestPrompt(VerificationPrompt):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
+        system = f"System prompt for {self.name}:{self.version}"
+        if language:
+            system = f"{system} [lang={language}]"
         return {
-            "system": f"System prompt for {self.name}:{self.version}",
+            "system": system,
             "user": f"User prompt for claim={aid_claim}",
         }
 
@@ -256,3 +260,60 @@ class TestHumanitarianPromptEngine:
         assert "Unterminated string" in repair["user"]
         assert '{"verdict": "credible"' in repair["user"]
         assert "Original request prompt text" in repair["user"]
+
+    def test_resolve_language_no_hint_resolves_to_configured_default(self, monkeypatch):
+        from config import settings
+        monkeypatch.setattr(settings, "default_prompt_language", "fr")
+        monkeypatch.setattr(settings, "org_default_languages", {})
+        monkeypatch.setattr(settings, "campaign_default_languages", {})
+
+        lang = self.engine.resolve_language()
+        assert lang == "fr"
+
+    def test_resolve_language_explicit_hint_takes_precedence(self, monkeypatch):
+        from config import settings
+        monkeypatch.setattr(settings, "default_prompt_language", "en")
+        monkeypatch.setattr(settings, "org_default_languages", {"org-1": "es"})
+        monkeypatch.setattr(settings, "campaign_default_languages", {"camp-1": "de"})
+
+        lang = self.engine.resolve_language(
+            language_hint="sw",
+            org_id="org-1",
+            campaign_ref="camp-1",
+        )
+        assert lang == "sw"
+
+    def test_resolve_language_campaign_default_override(self, monkeypatch):
+        from config import settings
+        monkeypatch.setattr(settings, "default_prompt_language", "en")
+        monkeypatch.setattr(settings, "org_default_languages", {"org-1": "es"})
+        monkeypatch.setattr(settings, "campaign_default_languages", {"camp-1": "ar"})
+
+        lang = self.engine.resolve_language(
+            language_hint=None,
+            org_id="org-1",
+            campaign_ref="camp-1",
+        )
+        assert lang == "ar"
+
+    def test_resolve_language_org_default_override(self, monkeypatch):
+        from config import settings
+        monkeypatch.setattr(settings, "default_prompt_language", "en")
+        monkeypatch.setattr(settings, "org_default_languages", {"org-1": "es"})
+        monkeypatch.setattr(settings, "campaign_default_languages", {})
+
+        lang = self.engine.resolve_language(
+            language_hint=None,
+            org_id="org-1",
+            campaign_ref="unmatched-camp",
+        )
+        assert lang == "es"
+
+    def test_prompt_building_reflects_resolved_language(self):
+        prompt = self.engine.build_primary_prompt(
+            aid_claim="Food kit delivered.",
+            supporting_evidence=[],
+            context_factors={},
+            language="es",
+        )
+        assert "Respond using language: es." in prompt["system"]

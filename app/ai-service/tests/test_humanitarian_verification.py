@@ -804,3 +804,72 @@ class TestTestProvider:
             "inconclusive",
             "not_credible",
         }
+
+    def test_verify_claim_resolves_configured_default_language_when_no_hint(
+        self, monkeypatch
+    ):
+        captured_prompts = []
+        mock_provider = MagicMock(spec=ModelProvider)
+
+        def fake_chat(system_prompt, user_prompt, *, model=None, timeout=None):
+            captured_prompts.append({"system": system_prompt, "user": user_prompt})
+            return LLMResponse(
+                content='{"verdict":"credible","confidence":0.9,"summary":"ok"}',
+                provider="openai",
+                model="test-model",
+            )
+
+        mock_provider.llm_chat.side_effect = fake_chat
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", mock_provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda provider: "test-model"
+        )
+        monkeypatch.setattr(settings, "default_prompt_language", "fr")
+        monkeypatch.setattr(settings, "org_default_languages", {})
+        monkeypatch.setattr(settings, "campaign_default_languages", {})
+
+        result = self.service.verify_claim(
+            aid_claim="Clean water distribution verified across 4 sectors.",
+            supporting_evidence=[],
+            context_factors={},
+            provider_preference="openai",
+        )
+
+        assert result["language"] == "fr"
+        assert "Respond using language: fr." in captured_prompts[0]["system"]
+
+    def test_verify_claim_explicit_hint_overrides_configured_default(self, monkeypatch):
+        captured_prompts = []
+        mock_provider = MagicMock(spec=ModelProvider)
+
+        def fake_chat(system_prompt, user_prompt, *, model=None, timeout=None):
+            captured_prompts.append({"system": system_prompt, "user": user_prompt})
+            return LLMResponse(
+                content='{"verdict":"credible","confidence":0.9,"summary":"ok"}',
+                provider="openai",
+                model="test-model",
+            )
+
+        mock_provider.llm_chat.side_effect = fake_chat
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", mock_provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda provider: "test-model"
+        )
+        monkeypatch.setattr(settings, "default_prompt_language", "en")
+        monkeypatch.setattr(settings, "org_default_languages", {"org-1": "es"})
+
+        result = self.service.verify_claim(
+            aid_claim="Clean water distribution verified across 4 sectors.",
+            supporting_evidence=[],
+            context_factors={},
+            provider_preference="openai",
+            language_hint="de",
+            org_id="org-1",
+        )
+
+        assert result["language"] == "de"
+        assert "Respond using language: de." in captured_prompts[0]["system"]

@@ -79,6 +79,9 @@ class Settings(BaseSettings):
         CACHE_TTL_VERIFICATION: TTL for cached AI verification responses (artifact + model-version keyed)
         FRAUD_PASS_MAX_SCORE: Claims scoring below this are banded 'pass'
         FRAUD_REVIEW_MAX_SCORE: Claims scoring below this (and above pass) are 'review'; at/above it is 'reject'
+        DEFAULT_PROMPT_LANGUAGE: Configurable default language when no language hint is provided (default: en)
+        ORG_DEFAULT_LANGUAGES: JSON dictionary mapping organization IDs to default languages
+        CAMPAIGN_DEFAULT_LANGUAGES: JSON dictionary mapping campaign references to default languages
     """
 
     # API Keys
@@ -91,6 +94,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 30
     humanitarian_primary_prompt_version: str = "v1"
     humanitarian_fallback_prompt_version: str = "v1"
+    default_prompt_language: str = "en"
+    org_default_languages: Dict[str, str] = Field(default_factory=dict)
+    campaign_default_languages: Dict[str, str] = Field(default_factory=dict)
 
     # Per-model USD cost per 1,000 tokens (issue #981), keyed by the exact
     # model string passed to the provider (e.g. OPENAI_MODEL/GROQ_MODEL).
@@ -601,6 +607,25 @@ class Settings(BaseSettings):
                             key,
                             f"fallback '{fallback}' for provider '{provider}' must have lower configured token rates",
                         )
+
+        # --- Prompt language configuration (issue configurable default language) --
+        if not isinstance(self.default_prompt_language, str) or not self.default_prompt_language.strip():
+            _add("DEFAULT_PROMPT_LANGUAGE", "must be a non-empty string language code")
+
+        for mapping_key, mapping in (
+            ("ORG_DEFAULT_LANGUAGES", self.org_default_languages),
+            ("CAMPAIGN_DEFAULT_LANGUAGES", self.campaign_default_languages),
+        ):
+            if not isinstance(mapping, dict):
+                _add(mapping_key, "must be a mapping of id to language code")
+            else:
+                for target_id, lang in mapping.items():
+                    if not isinstance(target_id, str) or not target_id.strip():
+                        _add(mapping_key, "keys must be non-empty strings")
+                        break
+                    if not isinstance(lang, str) or not lang.strip():
+                        _add(mapping_key, f"language for '{target_id}' must be a non-empty string language code")
+                        break
 
         # --- Production requirements (defense in depth) ------------------
         # apply_environment_defaults already rejects this at construction

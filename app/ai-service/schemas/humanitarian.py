@@ -57,6 +57,11 @@ class HumanitarianVerificationRequest(BaseModel):
         description="Explicit prompt version to use from registry (defaults to configured active version)",
         examples=["v1"],
     )
+    language_hint: Optional[str] = Field(
+        default=None,
+        description="Explicit language hint/code for prompt verification instructions (e.g. 'en', 'es', 'fra')",
+        examples=["en"],
+    )
     anchor_metadata: Optional[AnchorMetadata] = None
 
     model_config = {
@@ -89,6 +94,7 @@ class HumanitarianVerificationResponse(BaseModel):
     prompt_variant: Optional[str] = Field(None, examples=["primary"])
     prompt_name: Optional[str] = Field(None, examples=["humanitarian_primary"])
     prompt_version: Optional[str] = Field(None, examples=["v1"])
+    language: Optional[str] = Field(None, examples=["en"])
     verification: Optional[Dict[str, Any]] = Field(
         None,
         examples=[
