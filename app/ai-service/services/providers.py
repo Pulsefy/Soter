@@ -340,7 +340,12 @@ class OpenAIProvider(ModelProvider):
                 separators=(",", ":"),
                 sort_keys=True,
             )
-            return LLMResponse(content=stable, provider=provider_name, model=model)
+            return LLMResponse(
+                content=stable,
+                provider=provider_name,
+                model=model,
+                latency_ms=int((time.time() - start) * 1000),
+            )
 
         payload = {
             "model": model,
@@ -495,13 +500,17 @@ class FixtureProvider(ModelProvider):
         model: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> LLMResponse:
+        start = time.time()
         response = self._inner.get_response(
             endpoint="humanitarian",
             request_data={"system_prompt": system_prompt, "user_prompt": user_prompt},
         )
         content = json.dumps(response, separators=(",", ":"), sort_keys=True)
         return LLMResponse(
-            content=content, provider="test", model="test-provider/fixture"
+            content=content,
+            provider="test",
+            model="test-provider/fixture",
+            latency_ms=int((time.time() - start) * 1000),
         )
 
     def llm_chat_stream(

@@ -181,6 +181,29 @@ CIRCUIT_BREAKER_ALERTS_TOTAL = Counter(
     ["provider", "event", "outcome"],
 )
 
+# Provider SLA response latency metric
+# Bounded label: provider is in KNOWN_LLM_PROVIDERS | KNOWN_OCR_PROVIDERS
+PROVIDER_RESPONSE_LATENCY = Histogram(
+    "provider_response_latency_seconds",
+    "Latency of requests by model provider in seconds",
+    ["provider"],
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 8.0, 10.0, 15.0, 30.0, 60.0],
+)
+
+
+def record_provider_latency(provider: str, duration_seconds: float) -> None:
+    """Records response latency for a provider call and triggers SLA alerts if threshold exceeded."""
+    if duration_seconds < 0:
+        duration_seconds = 0.0
+    PROVIDER_RESPONSE_LATENCY.labels(provider=provider).observe(duration_seconds)
+
+    try:
+        from services.circuit_breaker_alerts import notify_provider_latency
+
+        notify_provider_latency(provider=provider, duration_seconds=duration_seconds)
+    except Exception:  # pragma: no cover
+        logger.exception("Failed to dispatch provider latency alert for provider=%s", provider)
+
 
 def check_system_resources(memory_threshold_percent: float = 90.0) -> bool:
     """

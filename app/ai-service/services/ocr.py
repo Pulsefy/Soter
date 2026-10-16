@@ -131,6 +131,10 @@ class OCRService:
                 )
 
                 breaker.record_success()
+                metrics.record_provider_latency(
+                    provider=provider_name,
+                    duration_seconds=response.processing_time_ms / 1000.0,
+                )
                 return OCRResult(
                     fields=fields,
                     raw_text=response.raw_text,

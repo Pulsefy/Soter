@@ -22,6 +22,7 @@ An alert is emitted on the two transitions an operator can act on:
 | --- | --- | --- |
 | `opened` | any state → `OPEN` | A provider is failing; the breaker is now short-circuiting calls |
 | `recovered` | any state → `CLOSED` | A half-open probe succeeded (or an operator reset the breaker); the provider is serving traffic again |
+| `latency_exceeded` | SLA degradation | Provider response latency exceeded configured threshold (`PROVIDER_LATENCY_ALERT_THRESHOLD_SECONDS` or per-provider override), independent of circuit breaker failures |
 
 `CLOSED → HALF_OPEN` probes are deliberately **not** alerted: the breaker is
 already testing its own recovery, which is not operator-actionable. Every
@@ -35,6 +36,8 @@ transition, alerted or not, is still written to the service log as a
 | `CIRCUIT_BREAKER_ALERTS_ENABLED` | `true` | Master switch. When `false`, no alerts are delivered (transitions are still logged). |
 | `CIRCUIT_BREAKER_ALERT_WEBHOOK_URL` | *(unset)* | The alert sink. **Leave unset to disable delivery.** |
 | `CIRCUIT_BREAKER_ALERT_DEDUP_SECONDS` | `300` | De-duplication window in seconds, applied per `(provider, event)`. `0` disables de-duplication. |
+| `PROVIDER_LATENCY_ALERT_THRESHOLD_SECONDS` | `5.0` | Default response latency SLA threshold in seconds triggering a `latency_exceeded` alert. |
+| `PROVIDER_LATENCY_THRESHOLDS` | `{}` | Per-provider override dict mapping provider name to threshold seconds, e.g. `{"groq": 2.5}`. |
 | `AI_WEBHOOK_SECRET` | *(unset)* | Shared HMAC-SHA256 secret used to sign alert bodies. When unset, alerts are delivered **unsigned** (development only) and a warning is logged. |
 
 Alerting is off unless a webhook URL is configured, so the default
@@ -63,12 +66,14 @@ to match the existing task-callback contract:
 | Field | Description |
 | --- | --- |
 | `alertType` | Always `circuit_breaker`; lets a shared sink route by alert kind. |
-| `event` | `opened` or `recovered`. |
-| `provider` | Provider whose breaker changed state (`openai`, `groq`, `test`, `tesseract`, …). |
-| `fromState` / `toState` | Breaker states (`CLOSED`, `HALF_OPEN`, `OPEN`). |
-| `failureCount` | Failure count recorded at the moment of the transition — the count that triggered the alert. |
-| `reason` | The breaker's own reason string, e.g. `failure_threshold_reached:3/3`, `probe_succeeded`, `manual_reset_via_admin_api`. |
-| `timestamp` | ISO-8601 UTC time of the transition. |
+| `event` | `opened`, `recovered`, or `latency_exceeded`. |
+| `provider` | Provider whose breaker changed state or whose latency degraded (`openai`, `groq`, `test`, `tesseract`, …). |
+| `fromState` / `toState` | Breaker states (`CLOSED`, `HALF_OPEN`, `OPEN`), omitted or `None` on latency alerts. |
+| `failureCount` | Failure count recorded at the moment of the transition (omitted on latency alerts). |
+| `latencySeconds` | Recorded response latency in seconds (present on `latency_exceeded` alerts). |
+| `latencyThresholdSeconds` | Configured SLA threshold in seconds that was breached (present on `latency_exceeded` alerts). |
+| `reason` | The alert's reason string, e.g. `failure_threshold_reached:3/3`, `latency_exceeded:8.12s>5.00s`. |
+| `timestamp` | ISO-8601 UTC time of the event. |
 | `service` | Emitting service (`soter-ai-service`). |
 | `schemaVersion` | Forward-compatibility version (`1.0`). |
 
