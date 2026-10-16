@@ -172,7 +172,8 @@ export class ClaimsController {
     type: ClaimStatusHistoryDto,
   })
   @ApiForbiddenResponse({
-    description: 'Access denied - resource belongs to a different organization.',
+    description:
+      'Access denied - resource belongs to a different organization.',
   })
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
