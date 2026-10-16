@@ -3286,6 +3286,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ResultEnvelope_Dict_str__Any__"
                 }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -3576,6 +3581,18 @@
               "default": "",
               "title": "X-User-Role",
               "type": "string"
+            }
+          },
+          {
+            "description": "Stream provider output as server-sent events",
+            "in": "query",
+            "name": "stream",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Stream provider output as server-sent events",
+              "title": "Stream",
+              "type": "boolean"
             }
           }
         ],

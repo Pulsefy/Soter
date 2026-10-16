@@ -3,11 +3,16 @@ v1 humanitarian verification endpoint.
 """
 
 import hashlib
+import json
 import logging
+import queue
+import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, HTTPException, Header, Request
+from fastapi import APIRouter, HTTPException, Header, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
 
 from config import settings
 from schemas.common import ResultEnvelope
@@ -154,6 +159,170 @@ def _write_audit_record(
         logger.error("decision_audit_record_failed: %s", exc)
 
 
+def _build_result_envelope(
+    http_request: Request,
+    request: HumanitarianVerificationRequest,
+    raw: Dict[str, Any],
+    *,
+    prompt_version: Optional[str],
+    model_version: str,
+    artifact_tag: str,
+    org_id: str,
+    user_id: str,
+    user_role: str,
+    correlation_id: str,
+) -> ResultEnvelope[Dict[str, Any]]:
+    verification = raw.get("verification")
+    if not isinstance(verification, dict):
+        verification = {}
+
+    confidence: Optional[float] = None
+    raw_conf = verification.get("confidence")
+    if isinstance(raw_conf, (int, float)):
+        confidence = round(float(max(0.0, min(1.0, raw_conf))), 4)
+
+    reasons: Optional[List[str]] = None
+    for key in ("reasoning", "reason", "summary", "explanation"):
+        raw_reason = verification.get(key)
+        if isinstance(raw_reason, str) and raw_reason:
+            reasons = [raw_reason]
+            break
+        if isinstance(raw_reason, list) and raw_reason:
+            reasons = [str(reason) for reason in raw_reason]
+            break
+
+    eligible = verification.get("eligible")
+    if raw.get("manual_review") is True:
+        outcome = "manual_review"
+    elif isinstance(eligible, bool):
+        outcome = "eligible" if eligible else "ineligible"
+    else:
+        outcome = "completed"
+    _write_audit_record(
+        http_request,
+        request,
+        outcome=outcome,
+        correlation_id=correlation_id,
+        org_id=org_id,
+        provider=raw.get("provider"),
+        model=raw.get("model"),
+        prompt_variant=raw.get("prompt_variant"),
+        confidence=confidence,
+        reasons=reasons,
+        metadata={
+            "verification": verification,
+            "model_version": model_version,
+            "artifact_tag": artifact_tag,
+            "user_id": user_id,
+            "user_role": user_role,
+        },
+    )
+    response_prompt_version = raw.get("prompt_version")
+    if not isinstance(response_prompt_version, str):
+        response_prompt_version = prompt_version
+    return ResultEnvelope[Dict[str, Any]](
+        result=raw,
+        confidence=confidence,
+        reasons=reasons,
+        anchor_metadata=request.anchor_metadata,
+        trace_id=correlation_id or None,
+        prompt_version=response_prompt_version,
+    )
+
+
+def _stream_verification_response(
+    http_request: Request,
+    request: HumanitarianVerificationRequest,
+    service: Any,
+    *,
+    timeout: Optional[float],
+    prompt_version: Optional[str],
+    model_version: str,
+    artifact_tag: str,
+    org_id: str,
+    user_id: str,
+    user_role: str,
+    correlation_id: str,
+) -> StreamingResponse:
+    """Stream provider text deltas, then the normal result envelope, as SSE."""
+
+    def event_stream():
+        events: queue.Queue[Tuple[str, Any]] = queue.Queue()
+
+        def on_token(token: str) -> None:
+            events.put(("token", token))
+
+        def verify() -> None:
+            try:
+                raw = service.verify_claim(
+                    aid_claim=request.aid_claim,
+                    supporting_evidence=request.supporting_evidence,
+                    context_factors=request.context_factors,
+                    provider_preference=request.provider_preference,
+                    timeout=timeout,
+                    prompt_version=prompt_version or None,
+                    on_token=on_token,
+                )
+            except Exception as exc:
+                events.put(("error", exc))
+            else:
+                events.put(("result", raw))
+
+        threading.Thread(target=verify, daemon=True).start()
+        while True:
+            event_type, value = events.get()
+            if event_type == "token":
+                data = json.dumps({"delta": value}, separators=(",", ":"))
+                yield f"event: token\ndata: {data}\n\n"
+            elif event_type == "result":
+                envelope = _build_result_envelope(
+                    http_request,
+                    request,
+                    value,
+                    prompt_version=prompt_version,
+                    model_version=model_version,
+                    artifact_tag=artifact_tag,
+                    org_id=org_id,
+                    user_id=user_id,
+                    user_role=user_role,
+                    correlation_id=correlation_id,
+                )
+                data = json.dumps(jsonable_encoder(envelope), separators=(",", ":"))
+                yield f"event: result\ndata: {data}\n\n"
+                return
+            else:
+                logger.error(
+                    "Humanitarian streaming verification failed: %s",
+                    value,
+                    exc_info=(type(value), value, value.__traceback__),
+                )
+                _write_audit_record(
+                    http_request,
+                    request,
+                    outcome="error",
+                    correlation_id=correlation_id,
+                    org_id=org_id,
+                    reasons=[str(value)],
+                    metadata={
+                        "error_type": type(value).__name__,
+                        "user_id": user_id,
+                        "user_role": user_role,
+                    },
+                )
+                data = json.dumps(
+                    {"detail": "Humanitarian verification failed"},
+                    separators=(",", ":"),
+                )
+                yield f"event: error\ndata: {data}\n\n"
+                return
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @cached_response(
     prefix="humanitarian_verification",
     ttl_seconds=settings.cache_ttl_verification,
@@ -227,14 +396,27 @@ async def _verify_claim_cached(
         raise
 
 
-@router.post("/ai/humanitarian/verify", response_model=ResultEnvelope[Dict[str, Any]])
+@router.post(
+    "/ai/humanitarian/verify",
+    response_model=ResultEnvelope[Dict[str, Any]],
+    responses={
+        200: {
+            "content": {
+                "text/event-stream": {"schema": {"type": "string"}},
+            }
+        }
+    },
+)
 async def verify_humanitarian_claim(
     http_request: Request,
     request: HumanitarianVerificationRequest,
     x_org_id: str = Header(default="", alias="X-Org-Id"),
     x_user_id: str = Header(default="", alias="X-User-Id"),
     x_user_role: str = Header(default="", alias="X-User-Role"),
-) -> ResultEnvelope[Dict[str, Any]]:
+    stream: bool = Query(
+        default=False, description="Stream provider output as server-sent events"
+    ),
+) -> Any:
     """Verify an aid claim against standardised humanitarian criteria.
 
     Validates that all referenced evidence artifacts belong to the requesting
@@ -402,6 +584,21 @@ async def verify_humanitarian_claim(
             request.artifact_ids, artifact_access_control
         )
 
+        if stream:
+            return _stream_verification_response(
+                http_request,
+                request,
+                humanitarian_verification_service,
+                timeout=timeout,
+                prompt_version=prompt_version,
+                model_version=model_version,
+                artifact_tag=artifact_tag,
+                org_id=x_org_id,
+                user_id=x_user_id,
+                user_role=x_user_role,
+                correlation_id=correlation_id,
+            )
+
         raw = await _verify_claim_cached(
             humanitarian_verification_service,
             aid_claim=request.aid_claim,
@@ -416,73 +613,17 @@ async def verify_humanitarian_claim(
             content_hash=content_hash,
         )
 
-        verification: Dict[str, Any] = (
-            raw.get("verification") if isinstance(raw, dict) else {}
-        )
-        if not isinstance(verification, dict):
-            verification = {}
-
-        # Extract confidence and reasons from the LLM-produced verification dict.
-        confidence: Optional[float] = None
-        raw_conf = verification.get("confidence")
-        if isinstance(raw_conf, (int, float)):
-            confidence = round(float(max(0.0, min(1.0, raw_conf))), 4)
-
-        reasons: Optional[List[str]] = None
-        for key in ("reasoning", "reason", "summary", "explanation"):
-            raw_reason = verification.get(key)
-            if isinstance(raw_reason, str) and raw_reason:
-                reasons = [raw_reason]
-                break
-            if isinstance(raw_reason, list) and raw_reason:
-                reasons = [str(r) for r in raw_reason]
-                break
-
-        # Issue #990: durably record the decision *before* it is returned,
-        # capturing the inputs, provider, model, prompt version, and outcome
-        # that produced it. ``eligible`` is the disbursement-relevant outcome
-        # when the model supplied it; otherwise the record still proves a
-        # completed decision.
-        eligible = verification.get("eligible")
-        if isinstance(raw, dict) and raw.get("manual_review") is True:
-            outcome = "manual_review"
-        elif isinstance(eligible, bool):
-            outcome = "eligible" if eligible else "ineligible"
-        else:
-            outcome = "completed"
-        _write_audit_record(
+        return _build_result_envelope(
             http_request,
             request,
-            outcome=outcome,
-            correlation_id=correlation_id,
+            raw,
+            prompt_version=prompt_version,
+            model_version=model_version,
+            artifact_tag=artifact_tag,
             org_id=x_org_id,
-            provider=raw.get("provider"),
-            model=raw.get("model"),
-            prompt_variant=raw.get("prompt_variant"),
-            confidence=confidence,
-            reasons=reasons,
-            metadata={
-                "verification": verification,
-                "model_version": model_version,
-                "artifact_tag": artifact_tag,
-                "user_id": x_user_id,
-                "user_role": x_user_role,
-            },
-        )
-
-        envelope_prompt_version: Optional[str] = None
-        if isinstance(raw, dict) and isinstance(raw.get("prompt_version"), str):
-            envelope_prompt_version = raw["prompt_version"]
-        elif isinstance(prompt_version, str):
-            envelope_prompt_version = prompt_version
-
-        return ResultEnvelope[Dict[str, Any]](
-            result=raw,
-            confidence=confidence,
-            reasons=reasons,
-            anchor_metadata=request.anchor_metadata,
-            trace_id=correlation_id or None,
-            prompt_version=envelope_prompt_version,
+            user_id=x_user_id,
+            user_role=x_user_role,
+            correlation_id=correlation_id,
         )
     except HTTPException as http_exc:
         # Access-control denials and misconfiguration are decisions too: they

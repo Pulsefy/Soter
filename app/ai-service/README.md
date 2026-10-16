@@ -115,6 +115,14 @@ Response body:
 }
 ```
 
+To receive provider output incrementally, add `?stream=true` to the
+verification URL. The response uses Server-Sent Events: each `token` event
+contains a JSON `delta` with a fragment of the provider's response, followed by
+a `result` event containing the same result envelope returned by a regular
+request. Streaming requests bypass the response cache so token events represent
+the live provider response. Provider errors are reported as an `error` event.
+Requests without `stream=true` retain the existing JSON response.
+
 ```bash
 curl -X POST "http://localhost:8000/ai/ocr" -F "image=@document.jpg"
 ```

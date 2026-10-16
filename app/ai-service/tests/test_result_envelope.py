@@ -22,6 +22,8 @@ from fastapi.testclient import TestClient
 
 import main
 from main import app
+from config import settings
+from services.humanitarian_verification import HumanitarianVerificationService
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -392,3 +394,44 @@ class TestHumanitarianEnvelope:
         ):
             data = client.post("/v1/ai/humanitarian/verify", json=self._REQUEST).json()
         assert data["result"]["provider"] == "test"
+
+    def test_streaming_and_non_streaming_fixture_provider_modes(self, monkeypatch):
+        monkeypatch.setattr(settings, "test_provider_mode", True)
+        monkeypatch.setattr(
+            app.state,
+            "humanitarian_verification_service",
+            HumanitarianVerificationService(),
+        )
+        payload = {**self._REQUEST, "provider_preference": "test"}
+
+        regular_response = client.post("/v1/ai/humanitarian/verify", json=payload)
+        assert regular_response.status_code == 200
+        regular_data = regular_response.json()
+        assert_envelope(regular_data)
+        assert regular_data["result"]["provider"] == "test"
+
+        streaming_response = client.post(
+            "/v1/ai/humanitarian/verify?stream=true", json=payload
+        )
+        assert streaming_response.status_code == 200
+        assert streaming_response.headers["content-type"].startswith(
+            "text/event-stream"
+        )
+        events = streaming_response.text.strip().split("\n\n")
+        assert any(event.startswith("event: token\n") for event in events)
+        result_event = next(
+            event for event in events if event.startswith("event: result\n")
+        )
+        stream_data = json.loads(
+            next(
+                line[6:]
+                for line in result_event.splitlines()
+                if line.startswith("data:")
+            )
+        )
+        assert_envelope(stream_data)
+        assert stream_data["result"]["provider"] == "test"
+        assert (
+            stream_data["result"]["verification"]
+            == regular_data["result"]["verification"]
+        )
