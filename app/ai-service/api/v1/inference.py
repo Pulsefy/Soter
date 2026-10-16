@@ -2,10 +2,13 @@
 v1 inference endpoints (task queue).
 """
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 from datetime import datetime
 import uuid
+
+from cachetools import TTLCache
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field, validator
@@ -18,6 +21,46 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["inference"])
+
+# Deduplication window: near-simultaneous identical requests are coalesced so
+# only one provider call is made. The second request waits for the first's
+# result. If the leader fails, waiters retry independently after a bounded wait.
+_DEDUP_WINDOW_SECONDS = 5.0
+_DEDUP_MAX_WAIT_SECONDS = 30.0
+
+
+class _InFlightRequest:
+    """Tracks an in-flight request so concurrent duplicates can await it."""
+
+    __slots__ = ("event", "result", "error")
+
+    def __init__(self) -> None:
+        self.event = asyncio.Event()
+        self.result: Optional[Any] = None
+        self.error: Optional[BaseException] = None
+
+
+_in_flight: "TTLCache[str, _InFlightRequest]" = TTLCache(
+    maxsize=1024, ttl=_DEDUP_WINDOW_SECONDS
+)
+_in_flight_lock = asyncio.Lock()
+
+
+def _dedup_key(request: "InferenceRequest") -> str:
+    """Build a stable content key for deduplicating identical requests."""
+    data = request.data or {}
+    return "|".join(
+        [
+            request.type or "inference",
+            str(request.campaign_id or ""),
+            str(request.claim_id or ""),
+            str(request.package_id or ""),
+            str(request.transaction_hash or ""),
+            str(request.contract_address or ""),
+            str(request.network or ""),
+            repr(sorted(data.items())),
+        ]
+    )
 
 
 class ContractMetadata(BaseModel):
@@ -135,6 +178,38 @@ async def create_inference_task(
             detail=f"Metadata validation failed: {'; '.join(metadata_errors)}",
         )
 
+    # Coalesce near-simultaneous identical requests so only one provider call
+    # is made. The first request becomes the leader; duplicates wait for it.
+    key = _dedup_key(request)
+    async with _in_flight_lock:
+        existing = _in_flight.get(key)
+        if existing is not None:
+            leader = False
+            inflight = existing
+        else:
+            leader = True
+            inflight = _InFlightRequest()
+            _in_flight[key] = inflight
+
+    if not leader:
+        try:
+            await asyncio.wait_for(
+                inflight.event.wait(), timeout=_DEDUP_MAX_WAIT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            # Leader took too long; fall through and retry independently.
+            logger.warning(
+                "Dedup wait timed out for key=%s; retrying independently", key
+            )
+        else:
+            if inflight.error is not None:
+                # Leader failed; retry independently rather than blocking.
+                logger.info(
+                    "Leader failed for key=%s; retrying independently", key
+                )
+            elif inflight.result is not None:
+                return inflight.result
+
     try:
         # Build task payload with metadata
         payload = {
@@ -160,7 +235,7 @@ async def create_inference_task(
             payload=payload,
         )
 
-        return {
+        response = {
             "success": True,
             "task_id": task_id,
             "status": "pending",
@@ -169,10 +244,23 @@ async def create_inference_task(
             "metadata": payload.get("metadata"),
         }
 
+        if leader:
+            inflight.result = response
+            inflight.event.set()
+            async with _in_flight_lock:
+                _in_flight.pop(key, None)
+
+        return response
+
     except LoadShedError:
         raise
     except Exception as e:
         logger.error(f"Failed to create inference task: {str(e)}")
+        if leader:
+            inflight.error = e
+            inflight.event.set()
+            async with _in_flight_lock:
+                _in_flight.pop(key, None)
         raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")
 
 
