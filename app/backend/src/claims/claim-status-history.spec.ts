@@ -225,7 +225,7 @@ describe('Claim Status History', () => {
       const mockRequest = { user: mockUser };
 
       expect(() => {
-        controller.getStatusHistory(claimId, mockRequest as any);
+        void controller.getStatusHistory(claimId, mockRequest as any);
       }).toThrow(AppException);
     });
 

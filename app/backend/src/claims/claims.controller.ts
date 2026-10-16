@@ -34,9 +34,7 @@ import {
   ClaimShareResponseDto,
   SendReceiptShareDto,
 } from './dto/claim-receipt.dto';
-import {
-  ClaimStatusHistoryDto,
-} from './dto/claim-status-history.dto';
+import { ClaimStatusHistoryDto } from './dto/claim-status-history.dto';
 import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
 import { CancellationReportQueryDto } from './dto/cancellation-report-query.dto';
