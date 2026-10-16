@@ -11,7 +11,17 @@ import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { ExportCampaignsQueryDto } from './dto/export-campaigns.dto';
 import { escapeCsvField, toCsvRow } from '../common/csv/csv.util';
-import { streamCursorPaginated } from '../common/streaming/cursor-paginate';
+import { streamCursorPaginate } from '../common/streaming/cursor-paginate';
+import {
+  CAMPAIGN_CONFIDENCE_THRESHOLD_KEY,
+  ENTITY_LINK_CONFIDENCE_CONFIG,
+  getCampaignConfidenceThreshold,
+} from '../common/config/entity-link-confidence.config';
+
+export interface CampaignConfidenceThresholds {
+  reviewThreshold: number;
+  rejectThreshold: number;
+}
 
 export interface CampaignExportRow {
   id: string;
@@ -57,6 +67,76 @@ export interface CampaignTimelineMilestone {
 export class CampaignsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private static readonly DEFAULT_CONFIDENCE_THRESHOLDS: CampaignConfidenceThresholds =
+    {
+      reviewThreshold: 0.6,
+      rejectThreshold: 0.3,
+    };
+
+  private static readonly CONFIDENCE_THRESHOLD_METADATA_KEY =
+    'confidenceThresholds';
+
+  /**
+   * Resolves the confidence thresholds that apply to a campaign. When the
+   * campaign's anchor metadata carries a `confidenceThresholds` override, that
+   * override is used; otherwise the global default bands are returned
+   * unchanged.
+   */
+  getConfidenceThresholds(
+    campaign:
+      | { metadata?: Prisma.JsonValue | null }
+      | null
+      | undefined,
+  ): CampaignConfidenceThresholds {
+    const metadata = campaign?.metadata;
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return CampaignsService.DEFAULT_CONFIDENCE_THRESHOLDS;
+    }
+
+    const raw = (metadata as Record<string, unknown>)[
+      CampaignsService.CONFIDENCE_THRESHOLD_METADATA_KEY
+    ];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return CampaignsService.DEFAULT_CONFIDENCE_THRESHOLDS;
+    }
+
+    const { reviewThreshold, rejectThreshold } = raw as Record;
+      string,
+      unknown
+    >;
+    if (
+      typeof reviewThreshold !== 'number' ||
+      typeof rejectThreshold !== 'number'
+    ) {
+      return CampaignsService.DEFAULT_CONFIDENCE_THRESHOLDS;
+    }
+
+    return { reviewThreshold, rejectThreshold };
+  }
+
+  /** Resolves the thresholds for a campaign by id. */
+  async getConfidenceThresholdsForCampaign(
+    id: string,
+  ): Promise<CampaignConfidenceThresholds> {
+    const campaign = await this.findOne(id);
+    return this.getConfidenceThresholds(campaign);
+  }
+
+  /**
+   * Resolves the effective confidence threshold for a campaign, preferring a
+   * per-campaign override (stored in the campaign's metadata) when one is
+   * supplied and falling back to the global default otherwise.
+   */
+  async getConfidenceThreshold(id: string): Promise<number> {
+    const campaign = await this.findOne(id);
+    const metadata =
+      campaign.metadata && typeof campaign.metadata === 'object'
+        ? (campaign.metadata as Record<string, unknown>)
+        : null;
+    const override = getCampaignConfidenceThreshold(metadata);
+    return override ?? ENTITY_LINK_CONFIDENCE_CONFIG.AUTO_ACCEPT_THRESHOLD;
+  }
+
   private sanitizeMetadata(
     metadata?: Record<string, unknown>,
   ): Prisma.InputJsonValue | undefined {
@@ -64,13 +144,36 @@ export class CampaignsService {
     return metadata as Prisma.InputJsonValue;
   }
 
+  /**
+   * Merges an optional confidence threshold override into the campaign
+   * metadata blob, preserving any existing keys. When no override is supplied
+   * the metadata is returned unchanged.
+   */
+  private withConfidenceThreshold(
+    metadata: Record<string, unknown> | undefined,
+    confidenceThreshold?: number,
+  ): Record<string, unknown> | undefined {
+    if (confidenceThreshold === undefined) {
+      return metadata;
+    }
+    return {
+      ...(metadata ?? {}),
+      [CAMPAIGN_CONFIDENCE_THRESHOLD_KEY]: confidenceThreshold,
+    };
+  }
+
   async create(dto: CreateCampaignDto, ngoId?: string | null) {
+    const metadata = this.withConfidenceThreshold(
+      dto.metadata,
+      dto.confidenceThreshold,
+    );
+
     return this.prisma.campaign.create({
       data: {
         name: dto.name,
         status: dto.status ?? CampaignStatus.draft,
         budget: dto.budget,
-        metadata: this.sanitizeMetadata(dto.metadata),
+        metadata: this.sanitizeMetadata(metadata),
         ngoId: ngoId ?? null,
       },
     });
@@ -119,7 +222,7 @@ export class CampaignsService {
     }
 
     const allTransactions = campaign.claims.flatMap(claim =>
-      claim.sorobanTransactions.map(tx => ({ ...tx, claim })),
+      claim.sorobanTransactions.map(tx => ({ ...tx, claim }),
     );
     const claimTransactions = allTransactions.filter(
       tx => tx.operation === SorobanOperationType.create_claim,
@@ -175,12 +278,12 @@ export class CampaignsService {
         occurredAt:
           latestClaimTx?.confirmedAt ??
           latestClaimTx?.submittedAt ??
-          latestClaimTx?.initiatedAt,
+          latestClaimTx ?.initiatedAt,
         description:
           claimTransactions.length > 0
             ? `${claimTransactions.length} onchain claim transaction${claimTransactions.length === 1 ? '' : 's'} tracked.`
             : 'Waiting for onchain claim transactions.',
-        transactionHash: latestClaimTx?.txHash ?? undefined,
+        transactionHash: latestClaimTx ?.txHash ?? undefined,
         explorerUrl: latestClaimTx?.txHash
           ? this.explorerTxUrl(latestClaimTx.txHash)
           : undefined,
@@ -197,7 +300,7 @@ export class CampaignsService {
           disburseLedger.at(-1)?.createdAt ??
           latestDisburseTx?.confirmedAt ??
           latestDisburseTx?.submittedAt ??
-          latestDisburseTx?.initiatedAt,
+          latestDisburseTx ?.initiatedAt,
         description:
           disburseLedger.length > 0
             ? `${disburseLedger.length} disbursement ledger event${disburseLedger.length === 1 ? '' : 's'} recorded.`
@@ -212,7 +315,18 @@ export class CampaignsService {
   }
 
   async update(id: string, dto: UpdateCampaignDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
+
+    const metadata =
+      dto.metadata === undefined && dto.confidenceThreshold === undefined
+        ? undefined
+        : this.withConfidenceThreshold(
+            dto.metadata ??
+              (existing.metadata && typeof existing.metadata === 'object'
+                ? (existing.metadata as Record<string, unknown>)
+                : undefined),
+            dto.confidenceThreshold,
+          );
 
     return this.prisma.campaign.update({
       where: { id },
@@ -221,21 +335,21 @@ export class CampaignsService {
         status: dto.status,
         budget: dto.budget,
         metadata:
-          dto.metadata === undefined
+          metadata === undefined
             ? undefined
-            : this.sanitizeMetadata(dto.metadata),
+            : this.sanitizeMetadata(metadata),
       },
     });
   }
 
   private latestTransaction<
-    T extends {
+    Tx extends {
       initiatedAt: Date;
       submittedAt: Date | null;
       confirmedAt: Date | null;
       failedAt: Date | null;
     },
-  >(transactions: T[]): T | undefined {
+  >(transactions: TXz[]): TXz | undefined {
     return [...transactions].sort((a, b) => {
       const aTime =
         a.confirmedAt ?? a.submittedAt ?? a.failedAt ?? a.initiatedAt;
@@ -258,28 +372,27 @@ export class CampaignsService {
   private explorerTxUrl(txHash: string): string {
     const network = process.env.STELLAR_NETWORK ?? 'testnet';
     const base =
-      network.toLowerCase() === 'mainnet'
-        ? 'https://stellar.expert/explorer/public'
-        : 'https://stellar.expert/explorer/testnet';
-    return `${base}/tx/${txHash}`;
+      network === 'public'
+        ? 'https://stellarchain.org'
+        : 'https://stellar.org';
+    return `${base}/explorer/tx/${txHash}`;
   }
 
   async archive(id: string) {
-    const existing = await this.findOne(id);
-
-    if (existing.archivedAt) {
-      return { campaign: existing, alreadyArchived: true };
+    const campaign = await this.findOne(id);
+    if (campaign.archivedAt) {
+      return { alreadyArchived: true, campaign };
     }
-
     const updated = await this.prisma.campaign.update({
       where: { id },
-      data: { archivedAt: new Date(), status: CampaignStatus.archived },
+      data: {
+        status: CampaignStatus.archived,
+        archivedAt: new Date(),
+      },
     });
-
-    return { campaign: updated, alreadyArchived: false };
+    return { alreadyArchived: false, campaign: updated };
   }
 
-  /** Soft-delete a campaign (sets deletedAt). */
   async softDelete(id: string) {
     await this.findOne(id);
     return this.prisma.campaign.update({
@@ -288,117 +401,109 @@ export class CampaignsService {
     });
   }
 
-  /** Batch size used when streaming exports; bounds memory to O(batch), not O(total rows). */
-  private static readonly EXPORT_BATCH_SIZE = 500;
-
-  private static readonly CSV_HEADER =
-    'id,name,status,budget,orgId,ngoId,createdAt,updatedAt,archivedAt,totalClaims,totalDisbursed';
-
-  private buildExportWhere(
-    query: ExportCampaignsQueryDto,
-  ): Prisma.CampaignWhereInput {
-    const where: Prisma.CampaignWhereInput = {
-      deletedAt: null,
-    };
-
-    if (query.status) where.status = query.status;
-    if (query.orgId) where.orgId = query.orgId;
-    if (query.ngoId) where.ngoId = query.ngoId;
-
-    if (query.from || query.to) {
-      if (query.from && isNaN(Date.parse(query.from))) {
-        throw new AppException(
-          ERROR_CODES.BAD_REQUEST,
-          400,
-          `Invalid 'from' date: ${query.from}`,
-        );
-      }
-      if (query.to && isNaN(Date.parse(query.to))) {
-        throw new AppException(
-          ERROR_CODES.BAD_REQUEST,
-          400,
-          `Invalid 'to' date: ${query.to}`,
-        );
-      }
-      where.createdAt = {};
-      if (query.from) where.createdAt.gte = new Date(query.from);
-      if (query.to) where.createdAt.lte = new Date(query.to);
-    }
-
-    return where;
-  }
-
-  private mapCampaignRow(c: RawCampaignExportRow): CampaignExportRow {
-    return {
-      id: c.id,
-      name: c.name,
-      status: c.status,
-      budget: c.budget,
-      orgId: c.orgId ?? null,
-      ngoId: c.ngoId ?? null,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-      archivedAt: c.archivedAt ?? null,
-      totalClaims: c._count.claims,
-      totalDisbursed: c.balanceLedger.reduce((sum, bl) => sum + bl.amount, 0),
-    };
-  }
-
-  /** Count of campaigns matching the export filters, for the X-Total-Count header. */
   async countExport(query: ExportCampaignsQueryDto): Promise<number> {
-    return this.prisma.campaign.count({ where: this.buildExportWhere(query) });
+    const where = this.buildExportWhere(query);
+    return this.prisma.campaign.count({ where });
   }
 
-  /**
-   * Streams campaign export rows using cursor-based pagination, fetching one
-   * bounded batch at a time instead of loading the full matching set into
-   * memory. See CampaignsController#exportCampaigns for how this is piped
-   * directly into the HTTP response.
-   */
   async *streamExportRows(
     query: ExportCampaignsQueryDto,
   ): AsyncGenerator<CampaignExportRow> {
     const where = this.buildExportWhere(query);
-    const batchSize = CampaignsService.EXPORT_BATCH_SIZE;
+    const batchSize = 500;
 
-    const fetchPage = (cursor: string | undefined) =>
-      this.prisma.campaign.findMany({
-        where,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: batchSize,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        include: {
-          _count: { select: { claims: true } },
-          balanceLedger: { where: { eventType: 'disburse' } },
-        },
-        // Prisma schema has these fields but generated types may be stale.
-      }) as unknown as Promise<RawCampaignExportRow[]>;
+    const pages = streamCursorPaginate<any>(
+      cursor =>
+        this.prisma.campaign.findMany({
+          where,
+          orderBy: { id: 'asc' },
+          take: batchSize,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+          include: {
+            _count: { select: { claims: true } },
+            balanceLedger: { select: { amount: true } },
+          },
+        }),
+      batchSize,
+    );
 
-    for await (const row of streamCursorPaginated(fetchPage, batchSize)) {
-      yield this.mapCampaignRow(row);
+    for await (const page of pages) {
+      for (const raw of page as RawCampaignExportRow[]) {
+        yield {
+          id: raw.id,
+          name: raw.name,
+          status: raw.status,
+          budget: Number(raw.budget),
+          orgId: raw.orgId,
+          ngoId: raw.ngoId,
+          createdAt: raw.createdAt,
+          updatedAt: raw.updatedAt,
+          archivedAt: raw.archivedAt,
+          totalClaims: raw._count.claims,
+          totalDisbursed: raw.balanceLedger.reduce(
+            (sum, entry) => sum + Number(entry.amount),
+            0,
+          ),
+        };
+      }
     }
   }
 
-  /** Streams the export as CSV text chunks: header first, then one line per row. */
   async *streamExportCsv(
     query: ExportCampaignsQueryDto,
   ): AsyncGenerator<string> {
-    yield CampaignsService.CSV_HEADER + '\r\n';
+    yield toCsvRow([
+      'id',
+      'name',
+      'status',
+      'budget',
+      'orgId',
+      'ngoId',
+      'createdAt',
+      'updatedAt',
+      'archivedAt',
+      'totalClaims',
+      'totalDisbursed',
+    ]);
 
     for await (const row of this.streamExportRows(query)) {
       yield toCsvRow([
-        escapeCsvField(row.id),
+        row.id,
         escapeCsvField(row.name),
-        escapeCsvField(row.status),
-        escapeCsvField(row.budget),
-        escapeCsvField(row.orgId),
-        escapeCsvField(row.ngoId),
-        escapeCsvField(row.createdAt.toISOString()),
-        escapeCsvField(row.updatedAt.toISOString()),
-        escapeCsvField(row.archivedAt?.toISOString() ?? ''),
-        escapeCsvField(row.totalClaims),
-        escapeCsvField(row.totalDisbursed.toFixed(2)),
+        row.status,
+        row.budget,
+        row.orgId ?? '',
+        row.ngoId ?? '',
+        row.createdAt.toISOString(),
+        row.updatedAt.toISOString(),
+        row.archivedAt?.toISOString() ?? '',
+        row.totalClaims,
+        row.totalDisbursed,
       ]);
     }
+  }
+
+  private buildExportWhere(
+    query: ExportCampaignsQueryDto,
+  ): Prisma.CampaignWhereInput {
+    const where: Prisma.CampaignWhereInput = { deletedAt: null };
+    if (query.status) where.status = query.status;
+    if (query.orgId) where.orgId = query.orgId;
+    if (query.ngoId) where.ngoId = query.ngoId;
+    if (query.from) {
+      const from = new Date(query.from);
+      if (Number.isNaN(from.getTime())) {
+        throw new AppException(ERROR_CODES.BAD_REQUEST, 400, 'Invalid from date');
+      }
+      where.createdAt = { ...(where.createdAt as object), gte: from };
+    }
+    if (query.to) {
+      const to = new Date(query.to);
+      if (Number.isNaN(to.getTime())) {
+        throw new AppException(ERROR_CODES.BAD_REQUEST, 400, 'Invalid to date');
+      }
+      where.createdAt = { ...(where.createdAt as object), lte: to };
+    }
+    return where;
   }
 }

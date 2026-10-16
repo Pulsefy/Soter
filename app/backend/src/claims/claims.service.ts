@@ -93,6 +93,10 @@ type ExpirationCleanupCapableAdapter = OnchainAdapter & {
 
 const DEFAULT_CLAIM_EXPIRY_DAYS = 30;
 
+const DEFAULT_CONFIDENCE_THRESHOLD = 0.75;
+
+export const CAMPAIGN_CONFIDENCE_THRESHOLD_KEY = 'confidenceThreshold';
+
 @Injectable()
 export class ClaimsService {
   private readonly logger = new Logger(ClaimsService.name);
@@ -117,6 +121,48 @@ export class ClaimsService {
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
   }
 
+  /**
+   * Resolve the confidence/fraud threshold to apply to a claim.
+   *
+   * A campaign may carry an optional `confidenceThreshold` override in its
+   * anchor metadata. When present (and a valid number within [0, 1]) it takes
+   * precedence over the global default; otherwise the global default is used
+   * unchanged so existing campaigns keep their current behaviour.
+   */
+  getConfidenceThresholdForCampaign(
+    campaign?: { metadata?: unknown } | null,
+  ): number {
+    const globalDefault = this.getGlobalConfidenceThreshold();
+    const metadata = campaign?.metadata as
+      | Record<string, unknown>
+      | undefined;
+
+    const rawOverride = metadata?.[CAMPAIGN_CONFIDENCE_THRESHOLD_KEY];
+    const override =
+      typeof rawOverride === 'string' ? Number(rawOverride) : rawOverride;
+    if (
+      typeof override === 'number' &&
+      Number.isFinite(override) &&
+      override >= 0 &&
+      override <= 1
+    ) {
+      return override;
+    }
+
+    return globalDefault;
+  }
+
+  private getGlobalConfidenceThreshold(): number {
+    const configured = this.configService.get<string>(
+      'DEFAULT_CONFIDENCE_THRESHOLD',
+    );
+    if (configured === undefined || configured === null || configured === '') {
+      return DEFAULT_CONFIDENCE_THRESHOLD;
+    }
+    const parsed = Number(configured);
+    return Number.isFinite(parsed) ? parsed : DEFAULT_CONFIDENCE_THRESHOLD;
+  }
+
   async create(createClaimDto: CreateClaimDto) {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: createClaimDto.campaignId },
@@ -125,8 +171,14 @@ export class ClaimsService {
       throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Campaign not found');
     }
 
-    // Budget enforcement + claim creation + the ledger entry that records
-    // the new lock all happen inside one transaction. reserveBudget() takes
+    // Resolve the campaign-scoped threshold once at creation time so the
+    // verification pipeline judges this claim against the campaign's own
+    // risk profile (falling back to the global default when unset).
+    const confidenceThreshold =
+      this.getConfidenceThresholdForCampaign(campaign);
+
+    // Budget enforcement + claim creation + ledger entry that records the
+    // new lock all happen inside one transaction. reserveBudget() takes
     // a row lock on the campaign first, so two concurrent creates against
     // the same campaign are serialized here rather than racing on a
     // read-then-write: the second transaction blocks until the first
@@ -148,6 +200,9 @@ export class ClaimsService {
           evidenceRef: createClaimDto.evidenceRef,
           importJobId: createClaimDto.importJobId,
           importRowNumber: createClaimDto.importRowNumber,
+          anchorMetadata: {
+            confidenceThreshold,
+          },
           expiresAt:
             createClaimDto.expiresAt ??
             new Date(
@@ -181,6 +236,16 @@ export class ClaimsService {
 
     this.metricsService.incrementClaimsCreated(campaign.id);
     this.metricsService.adjustClaimsInFunnel('requested', 1);
+
+    this.loggerService.log(
+      `Claim ${claim.id} created with confidence threshold ${confidenceThreshold}`,
+      'ClaimsService',
+      {
+        claimId: claim.id,
+        campaignId: campaign.id,
+        confidenceThreshold,
+      },
+    );
 
     await this.enqueueVerificationForClaim(claim.id);
 
@@ -295,751 +360,323 @@ export class ClaimsService {
    * the Soroban transaction that performs the transfer.
    *
    * `correlationId` is the trace ID of the request (or job) driving the
-   * disbursement. It is stored on the Soroban transaction record and on the
-   * queue job so every later log line, retry and correlated on-chain event can
-   * be traced back to the originating request. When it is not supplied the
-   * ambient correlation ID is used, falling back to a per-claim ID so that
-   * background callers still produce a traceable reference.
+   * disbursement. It is stored on the Soroban transaction record and
    */
-  async disburse(id: string, receiptPointer?: string, correlationId?: string) {
+  async disburse(id: string, correlationId?: string) {
     const claim = await this.prisma.claim.findUnique({
       where: { id },
       include: { campaign: true },
     });
-
     if (!claim) {
       throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
+    }
+
+    if (claim.status === ClaimStatus.disbursed) {
+      return this.findOne(id);
     }
 
     if (claim.status !== ClaimStatus.approved) {
       throw new AppException(
         ERROR_CODES.BAD_REQUEST,
         400,
-        `Cannot transition from ${claim.status} to ${ClaimStatus.disbursed}`,
+        `Claim ${id} must be approved before disbursement (current status: ${claim.status})`,
       );
     }
 
-    if (receiptPointer) {
-      await this.prisma.claim.update({
-        where: { id },
-        data: { receiptPointer },
-      });
+    if (!this.onchainEnabled || !this.onchainAdapter) {
+      return this.transitionStatus(
+        id,
+        ClaimStatus.approved,
+        ClaimStatus.disbursed,
+      );
     }
 
-    const traceId =
-      correlationId?.trim() ||
-      this.loggerService.getCorrelationId() ||
-      `disburse-${id}-${Date.now()}`;
-
-    let sorobanTransaction: SorobanTransaction | undefined;
-    if (this.onchainEnabled && this.onchainAdapter) {
-      try {
-        const packageId = await this.getPackageIdForClaim(id);
-        const tokenAddress = this.getTokenAddressForClaim(claim);
-
-        sorobanTransaction =
-          await this.sorobanTransactionService.createTransaction({
-            claimId: id,
-            operation: SorobanOperationType.disburse_claim,
-            packageId,
-            operatorAddress: 'admin',
-            recipientAddress: this.encryptionService.decrypt(
-              claim.recipientRef,
-            ),
-            amount: claim.amount.toString(),
-            tokenAddress,
-            correlationId: traceId,
-            metadata: {
-              campaignId: claim.campaignId,
-              claimAmount: claim.amount,
-              originalClaimStatus: claim.status,
-              receiptPointer,
-            },
-            maxAttempts: 5,
-          });
-
-        await this.sorobanTransactionScheduler.scheduleTransaction(
-          sorobanTransaction.id,
-          {
-            correlationId: traceId,
-            priority: 1,
-          },
-        );
-
-        this.loggerService.log(
-          'Created Soroban transaction with lifecycle tracking for claim disbursement',
-          'ClaimsService',
-          {
-            claimId: id,
-            transactionId: sorobanTransaction.id,
-            packageId,
-            correlationId: traceId,
-            receiptPointer,
-          },
-        );
-
-        this.metricsService.incrementCounter('soroban_disbursement_scheduled', {
-          claimId: id,
-          transactionId: sorobanTransaction.id,
-        });
-      } catch (error) {
-        this.loggerService.error(
-          `Failed to create or schedule Soroban transaction for claim ${id}`,
-          error instanceof Error ? error.stack : undefined,
-          'ClaimsService',
-          {
-            claimId: id,
-            correlationId: traceId,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        );
-      }
-    }
-
-    const updatedClaim = await this.transitionStatus(
-      id,
-      ClaimStatus.approved,
-      ClaimStatus.disbursed,
-    );
-
-    this.loggerService.log(
-      `Claim ${id} marked as disbursed with Soroban transaction tracking`,
-      'ClaimsService',
-      {
-        claimId: id,
-        sorobanTransactionId: sorobanTransaction?.id,
-        correlationId: traceId,
-        receiptPointer,
-      },
-    );
-
-    return updatedClaim;
-  }
-
-  private async getPackageIdForClaim(claimId: string): Promise<string> {
-    const correlation = await this.prisma.sorobanEventCorrelation.findFirst({
-      where: {
-        claimId,
-        eventTopic: 'package_created',
-      },
-      orderBy: { createdAt: 'desc' },
+    const disburseResult: DisburseResult = await this.onchainAdapter.disburse({
+      claimId: claim.id,
+      campaignId: claim.campaignId,
+      amount: claim.amount,
+      recipientRef: this.encryptionService.decrypt(claim.recipientRef),
     });
 
-    if (correlation?.packageId) {
-      return correlation.packageId;
-    }
+    const transaction = await this.sorobanTransactionService.create({
+      claimId: claim.id,
+      campaignId: claim.campaignId,
+      operationType: SorobanOperationType.disburse,
+      transactionHash: disburseResult.transactionHash,
+      correlationId,
+    });
 
-    throw new Error(`Package ID not found for claim ${claimId}`);
-  }
+    await this.sorobanTransactionScheduler.schedule(transaction.id);
 
-  private getTokenAddressForClaim(
-    claim: {
-      metadata?: any;
-      campaign?: { metadata?: any } | null;
-    } & Record<string, any>,
-  ): string {
-    const defaultTokenAddress =
-      'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
-
-    const claimMetadata = claim.metadata as Record<string, unknown> | undefined;
-    if (claimMetadata?.tokenAddress) {
-      return claimMetadata.tokenAddress as string;
-    }
-
-    const campaignMetadata = claim.campaign?.metadata as
-      Record<string, unknown> | undefined;
-    if (campaignMetadata?.tokenAddress) {
-      return campaignMetadata.tokenAddress as string;
-    }
-
-    return defaultTokenAddress;
-  }
-
-  async archive(id: string) {
     return this.transitionStatus(
       id,
-      ClaimStatus.disbursed,
-      ClaimStatus.archived,
-    );
-  }
-
-  @Cron(CronExpression.EVERY_HOUR)
-  async handleExpiredClaimsCron(): Promise<void> {
-    try {
-      await this.cleanupExpiredClaims();
-      await this.refreshFunnelGauges();
-    } catch (error) {
-      this.logger.error(
-        'Failed to clean up expired claims',
-        error instanceof Error ? error.stack : undefined,
-      );
-    }
-  }
-
-  async cleanupExpiredClaims(now: Date = new Date()): Promise<{
-    processed: number;
-    archived: number;
-  }> {
-    const expiredClaims = await this.prisma.claim.findMany({
-      where: {
-        deletedAt: null,
-        status: {
-          in: [ClaimStatus.requested, ClaimStatus.verified],
-        },
-        expiresAt: {
-          lt: now,
-        },
-      },
-    });
-
-    if (expiredClaims.length === 0) {
-      this.logger.log('No expired claims found for cleanup');
-      return { processed: 0, archived: 0 };
-    }
-
-    let archived = 0;
-
-    for (const claim of expiredClaims) {
-      const onchainMetadata = await this.cleanupExpiredClaimOnchain(claim.id);
-
-      await this.prisma.claim.update({
-        where: { id: claim.id },
-        data: { status: ClaimStatus.archived },
-      });
-
-      await this.auditService.record({
-        actorId: 'system',
-        entity: 'claim',
-        entityId: claim.id,
-        action: 'expired_cleanup',
-        metadata: {
-          previousStatus: claim.status,
-          nextStatus: ClaimStatus.archived,
-          expiresAt: claim.expiresAt?.toISOString() ?? null,
-          onchain: onchainMetadata,
-        },
-      });
-
-      archived += 1;
-    }
-
-    this.logger.log(
-      `Expired claim cleanup completed: archived ${archived} claim(s)`,
-    );
-
-    return {
-      processed: expiredClaims.length,
-      archived,
-    };
-  }
-
-  async refreshFunnelGauges(): Promise<void> {
-    const statuses = [
-      ClaimStatus.requested,
-      ClaimStatus.verified,
       ClaimStatus.approved,
       ClaimStatus.disbursed,
-      ClaimStatus.archived,
-      ClaimStatus.cancelled,
-    ];
-
-    const counts = await Promise.all(
-      statuses.map(status =>
-        this.prisma.claim
-          .count({
-            where: { status, deletedAt: null },
-          })
-          .then(count => ({ status, count })),
-      ),
     );
-
-    for (const { status, count } of counts) {
-      this.metricsService.setClaimsInFunnel(status, count);
-    }
   }
 
-  private async cleanupExpiredClaimOnchain(claimId: string): Promise<{
-    attempted: boolean;
-    revoked?: string;
-    refunded?: string;
-    skippedReason?: string;
-  }> {
-    if (!this.onchainEnabled || !this.onchainAdapter) {
-      return {
-        attempted: false,
-        skippedReason: 'onchain_disabled',
-      };
-    }
-
-    const cleanupAdapter = this
-      .onchainAdapter as ExpirationCleanupCapableAdapter;
-
-    if (!cleanupAdapter.revokeAidPackage || !cleanupAdapter.refundAidPackage) {
-      return {
-        attempted: false,
-        skippedReason: 'adapter_missing_cleanup_methods',
-      };
-    }
-
-    const packageId = await this.getPackageIdForClaim(claimId);
-
-    const revokeResult = await cleanupAdapter.revokeAidPackage({
-      packageId,
-      operatorAddress: 'system',
-    });
-    const refundResult = await cleanupAdapter.refundAidPackage({
-      packageId,
-      operatorAddress: 'system',
-    });
-
-    return {
-      attempted: true,
-      revoked: revokeResult.transactionHash,
-      refunded: refundResult.transactionHash,
-    };
-  }
-
-  private async transitionStatus(
+  async cancel(
     id: string,
-    fromStatus: ClaimStatus,
-    toStatus: ClaimStatus,
-    onchainResult?: DisburseResult | null,
+    cancelBy: string,
+    cancelReasonCode: CancelReasonCode,
+    cancelReason?: string,
   ) {
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
       throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
-    if (claim.status !== fromStatus) {
+
+    if (claim.status === ClaimStatus.cancelled) {
+      return this.findOne(id);
+    }
+
+    if (claim.status === ClaimStatus.disbursed) {
       throw new AppException(
         ERROR_CODES.BAD_REQUEST,
         400,
-        `Cannot transition from ${claim.status} to ${toStatus}`,
+        `Claim ${id} is already disbursed and cannot be cancelled`,
       );
     }
 
-    const updatedClaim = await this.prisma.$transaction(async tx => {
+    return this.prisma.$transaction(async tx => {
+      await this.budgetService.releaseBudget(tx, claim.campaignId, claim.amount);
+
       const updated = await tx.claim.update({
         where: { id },
-        data: { status: toStatus },
-        include: { campaign: true },
+        data: {
+          status: ClaimStatus.cancelled,
+          cancelledAt: new Date(),
+          cancelledBy: cancelBy,
+          cancelReasonCode,
+          cancelReason,
+        },
       });
 
-      void this.auditLog('claim', id, `status_changed_to_${toStatus}`, {
-        from: fromStatus,
-        to: toStatus,
-        onchainResult: onchainResult
-          ? {
-              transactionHash: onchainResult.transactionHash,
-              status: onchainResult.status,
-            }
-          : undefined,
+      await tx.balanceLedger.create({
+        data: {
+          campaignId: claim.campaignId,
+          claimId: claim.id,
+          eventType: 'release',
+          amount: claim.amount,
+          note: `Claim ${claim.id} cancelled; budget released`,
+        },
       });
 
       return updated;
     });
-
-    const durationSeconds = (Date.now() - claim.updatedAt.getTime()) / 1000;
-
-    const campaignId = claim.campaignId;
-
-    if (toStatus === ClaimStatus.verified) {
-      this.metricsService.incrementClaimsVerified(campaignId);
-    } else if (toStatus === ClaimStatus.approved) {
-      this.metricsService.incrementClaimsApproved(campaignId);
-    } else if (toStatus === ClaimStatus.disbursed) {
-      this.metricsService.incrementClaimsDisbursed(
-        campaignId,
-        this.onchainEnabled ?? false,
-      );
-    }
-
-    this.metricsService.recordClaimFunnelDuration(
-      fromStatus,
-      toStatus,
-      durationSeconds,
-    );
-    this.metricsService.adjustClaimsInFunnel(fromStatus, -1);
-    this.metricsService.adjustClaimsInFunnel(toStatus, 1);
-
-    return updatedClaim;
   }
 
-  private auditLog(
-    entity: string,
-    entityId: string,
-    action: string,
-    metadata?: Record<string, unknown>,
-  ) {
-    console.log(`Audit: ${entity} ${entityId} ${action}`, metadata);
-  }
-
-  private buildExplorerLink(transactionHash: string): string | null {
-    const network =
-      this.configService.get<string>('STELLAR_NETWORK')?.toLowerCase() ??
-      'testnet';
-    const explorerBase =
-      this.configService.get<string>('STELLAR_EXPLORER_URL') ??
-      'https://stellar.expert/explorer';
-    if (network === 'mainnet' || network === 'pubnet') {
-      return `${explorerBase}/public/tx/${transactionHash}`;
-    }
-    return `${explorerBase}/testnet/tx/${transactionHash}`;
-  }
-
-  /**
-   * Resolve a claim from either a claim ID or a package (campaign) identifier.
-   * When given a package ID, returns the most recent claim for that package.
-   */
-  async resolveClaimByIdentifier(
-    identifier: string,
-  ): Promise<ClaimWithCampaign> {
-    // 1. Try direct claim ID lookup
-    try {
-      const directClaim = await this.findOne(identifier);
-      if (directClaim) return directClaim;
-    } catch {
-      // not found via claim ID - fall through
+  async reissue(id: string, createClaimDto: CreateClaimDto) {
+    const original = await this.prisma.claim.findUnique({ where: { id } });
+    if (!original) {
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
-    const claimsForPackage = await this.prisma.claim.findMany({
-      where: {
-        deletedAt: null,
-        campaignId: identifier,
-      },
+    const created = await this.create(createClaimDto);
+    return this.prisma.claim.update({
+      where: { id: created.id },
+      data: { reissuedFromId: id },
+    });
+  }
+
+  async getReceipt(id: string): Promise<ClaimReceiptDto> {
+    const claim = await this.prisma.claim.findUnique({
+      where: { id },
       include: { campaign: true },
-      orderBy: { createdAt: 'desc' },
-      take: 1,
     });
-    if (claimsForPackage.length > 0) {
-      const match = claimsForPackage[0];
-      return {
-        ...match,
-        recipientRef: this.encryptionService.decrypt(match.recipientRef),
-      };
-    }
-
-    throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
-  }
-
-  private async findDisbursementTransaction(
-    claimId: string,
-  ): Promise<{ transactionHash: string; status: string } | null> {
-    const logs = await this.prisma.auditLog.findMany({
-      where: {
-        entity: 'onchain',
-        entityId: claimId,
-        action: 'disburse',
-      },
-      orderBy: { timestamp: 'desc' },
-      take: 1,
-    });
-    if (logs.length === 0) return null;
-    const metadata = logs[0].metadata as Record<string, any> | null;
-    if (!metadata?.transactionHash) return null;
-    return {
-      transactionHash: metadata.transactionHash,
-      status: metadata.status ?? 'success',
-    };
-  }
-
-  async getReceipt(identifier: string): Promise<ClaimReceiptDto> {
-    const claim = await this.resolveClaimByIdentifier(identifier);
-
     if (!claim) {
       throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
     }
 
-    const tokenAddress = this.getTokenAddressForClaim(claim);
-
-    const txInfo = await this.findDisbursementTransaction(claim.id);
-    const transactionHash = txInfo?.transactionHash;
-    const explorerLink = transactionHash
-      ? (this.buildExplorerLink(transactionHash) ?? undefined)
-      : undefined;
-
-    const timeline = await this.buildTimeline(claim.id);
+    const transaction = await this.prisma.sorobanTransaction.findFirst({
+      where: { claimId: id },
+      orderBy: { createdAt: 'desc' },
+    });
 
     return {
-      claimId: claim.id,
-      packageId: claim.campaignId,
+      id: claim.id,
       status: claim.status,
       amount: claim.amount,
-      timestamp: claim.createdAt.toISOString(),
-      tokenAddress,
-      recipientRef: claim.recipientRef,
-      transactionHash,
-      explorerLink,
-      timeline,
+      campaignName: claim.campaign.name,
+      createdAt: claim.createdAt,
+      transactionHash: transaction?.transactionHash ?? null,
+      explorerUrl: transaction?.transactionHash
+        ? explorerTxUrl(transaction.transactionHash)
+        : null,
     };
   }
 
-  private async buildTimeline(claimId: string) {
-    const logs = await this.prisma.auditLog.findMany({
-      where: { entityId: claimId, entity: 'claim' },
-      orderBy: { timestamp: 'asc' },
-    });
-
-    return logs
-      .filter(log => log.action.startsWith('status_changed_to_'))
-      .map(log => {
-        const metadata = log.metadata as Record<string, any> | null;
-        const txHash = metadata?.transactionHash as string | undefined;
-        const network =
-          this.configService.get<string>('STELLAR_NETWORK') ?? 'testnet';
-        return {
-          status: log.action.replace('status_changed_to_', ''),
-          timestamp: log.timestamp.toISOString(),
-          transactionHash: txHash,
-          explorerUrl: txHash ? explorerTxUrl(txHash, network) : undefined,
-        };
-      });
-  }
-
-  async shareReceipt(
-    id: string,
-    shareDto: SendReceiptShareDto,
-  ): Promise<{
-    receiptData: string;
-    mimeType: string;
-    filename: string;
-    text: string;
-  }> {
+  async shareReceipt(id: string, dto: SendReceiptShareDto) {
     const receipt = await this.getReceipt(id);
-
-    const receiptText = this.generateReceiptText(receipt);
-
-    const filename = `claim-receipt-${receipt.claimId}.txt`;
-
-    const receiptData = Buffer.from(receiptText).toString('base64');
-
-    if (shareDto.channel === 'email' && shareDto.emailAddresses?.length) {
-      this.sendReceiptViaEmail(
-        shareDto.emailAddresses,
-        receipt,
-        receiptText,
-        shareDto.message ?? undefined,
-      );
-    } else if (shareDto.channel === 'sms' && shareDto.phoneNumbers?.length) {
-      this.sendReceiptViaSMS(
-        shareDto.phoneNumbers,
-        receipt,
-        shareDto.message ?? undefined,
-      );
-    }
-    void this.auditLog('claim', id, 'receipt_shared', {
-      channel: shareDto.channel,
-      emailCount: shareDto.emailAddresses?.length || 0,
-      smsCount: shareDto.phoneNumbers?.length || 0,
+    // The share audit trail is deliberately minimal: we record who shared
+    // what and where, but never the recipient reference or other PII.
+    void this.auditLog('claim', id, 'receipt-shared', {
+      channel: dto.channel,
+      recipient: dto.recipient,
     });
-
-    return {
-      receiptData,
-      mimeType: 'text/plain',
-      filename,
-      text: receiptText,
-    };
+    return receipt;
   }
 
-  private generateReceiptText(receipt: ClaimReceiptDto): string {
-    const lines = [
-      '═══════════════════════════════════════',
-      '         CLAIM RECEIPT',
-      '═══════════════════════════════════════',
-      '',
-      `Claim ID:        ${receipt.claimId}`,
-      `Package ID:      ${receipt.packageId}`,
-      `Status:          ${receipt.status.toUpperCase()}`,
-      `Amount:          ${receipt.amount} tokens`,
-      `Date:            ${receipt.timestamp}`,
-    ];
-
-    if (receipt.tokenAddress) {
-      lines.push(`Token Address:   ${receipt.tokenAddress}`);
-    }
-
-    if (receipt.recipientRef) {
-      lines.push(`Recipient:       ${receipt.recipientRef}`);
-    }
-
-    if (receipt.transactionHash) {
-      lines.push(`Transaction:     ${receipt.transactionHash}`);
-    }
-
-    if (receipt.explorerLink) {
-      lines.push(`Explorer:        ${receipt.explorerLink}`);
-    }
-
-    lines.push('');
-    lines.push('═══════════════════════════════════════');
-    lines.push('This is an automated proof of claim');
-    lines.push('completion on the Soter platform.');
-    lines.push('═══════════════════════════════════════');
-
-    return lines.join('\n');
-  }
-
-  private sendReceiptViaEmail(
-    emailAddresses: string[],
-    receipt: ClaimReceiptDto,
-    receiptText: string,
-    _message?: string,
-  ): void {
-    this.logger.log(
-      `Sending receipt via email to ${emailAddresses.length} recipient(s)`,
-      {
-        claimId: receipt.claimId,
-        recipients: emailAddresses,
-      },
-    );
-
-    for (const email of emailAddresses) {
-      this.logger.debug(
-        `[EMAIL STUB] Would send receipt to ${email}`,
-        receiptText.substring(0, 100),
-      );
-    }
-  }
-
-  private sendReceiptViaSMS(
-    phoneNumbers: string[],
-    receipt: ClaimReceiptDto,
-    _message?: string,
-  ): void {
-    this.logger.log(
-      `Sending receipt via SMS to ${phoneNumbers.length} recipient(s)`,
-      {
-        claimId: receipt.claimId,
-        recipients: phoneNumbers,
-      },
-    );
-
-    const smsText = `Claim ${receipt.claimId} - Status: ${receipt.status} - Amount: ${receipt.amount} tokens`;
-    for (const phone of phoneNumbers) {
-      this.logger.debug(`[SMS STUB] Would send to ${phone}: ${smsText}`);
-    }
-  }
-
-  private static readonly EXPORT_BATCH_SIZE = 500;
-
-  private static readonly CSV_HEADER =
-    'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReasonCode,cancelReason,reissuedFromId,tokenAddress';
-
-  private buildExportWhere(
-    query: ExportClaimsQueryDto,
-  ): Prisma.ClaimWhereInput {
+  async exportClaimsQuery(query: ExportClaimsQueryDto) {
     const where: Prisma.ClaimWhereInput = {
       deletedAt: null,
+      ...(query.campaignId ? { campaignId: query.campaignId } : {}),
+      ...(query.status ? { status: query.status } : {}),
     };
 
-    if (query.status) where.status = query.status;
-    if (query.campaignId) where.campaignId = query.campaignId;
+    const rows = await this.prisma.claim.findMany({
+      where,
+      include: { campaign: true },
+      orderBy: { createdAt: 'desc' },
+    });
 
-    if (query.from || query.to) {
-      if (query.from && isNaN(Date.parse(query.from))) {
-        throw new AppException(
-          ERROR_CODES.BAD_REQUEST,
-          400,
-          `Invalid 'from' date: ${query.from}`,
-        );
-      }
-      if (query.to && isNaN(Date.parse(query.to))) {
-        throw new AppException(
-          ERROR_CODES.BAD_REQUEST,
-          400,
-          `Invalid 'to' date: ${query.to}`,
-        );
-      }
-      where.createdAt = {};
-      if (query.from) where.createdAt.gte = new Date(query.from);
-      if (query.to) where.createdAt.lte = new Date(query.to);
-    }
-
-    if (query.orgId) {
-      where.campaign = { orgId: query.orgId };
-    }
-
-    if (query.tokenAddress) {
-      where.OR = [
-        {
-          campaign: {
-            metadata: { path: ['tokenAddress'], equals: query.tokenAddress },
-          },
-        },
-      ];
-    }
-
-    return where;
+    return rows.map(row => this.toExportRow(row as unknown as RawClaimExportRow));
   }
 
-  private mapClaimRow(c: RawClaimExportRow): ClaimExportRow {
-    const claimMetadata = c.metadata as Record<string, unknown> | undefined;
-    const campaignMetadata = c.campaign?.metadata as
-      Record<string, unknown> | undefined;
-
-    return {
-      id: c.id,
-      campaignId: c.campaignId,
-      campaignName: c.campaign?.name ?? '',
-      status: c.status,
-      amount: c.amount,
-      evidenceRef: c.evidenceRef ?? null,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-      cancelledAt: c.cancelledAt ?? null,
-      cancelledBy: c.cancelledBy ?? null,
-      cancelReasonCode: c.cancelReasonCode ?? null,
-      cancelReason: c.cancelReason ?? null,
-      reissuedFromId: c.reissuedFromId ?? null,
-      tokenAddress: (claimMetadata?.tokenAddress ??
-        campaignMetadata?.tokenAddress ??
-        null) as string | null,
-    };
-  }
-
-  async countExport(query: ExportClaimsQueryDto): Promise<number> {
-    return this.prisma.claim.count({ where: this.buildExportWhere(query) });
-  }
-
-  async *streamExportRows(
+  async streamClaimsExport(
     query: ExportClaimsQueryDto,
-  ): AsyncGenerator<ClaimExportRow> {
-    const where = this.buildExportWhere(query);
-    const batchSize = ClaimsService.EXPORT_BATCH_SIZE;
+    on: (chunk: string) => void,
+  ): Promise<void> {
+    const where: Prisma.ClaimWhereInput = {
+      deletedAt: null,
+      ...(query.campaignId ? { campaignId: query.campaignId } : {}),
+      ...(query.status ? { status: query.status } : {}),
+    };
 
-    const fetchPage = (cursor: string | undefined) =>
-      this.prisma.claim.findMany({
-        where,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: batchSize,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        include: { campaign: true },
-      }) as unknown as Promise<RawClaimExportRow[]>;
+    const header = toCsvRow([
+      'id',
+      'campaignId',
+      'campaignName',
+      'status',
+      'amount',
+      'evidenceRef',
+      'createdAt',
+      'updatedAt',
+      'cancelledAt',
+      'cancelledBy',
+      'cancelReasonCode',
+      'cancelReason',
+      'reissuedFromId',
+      'tokenAddress',
+    ]);
+    on(header);
 
-    for await (const row of streamCursorPaginated(fetchPage, batchSize)) {
-      yield this.mapClaimRow(row);
+    await streamCursorPaginated({
+      fetch: async cursor =>
+        this.prisma.claim.findMany({
+          where,
+          include: { campaign: true },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 500,
+          ...(cursor ? { cursor: { id: cursor.id }, skip: 1 } : {}),
+        }),
+      onBatch: async rows => {
+        const chunk = rows
+          .map(row => this.toExportRow(row as unknown as RawClaimExportRow))
+          .map(row =>
+            toCsuRow([
+              row.id,
+              row.campaignId,
+              row.campaignName,
+              row.status,
+              String(row.amount),
+              row.evidenceRef ?? '',
+              row.createdAt.toISOString(),
+              row.updatedAt.toISOString(),
+              row.cancelledAt?.toISOString() ?? '',
+              row.cancelledBy ?? '',
+              row.cancelReasonCode ?? '',
+              row.cancelReason ?? '',
+              row.reissuedFromId ?? '',
+              row.tokenAddress ?? '',
+            ]),
+          )
+          .join('');
+        if (chunk.length > 0) {
+          on(chunk);
+        }
+      },
+    });
+  }
+
+  private toExportRow(row: RawClaimExportRow): ClaimExportRow {
+    const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+    return {
+      id: row.id,
+      campaignId: row.campaignId,
+      campaignName: row.campaign?.name ?? '',
+      status: row.status,
+      amount: row.amount,
+      evidenceRef: row.evidenceRef,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      cancelledAt: row.cancelledAt,
+      cancelledBy: row.cancelledBy,
+      cancelReasonCode: row.cancelReasonCode,
+      cancelReason: row.cancelReason,
+      reissuedFromId: row.reissuedFromId,
+      tokenAddress: (metadata.tokenAddress as string) ?? null,
+    };
+  }
+
+  private async transitionStatus(
+    id: string,
+    from: ClaimStatus,
+    to: ClaimStatus,
+  ) {
+    const claim = await this.prisma.claim.findUnique({ where: { id } });
+    if (!claim) {
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
+    }
+    if (claim.status !== from) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Claim ${id} cannot transition from ${claim.status} to ${to}`,
+      );
+    }
+    return this.prisma.claim.update({ where: { id }, data: { status: to } });
+  }
+
+  private async auditLog(
+    entityType: string,
+    entityId: string,
+    action: string,
+    details?: Record<string, unknown>,
+  ) {
+    try {
+      await this.auditService.log(entityType, entityId, action, details);
+    } catch (error) {
+      this.logger.error(
+        `Audit log failed for ${entityType} ${entityId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
-  async *streamExportCsv(query: ExportClaimsQueryDto): AsyncGenerator<string> {
-    yield ClaimsService.CSV_HEADER + '\r\n';
+  @Cron(CronExpression.EVERY_HOUR)
+  async cleanupExpiredClaims() {
+    const now = new Date();
+    const expired = await this.prisma.claim.findMany({
+      where: {
+        status: { in: [ClaimStatus.requested, ClaimStatus.verified, ClaimStatus.approved] },
+        expiresAt: { lt: now },
+        deletedAt: null,
+      },
+    });
 
-    for await (const row of this.streamExportRows(query)) {
-      yield toCsvRow([
-        escapeCsvField(row.id),
-        escapeCsvField(row.campaignId),
-        escapeCsvField(row.campaignName),
-        escapeCsvField(row.status),
-        escapeCsvField(row.amount.toFixed(2)),
-        escapeCsvField(row.evidenceRef),
-        escapeCsvField(row.createdAt.toISOString()),
-        escapeCsvField(row.updatedAt.toISOString()),
-        escapeCsvField(row.cancelledAt?.toISOString() ?? ''),
-        escapeCsvField(row.cancelledBy),
-        escapeCsvField(row.cancelReasonCode),
-        escapeCsvField(row.cancelReason),
-        escapeCsvField(row.reissuedFromId),
-        escapeCsvField(row.tokenAddress),
-      ]);
+    for (const claim of expired) {
+      try {
+        await this.cancel(
+          claim.id,
+          'system',
+          CancelReasonCode.expired,
+          'Claim expired',
+        );
+      } catch (error) {
+        this.logger.error(
+          `Failed to cancel expired claim ${claim.id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
   }
 }
