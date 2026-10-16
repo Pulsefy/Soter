@@ -884,13 +884,13 @@ export class ClaimsService {
         trigger,
         metadata: {
           // Preserve operational metadata but exclude internal fields
-          ...(metadata?.from && { from: metadata.from }),
-          ...(metadata?.to && { to: metadata.to }),
-          ...(metadata?.reason && { cancelReason: metadata.reason }),
-          ...(metadata?.code && { cancelReasonCode: metadata.code }),
-          ...(metadata?.verificationScore && {
-            verificationScore: metadata.verificationScore,
-          }),
+          ...(metadata?.from ? { from: metadata.from } : {}),
+          ...(metadata?.to ? { to: metadata.to } : {}),
+          ...(metadata?.reason ? { cancelReason: metadata.reason } : {}),
+          ...(metadata?.code ? { cancelReasonCode: metadata.code } : {}),
+          ...(metadata?.verificationScore
+            ? { verificationScore: metadata.verificationScore }
+            : {}),
         },
       };
     });
