@@ -215,7 +215,7 @@ describe('Claim Status History', () => {
       expect(result.historicalCoverageNote).toContain('Incomplete history');
     });
 
-    it('enforces authorization: denies access for unauthorized organization', () => {
+    it('enforces authorization: denies access for unauthorized organization', async () => {
       claimsService.findOne.mockResolvedValue(mockClaim);
 
       const mockUser = {
@@ -224,9 +224,9 @@ describe('Claim Status History', () => {
       };
       const mockRequest = { user: mockUser };
 
-      expect(() => {
-        void controller.getStatusHistory(claimId, mockRequest as any);
-      }).toThrow(AppException);
+      await expect(
+        controller.getStatusHistory(claimId, mockRequest as any),
+      ).rejects.toThrow(AppException);
     });
 
     it('allows admin to access any organization claim', async () => {
