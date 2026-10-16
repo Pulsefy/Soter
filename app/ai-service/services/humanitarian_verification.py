@@ -215,6 +215,10 @@ class HumanitarianVerificationService:
                             on_token=on_token,
                         )
                         breaker.record_success()
+                        metrics.record_provider_latency(
+                            provider=provider_name,
+                            duration_seconds=response.latency_ms / 1000.0,
+                        )
                         metrics.record_llm_usage(
                             provider=provider_name,
                             model=model,
@@ -432,6 +436,7 @@ class HumanitarianVerificationService:
                     usage["prompt_tokens"] = prompt_tokens
                     usage["completion_tokens"] = completion_tokens
 
+                stream_start = time.time()
                 for chunk in provider.llm_chat_stream(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
@@ -445,6 +450,7 @@ class HumanitarianVerificationService:
                     content="".join(chunks),
                     provider=provider_name,
                     model=model,
+                    latency_ms=int((time.time() - stream_start) * 1000),
                     prompt_tokens=usage["prompt_tokens"],
                     completion_tokens=usage["completion_tokens"],
                 )

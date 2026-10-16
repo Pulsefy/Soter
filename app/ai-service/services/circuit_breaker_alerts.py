@@ -61,6 +61,8 @@ SCHEMA_VERSION = "1.0"
 ALERT_EVENT_OPENED = "opened"
 #: Transition back to CLOSED — the provider is healthy again.
 ALERT_EVENT_RECOVERED = "recovered"
+#: Latency threshold exceeded — high latency alert independent of outright failure.
+ALERT_EVENT_LATENCY_EXCEEDED = "latency_exceeded"
 
 #: States as emitted by :mod:`services.circuit_breaker`. Kept as plain strings
 #: so this module never needs to import the breaker (avoiding a cycle).
@@ -85,20 +87,32 @@ class CircuitBreakerAlertPayload(BaseModel):
     )
     event: str = Field(
         ...,
-        description="One of 'opened' or 'recovered'.",
+        description="One of 'opened', 'recovered', or 'latency_exceeded'.",
     )
     provider: str = Field(
         ...,
-        description="Provider whose breaker changed state (e.g. 'openai').",
+        description="Provider whose breaker changed state or exceeded latency (e.g. 'openai').",
         min_length=1,
     )
-    from_state: str = Field(..., alias="fromState", description="Previous state.")
-    to_state: str = Field(..., alias="toState", description="New state.")
-    failure_count: int = Field(
-        ...,
+    from_state: Optional[str] = Field(default=None, alias="fromState", description="Previous state.")
+    to_state: Optional[str] = Field(default=None, alias="toState", description="New state.")
+    failure_count: Optional[int] = Field(
+        default=None,
         alias="failureCount",
         ge=0,
         description="Failure count recorded at the moment of the transition.",
+    )
+    latency_seconds: Optional[float] = Field(
+        default=None,
+        alias="latencySeconds",
+        ge=0.0,
+        description="Observed request latency in seconds when alerting on latency.",
+    )
+    latency_threshold_seconds: Optional[float] = Field(
+        default=None,
+        alias="latencyThresholdSeconds",
+        ge=0.0,
+        description="Configured latency threshold in seconds.",
     )
     reason: str = Field(
         default="",
@@ -253,6 +267,59 @@ class CircuitBreakerAlerter:
         self._dispatch(provider, event, payload)
         return True
 
+    def notify_latency(
+        self,
+        provider: str,
+        duration_seconds: float,
+        threshold_seconds: Optional[float] = None,
+    ) -> bool:
+        """Alert when a provider request latency exceeds the configured SLA threshold.
+
+        Independent of outright failures.
+        Returns False when alerts are disabled, when latency is below threshold,
+        or when de-duplicated.
+        """
+        if not self.enabled:
+            return False
+
+        if threshold_seconds is None:
+            threshold_seconds = settings.provider_latency_thresholds.get(
+                provider, settings.provider_latency_alert_threshold_seconds
+            )
+
+        if duration_seconds <= threshold_seconds:
+            return False
+
+        event = ALERT_EVENT_LATENCY_EXCEEDED
+        now = self._time()
+        with self._lock:
+            if self._is_duplicate(provider, event, now):
+                self.suppressed_count += 1
+                self._record_metric(provider, event, "suppressed")
+                logger.info(
+                    "circuit_breaker_alert_suppressed provider=%s event=%s "
+                    "dedup_window_seconds=%s",
+                    provider,
+                    event,
+                    self._dedup_window,
+                )
+                return False
+            self._last_sent[(provider, event)] = now
+
+        reason = (
+            f"latency_threshold_exceeded:{duration_seconds:.2f}s > {threshold_seconds:.2f}s"
+        )
+        payload = CircuitBreakerAlertPayload(
+            event=event,
+            provider=provider,
+            latency_seconds=duration_seconds,
+            latency_threshold_seconds=threshold_seconds,
+            reason=reason,
+            timestamp=_utc_now_iso(),
+        )
+        self._dispatch(provider, event, payload)
+        return True
+
     def _is_duplicate(self, provider: str, event: str, now: float) -> bool:
         last = self._last_sent.get((provider, event))
         if last is None:
@@ -396,4 +463,24 @@ def notify_breaker_transition(
         to_state=to_state,
         failure_count=failure_count,
         reason=reason,
+    )
+
+
+def notify_provider_latency(
+    provider: str,
+    duration_seconds: float,
+    threshold_seconds: Optional[float] = None,
+) -> bool:
+    """Forward a provider latency observation to the configured alerter (if any).
+
+    Triggers an alert when duration_seconds exceeds threshold_seconds,
+    independent of outright circuit breaker failures.
+    """
+    alerter = get_alerter()
+    if alerter is None:
+        return False
+    return alerter.notify_latency(
+        provider=provider,
+        duration_seconds=duration_seconds,
+        threshold_seconds=threshold_seconds,
     )

@@ -175,6 +175,12 @@ class Settings(BaseSettings):
     # channel. Set to 0 to disable de-duplication.
     circuit_breaker_alert_dedup_seconds: float = 300.0
 
+    # Provider SLA latency alerting.
+    # Latency threshold in seconds that triggers an alert independent of outright failures.
+    # Can be configured globally or overridden per-provider.
+    provider_latency_alert_threshold_seconds: float = 5.0
+    provider_latency_thresholds: Dict[str, float] = Field(default_factory=dict)
+
     # Provider fallback ordering.
     # Explicit, operator-controlled ordering used when a request must fall back
     # across providers (e.g. under ``provider_preference="auto"``). Comma-
@@ -457,6 +463,20 @@ class Settings(BaseSettings):
                 "must be 0 (no de-duplication) or a positive number of seconds "
                 f"(got {self.circuit_breaker_alert_dedup_seconds})",
             )
+
+        # --- Provider latency alert threshold validation -----------------
+        if self.provider_latency_alert_threshold_seconds <= 0:
+            _add(
+                "PROVIDER_LATENCY_ALERT_THRESHOLD_SECONDS",
+                "must be a positive number of seconds "
+                f"(got {self.provider_latency_alert_threshold_seconds})",
+            )
+        for provider_name, thresh in self.provider_latency_thresholds.items():
+            if thresh <= 0:
+                _add(
+                    "PROVIDER_LATENCY_THRESHOLDS",
+                    f"threshold for provider '{provider_name}' must be positive (got {thresh})",
+                )
 
         # --- Bounded numeric settings ------------------------------------
         if not 0.0 <= self.proof_of_life_confidence_threshold <= 1.0:
