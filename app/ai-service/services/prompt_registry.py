@@ -191,3 +191,58 @@ class PromptRegistry:
         if version is not None:
             return version in self._prompts[name]
         return True
+
+    def check_health(
+        self,
+        expected_names: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Verify that every known prompt name resolves to a valid active version.
+
+        Args:
+            expected_names: Optional list of prompt names the service expects to
+                use. If None, every registered prompt name is checked.
+
+        Returns:
+            Dict with "healthy" (bool) and "errors" (List[str]) keys. Each error
+            message names the affected prompt.
+        """
+        names = expected_names if expected_names is not None else list(self._prompts.keys())
+        errors: List[str] = []
+
+        for name in names:
+            if name not in self._prompts:
+                errors.append(
+                    f"Prompt '{name}' is expected but not registered. "
+                    f"Registered prompts: {list(self._prompts.keys())}"
+                )
+                continue
+
+            active_version = self._active_versions.get(name)
+            if not active_version:
+                errors.append(f"No active version configured for prompt '{name}'")
+                continue
+
+            if active_version not in self._prompts[name]:
+                available = sorted(list(self._prompts[name].keys()))
+                errors.append(
+                    f"Prompt '{name}' has invalid active version '{active_version}'. "
+                    f"Available versions: {available}"
+                )
+
+        return {"healthy": not errors, "errors": errors}
+
+    def assert_healthy(
+        self,
+        expected_names: Optional[List[str]] = None,
+    ) -> None:
+        """Fail fast if any expected prompt lacks a valid active version.
+
+        Raises:
+            ValueError: If any prompt is missing or has an invalid active version,
+                with a message naming each affected prompt.
+        """
+        result = self.check_health(expected_names=expected_names)
+        if not result["healthy"]:
+            raise ValueError(
+                "Prompt registry health check failed: " + "; ".join(result["errors"])
+            )

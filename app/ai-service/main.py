@@ -37,6 +37,7 @@ from api.v1.router import v1_router
 from config import settings
 from request_limits import RequestSizeLimitMiddleware, clamp_request_timeout
 import tasks
+from services.prompt_registry import PromptRegistry, PromptRegistryError
 from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
 from schemas.anonymization import AnonymizeRequest, AnonymizeResponse
 from services.pii_scrubber import PIIScrubberService
@@ -123,6 +124,13 @@ async def lifespan(app: FastAPI):
     # Report optional values still at their defaults (DEBUG only; secrets
     # are never included, consistent with logging_redaction.py).
     settings.report_boot_configuration(logger)
+
+    # Fail fast if any known prompt name lacks a valid active version.  A
+    # misconfigured (unset or typo'd) active version would otherwise only
+    # surface as a runtime error on the first request needing that prompt.
+    prompt_registry = PromptRegistry.from_settings(settings)
+    prompt_registry.validate_active_versions()
+    app.state.prompt_registry = prompt_registry
 
     if not settings.validate_api_keys():
         logger.warning("No API keys configured. AI features will be unavailable.")
@@ -274,6 +282,17 @@ app.state.humanitarian_verification_service = humanitarian_verification_service
 app.state.artifact_access_control = evidence_access_control
 app.state.rate_limiter = rate_limiter
 app.state.decision_audit_store = decision_audit_store
+
+# Build the prompt registry at module-init time so both the production app
+# and ``TestClient(app)`` (which does not enter lifespan unless used as a
+# context manager) can resolve it.  ``lifespan`` re-asserts the same
+# reference on startup and performs the fail-fast validation.
+try:
+    prompt_registry = PromptRegistry.from_settings(settings)
+except Exception as _prompt_exc:  # pragma: no cover - defensive
+    logger.error("Failed to initialise prompt registry: %s", _prompt_exc)
+    prompt_registry = None
+app.state.prompt_registry = prompt_registry
 
 
 class InferenceRequest(BaseModel):
@@ -634,6 +653,44 @@ async def health_check(request: Request):
             },
         )
     return {"status": "healthy", "service": "soter-ai-service", "version": "1.0.0"}
+
+
+@app.get("/health/prompts")
+async def health_prompts(request: Request):
+    """Report the health of the prompt registry's active versions.
+
+    Returns ``ok`` when every known prompt name resolves to a valid active
+    version, or ``degraded`` (HTTP 503) with the offending prompt names so
+    operators can fix the misconfiguration without waiting for a runtime
+    failure on the first real request.
+    """
+    registry = getattr(request.app.state, "prompt_registry", None)
+    if registry is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "error": "prompt registry not initialised",
+                "invalid_prompts": [],
+            },
+        )
+
+    invalid = registry.invalid_active_versions()
+    if invalid:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "error": "missing or invalid active version for prompt(s): "
+                + ", ".join(sorted(invalid)),
+                "invalid_prompts": sorted(invalid),
+            },
+        )
+
+    return {
+        "status": "ok",
+        "known_prompts": sorted(registry.known_prompt_names()),
+    }
 
 
 @app.get("/health/mode")
