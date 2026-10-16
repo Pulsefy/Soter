@@ -228,7 +228,7 @@ class OpenAIProvider(ModelProvider):
         timeout: Optional[float] = None,
         fallback_api_key: Optional[str] = None,
     ) -> LLMResponse:
-        provider_name = "openai" if "openai" in base_url else "groq"
+        provider_name = "openai" if "api.openai.com" in base_url else "groq"
         if settings.ai_deterministic_mode:
             logger.info("Deterministic AI mode enabled: returning stable response")
             stable = json.dumps(
