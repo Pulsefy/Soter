@@ -5,10 +5,6 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { ClaimReceiptDto, SendReceiptShareDto } from './dto/claim-receipt.dto';
-import {
-  ClaimStatusHistoryDto,
-  ClaimStatusHistoryEntryDto,
-} from './dto/claim-status-history.dto';
 import { explorerTxUrl } from '../common/utils/explorer-url.util';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
 import {
@@ -812,7 +808,19 @@ export class ClaimsService {
    * If a claim was created before this feature was implemented, the history
    * starts from the first recorded transition.
    */
-  async getStatusHistory(claimId: string) {
+  async getStatusHistory(claimId: string): Promise<{
+    claimId: string;
+    history: Array<{
+      previousStatus?: string;
+      newStatus: string;
+      timestamp: string;
+      actor?: string;
+      trigger?: string;
+      metadata?: Record<string, unknown>;
+    }>;
+    historicalCoverageStart: string;
+    historicalCoverageNote?: string;
+  }> {
     const claim = await this.prisma.claim.findUnique({
       where: { id: claimId },
       include: { campaign: true },

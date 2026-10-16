@@ -10,7 +10,7 @@ import { BudgetService } from '../common/budget/budget.service';
 import { SorobanTransactionLifecycleService } from '../onchain/soroban-transaction-lifecycle.service';
 import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
 import { VerificationService } from '../verification/verification.service';
-import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { AppException } from '../common/dto/error-response.dto';
 
 describe('ClaimsService - getStatusHistory', () => {
   let service: ClaimsService;
@@ -87,7 +87,11 @@ describe('ClaimsService - getStatusHistory', () => {
           id: 'log-2',
           action: 'status_changed_to_verified',
           timestamp: new Date('2026-01-01T11:00:00Z'),
-          metadata: { from: 'requested', to: 'verified', verificationScore: 0.95 },
+          metadata: {
+            from: 'requested',
+            to: 'verified',
+            verificationScore: 0.95,
+          },
         },
       ];
 

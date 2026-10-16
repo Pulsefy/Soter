@@ -215,7 +215,7 @@ describe('Claim Status History', () => {
       expect(result.historicalCoverageNote).toContain('Incomplete history');
     });
 
-    it('enforces authorization: denies access for unauthorized organization', async () => {
+    it('enforces authorization: denies access for unauthorized organization', () => {
       claimsService.findOne.mockResolvedValue(mockClaim);
 
       const mockUser = {

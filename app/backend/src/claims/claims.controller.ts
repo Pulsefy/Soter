@@ -36,7 +36,6 @@ import {
 } from './dto/claim-receipt.dto';
 import {
   ClaimStatusHistoryDto,
-  ClaimStatusHistoryEntryDto,
 } from './dto/claim-status-history.dto';
 import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
