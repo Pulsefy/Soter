@@ -33,6 +33,19 @@ export interface ListAidPackagesParams {
   token?: string;
 }
 
+export interface ListRecipientPackagesParams {
+  page?: number;
+  size?: number;
+}
+
+export interface OnchainAdapter {
+  listRecipientPackages(
+    recipient: string,
+    pagination?: ListRecipientPackagesParams,
+  ): Promise<PaginatedResult<Record<string, unknown>>>;
+  getRecipientPackageCount(recipient: string): Promise<number>;
+}
+
 @Injectable()
 export class AidService {
   private readonly logger = new Logger(AidService.name);
@@ -87,6 +100,45 @@ export class AidService {
       size,
       totalPages,
     };
+  }
+
+  async listRecipientPackages(
+    recipient: string,
+    pagination?: ListRecipientPackagesParams,
+  ): Promise<PaginatedResult<Record<string, unknown>>> {
+    const page = Math.max(1, pagination?.page ?? 1);
+    const size = Math.min(100, Math.max(1, pagination?.size ?? 10));
+    const skip = (page - 1) * size;
+
+    const where: Prisma.AidPackageWhereInput = {
+      recipient,
+    };
+
+    const [packages, total] = await Promise.all([
+      this.prisma.aidPackage.findMany({
+        where,
+        orderBy: { id: 'asc' },
+        skip,
+        take: size,
+      }),
+      this.prisma.aidPackage.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / size);
+
+    return {
+      data: packages,
+      total,
+      page,
+      size,
+      totalPages,
+    };
+  }
+
+  async getRecipientPackageCount(recipient: string): Promise<number> {
+    return this.prisma.aidPackage.count({
+      where: { recipient },
+    });
   }
 
   async createCampaign(
