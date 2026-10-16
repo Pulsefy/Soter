@@ -19,7 +19,7 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -155,6 +155,22 @@ class ModelProvider(ABC):
         """
         raise NotImplementedError(f"{self.name} does not support llm_chat")
 
+    def llm_chat_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        on_token: Callable[[str], None],
+        model: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> LLMResponse:
+        """Stream response text when supported, otherwise emit it on completion."""
+        response = self.llm_chat(
+            system_prompt, user_prompt, model=model, timeout=timeout
+        )
+        on_token(response.content)
+        return response
+
     def ocr_extract(
         self,
         image: Any,
@@ -197,6 +213,27 @@ class OpenAIProvider(ModelProvider):
             model=resolved_model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            timeout=timeout,
+        )
+
+    def llm_chat_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        on_token: Callable[[str], None],
+        model: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> LLMResponse:
+        if not settings.openai_api_key:
+            raise RuntimeError("OpenAI API key is not configured")
+        return self._stream_chat_completion(
+            base_url="https://api.openai.com/v1/chat/completions",
+            api_key=settings.openai_api_key,
+            model=model or settings.openai_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            on_token=on_token,
             timeout=timeout,
         )
 
@@ -293,6 +330,107 @@ class OpenAIProvider(ModelProvider):
             total_tokens=total_tokens,
         )
 
+    @staticmethod
+    def _stream_chat_completion(
+        base_url: str,
+        api_key: str,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        on_token: Callable[[str], None],
+        timeout: Optional[float] = None,
+    ) -> LLMResponse:
+        provider_name = "openai" if "openai" in base_url else "groq"
+        if settings.ai_deterministic_mode:
+            response = OpenAIProvider._call_chat_completion(
+                base_url,
+                api_key,
+                model,
+                system_prompt,
+                user_prompt,
+                timeout,
+            )
+            on_token(response.content)
+            return response
+
+        payload = {
+            "model": model,
+            "temperature": 0.1,
+            "stream": True,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        req_timeout = (
+            timeout if timeout is not None else float(settings.llm_timeout_seconds)
+        )
+        start = time.time()
+        content_parts: List[str] = []
+        usage: Dict[str, Any] = {}
+
+        try:
+            with httpx.Client(timeout=req_timeout) as client:
+                with client.stream(
+                    "POST", base_url, json=payload, headers=headers
+                ) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+                        chunk = json.loads(data)
+                        choices = chunk.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {}).get("content")
+                            if delta:
+                                delta = str(delta)
+                                content_parts.append(delta)
+                                on_token(delta)
+                        if isinstance(chunk.get("usage"), dict):
+                            usage = chunk["usage"]
+        except httpx.TimeoutException as exc:
+            raise AIServiceError(
+                message=f"LLM request timed out after {req_timeout}s",
+                code="AI_TIMEOUT",
+                details={"provider": provider_name, "timeout_seconds": req_timeout},
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise AIServiceError(
+                message=f"LLM request failed with status {exc.response.status_code}",
+                code="AI_PROVIDER_ERROR",
+                details={
+                    "provider": provider_name,
+                    "status_code": exc.response.status_code,
+                },
+            ) from exc
+        except Exception as exc:
+            raise AIServiceError(
+                message=f"LLM streaming connection error: {exc}",
+                code="AI_CONNECTION_ERROR",
+                details={"provider": provider_name},
+            ) from exc
+
+        content = "".join(content_parts)
+        if not content:
+            raise RuntimeError("LLM returned empty content")
+        return LLMResponse(
+            content=content,
+            provider=provider_name,
+            model=model,
+            latency_ms=int((time.time() - start) * 1000),
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+            total_tokens=usage.get("total_tokens"),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Groq provider
@@ -323,6 +461,27 @@ class GroqProvider(ModelProvider):
             model=resolved_model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            timeout=timeout,
+        )
+
+    def llm_chat_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        on_token: Callable[[str], None],
+        model: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> LLMResponse:
+        if not settings.groq_api_key:
+            raise RuntimeError("Groq API key is not configured")
+        return OpenAIProvider._stream_chat_completion(
+            base_url="https://api.groq.com/openai/v1/chat/completions",
+            api_key=settings.groq_api_key,
+            model=model or settings.groq_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            on_token=on_token,
             timeout=timeout,
         )
 

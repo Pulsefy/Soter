@@ -2,10 +2,14 @@
 Fraud detection endpoint.
 """
 
+import asyncio
+import json
 import logging
-from typing import Any, Dict, List
+import threading
+from typing import Any, AsyncIterator, Dict, List, Tuple
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from schemas.common import ResultEnvelope
 from schemas.fraud import ClaimFraudResult, ClaimMetadata, FraudDetectionRequest
@@ -129,11 +133,78 @@ def _write_failure_audit(
         logger.error("decision_audit_record_failed: %s", exc)
 
 
+def _fraud_envelope(
+    request: FraudDetectionRequest,
+    results: List[ClaimFraudResult],
+    trace_id: str,
+) -> ResultEnvelope[List[ClaimFraudResult]]:
+    flagged = [result for result in results if result.is_flagged]
+    reasons = [
+        f"claim_id={result.claim_id}: {result.reason}"
+        for result in flagged
+        if result.reason
+    ] or None
+    if results:
+        avg_risk = sum(result.fraud_risk_score for result in results) / len(results)
+        confidence = round(1.0 - avg_risk, 4)
+    else:
+        confidence = None
+
+    return ResultEnvelope[List[ClaimFraudResult]](
+        result=results,
+        confidence=confidence,
+        reasons=reasons,
+        anchor_metadata=request.anchor_metadata,
+        trace_id=trace_id or None,
+    )
+
+
+def _stream_fraud_events(
+    http_request: Request,
+    request: FraudDetectionRequest,
+    trace_id: str,
+) -> AsyncIterator[str]:
+    events: "asyncio.Queue[Tuple[str, Any]]" = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    def publish(event: str, payload: Any) -> None:
+        loop.call_soon_threadsafe(events.put_nowait, (event, payload))
+
+    def run_detection() -> None:
+        try:
+            results = detect_fraud(request.claims)
+            _write_audit_records(http_request, request, results)
+            for result in results:
+                publish("item", result.model_dump(mode="json"))
+            publish(
+                "result",
+                _fraud_envelope(request, results, trace_id).model_dump(mode="json"),
+            )
+        except Exception as exc:
+            logger.error("Fraud detection failed: %s", exc)
+            _write_failure_audit(http_request, request, exc)
+            publish("error", {"detail": "Fraud detection failed"})
+        finally:
+            publish("end", None)
+
+    yield "event: status\ndata: {\"status\":\"scoring\"}\n\n"
+    threading.Thread(target=run_detection, daemon=True).start()
+    while True:
+        event, payload = await events.get()
+        if event == "end":
+            break
+        yield f"event: {event}\ndata: {json.dumps(payload, default=str)}\n\n"
+
+
 @router.post("/fraud/detect", response_model=ResultEnvelope[List[ClaimFraudResult]])
 async def detect_fraud_endpoint(
     http_request: Request,
     request: FraudDetectionRequest,
-) -> ResultEnvelope[List[ClaimFraudResult]]:
+    stream: bool = Query(
+        False,
+        description="Stream per-claim results and the final envelope as SSE.",
+    ),
+) -> Any:
     """
     Analyse a batch of claims for suspicious patterns.
 
@@ -143,37 +214,26 @@ async def detect_fraud_endpoint(
 
     Every scored claim also produces a durable decision audit record (issue
     #990) so the score can be explained after the fact; see
-    ``services/decision_audit.py``.
+    ``services/decision_audit.py``. Set ``stream=true`` to receive a scoring
+    status event, one event per scored claim, and the final envelope as SSE.
     """
     from main import correlation_id_var
+
+    trace_id = correlation_id_var.get() or ""
+    if stream:
+        return StreamingResponse(
+            _stream_fraud_events(http_request, request, trace_id),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     try:
         results = detect_fraud(request.claims)
 
-        flagged = [r for r in results if r.is_flagged]
-        reasons = [
-            f"claim_id={r.claim_id}: {r.reason}" for r in flagged if r.reason
-        ] or None
-
-        # Aggregate confidence: 1 - mean(fraud_risk_score of flagged claims), or
-        # 1 - mean(all scores) as overall cleanliness confidence.
-        if results:
-            avg_risk = sum(r.fraud_risk_score for r in results) / len(results)
-            confidence = round(1.0 - avg_risk, 4)
-        else:
-            confidence = None
-
         # Audit before returning: the record is the reason the disbursement
         # decision can be reconstructed later.
         _write_audit_records(http_request, request, results)
-
-        return ResultEnvelope[List[ClaimFraudResult]](
-            result=results,
-            confidence=confidence,
-            reasons=reasons,
-            anchor_metadata=request.anchor_metadata,
-            trace_id=correlation_id_var.get() or None,
-        )
+        return _fraud_envelope(request, results, trace_id)
     except Exception as exc:
         logger.error("Fraud detection failed: %s", exc)
         _write_failure_audit(http_request, request, exc)
