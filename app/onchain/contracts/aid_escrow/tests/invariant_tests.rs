@@ -564,7 +564,7 @@ mod simultaneous_claims {
 
 mod batch_partial_failure {
     use super::*;
-    use aid_escrow::{BatchAdminActionStatus, BatchAdminActionResult, Error, PackageStatus};
+    use aid_escrow::{BatchAdminActionResult, BatchAdminActionStatus, Error, PackageStatus};
     use soroban_sdk::{testutils::Ledger, Vec};
 
     /// Shared fixture: one admin-funded escrow and one 7-decimal token.
@@ -856,10 +856,7 @@ mod batch_partial_failure {
             locked_before - 3 * UNIT,
             "the cancelled id must not unlock funds a second time"
         );
-        assert_eq!(
-            locked_after, UNIT,
-            "the live package must remain locked"
-        );
+        assert_eq!(locked_after, UNIT, "the live package must remain locked");
         assert_eq!(
             f.claimed(),
             claimed_before,
