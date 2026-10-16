@@ -100,9 +100,12 @@ class DeadLetterQueue:
         self._lock = Lock()
 
     @staticmethod
-    def make_id(kind: DeadLetterKind, task_id: str) -> str:
-        """Deterministic ID so re-adding the same failed task updates it in place."""
-        return f"{kind}:{task_id}"
+    def make_id(
+        kind: DeadLetterKind, task_id: str, event_id: Optional[str] = None
+    ) -> str:
+        """Deterministic ID so re-adding the same failed event updates it in place."""
+        entry_id = f"{kind}:{task_id}"
+        return f"{entry_id}:{event_id}" if event_id else entry_id
 
     def add(
         self,
@@ -111,9 +114,10 @@ class DeadLetterQueue:
         payload: Dict[str, Any],
         error: str,
         task_type: Optional[str] = None,
+        event_id: Optional[str] = None,
     ) -> DeadLetterEntry:
-        """Record a terminally-failed callback delivery or async job."""
-        entry_id = self.make_id(kind, task_id)
+        """Record a failed callback delivery or async job."""
+        entry_id = self.make_id(kind, task_id, event_id)
         with self._lock:
             existing = self._entries.get(entry_id)
             now = time.time()

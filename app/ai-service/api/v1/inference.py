@@ -8,7 +8,7 @@ from datetime import datetime
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, HttpUrl, validator
 
 import tasks
 from exceptions import LoadShedError
@@ -64,6 +64,13 @@ class InferenceRequest(BaseModel):
     type: str = "inference"
     data: Optional[Dict[str, Any]] = None
     priority: Optional[str] = "normal"
+    webhook_url: Optional[HttpUrl] = Field(
+        None,
+        description=(
+            "Optional URL to receive signed task lifecycle callbacks, including "
+            "processing and terminal status events."
+        ),
+    )
 
     # Contract-aware metadata fields
     campaign_id: Optional[str] = None
@@ -106,6 +113,8 @@ async def create_inference_task(
 
     Offloads time-consuming AI tasks to background workers. Use the
     returned ``task_id`` to poll for results via ``GET /ai/status/{task_id}``.
+    Optionally provide ``webhook_url`` to receive signed callbacks when
+    processing begins and when the task completes or fails.
 
     Contract-aware metadata fields are used to anchor verification results
     to on-chain events during Testnet demos.
@@ -141,6 +150,8 @@ async def create_inference_task(
             "data": request.data or {},
             "priority": request.priority or "normal",
         }
+        if request.webhook_url:
+            payload["webhook_url"] = str(request.webhook_url)
 
         # Add metadata if provided
         if request.campaign_id:

@@ -205,6 +205,28 @@ Response body:
 }
 ```
 
+### Asynchronous Inference Webhooks
+
+`POST /v1/ai/inference` accepts an optional `webhook_url`. When supplied, the
+service POSTs signed lifecycle callbacks using the canonical AI callback
+contract: a `processing` event when a worker starts the task, followed by a
+`completed` or `failed` event. The `status` field identifies each event, and
+`taskId` and `taskType` identify the task. Webhook URLs must use HTTP or HTTPS.
+
+```json
+{
+"type": "inference",
+"data": { "document_url": "https://example.com/document.pdf" },
+"webhook_url": "https://client.example.com/task-events"
+}
+```
+
+The response still includes `task_id` and `status_url`; the existing
+`/v1/ai/status/{task_id}` and `/v1/ai/jobs/{task_id}` polling endpoints remain
+available. If `webhook_url` is omitted, the configured backend callback
+behavior is unchanged. Failed callback deliveries, including progress events,
+are recorded in the dead-letter queue and can be replayed.
+
 ### Dead-Letter Replay
 
 Failed callback deliveries (webhook POSTs to the backend that keep 4xx/5xx-ing)
