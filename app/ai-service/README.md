@@ -84,6 +84,14 @@ Response body:
 ### Humanitarian Verification
 - **POST** `/ai/humanitarian/verify` - Standardized humanitarian claim verification (Sphere criteria + context factors + provider fallback)
 
+The versioned endpoint also supports optional server-sent events for token-capable
+LLM providers: send the same request to
+`/v1/ai/humanitarian/verify?stream=true`. The stream emits `token` events as
+provider output arrives, followed by a `result` event containing the usual
+result envelope. Requests without `stream=true` continue to return the normal
+single JSON envelope and use the existing response cache. Token events contain
+partial provider text; the final result event is authoritative.
+
 Request body:
 
 ```json

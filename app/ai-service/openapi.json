@@ -3563,9 +3563,19 @@
     },
     "/v1/ai/humanitarian/verify": {
       "post": {
-        "description": "Verify an aid claim against standardised humanitarian criteria.\n\nValidates that all referenced evidence artifacts belong to the requesting\norganization before processing.  Maintains audit logs for access attempts.\n\n``artifact_access_control`` and ``humanitarian_verification_service`` are\nresolved from ``request.app.state``.  Production wires them up in the\nlifespan of ``main.app``; tests inject lightweight Mocks via the same\nstate so we never have to monkeypatch ``main`` module globals.",
+        "description": "Verify an aid claim against standardised humanitarian criteria.\n\nValidates that all referenced evidence artifacts belong to the requesting\norganization before processing.  Maintains audit logs for access attempts.\nSet ``stream=true`` to receive provider token events followed by the usual\nresult envelope; streaming bypasses response caching to return live output.\n\n``artifact_access_control`` and ``humanitarian_verification_service`` are\nresolved from ``request.app.state``.  Production wires them up in the\nlifespan of ``main.app``; tests inject lightweight Mocks via the same\nstate so we never have to monkeypatch ``main`` module globals.",
         "operationId": "verify_humanitarian_claim_v1_ai_humanitarian_verify_post",
         "parameters": [
+          {
+            "in": "query",
+            "name": "stream",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Stream",
+              "type": "boolean"
+            }
+          },
           {
             "in": "header",
             "name": "X-Org-Id",

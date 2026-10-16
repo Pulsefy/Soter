@@ -392,3 +392,40 @@ class TestHumanitarianEnvelope:
         ):
             data = client.post("/v1/ai/humanitarian/verify", json=self._REQUEST).json()
         assert data["result"]["provider"] == "test"
+
+    def test_streaming_and_json_modes_use_deterministic_provider(self, monkeypatch):
+        from config import settings
+        from services.humanitarian_verification import HumanitarianVerificationService
+
+        monkeypatch.setattr(settings, "test_provider_mode", True)
+        monkeypatch.setattr(settings, "openai_api_key", None)
+        monkeypatch.setattr(settings, "groq_api_key", None)
+        service = HumanitarianVerificationService()
+        monkeypatch.setattr(app.state, "humanitarian_verification_service", service)
+
+        regular = client.post(
+            "/v1/ai/humanitarian/verify",
+            json={**self._REQUEST, "aid_claim": "streaming mode deterministic claim"},
+        )
+        streamed = client.post(
+            "/v1/ai/humanitarian/verify?stream=true",
+            json={**self._REQUEST, "aid_claim": "streaming mode deterministic claim"},
+        )
+
+        assert regular.status_code == 200
+        assert streamed.status_code == 200
+        assert streamed.headers["content-type"].startswith("text/event-stream")
+
+        token_events = []
+        result_event = None
+        for event in streamed.text.strip().split("\n\n"):
+            if event.startswith("event: token\n"):
+                token_events.append(json.loads(event.split("data: ", 1)[1])["token"])
+            elif event.startswith("event: result\n"):
+                result_event = json.loads(event.split("data: ", 1)[1])
+
+        assert len(token_events) > 1
+        assert result_event is not None
+        assert result_event["result"] == regular.json()["result"]
+        assert result_event["confidence"] == regular.json()["confidence"]
+        assert result_event["reasons"] == regular.json()["reasons"]
