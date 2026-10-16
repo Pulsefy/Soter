@@ -58,6 +58,7 @@ class Settings(BaseSettings):
         AI_DETERMINISTIC_MODE: Enable deterministic AI results for verification and classification during tests/CI
         TEST_PROVIDER_MODE: Enable test provider mode that returns fixture-driven results (no API keys required)
         LLM_TIMEOUT_SECONDS: Timeout for LLM API requests
+        PROVIDER_HTTP_IDLE_TIMEOUT_SECONDS: Idle period before pooled provider HTTP clients are recycled
         MAX_REQUEST_BODY_BYTES: Maximum request body size for AI endpoints
         MAX_REQUEST_TIMEOUT_SECONDS: Maximum caller-supplied provider timeout
         APP_ENV: Application environment (development, staging, production, test)
@@ -82,6 +83,9 @@ class Settings(BaseSettings):
     ai_deterministic_mode: bool = False
     test_provider_mode: bool = False
     llm_timeout_seconds: int = 30
+    # Recycle pooled provider HTTP clients before server/load-balancer idle
+    # timeouts can leave stale sockets behind.
+    provider_http_idle_timeout_seconds: float = 300.0
     humanitarian_primary_prompt_version: str = "v1"
     humanitarian_fallback_prompt_version: str = "v1"
 
@@ -386,6 +390,10 @@ class Settings(BaseSettings):
         # --- Numeric settings must be positive ---------------------------
         positive_numeric_settings = (
             ("LLM_TIMEOUT_SECONDS", self.llm_timeout_seconds),
+            (
+                "PROVIDER_HTTP_IDLE_TIMEOUT_SECONDS",
+                self.provider_http_idle_timeout_seconds,
+            ),
             ("MAX_REQUEST_BODY_BYTES", self.max_request_body_bytes),
             ("MAX_REQUEST_TIMEOUT_SECONDS", self.max_request_timeout_seconds),
             ("CACHE_TTL_TASK_STATUS", self.cache_ttl_task_status),

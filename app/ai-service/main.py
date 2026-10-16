@@ -40,6 +40,7 @@ import tasks
 from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
 from schemas.anonymization import AnonymizeRequest, AnonymizeResponse
 from services.pii_scrubber import PIIScrubberService
+from services.providers import close_provider_http_clients
 from schemas.humanitarian import (
     HumanitarianVerificationRequest,
     HumanitarianVerificationResponse,
@@ -214,6 +215,8 @@ async def lifespan(app: FastAPI):
         logger.warning(
             f"Drain timeout ({drain_timeout}s) reached with {app.state.active_requests} active requests."
         )
+
+    close_provider_http_clients()
 
 
 app = FastAPI(
