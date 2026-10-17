@@ -337,5 +337,15 @@
     "reasonManual": "Activé manuellement",
     "subtitle": "L'actualisation, les médias et la synchronisation en arrière-plan sont réduits.",
     "accessible": "Le mode économiseur est actif. {reason}. L'actualisation, les médias et la synchronisation en arrière-plan sont réduits."
+  },
+  "networkGuard": {
+    "mainnetTitle": "⚠️ Mainnet Détecté",
+    "networkIssueTitle": "⚠️ Problème de Réseau",
+    "reconnectWallet": "Reconnecter le Portefeuille",
+    "reconnectWalletHint": "Déconnecte la session en cours et ouvre WalletConnect pour se reconnecter sur le bon réseau",
+    "switchNetwork": "Changer de Réseau",
+    "switchNetworkHint": "Ouvre votre portefeuille pour modifier le paramètre de réseau",
+    "dismiss": "Ignorer",
+    "dismissHint": "Ignorer cette alerte réseau"
   }
 }

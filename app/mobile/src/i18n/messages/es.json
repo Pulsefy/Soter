@@ -337,5 +337,15 @@
     "reasonManual": "Activado manualmente",
     "subtitle": "La actualización, los medios y la sincronización en segundo plano están reducidos.",
     "accessible": "El modo ahorro está activo. {reason}. La actualización, los medios y la sincronización en segundo plano están reducidos."
+  },
+  "networkGuard": {
+    "mainnetTitle": "⚠️ Mainnet Detectada",
+    "networkIssueTitle": "⚠️ Problema de Red",
+    "reconnectWallet": "Reconectar Billetera",
+    "reconnectWalletHint": "Desconecta la sesión actual y abre WalletConnect para reconectarse en la red correcta",
+    "switchNetwork": "Cambiar Red",
+    "switchNetworkHint": "Abre tu billetera para cambiar la configuración de red",
+    "dismiss": "Cerrar",
+    "dismissHint": "Cerrar esta alerta de red"
   }
 }

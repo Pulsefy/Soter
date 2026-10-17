@@ -337,5 +337,15 @@
     "reasonManual": "Manually enabled",
     "subtitle": "Refresh, media, and background sync are reduced.",
     "accessible": "Saver mode is active. {reason}. Refresh, media, and background sync are reduced."
+  },
+  "networkGuard": {
+    "mainnetTitle": "⚠️ Mainnet Detected",
+    "networkIssueTitle": "⚠️ Network Issue",
+    "reconnectWallet": "Reconnect Wallet",
+    "reconnectWalletHint": "Disconnects the current session and opens WalletConnect so you can re-pair on the correct network",
+    "switchNetwork": "Switch Network",
+    "switchNetworkHint": "Opens your wallet to change the network setting",
+    "dismiss": "Dismiss",
+    "dismissHint": "Dismiss this network alert"
   }
 }

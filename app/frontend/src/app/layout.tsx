@@ -12,6 +12,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MisconfiguredPage } from '@/components/MisconfiguredPage';
 import { EnvWarningBanner } from '@/components/EnvWarningBanner';
 import { DemoModeBanner, type DemoModeType } from '@/components/DemoModeBanner';
+import { NetworkMismatchBanner } from '@/components/NetworkMismatchBanner';
 import { VersionProvider } from '@/components/VersionProvider';
 import { validateEnv, demoModeEnabled } from '@/lib/env';
 
@@ -87,6 +88,7 @@ export default async function RootLayout({
                   <ToastProvider>
                     {!envResult.ok && <EnvWarningBanner missing={envResult.missing} invalid={envResult.invalid} />}
                     <DemoModeBanner mode={demoMode} />
+                    <NetworkMismatchBanner />
                     <Navbar />
                     {children}
                     <TestnetFaucetHelper />
