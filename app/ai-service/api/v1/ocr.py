@@ -7,7 +7,9 @@ single place and is referenced by both the /v1 and the legacy /ai mounts.
 
 import base64
 import io
+import re
 import time
+import uuid
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
@@ -29,7 +31,7 @@ from schemas.ocr import (
 )
 from schemas.common import ResultEnvelope
 from services.ocr_confidence import assess_confidence
-from services.ocr_job import run_ocr_from_bytes
+from services.ocr_job import run_ocr_from_bytes, run_multipage_ocr_from_bytes
 from services.ocr_batch_store import (
     BatchOCRError,
     OCRBatch,
@@ -50,6 +52,28 @@ ALLOWED_CONTENT_TYPES = {
     "image/webp",
 }
 
+DOCUMENT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]+$")
+
+
+def _validate_document_id(document_id: Optional[str]) -> Optional[str]:
+    if document_id is None:
+        return None
+    doc_id = document_id.strip()
+    if not doc_id:
+        return None
+    if len(doc_id) > 128 or not DOCUMENT_ID_PATTERN.match(doc_id):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_document_id",
+                "message": (
+                    f"Invalid document_id '{document_id}'. Must be 1-128 alphanumeric, "
+                    "underscore, dash, or dot characters."
+                ),
+            },
+        )
+    return doc_id
+
 
 class QueuedOCRResponse(BaseModel):
     success: bool
@@ -63,7 +87,17 @@ class QueuedOCRResponse(BaseModel):
 @limiter.limit(settings.request_rate_limit)
 async def process_ocr(
     request: Request,
-    image: Annotated[UploadFile, File(description="Image file to process")],
+    image: Optional[UploadFile] = File(
+        None, description="Single image file to process"
+    ),
+    pages: list[UploadFile] = File(
+        default=[],
+        description="Multiple page images belonging to one logical document",
+    ),
+    document_id: Annotated[
+        Optional[str],
+        Form(description="Logical document identifier grouping the pages"),
+    ] = None,
     anchor_metadata: Annotated[
         Optional[str], Form(description="JSON encoded AnchorMetadata")
     ] = None,
@@ -80,24 +114,44 @@ async def process_ocr(
         ),
     ] = None,
 ) -> ResultEnvelope[OCRData]:
-    """Extract text fields from an uploaded document image."""
-    start_time = time.time()
+    """Extract text fields from an uploaded document image (single or multi-page)."""
+    upload_pages: list[UploadFile] = []
+    if image is not None:
+        upload_pages.append(image)
+    if pages:
+        upload_pages.extend(pages)
 
-    if image.content_type not in ALLOWED_CONTENT_TYPES:
+    if not upload_pages:
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail={
-                "code": "invalid_content_type",
-                "message": (
-                    f"Invalid content type: {image.content_type}. "
-                    f"Allowed: {', '.join(ALLOWED_CONTENT_TYPES)}"
-                ),
+                "code": "missing_image",
+                "message": "At least one image file is required ('image' or 'pages')",
             },
         )
 
-    try:
-        contents = await image.read()
+    validated_doc_id = _validate_document_id(document_id)
+    if not validated_doc_id and len(upload_pages) > 1:
+        validated_doc_id = f"doc-{uuid.uuid4().hex[:12]}"
 
+    start_time = time.time()
+    page_contents: list[bytes] = []
+
+    for idx, page_file in enumerate(upload_pages):
+        page_num = idx + 1
+        if page_file.content_type not in ALLOWED_CONTENT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "invalid_content_type",
+                    "message": (
+                        f"Invalid content type: {page_file.content_type}. "
+                        f"Allowed: {', '.join(ALLOWED_CONTENT_TYPES)}"
+                    ),
+                },
+            )
+
+        contents = await page_file.read()
         if len(contents) == 0:
             raise HTTPException(
                 status_code=400,
@@ -108,12 +162,25 @@ async def process_ocr(
             )
 
         _validate_image_bytes(contents)
-        raw = run_ocr_from_bytes(
-            contents,
-            anchor_metadata,
-            language_hint=language_hint.value if language_hint else None,
-            document_type=document_type,
-        )
+        page_contents.append(contents)
+
+    try:
+        if len(upload_pages) == 1:
+            raw = run_ocr_from_bytes(
+                page_contents[0],
+                anchor_metadata=anchor_metadata,
+                language_hint=language_hint.value if language_hint else None,
+                document_type=document_type,
+                document_id=validated_doc_id,
+            )
+        else:
+            raw = run_multipage_ocr_from_bytes(
+                page_contents,
+                document_id=validated_doc_id,
+                anchor_metadata=anchor_metadata,
+                language_hint=language_hint.value if language_hint else None,
+                document_type=document_type,
+            )
 
         from main import correlation_id_var
 
@@ -162,6 +229,49 @@ async def process_ocr(
                 "message": str(e),
             },
         )
+
+
+@router.post(
+    "/ai/ocr/multi-page",
+    response_model=ResultEnvelope[OCRData],
+)
+@limiter.limit(settings.request_rate_limit)
+async def process_multipage_ocr(
+    request: Request,
+    pages: Annotated[
+        list[UploadFile],
+        File(description="Two or more page images belonging to one logical document"),
+    ],
+    document_id: Annotated[
+        Optional[str],
+        Form(description="Logical document identifier grouping the pages"),
+    ] = None,
+    anchor_metadata: Annotated[
+        Optional[str], Form(description="JSON encoded AnchorMetadata")
+    ] = None,
+    language_hint: Annotated[
+        Optional[LanguageHint], Form(description="Language hint for OCR")
+    ] = None,
+    document_type: Annotated[
+        Optional[str],
+        Form(
+            description=(
+                "Optional document type (e.g. id_card, passport) used to pick "
+                "a per-document-type review threshold"
+            )
+        ),
+    ] = None,
+) -> ResultEnvelope[OCRData]:
+    """Extract and aggregate text fields across multiple pages of a single logical document."""
+    return await process_ocr(
+        request=request,
+        image=None,
+        pages=pages,
+        document_id=document_id,
+        anchor_metadata=anchor_metadata,
+        language_hint=language_hint,
+        document_type=document_type,
+    )
 
 
 @router.post(
@@ -363,7 +473,17 @@ async def retry_batch_ocr_document(
 @limiter.limit(settings.request_rate_limit)
 async def queue_ocr_job(
     request: Request,
-    image: Annotated[UploadFile, File(description="Image file to process")],
+    image: Optional[UploadFile] = File(
+        None, description="Single image file to process"
+    ),
+    pages: list[UploadFile] = File(
+        default=[],
+        description="Multiple page images belonging to one logical document",
+    ),
+    document_id: Annotated[
+        Optional[str],
+        Form(description="Logical document identifier grouping the pages"),
+    ] = None,
     anchor_metadata: Annotated[
         Optional[str], Form(description="JSON encoded AnchorMetadata")
     ] = None,
@@ -380,42 +500,74 @@ async def queue_ocr_job(
         ),
     ] = None,
 ) -> QueuedOCRResponse:
-    """Queue OCR processing and return immediately with a pollable job URL."""
-    if image.content_type not in ALLOWED_CONTENT_TYPES:
+    """Queue OCR processing (single or multi-page) and return immediately with a pollable job URL."""
+    upload_pages: list[UploadFile] = []
+    if image is not None:
+        upload_pages.append(image)
+    if pages:
+        upload_pages.extend(pages)
+
+    if not upload_pages:
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail={
-                "code": "invalid_content_type",
-                "message": (
-                    f"Invalid content type: {image.content_type}. "
-                    f"Allowed: {', '.join(ALLOWED_CONTENT_TYPES)}"
-                ),
+                "code": "missing_image",
+                "message": "At least one image file is required ('image' or 'pages')",
             },
         )
 
-    contents = await image.read()
-    if len(contents) == 0:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "empty_image",
-                "message": "Uploaded image is empty",
-            },
-        )
+    validated_doc_id = _validate_document_id(document_id)
+    if not validated_doc_id and len(upload_pages) > 1:
+        validated_doc_id = f"doc-{uuid.uuid4().hex[:12]}"
 
-    _validate_image_bytes(contents)
+    page_b64_list: list[str] = []
+    for idx, page_file in enumerate(upload_pages):
+        page_num = idx + 1
+        if page_file.content_type not in ALLOWED_CONTENT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "invalid_content_type",
+                    "message": (
+                        f"Invalid content type: {page_file.content_type}. "
+                        f"Allowed: {', '.join(ALLOWED_CONTENT_TYPES)}"
+                    ),
+                },
+            )
 
-    task_id = tasks.create_task(
-        task_type="ocr",
-        payload={
-            "image_base64": base64.b64encode(contents).decode("ascii"),
-            "content_type": image.content_type,
-            "filename": image.filename,
+        contents = await page_file.read()
+        if len(contents) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "empty_image",
+                    "message": f"Uploaded image for page {page_num} is empty",
+                },
+            )
+
+        _validate_image_bytes(contents)
+        page_b64_list.append(base64.b64encode(contents).decode("ascii"))
+
+    if len(page_b64_list) == 1:
+        payload = {
+            "image_base64": page_b64_list[0],
+            "content_type": upload_pages[0].content_type,
+            "filename": upload_pages[0].filename,
             "anchor_metadata": anchor_metadata,
             "language_hint": language_hint.value if language_hint else None,
             "document_type": document_type,
-        },
-    )
+            "document_id": validated_doc_id,
+        }
+    else:
+        payload = {
+            "pages_base64": page_b64_list,
+            "document_id": validated_doc_id,
+            "anchor_metadata": anchor_metadata,
+            "language_hint": language_hint.value if language_hint else None,
+            "document_type": document_type,
+        }
+
+    task_id = tasks.create_task(task_type="ocr", payload=payload)
 
     return QueuedOCRResponse(
         success=True,

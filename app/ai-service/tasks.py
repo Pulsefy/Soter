@@ -20,7 +20,7 @@ from schemas.callback import AiCallbackPayload, CallbackStatus
 from services.load_shedder import ensure_queue_capacity
 from services.pii_scrubber import PIIScrubberService
 from services.humanitarian_verification import HumanitarianVerificationService
-from services.ocr_job import run_ocr_from_base64
+from services.ocr_job import run_ocr_from_base64, run_multipage_ocr_from_base64
 from services.dead_letter import dead_letter_queue
 
 # Configure logging
@@ -403,9 +403,23 @@ def process_heavy_inference_impl(
 
 def _process_ocr(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Process an OCR task from base64-encoded image bytes."""
+    pages_base64 = payload.get("pages_base64")
+    if pages_base64:
+        return {
+            "type": "ocr",
+            "status": "success",
+            "result": run_multipage_ocr_from_base64(
+                pages_base64,
+                document_id=payload.get("document_id"),
+                anchor_metadata=payload.get("anchor_metadata"),
+                language_hint=payload.get("language_hint"),
+                document_type=payload.get("document_type"),
+            ),
+        }
+
     image_base64 = payload.get("image_base64")
     if not image_base64:
-        raise ValueError("'image_base64' is required for ocr tasks")
+        raise ValueError("'image_base64' or 'pages_base64' is required for ocr tasks")
 
     return {
         "type": "ocr",
@@ -415,6 +429,7 @@ def _process_ocr(payload: Dict[str, Any]) -> Dict[str, Any]:
             payload.get("anchor_metadata"),
             language_hint=payload.get("language_hint"),
             document_type=payload.get("document_type"),
+            document_id=payload.get("document_id"),
         ),
     }
 
