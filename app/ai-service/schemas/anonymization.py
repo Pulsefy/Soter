@@ -1,6 +1,7 @@
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field, model_validator
+from redaction_ruleset import REDACTION_RULESET_VERSION
 from schemas.common import AnchorMetadata
 
 
@@ -67,6 +68,11 @@ class AnonymizeResult(BaseModel):
     )
     token_counts: Dict[str, int] = Field(
         default_factory=dict, examples=[{"original": 10, "anonymized": 10}]
+    )
+    ruleset_version: str = Field(
+        default=REDACTION_RULESET_VERSION,
+        description="Version of the redaction rule set that produced this output",
+        examples=["1.0.0"],
     )
 
     model_config = {
@@ -153,6 +159,11 @@ class RedactionPreviewResult(BaseModel):
     pii_summary: Dict[str, Any] = Field(
         default_factory=dict,
         examples=[{"names": 1, "locations": 1, "dates": 1, "total": 3}],
+    )
+    ruleset_version: str = Field(
+        default=REDACTION_RULESET_VERSION,
+        description="Version of the redaction rule set that produced this output",
+        examples=["1.0.0"],
     )
 
     model_config = {

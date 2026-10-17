@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import time
 import metrics
 
@@ -103,6 +103,7 @@ class HumanitarianVerificationService:
         prompt_version: Optional[str] = None,
         primary_prompt_version: Optional[str] = None,
         fallback_prompt_version: Optional[str] = None,
+        on_token: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
         try:
@@ -211,6 +212,7 @@ class HumanitarianVerificationService:
                             model=model,
                             prompt=prompt,
                             timeout=timeout,
+                            on_token=on_token,
                         )
                         breaker.record_success()
                         metrics.record_llm_usage(
@@ -392,6 +394,7 @@ class HumanitarianVerificationService:
         model: str,
         prompt: Dict[str, str],
         timeout: Optional[float],
+        on_token: Optional[Callable[[str], None]] = None,
     ) -> Tuple[Dict[str, Any], LLMResponse]:
         """Calls `provider` and returns `(validated_payload, response)`.
 
@@ -408,12 +411,43 @@ class HumanitarianVerificationService:
         last_error: Optional[Exception] = None
 
         for attempt in range(1, _MAX_ATTEMPTS_PER_PROMPT + 1):
-            response = provider.llm_chat(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                model=model,
-                timeout=timeout,
-            )
+            if on_token is None:
+                response = provider.llm_chat(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    model=model,
+                    timeout=timeout,
+                )
+            else:
+                chunks = []
+                usage: Dict[str, Optional[int]] = {
+                    "prompt_tokens": None,
+                    "completion_tokens": None,
+                }
+
+                def record_usage(
+                    prompt_tokens: Optional[int],
+                    completion_tokens: Optional[int],
+                ) -> None:
+                    usage["prompt_tokens"] = prompt_tokens
+                    usage["completion_tokens"] = completion_tokens
+
+                for chunk in provider.llm_chat_stream(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    model=model,
+                    timeout=timeout,
+                    on_usage=record_usage,
+                ):
+                    chunks.append(chunk)
+                    on_token(chunk)
+                response = LLMResponse(
+                    content="".join(chunks),
+                    provider=provider_name,
+                    model=model,
+                    prompt_tokens=usage["prompt_tokens"],
+                    completion_tokens=usage["completion_tokens"],
+                )
             content = response.content
 
             if self._looks_like_refusal(content):

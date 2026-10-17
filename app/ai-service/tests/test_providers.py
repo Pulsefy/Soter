@@ -15,7 +15,7 @@ from services.providers import (
     FixtureProvider,
     TesseractOCRProvider,
     validate_fallback_order,
-    close_provider_http_clients,
+    validate_provider_capability_matrix,
 )
 
 # ---------------------------------------------------------------------------
@@ -245,6 +245,27 @@ class TestProviderRegistry:
             assert "tesseract" in names
             assert "test" not in names
 
+    def test_resolve_filters_providers_by_capability_matrix(self):
+        with patch("services.providers.settings") as mock_settings:
+            mock_settings.provider_capability_matrix = {
+                "openai": [],
+                "groq": ["llm"],
+                "test": ["ocr"],
+                "tesseract": ["ocr"],
+            }
+            mock_settings.test_provider_mode = False
+            mock_settings.openai_api_key = "key"
+            mock_settings.groq_api_key = "key"
+            mock_settings.get_llm_fallback_order.return_value = ["openai", "groq"]
+            mock_settings.get_ocr_fallback_order.return_value = ["test", "tesseract"]
+            registry = ProviderRegistry()
+
+            llm_names = [name for name, _ in registry.resolve_llm()]
+            ocr_names = [name for name, _ in registry.resolve_ocr()]
+
+        assert llm_names == ["groq"]
+        assert ocr_names == ["tesseract"]
+
 
 class TestFallbackOrderValidation:
     def test_valid_order_passes(self):
@@ -263,6 +284,10 @@ class TestFallbackOrderValidation:
     def test_duplicate_provider_rejected(self):
         with pytest.raises(ValueError, match="more than once"):
             validate_fallback_order("LLM_PROVIDER_FALLBACK_ORDER", ["openai", "openai"])
+
+    def test_unknown_capability_rejected(self):
+        with pytest.raises(ValueError, match="unknown capability"):
+            validate_provider_capability_matrix({"openai": ["streaming"]})
 
 
 # ---------------------------------------------------------------------------

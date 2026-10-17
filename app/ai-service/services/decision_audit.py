@@ -49,6 +49,7 @@ from threading import Lock
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from logging_redaction import redact
+from redaction_ruleset import REDACTION_RULESET_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,9 @@ class DecisionAuditRecord:
     inputs: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     schema_version: str = AUDIT_RECORD_SCHEMA_VERSION
+    #: Redaction rule-set version that redacted this record (issue #1428).
+    #: ``None`` only for records persisted before versioning existed.
+    redaction_ruleset_version: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -142,6 +146,9 @@ class DecisionAuditRecord:
         }
         redacted = _redact_value(data)
         redacted.update(preserved)
+        # Stamp the rule set that did this redaction, so the version always
+        # reflects the rules in force when the record was persisted.
+        redacted["redaction_ruleset_version"] = REDACTION_RULESET_VERSION
         return DecisionAuditRecord(**redacted)
 
     @classmethod

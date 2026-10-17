@@ -7,7 +7,7 @@ import * as fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { UploadSessionStatus } from '@prisma/client';
+import { Prisma, UploadSessionStatus } from '@prisma/client';
 import { CreateUploadSessionDto } from './upload-session.dto';
 import { UploadSessionStore } from './upload-session.store';
 import {
@@ -21,6 +21,15 @@ import {
 /** Sessions expire after 24 hours of inactivity. */
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_TTL_SECONDS = Math.ceil(SESSION_TTL_MS / 1000);
+const DEFAULT_MAX_ARTIFACTS_PER_CLAIM = 10;
+const configuredArtifactLimit = Number(
+  process.env.EVIDENCE_MAX_ARTIFACTS_PER_CLAIM ??
+    DEFAULT_MAX_ARTIFACTS_PER_CLAIM,
+);
+export const MAX_ARTIFACTS_PER_CLAIM =
+  Number.isSafeInteger(configuredArtifactLimit) && configuredArtifactLimit > 0
+    ? configuredArtifactLimit
+    : DEFAULT_MAX_ARTIFACTS_PER_CLAIM;
 
 @Injectable()
 export class UploadSessionService {
@@ -173,8 +182,12 @@ export class UploadSessionService {
     return { sessionId, index, received: true, duplicate: false };
   }
 
-  async finalize(sessionId: string, ownerId: string) {
+  async finalize(sessionId: string, ownerId: string, claimId?: string) {
     const session = await this.getActiveSession(sessionId, ownerId);
+
+    if (claimId) {
+      await this.assertClaimHasArtifactCapacity(claimId);
+    }
 
     const receivedIndices = await this.store.getReceivedChunks(sessionId);
 
@@ -258,18 +271,24 @@ export class UploadSessionService {
       );
     }
 
-    const item = await this.prisma.evidenceQueueItem.create({
-      data: {
-        fileName: session.fileName,
-        filePath: evidenceFile,
-        fileHash,
-        mimeType: session.mimeType,
-        size: assembled.length,
-        ownerId,
-        orgId: session.orgId ?? undefined,
-        status: 'pending',
-      },
-    });
+    const itemData = {
+      fileName: session.fileName,
+      filePath: evidenceFile,
+      fileHash,
+      mimeType: session.mimeType,
+      size: assembled.length,
+      ownerId,
+      orgId: session.orgId ?? undefined,
+      status: 'pending' as const,
+    };
+    const item = claimId
+      ? await this.createClaimAssociatedArtifact(itemData, claimId).catch(
+          async (error: unknown) => {
+            await fs.unlink(evidenceFile).catch(() => undefined);
+            throw error;
+          },
+        )
+      : await this.prisma.evidenceQueueItem.create({ data: itemData });
 
     await this.store.updateSessionStatus(
       sessionId,
@@ -286,6 +305,48 @@ export class UploadSessionService {
     });
 
     return item;
+  }
+
+  private async assertClaimHasArtifactCapacity(claimId: string): Promise<void> {
+    const artifactCount = await this.prisma.evidenceQueueItem.count({
+      where: { metadata: { path: ['claimId'], equals: claimId } },
+    });
+    if (artifactCount >= MAX_ARTIFACTS_PER_CLAIM) {
+      throw this.claimArtifactLimitError();
+    }
+  }
+
+  private async createClaimAssociatedArtifact(
+    data: Parameters<typeof this.prisma.evidenceQueueItem.create>[0]['data'],
+    claimId: string,
+  ) {
+    return this.prisma.$transaction(async tx => {
+      const claims = await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`SELECT "id" FROM "Claim" WHERE "id" = ${claimId} FOR UPDATE`,
+      );
+      if (!claims[0]) {
+        throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
+      }
+
+      const artifactCount = await tx.evidenceQueueItem.count({
+        where: { metadata: { path: ['claimId'], equals: claimId } },
+      });
+      if (artifactCount >= MAX_ARTIFACTS_PER_CLAIM) {
+        throw this.claimArtifactLimitError();
+      }
+
+      return tx.evidenceQueueItem.create({
+        data: { ...data, metadata: { claimId } },
+      });
+    });
+  }
+
+  private claimArtifactLimitError(): AppException {
+    return new AppException(
+      ERROR_CODES.BAD_REQUEST,
+      400,
+      `Claim artifact limit of ${MAX_ARTIFACTS_PER_CLAIM} exceeded`,
+    );
   }
 
   /** Returns the upload status so clients can resume after a disconnect. */

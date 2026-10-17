@@ -24,7 +24,11 @@ import {
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 import { UploadSessionService } from './upload-session.service';
-import { CreateUploadSessionDto, UploadChunkDto } from './upload-session.dto';
+import {
+  CreateUploadSessionDto,
+  FinalizeUploadSessionDto,
+  UploadChunkDto,
+} from './upload-session.dto';
 import { evidenceMulterOptions } from './file-validation';
 
 @ApiTags('Evidence Upload Sessions')
@@ -84,11 +88,19 @@ export class UploadSessionController {
   @Post(':id/finalize')
   @Roles(AppRole.operator, AppRole.admin)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Finalize session and assemble evidence file' })
+  @ApiOperation({
+    summary: 'Finalize session and assemble evidence file',
+    description:
+      'Optionally associates the artifact with a claim, subject to the configured per-claim artifact limit.',
+  })
   @ApiOkResponse({ description: 'Evidence queued.' })
-  finalize(@Param('id') id: string, @Request() req: ExpressRequest) {
+  finalize(
+    @Param('id') id: string,
+    @Body() dto: FinalizeUploadSessionDto,
+    @Request() req: ExpressRequest,
+  ) {
     const ownerId = req.user?.apiKeyId ?? req.user?.authType ?? 'system';
-    return this.uploadSessionService.finalize(id, ownerId);
+    return this.uploadSessionService.finalize(id, ownerId, dto?.claimId);
   }
 
   @Get(':id/status')

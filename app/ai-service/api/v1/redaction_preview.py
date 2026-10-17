@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
+from redaction_ruleset import REDACTION_RULESET_VERSION
 from schemas.anonymization import AnonymizeRequest, RedactionPreviewResult
 from schemas.common import ResultEnvelope
 
@@ -52,6 +53,7 @@ async def preview_redaction(
             ids = sum(1 for s in spans if s.label == "ID")
 
             result = RedactionPreviewResult(
+                ruleset_version=REDACTION_RULESET_VERSION,
                 original_length=len(text),
                 segments=segments,
                 pii_summary={

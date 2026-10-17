@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - spaCy may be unavailable or incompatible
     Language = Any
 
 from config import settings
+from redaction_ruleset import REDACTION_RULESET_VERSION
 from services.test_provider import TestProvider
 
 
@@ -115,12 +116,15 @@ class PIIScrubberService:
     def anonymize(self, text: str) -> Dict[str, object]:
         """Return privacy-preserving anonymized text and summary metadata."""
         if settings.test_provider_mode:
-            return self.test_provider.get_response("anonymize", {"text": text})
+            response = self.test_provider.get_response("anonymize", {"text": text})
+            response["ruleset_version"] = REDACTION_RULESET_VERSION
+            return response
 
         start_time = time.time()
         try:
             if not text:
                 return {
+                    "ruleset_version": REDACTION_RULESET_VERSION,
                     "original_length": 0,
                     "anonymized_text": "",
                     "pii_summary": {"names": 0, "locations": 0, "dates": 0, "total": 0},
@@ -138,6 +142,7 @@ class PIIScrubberService:
             ids = sum(1 for span in spans if span.label == "ID")
 
             return {
+                "ruleset_version": REDACTION_RULESET_VERSION,
                 "original_length": len(text),
                 "anonymized_text": anonymized_text,
                 "pii_summary": {
@@ -203,6 +208,7 @@ class PIIScrubberService:
         """Build a redaction preview for structured OCR field payloads."""
         if not fields:
             return {
+                "ruleset_version": REDACTION_RULESET_VERSION,
                 "original_length": 0,
                 "segments": [],
                 "pii_summary": {
@@ -292,6 +298,7 @@ class PIIScrubberService:
 
         pii_summary["total"] = sum(pii_summary.values())
         return {
+            "ruleset_version": REDACTION_RULESET_VERSION,
             "original_length": len(rendered_text),
             "segments": segments,
             "pii_summary": pii_summary,

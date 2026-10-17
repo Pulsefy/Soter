@@ -84,6 +84,14 @@ Response body:
 ### Humanitarian Verification
 - **POST** `/ai/humanitarian/verify` - Standardized humanitarian claim verification (Sphere criteria + context factors + provider fallback)
 
+The versioned endpoint also supports optional server-sent events for token-capable
+LLM providers: send the same request to
+`/v1/ai/humanitarian/verify?stream=true`. The stream emits `token` events as
+provider output arrives, followed by a `result` event containing the usual
+result envelope. Requests without `stream=true` continue to return the normal
+single JSON envelope and use the existing response cache. Token events contain
+partial provider text; the final result event is authoritative.
+
 Request body:
 
 ```json
@@ -171,6 +179,20 @@ The `/ai/metrics` endpoint exposes `llm_provider_cost_ceiling_usd` and
     "processing_time_ms": 950
   }
 }
+```
+
+### Provider Capabilities
+
+Provider eligibility is declared centrally by `PROVIDER_CAPABILITY_MATRIX`, a
+JSON object keyed by provider name. The supported capability identifiers are
+`llm` and `ocr`; a provider is considered for a request only if its matrix
+entry includes that request's capability and it is otherwise available
+(credentials or local runtime). Existing fallback-order settings still control
+the order among eligible providers. Removing a capability from an entry
+prevents that provider from being selected for the corresponding request type.
+
+```dotenv
+PROVIDER_CAPABILITY_MATRIX={"openai":["llm"],"groq":["llm"],"test":["llm","ocr"],"tesseract":["ocr"]}
 ```
 
 ### PII Anonymization

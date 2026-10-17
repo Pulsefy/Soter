@@ -1,17 +1,56 @@
 'use client';
 
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import { isRetrySafe, normalizeError } from '@/lib/error-utils';
+import { reportClientError } from '@/utils/reportClientError';
 
 interface GlobalErrorProps {
-  error: Error & { digest?: string };
+  error: Error & { digest?: string; correlationId?: string; traceId?: string };
   reset: () => void;
 }
 
+function useSafeRouter() {
+  try {
+    return useRouter();
+  } catch {
+    return null;
+  }
+}
+
 export default function GlobalError({ error, reset }: GlobalErrorProps) {
+  const router = useSafeRouter();
+  const normalized = normalizeError(error);
+  const correlationId = normalized.correlationId;
+  const canRetry = isRetrySafe(error, normalized.category);
+
   useEffect(() => {
-    // Log the error natively to the developer console
-    console.error('Critical Global Application Error:', error);
-  }, [error]);
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('Critical Global Application Error:', error);
+    }
+    void reportClientError(error, correlationId || error.digest);
+  }, [error, correlationId]);
+
+  const handleGoBack = () => {
+    reset();
+
+    const canUseHistoryBack =
+      typeof window !== 'undefined' && window.history.length > 1;
+
+    if (canUseHistoryBack) {
+      if (router?.back) {
+        router.back();
+      } else {
+        window.history.back();
+      }
+      return;
+    }
+
+    if (router?.push) {
+      router.push('/dashboard');
+    }
+  };
 
   return (
     <html lang="en">
@@ -41,8 +80,18 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
           
           <p className="text-sm text-slate-400 mb-6 leading-relaxed">
             The application shell encountered a critical fault before the page could finish loading. 
-            Retry the request or refresh your environment.
+            Retry the request or navigate back to a working screen.
           </p>
+
+          {correlationId && (
+            <div
+              data-testid="global-error-correlation-id"
+              className="mb-6 inline-flex flex-wrap items-center justify-center gap-2 rounded-lg border border-slate-800 bg-slate-950/80 px-3 py-1.5 text-xs text-slate-300"
+            >
+              <span className="text-slate-400">Correlation ID:</span>
+              <code className="font-mono text-cyan-300">{correlationId}</code>
+            </div>
+          )}
 
           {process.env.NODE_ENV !== 'production' && (
             <div className="mb-6 p-3 rounded bg-slate-950 border border-slate-800 text-left overflow-auto max-h-40">
@@ -57,19 +106,30 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
             </div>
           )}
 
-          <div className="flex flex-col sm:flex-row gap-2 justify-center">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-2 justify-center">
+            {canRetry && (
+              <button
+                type="button"
+                onClick={() => reset()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-sm font-medium transition-colors cursor-pointer"
+              >
+                Retry Request
+              </button>
+            )}
             <button
-              onClick={() => reset()}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-sm font-medium transition-colors cursor-pointer"
+              type="button"
+              onClick={handleGoBack}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md text-sm font-medium transition-colors cursor-pointer"
             >
-              Retry Request
+              Go back
             </button>
-            <button
-              onClick={() => { window.location.href = '/dashboard'; }}
+            <Link
+              href="/dashboard"
+              onClick={() => reset()}
               className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md text-sm font-medium transition-colors cursor-pointer"
             >
               Return Home
-            </button>
+            </Link>
           </div>
         </div>
       </body>

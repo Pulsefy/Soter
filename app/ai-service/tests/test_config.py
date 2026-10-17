@@ -20,6 +20,7 @@ _ISOLATED_ENV_KEYS = (
     "PROOF_OF_LIFE_CONFIDENCE_THRESHOLD",
     "PROOF_OF_LIFE_MIN_FACE_SIZE",
     "LLM_TIMEOUT_SECONDS",
+    "PROVIDER_CAPABILITY_MATRIX",
     "CACHE_TTL_TASK_STATUS",
     "ASYNC_JOB_IDLE_TIMEOUT_SECONDS",
     "PORT",
@@ -272,6 +273,18 @@ def test_empty_llm_fallback_order_rejected(monkeypatch):
         settings.validate_configuration()
 
     assert "LLM_PROVIDER_FALLBACK_ORDER" in str(excinfo.value)
+
+
+def test_invalid_provider_capability_matrix_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    config = Settings(_env_file=None)
+    config.provider_capability_matrix = {"openai": ["streaming"]}
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        config.validate_configuration()
+
+    assert "PROVIDER_CAPABILITY_MATRIX" in str(excinfo.value)
+    assert "streaming" in str(excinfo.value)
 
 
 def test_provider_cost_ceiling_configuration_validates(monkeypatch):

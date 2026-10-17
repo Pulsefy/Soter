@@ -8,7 +8,14 @@
  *  - categorizeError — correct category assignment
  */
 
-import { ApiError, categorizeError, extractApiError, normalizeError } from './error-utils';
+import {
+  ApiError,
+  categorizeError,
+  extractApiError,
+  extractCorrelationId,
+  isRetrySafe,
+  normalizeError,
+} from './error-utils';
 
 /* ─── Helpers ──────────────────────────────────────────────────────────── */
 
@@ -242,8 +249,50 @@ describe('categorizeError', () => {
     expect(categorizeError(new Error('service unavailable 504'))).toBe('server');
   });
 
+  it('returns config for deployment configuration messages', () => {
+    expect(categorizeError(new Error('NEXT_PUBLIC_API_URL is missing'))).toBe('config');
+    expect(categorizeError(new Error('Misconfigured deployment'))).toBe('config');
+  });
+
   it('returns unknown for unrecognized messages', () => {
     expect(categorizeError(new Error('something unrelated'))).toBe('unknown');
     expect(categorizeError(null)).toBe('unknown');
   });
 });
+
+/* ─── extractCorrelationId & isRetrySafe ──────────────────────────────── */
+
+describe('extractCorrelationId', () => {
+  it('extracts correlationId from nested details or cause when not on top-level Error', () => {
+    const errWithDetails = Object.assign(new Error('Request failed'), {
+      details: { correlationId: 'nested-detail-cid' },
+    });
+    expect(extractCorrelationId(errWithDetails)).toBe('nested-detail-cid');
+
+    const errWithCause = new Error('Wrapper error', {
+      cause: { traceId: 'cause-trace-id' },
+    });
+    expect(extractCorrelationId(errWithCause)).toBe('cause-trace-id');
+  });
+
+  it('returns undefined when no backend correlation ID is present', () => {
+    const plainErr = Object.assign(new Error('Render crash'), { digest: 'next-digest-1' });
+    expect(extractCorrelationId(plainErr)).toBeUndefined();
+  });
+});
+
+describe('isRetrySafe', () => {
+  it('returns true for transient network, server, and 429/5xx errors', () => {
+    expect(isRetrySafe(new ApiError('Service unavailable', 503, 'SERVICE_UNAVAILABLE', 'cid-1'))).toBe(true);
+    expect(isRetrySafe(new ApiError('Rate limited', 429, 'RATE_LIMIT_EXCEEDED', 'cid-2'))).toBe(true);
+    expect(isRetrySafe(new Error('Failed to fetch'))).toBe(true);
+  });
+
+  it('returns false for config errors and non-retryable 4xx statuses or codes', () => {
+    expect(isRetrySafe(new Error('Misconfigured deployment: NEXT_PUBLIC_API_URL missing'))).toBe(false);
+    expect(isRetrySafe(new ApiError('Forbidden', 403, 'FORBIDDEN', 'cid-403'))).toBe(false);
+    expect(isRetrySafe(new ApiError('Not found', 404, 'NOT_FOUND', 'cid-404'))).toBe(false);
+    expect(isRetrySafe(Object.assign(new Error('Fatal state'), { canRetry: false }))).toBe(false);
+  });
+});
+

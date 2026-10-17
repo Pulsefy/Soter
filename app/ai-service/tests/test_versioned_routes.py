@@ -29,6 +29,7 @@ from fastapi.testclient import TestClient
 import main
 import metrics
 from main import app
+from services.rate_limiter import rate_limiter
 
 # ---------------------------------------------------------------------------
 # Session-level resource-check bypass
@@ -55,7 +56,9 @@ def reset_app_state():
     """
     app.state.is_shutting_down = False
     app.state.active_requests = 0
+    rate_limiter.reset()
     yield
+    rate_limiter.reset()
 
 
 # ---------------------------------------------------------------------------

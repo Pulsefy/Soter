@@ -67,7 +67,6 @@ jest.mock('../services/aidApi', () => ({
     verifiedAt: '2026-01-01T01:00:00Z',
     approvalTransactionHash: 'a'.repeat(64),
   }),
-  getMockAidDetails: jest.fn(),
 }));
 
 jest.mock('../services/aidCache', () => ({
