@@ -1,5 +1,7 @@
 from typing import Generic, List, Optional, TypeVar
 from pydantic import BaseModel, Field
+import hashlib
+import json
 
 T = TypeVar("T")
 
@@ -76,3 +78,54 @@ class ResultEnvelope(BaseModel, Generic[T]):
         description="Version of the prompt template used for verification.",
         examples=["v1"],
     )
+
+
+class IdempotencyKey(BaseModel):
+    """
+    Optional idempotency key supplied by callers to make inference requests
+    replay-safe at the ai-service boundary.
+
+    A resubmission with the same key and an identical payload within the
+    bounded window returns the original result rather than reprocessing.
+    A resubmission with the same key but a different payload is rejected
+    with a conflict error.
+    """
+
+    key: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[a-zA-Z0-9_.:-]+$",
+        description="Caller-supplied idempotency key.",
+        examples=["req-7f3a9c2e-4b1d-4e8a-9c0f-1234567890ab"],
+    )
+    window_seconds: Optional[int] = Field(
+        None,
+        ge=1,
+        le=86400,
+        description="Bounded replay window in seconds. Defaults to service config.",
+        examples=[900],
+    )
+
+    def payload_fingerprint(self, payload: object) -> str:
+        """
+        Compute a stable fingerprint of the request payload so that a
+        resubmission with the same key but a different payload can be
+        detected and rejected as a conflict.
+        """
+        if isinstance(payload, BaseModel):
+            canonical = payload.model_dump(mode="json", exclude_none=True)
+        else:
+            canonical = payload
+        encoded = json.dumps(
+            canonical, sort_keys=True, separators=(",", ":"), default=str
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {"key": "req-7f3a9c2e-4b1d-4e8a-9c0f-1234567890ab", "window_seconds": 900}
+            ]
+        }
+    }

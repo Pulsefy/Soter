@@ -70,3 +70,14 @@ class LoadShedError(Exception):
         self.message = message
         self.details = details or {}
         super().__init__(message)
+
+
+class IdempotencyConflictError(AIServiceError):
+    """Raised when a request reuses an idempotency key that was already
+    seen within the bounded window, but the request payload differs from
+    the original. This is a client error (the key is being reused for a
+    different operation) and must not be silently treated as a cache hit.
+    """
+
+    def __init__(self, message: str, details: Optional[Any] = None):
+        super().__init__(message, code="AI_IDEMPOTENCY_CONFLICT", details=details)

@@ -224,6 +224,13 @@ class Settings(BaseSettings):
         120  # AI verification responses, keyed by claim/artifact/model version
     )
 
+    # Idempotency key settings for inference endpoints.
+    # A resubmission carrying the same idempotency key and an identical
+    # payload within this window returns the originally stored result
+    # instead of reprocessing. A resubmission with the same key but a
+    # different payload is rejected with a conflict error.
+    inference_idempotency_window_seconds: float = 3600.0
+
     # Fraud detection decision thresholds.
     # A claim's normalised fraud_risk_score (0 = lowest risk, 1 = highest
     # risk) is banded into pass / review / reject. Defaults below were
@@ -426,6 +433,7 @@ class Settings(BaseSettings):
             ("CACHE_TTL_VERIFICATION", self.cache_ttl_verification),
             ("TASK_RETRY_DELAY_SECONDS", self.task_retry_delay_seconds),
             ("ASYNC_JOB_IDLE_TIMEOUT_SECONDS", self.async_job_idle_timeout_seconds),
+            ("INFERENCE_IDEMPOTENCY_WINDOW_SECONDS", self.inference_idempotency_window_seconds),
             (
                 "VERIFICATION_ARTIFACT_URL_TTL_SECONDS",
                 self.verification_artifact_url_ttl_seconds,
