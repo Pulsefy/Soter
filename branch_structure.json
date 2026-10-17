@@ -1,0 +1,21 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1370-add-end-to-end-coverage-for-the-shared-device",
+    "fix/issue-1402-document-the-full-contract-interface-reference",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-1370-add-end-to-end-coverage-for-the-shared-device": "main",
+    "fix/issue-1402-document-the-full-contract-interface-reference": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1370-add-end-to-end-coverage-for-the-shared-device",
+    "fix/issue-1402-document-the-full-contract-interface-reference",
+    "origin"
+  ]
+}
