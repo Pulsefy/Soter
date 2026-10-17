@@ -53,6 +53,9 @@ export const ForceUpgradeScreen: React.FC = () => {
         <TouchableOpacity
           style={[styles.button, { backgroundColor: colors.brand.primary }]}
           onPress={handleUpdate}
+          accessibilityRole="button"
+          accessibilityLabel="Update Soter now"
+          accessibilityHint="Open the store to install the required app update"
         >
           <Text style={styles.buttonText}>{t('forceUpgrade.updateNow')}</Text>
         </TouchableOpacity>
