@@ -1,4 +1,13 @@
-import { IsInt, IsString, Min, Max, IsIn } from 'class-validator';
+import {
+  IsInt,
+  IsString,
+  Min,
+  Max,
+  IsIn,
+  IsOptional,
+  IsNotEmpty,
+} from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ALLOWED_MIME_TYPES, MAX_FILE_SIZE } from './file-validation';
 
 const MAX_CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB per chunk
@@ -33,4 +42,14 @@ export class UploadChunkDto {
   /** SHA-256 hex checksum of this chunk's raw bytes. */
   @IsString()
   checksum: string;
+}
+
+export class FinalizeUploadSessionDto {
+  @ApiPropertyOptional({
+    description: 'Claim to associate the uploaded artifact with.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  claimId?: string;
 }
