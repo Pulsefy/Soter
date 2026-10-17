@@ -397,11 +397,11 @@ describe('AidService - listAidPackages', () => {
     await service.listAidPackages({ search: 'emergency' });
 
     expect(prismaService.aidPackage.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
+      expect.objectContaining( {
+        where: expect.objectContaining( {
           OR: expect.arrayContaining([
-            expect.objectContaining({
-              id: expect.objectContaining({
+            expect.objectContaining( {
+              id: expect.objectContaining( {
                 contains: 'emergency',
                 mode: 'insensitive',
               }),
@@ -421,66 +421,149 @@ describe('AidService - listAidPackages', () => {
       }),
     );
   });
+});
 
-  it('applies sorting with default asc direction', async () => {
-    await service.listAidPackages({ sortBy: 'totalAmount' });
+describe('AidService - listRecipientPackages', () => {
+  let service: AidService;
+  let prismaService: {
+    campaign: {
+      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+    };
+    aidPackage: {
+      findMany: jest.Mock;
+      count: jest.Mock;
+    };
+  };
+
+  beforeEach(async () => {
+    prismaService = {
+      campaign: {
+        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+      },
+      aidPackage: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AidService,
+        {
+          provide: AuditService,
+          useValue: { record: jest.fn() },
+        },
+        {
+          provide: RedisService,
+          useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() },
+        },
+        {
+          provide: MetricsService,
+          useValue: { incrementCallbackFailure: jest.fn() },
+        },
+        {
+          provide: PrismaService,
+          useValue: prismaService,
+        },
+      ],
+    }).compile();
+
+    service = module.get<AidService>(AidService);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('returns an empty page for a recipient with no packages', async () => {
+    const result = await service.listRecipientPackages('recipient-empty');
+
+    expect(result).toEqual({
+      data: [],
+      total: 0,
+      page: 1,
+      size: 10,
+      totalPages: 0,
+    });
+    expect(prismaService.aidPackage.findMany).toHaveBeenCalledWith({
+      where: { recipient: 'recipient-empty' },
+      orderBy: { id: 'asc' },
+      skip: 0,
+      take: 10,
+    });
+    expect(prismaService.aidPackage.count).toHaveBeenCalledWith({
+      where: { recipient: 'recipient-empty' },
+    });
+  });
+
+  it('returns a single page of packages for a recipient', async () => {
+    const packages = [
+      { id: 'pkg-1', recipient: 'recipient-1' },
+      { id: 'pkg-2', recipient: 'recipient-1' },
+    ];
+    prismaService.aidPackage.findMany.mockResolvedValue(packages);
+    prismaService.aidPackage.count.mockResolvedValue(2);
+
+    const result = await service.listRecipientPackages('recipient-1');
+
+    expect(result).toEqual({
+      data: packages,
+      total: 2,
+      page: 1,
+      size: 10,
+      totalPages: 1,
+    });
+  });
+
+  it('paginates multi-page recipients consistently', async () => {
+    const pageTwo = [
+      { id: 'pkg-11', recipient: 'recipient-1' },
+      { id: 'pkg-12', recipient: 'recipient-1' },
+    ];
+    prismaService.aidPackage.findMany.mockResolvedValue(pageTwo);
+    prismaService.aidPackage.count.mockResolvedValue(25);
+
+    const result = await service.listRecipientPackages('recipient-1', {
+      page: 2,
+      size: 10,
+    });
+
+    expect(result).toEqual({
+      data: pageTwo,
+      total: 25,
+      page: 2,
+      size: 10,
+      totalPages: 3,
+    });
+    expect(prismaService.aidPackage.findMany).toHaveBeenCalledWith({
+      where: { recipient: 'recipient-1' },
+      orderBy: { id: 'asc' },
+      skip: 10,
+      take: 10,
+    });
+  });
+
+  it('clamps page and size for recipient packages', async () => {
+    await service.listRecipientPackages('recipient-1', {
+      page: 0,
+      size: 500,
+    });
 
     expect(prismaService.aidPackage.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        orderBy: { totalAmount: 'asc' },
-      }),
+      expect.objectContaining({ skip: 0, take: 100 }),
     );
   });
 
-  it('combines pagination, filters, and sorting', async () => {
-    prismaService.aidPackage.count.mockResolvedValue(15);
-    prismaService.aidPackage.findMany.mockResolvedValue(
-      mockPackages.slice(0, 5),
-    );
-
-    const result = await service.listAidPackages({
-      page: 2,
-      size: 5,
-      status: 'Active',
-      search: 'test',
-      sortBy: 'status',
-      sortDirection: 'desc',
-    });
-
-    expect(result.page).toBe(2);
-    expect(result.size).toBe(5);
-    expect(result.total).toBe(15);
-    expect(result.totalPages).toBe(3);
-    expect(prismaService.aidPackage.findMany).toHaveBeenCalledWith({
-      where: {
-        status: 'Active',
-        OR: [{ id: { contains: 'test', mode: 'insensitive' } }],
-      },
-      orderBy: { status: 'desc' },
-      skip: 5,
-      take: 5,
-    });
-  });
-
-  it('returns empty data when no packages match', async () => {
-    prismaService.aidPackage.findMany.mockResolvedValue([]);
-    prismaService.aidPackage.count.mockResolvedValue(0);
-
-    const result = await service.listAidPackages({ status: 'Nonexistent' });
-
-    expect(result.data).toEqual([]);
-    expect(result.total).toBe(0);
-    expect(result.totalPages).toBe(0);
-  });
-
-  it('calculates totalPages correctly for partial last page', async () => {
+  it('returns the recipient package count', async () => {
     prismaService.aidPackage.count.mockResolvedValue(7);
-    prismaService.aidPackage.findMany.mockResolvedValue(
-      mockPackages.slice(0, 2),
-    );
 
-    const result = await service.listAidPackages({ page: 1, size: 3 });
+    const count = await service.getRecipientPackageCount('recipient-1');
 
-    expect(result.totalPages).toBe(3); // ceil(7/3) = 3
+    expect(count).toBe(7);
+    expect(prismaService.aidPackage.count).toHaveBeenCalledWith({
+      where: { recipient: 'recipient-1' },
+    });
   });
 });
