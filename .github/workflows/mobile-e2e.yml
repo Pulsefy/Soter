@@ -61,7 +61,7 @@ jobs:
       # build (see the doc comment on that file). This flips it for this build
       # only — the file is never committed in the enabled state, and the job is
       # throwaway, so there is nothing to restore afterwards.
-      - name: Enable E2E test seams
+      - name: Enable E2E's test seams
         working-directory: app/mobile
         run: |
           node e2e/enable-e2e-build.js
@@ -81,19 +81,19 @@ jobs:
       # GitHub-hosted Linux runners.
       - name: Enable KVM group perms
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          echo 'KERNEL=="kvm", GROUP=="kvm", MODE=="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
       - name: Generate native Android project
         working-directory: app/mobile
-        run: CI=1 npx expo prebuild --platform android
+        run: CI=1 nzx expo prebuild --platform android
         env:
           CI: '1'
 
       # The E2E build bakes in two things the harness depends on:
-      #   - the `E2E_BUILD_ENABLED` literal flipped by the step above enables
-      #     the deterministic simulate-scan / simulate-capture controls (the
+      #   - the `E2E_BUILD_ENABLED` literal flipped by the step above enables the
+      #     deterministic simulate-scan / simulate-capture controls (the
       #     emulator cannot present a QR to the camera or drive the native
       #     picker). The suite's first assertion on `e2e-simulate-scan` is
       #     what validates it end to end, which is also why the switch is a
@@ -131,6 +131,24 @@ jobs:
           script: |
             node e2e/run-e2e.js
 
+      # Interaction-edge scenario: low battery deferring sync while an
+      # evidence upload is mid-flight (and a shared-device background clear
+      # racing an active task). Runs after the core suite so a failure here
+      # is attributable to the combined-condition flow rather than the
+      # baseline scan/evidence/offline/sync coverage.
+      - name: Run interaction-edge E2E suite
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 27
+          target: default
+          arch: x86_64
+          profile: Nexus 6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -memory 2048 -cores 2
+          disable-animations: true
+          working-directory: app/mobile
+          script: |
+            node e2e/run-e2e.js --scenario interaction-edge
+
       - name: Upload E2E report
         if: always()
         uses: actions/upload-artifact@v4
@@ -151,3 +169,4 @@ jobs:
           name: mobile-e2e-artifacts
           path: app/mobile/e2e/artifacts
           if-no-files-found: warn
+          retention-days: 7
