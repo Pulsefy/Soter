@@ -215,13 +215,8 @@ class HumanitarianVerificationService:
                             on_token=on_token,
                         )
                         breaker.record_success()
-                        metrics.record_llm_usage(
-                            provider=provider_name,
-                            model=model,
-                            endpoint="humanitarian_verification",
-                            prompt_tokens=response.prompt_tokens,
-                            completion_tokens=response.completion_tokens,
-                        )
+                        # Cost tracking is now handled in _call_and_validate for retry-aware attribution
+                        # Only need to update the cost ceiling for the successful attempt
                         cost_usd = None
                         if (
                             response.prompt_tokens is not None
@@ -256,6 +251,15 @@ class HumanitarianVerificationService:
                         )
                     except Exception as exc:
                         breaker.record_failure()
+                        # Record failed attempt for transport-level errors (no response/token data available)
+                        metrics.record_llm_usage(
+                            provider=provider_name,
+                            model=model,
+                            endpoint="humanitarian_verification",
+                            prompt_tokens=None,
+                            completion_tokens=None,
+                            attempt_outcome="failure",
+                        )
                         err = f"provider={provider_name}, model={model}, prompt={prompt_variant}, version={prompt_obj.version}, error={exc}"
                         errors.append(err)
                         logger.warning(
@@ -405,6 +409,11 @@ class HumanitarianVerificationService:
         won't turn a decline into an answer) if the response looks like an
         explicit refusal, or `MalformedProviderOutputError` once every
         repair attempt is exhausted.
+
+        All attempts (successful and failed) are recorded for retry-aware
+        cost attribution. Failed attempts that consumed tokens are tracked
+        with attempt_outcome="failure" to distinguish them from the final
+        successful attempt.
         """
         system_prompt = prompt["system"]
         user_prompt = prompt["user"]
@@ -451,6 +460,15 @@ class HumanitarianVerificationService:
             content = response.content
 
             if self._looks_like_refusal(content):
+                # Record this failed attempt before raising
+                metrics.record_llm_usage(
+                    provider=provider_name,
+                    model=model,
+                    endpoint="humanitarian_verification",
+                    prompt_tokens=response.prompt_tokens,
+                    completion_tokens=response.completion_tokens,
+                    attempt_outcome="failure",
+                )
                 raise ProviderRefusalError(
                     f"provider={provider_name} declined to answer",
                     details={"content": content},
@@ -459,6 +477,15 @@ class HumanitarianVerificationService:
             try:
                 parsed = self._parse_json_response(content)
                 self._validate_schema(parsed)
+                # Record this successful attempt
+                metrics.record_llm_usage(
+                    provider=provider_name,
+                    model=model,
+                    endpoint="humanitarian_verification",
+                    prompt_tokens=response.prompt_tokens,
+                    completion_tokens=response.completion_tokens,
+                    attempt_outcome="success",
+                )
                 return parsed, response
             except (
                 json.JSONDecodeError,
@@ -466,6 +493,15 @@ class HumanitarianVerificationService:
                 MalformedProviderOutputError,
             ) as exc:
                 last_error = exc
+                # Record this failed attempt (it consumed tokens even if malformed)
+                metrics.record_llm_usage(
+                    provider=provider_name,
+                    model=model,
+                    endpoint="humanitarian_verification",
+                    prompt_tokens=response.prompt_tokens,
+                    completion_tokens=response.completion_tokens,
+                    attempt_outcome="failure",
+                )
                 logger.warning(
                     "Malformed output from provider=%s (attempt %d/%d): %s",
                     provider_name,

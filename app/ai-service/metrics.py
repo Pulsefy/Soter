@@ -365,20 +365,30 @@ SINGLE_FLIGHT_FAILED = Counter(
 # unbounded (see the module docstring above); attribute spend to a
 # campaign via logs/audit records instead, correlated on provider+model+
 # timestamp if needed.
+#
+# Retry-aware cost attribution (issue #TODO): `attempt_outcome` is a bounded
+# label (success/failure) that distinguishes the final successful attempt
+# from failed retry attempts that still consumed tokens. This allows dashboards
+# to separate "cost of successful requests" from "wasted cost on failed attempts".
 LLM_TOKENS_TOTAL = Counter(
     "llm_tokens_total",
-    "Total LLM tokens consumed, by provider, model, endpoint, and token type",
-    ["provider", "model", "endpoint", "token_type"],
+    "Total LLM tokens consumed, by provider, model, endpoint, token type, and attempt outcome",
+    ["provider", "model", "endpoint", "token_type", "attempt_outcome"],
 )
 LLM_COST_USD_TOTAL = Counter(
     "llm_cost_usd_total",
-    "Estimated USD cost of LLM usage, derived from configured per-model rates",
-    ["provider", "model", "endpoint"],
+    "Estimated USD cost of LLM usage, derived from configured per-model rates, by attempt outcome",
+    ["provider", "model", "endpoint", "attempt_outcome"],
 )
 LLM_USAGE_UNAVAILABLE_TOTAL = Counter(
     "llm_usage_unavailable_total",
     "LLM requests where the provider did not report token usage (not counted as zero)",
-    ["provider", "model", "endpoint"],
+    ["provider", "model", "endpoint", "attempt_outcome"],
+)
+LLM_ATTEMPT_TOTAL = Counter(
+    "llm_attempt_total",
+    "Total LLM call attempts by provider, model, endpoint, and outcome",
+    ["provider", "model", "endpoint", "attempt_outcome"],
 )
 LLM_PROVIDER_COST_CEILING_USD = Gauge(
     "llm_provider_cost_ceiling_usd",
@@ -423,28 +433,48 @@ def record_llm_usage(
     endpoint: str,
     prompt_tokens: Optional[int],
     completion_tokens: Optional[int],
+    attempt_outcome: str = "success",
 ) -> None:
-    """Records token usage and estimated cost for one successful LLM call.
+    """Records token usage and estimated cost for one LLM call attempt.
+
+    Args:
+        provider: Provider name (e.g., "openai", "groq", "test")
+        model: Model identifier
+        endpoint: Endpoint name (e.g., "humanitarian_verification")
+        prompt_tokens: Number of prompt tokens, or None if unavailable
+        completion_tokens: Number of completion tokens, or None if unavailable
+        attempt_outcome: "success" for the final successful attempt,
+            "failure" for retry attempts that failed but still consumed tokens
 
     If either token count is unavailable (the provider didn't report
     usage), records that as `LLM_USAGE_UNAVAILABLE_TOTAL` instead of
     treating the missing value as zero tokens/zero cost.
+
+    This function should be called for ALL attempts (successful and failed)
+    to enable retry-aware cost attribution. Failed attempts that consumed
+    tokens are recorded with attempt_outcome="failure" so dashboards can
+    distinguish "cost of successful requests" from "wasted cost on failed attempts".
     """
+    # Record the attempt count regardless of token availability
+    LLM_ATTEMPT_TOTAL.labels(
+        provider=provider, model=model, endpoint=endpoint, attempt_outcome=attempt_outcome
+    ).inc()
+
     if prompt_tokens is None or completion_tokens is None:
         LLM_USAGE_UNAVAILABLE_TOTAL.labels(
-            provider=provider, model=model, endpoint=endpoint
+            provider=provider, model=model, endpoint=endpoint, attempt_outcome=attempt_outcome
         ).inc()
         return
 
     LLM_TOKENS_TOTAL.labels(
-        provider=provider, model=model, endpoint=endpoint, token_type="prompt"
+        provider=provider, model=model, endpoint=endpoint, token_type="prompt", attempt_outcome=attempt_outcome
     ).inc(prompt_tokens)
     LLM_TOKENS_TOTAL.labels(
-        provider=provider, model=model, endpoint=endpoint, token_type="completion"
+        provider=provider, model=model, endpoint=endpoint, token_type="completion", attempt_outcome=attempt_outcome
     ).inc(completion_tokens)
 
     cost_usd = estimate_llm_cost_usd(model, prompt_tokens, completion_tokens)
     if cost_usd is not None:
         LLM_COST_USD_TOTAL.labels(
-            provider=provider, model=model, endpoint=endpoint
+            provider=provider, model=model, endpoint=endpoint, attempt_outcome=attempt_outcome
         ).inc(cost_usd)

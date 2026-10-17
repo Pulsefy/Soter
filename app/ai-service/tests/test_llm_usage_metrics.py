@@ -11,8 +11,13 @@ prom-client counters (kept out of the default registry, matching the
 convention in test_metrics_cardinality.py), plus confirm the two provider
 call sites (OpenAI/Groq HTTP parsing, humanitarian_verification's success
 path) actually wire it up.
+
+Retry-aware cost attribution tests verify that all attempts (successful
+and failed) are tracked with the appropriate attempt_outcome label to
+distinguish "cost of successful requests" from "wasted cost on failed attempts".
 """
 
+import pytest
 from unittest.mock import patch
 
 import metrics
@@ -66,6 +71,7 @@ class TestRecordLlmUsage:
                 model="gpt-4o-mini",
                 endpoint="humanitarian_verification",
                 token_type="prompt",
+                attempt_outcome="success",
             )
             or 0
         )
@@ -76,6 +82,7 @@ class TestRecordLlmUsage:
                 model="gpt-4o-mini",
                 endpoint="humanitarian_verification",
                 token_type="completion",
+                attempt_outcome="success",
             )
             or 0
         )
@@ -86,6 +93,7 @@ class TestRecordLlmUsage:
             endpoint="humanitarian_verification",
             prompt_tokens=120,
             completion_tokens=45,
+            attempt_outcome="success",
         )
 
         after_prompt = counter_value(
@@ -94,6 +102,7 @@ class TestRecordLlmUsage:
             model="gpt-4o-mini",
             endpoint="humanitarian_verification",
             token_type="prompt",
+            attempt_outcome="success",
         )
         after_completion = counter_value(
             metrics.LLM_TOKENS_TOTAL,
@@ -101,6 +110,7 @@ class TestRecordLlmUsage:
             model="gpt-4o-mini",
             endpoint="humanitarian_verification",
             token_type="completion",
+            attempt_outcome="success",
         )
 
         assert after_prompt == before_prompt + 120
@@ -117,6 +127,7 @@ class TestRecordLlmUsage:
                     provider="openai",
                     model="rate-test-model",
                     endpoint="humanitarian_verification",
+                    attempt_outcome="success",
                 )
                 or 0
             )
@@ -127,6 +138,7 @@ class TestRecordLlmUsage:
                 endpoint="humanitarian_verification",
                 prompt_tokens=1000,
                 completion_tokens=1000,
+                attempt_outcome="success",
             )
 
             after = counter_value(
@@ -134,6 +146,7 @@ class TestRecordLlmUsage:
                 provider="openai",
                 model="rate-test-model",
                 endpoint="humanitarian_verification",
+                attempt_outcome="success",
             )
             assert after == before + 0.03
 
@@ -146,6 +159,7 @@ class TestRecordLlmUsage:
                     provider="groq",
                     model="totally-unrated-model",
                     endpoint="humanitarian_verification",
+                    attempt_outcome="success",
                 )
                 or 0
             )
@@ -156,6 +170,7 @@ class TestRecordLlmUsage:
                 endpoint="humanitarian_verification",
                 prompt_tokens=500,
                 completion_tokens=500,
+                attempt_outcome="success",
             )
 
             after = (
@@ -164,6 +179,7 @@ class TestRecordLlmUsage:
                     provider="groq",
                     model="totally-unrated-model",
                     endpoint="humanitarian_verification",
+                    attempt_outcome="success",
                 )
                 or 0
             )
@@ -177,6 +193,7 @@ class TestRecordLlmUsage:
                 model="unavailable-model-a",
                 endpoint="humanitarian_verification",
                 token_type="prompt",
+                attempt_outcome="success",
             )
             or 0
         )
@@ -186,6 +203,7 @@ class TestRecordLlmUsage:
                 provider="test",
                 model="unavailable-model-a",
                 endpoint="humanitarian_verification",
+                attempt_outcome="success",
             )
             or 0
         )
@@ -196,6 +214,7 @@ class TestRecordLlmUsage:
             endpoint="humanitarian_verification",
             prompt_tokens=None,
             completion_tokens=10,
+            attempt_outcome="success",
         )
 
         after_tokens = (
@@ -205,6 +224,7 @@ class TestRecordLlmUsage:
                 model="unavailable-model-a",
                 endpoint="humanitarian_verification",
                 token_type="prompt",
+                attempt_outcome="success",
             )
             or 0
         )
@@ -213,6 +233,7 @@ class TestRecordLlmUsage:
             provider="test",
             model="unavailable-model-a",
             endpoint="humanitarian_verification",
+            attempt_outcome="success",
         )
 
         # Token counter must NOT move at all - a partial reading is still
@@ -227,6 +248,7 @@ class TestRecordLlmUsage:
                 provider="test",
                 model="unavailable-model-b",
                 endpoint="humanitarian_verification",
+                attempt_outcome="success",
             )
             or 0
         )
@@ -237,6 +259,7 @@ class TestRecordLlmUsage:
             endpoint="humanitarian_verification",
             prompt_tokens=10,
             completion_tokens=None,
+            attempt_outcome="success",
         )
 
         after = counter_value(
@@ -244,6 +267,7 @@ class TestRecordLlmUsage:
             provider="test",
             model="unavailable-model-b",
             endpoint="humanitarian_verification",
+            attempt_outcome="success",
         )
         assert after == before + 1
 
@@ -254,6 +278,7 @@ class TestRecordLlmUsage:
                 provider="test",
                 model="fully-unavailable-model",
                 endpoint="humanitarian_verification",
+                attempt_outcome="success",
             )
             or 0
         )
@@ -264,6 +289,7 @@ class TestRecordLlmUsage:
             endpoint="humanitarian_verification",
             prompt_tokens=None,
             completion_tokens=None,
+            attempt_outcome="success",
         )
 
         after = counter_value(
@@ -271,5 +297,221 @@ class TestRecordLlmUsage:
             provider="test",
             model="fully-unavailable-model",
             endpoint="humanitarian_verification",
+            attempt_outcome="success",
+        )
+        assert after == before + 1
+
+
+class TestRetryAwareCostAttribution:
+    """Tests for retry-aware cost attribution (tracking successful vs failed attempts)."""
+
+    def test_successful_attempt_records_with_success_outcome(self):
+        """Verify successful attempts are tagged with attempt_outcome='success'."""
+        before_attempts = (
+            counter_value(
+                metrics.LLM_ATTEMPT_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                attempt_outcome="success",
+            )
+            or 0
+        )
+        before_tokens = (
+            counter_value(
+                metrics.LLM_TOKENS_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                token_type="prompt",
+                attempt_outcome="success",
+            )
+            or 0
+        )
+
+        metrics.record_llm_usage(
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            prompt_tokens=100,
+            completion_tokens=50,
+            attempt_outcome="success",
+        )
+
+        after_attempts = counter_value(
+            metrics.LLM_ATTEMPT_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            attempt_outcome="success",
+        )
+        after_tokens = counter_value(
+            metrics.LLM_TOKENS_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            token_type="prompt",
+            attempt_outcome="success",
+        )
+
+        assert after_attempts == before_attempts + 1
+        assert after_tokens == before_tokens + 100
+
+    def test_failed_attempt_records_with_failure_outcome(self):
+        """Verify failed attempts are tagged with attempt_outcome='failure'."""
+        before_attempts = (
+            counter_value(
+                metrics.LLM_ATTEMPT_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                attempt_outcome="failure",
+            )
+            or 0
+        )
+        before_cost = (
+            counter_value(
+                metrics.LLM_COST_USD_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                attempt_outcome="failure",
+            )
+            or 0
+        )
+
+        with patch("metrics.settings") as mock_settings:
+            mock_settings.llm_model_cost_per_1k_tokens = {
+                "gpt-4o-mini": {"prompt": 0.001, "completion": 0.002},
+            }
+
+            metrics.record_llm_usage(
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                prompt_tokens=100,
+                completion_tokens=50,
+                attempt_outcome="failure",
+            )
+
+        after_attempts = counter_value(
+            metrics.LLM_ATTEMPT_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            attempt_outcome="failure",
+        )
+        after_cost = counter_value(
+            metrics.LLM_COST_USD_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            attempt_outcome="failure",
+        )
+
+        assert after_attempts == before_attempts + 1
+        # Failed attempts still incur cost
+        # Cost = (100/1000)*0.001 + (50/1000)*0.002 = 0.0001 + 0.0001 = 0.0002
+        expected_cost = before_cost + 0.0002
+        assert after_cost == pytest.approx(expected_cost)
+
+    def test_mixed_success_and_failure_attempts_tracked_separately(self):
+        """Verify that success and failure outcomes don't mix in metrics."""
+        before_failure_cost = (
+            counter_value(
+                metrics.LLM_COST_USD_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                attempt_outcome="failure",
+            )
+            or 0
+        )
+        before_success_cost = (
+            counter_value(
+                metrics.LLM_COST_USD_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                attempt_outcome="success",
+            )
+            or 0
+        )
+
+        with patch("metrics.settings") as mock_settings:
+            mock_settings.llm_model_cost_per_1k_tokens = {
+                "gpt-4o-mini": {"prompt": 0.001, "completion": 0.002},
+            }
+
+            # Record a failed attempt (e.g., retry due to malformed output)
+            metrics.record_llm_usage(
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                prompt_tokens=100,
+                completion_tokens=50,
+                attempt_outcome="failure",
+            )
+
+            # Record the successful attempt
+            metrics.record_llm_usage(
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                prompt_tokens=120,
+                completion_tokens=60,
+                attempt_outcome="success",
+            )
+
+        failure_cost = counter_value(
+            metrics.LLM_COST_USD_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            attempt_outcome="failure",
+        )
+        success_cost = counter_value(
+            metrics.LLM_COST_USD_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            attempt_outcome="success",
+        )
+
+        # Each outcome should have its own cost bucket
+        # Cost = (tokens / 1000) * rate
+        # Failed: (100/1000)*0.001 + (50/1000)*0.002 = 0.0001 + 0.0001 = 0.0002
+        # Success: (120/1000)*0.001 + (60/1000)*0.002 = 0.00012 + 0.00012 = 0.00024
+        assert failure_cost == pytest.approx(before_failure_cost + 0.0002)
+        assert success_cost == pytest.approx(before_success_cost + 0.00024)
+
+    def test_unavailable_usage_with_failure_outcome(self):
+        """Verify unavailable usage is also tracked by attempt_outcome."""
+        before = (
+            counter_value(
+                metrics.LLM_USAGE_UNAVAILABLE_TOTAL,
+                provider="test",
+                model="unavailable-model",
+                endpoint="humanitarian_verification",
+                attempt_outcome="failure",
+            )
+            or 0
+        )
+
+        metrics.record_llm_usage(
+            provider="test",
+            model="unavailable-model",
+            endpoint="humanitarian_verification",
+            prompt_tokens=None,
+            completion_tokens=None,
+            attempt_outcome="failure",
+        )
+
+        after = counter_value(
+            metrics.LLM_USAGE_UNAVAILABLE_TOTAL,
+            provider="test",
+            model="unavailable-model",
+            endpoint="humanitarian_verification",
+            attempt_outcome="failure",
         )
         assert after == before + 1
