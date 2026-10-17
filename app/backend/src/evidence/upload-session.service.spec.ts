@@ -60,7 +60,7 @@ const mockTransaction = {
 };
 
 const mockPrisma = {
-  $transaction: jest.fn(async (callback: (tx: any) => any) =>
+  $transaction: jest.fn((callback: (tx: any) => any) =>
     callback(mockTransaction),
   ),
   evidenceQueueItem: {
