@@ -9,6 +9,209 @@
  */
 
 /**
+ * Struct: DelegateHistory
+ */
+export interface DelegateHistory {
+  changed_at: bigint;
+  changed_by: string;
+  new_delegate: string;
+  package_id: bigint;
+  previous_delegate: string | null;
+  reason: string;
+}
+
+/**
+ * Enum: PackageStatus
+ */
+export enum PackageStatus {
+  /**
+   * Enum Case: Created
+   */
+  Created = 0,
+  /**
+   * Enum Case: Claimed
+   */
+  Claimed = 1,
+  /**
+   * Enum Case: Expired
+   */
+  Expired = 2,
+  /**
+   * Enum Case: Cancelled
+   */
+  Cancelled = 3,
+  /**
+   * Enum Case: Refunded
+   */
+  Refunded = 4,
+}
+
+/**
+ * Struct: Package
+ */
+export interface Package {
+  amount: bigint;
+  claim_starts_at: bigint;
+  created_at: bigint;
+  evidence_hash: string;
+  expires_at: bigint;
+  id: bigint;
+  metadata: Map<string, string>;
+  recipient: string;
+  status: PackageStatus;
+  token: string;
+}
+
+/**
+ * Struct: Config
+ */
+export interface Config {
+  allowed_tokens: Array<string>;
+  /**
+   * Minimum number of seconds a recipient must wait between successful
+   * claims. `0` disables the cooldown.
+   */
+  claim_cooldown: bigint;
+  max_expires_in: bigint;
+  min_amount: bigint;
+}
+
+/**
+ * Struct: Aggregates
+ */
+export interface Aggregates {
+  total_claimed: bigint;
+  total_committed: bigint;
+  total_expired_cancelled: bigint;
+}
+
+/**
+ * A proposed but not-yet-executed surplus withdrawal, stored under
+ * `KEY_PENDING_WITHDRAWAL` in instance storage.
+ */
+export interface PendingWithdrawal {
+  /**
+   * Amount (in smallest token units) to withdraw.
+   */
+  amount: bigint;
+  /**
+   * Earliest ledger timestamp at which `execute_surplus_withdrawal` may be called.
+   */
+  executable_at: bigint;
+  /**
+   * Destination address for the transfer.
+   */
+  to: string;
+  /**
+   * Token address for the withdrawal.
+   */
+  token: string;
+}
+
+/**
+ * Outcome of a single package claim attempt made as part of a `batch_claim`
+ * call. `batch_claim` never fails a whole batch because one package could
+ * not be claimed; instead each id resolves to one of these statuses.
+ */
+export enum ClaimStatus {
+  /**
+   * Package was claimed and the payout was transferred.
+   */
+  Success = 0,
+  /**
+   * No package exists with the given id.
+   */
+  NotFound = 1,
+  /**
+   * Package status is not `Created` (already claimed, cancelled, or refunded).
+   */
+  NotActive = 2,
+  /**
+   * Current ledger time is before the package's `claim_starts_at`.
+   */
+  ClaimTooEarly = 3,
+  /**
+   * Package has passed its `expires_at` timestamp.
+   */
+  Expired = 4,
+  /**
+   * Package is guarded by a Merkle allowlist; use `claim_with_proof` instead.
+   */
+  RequiresProof = 5,
+  /**
+   * Caller is neither the package's recipient nor an authorised delegate.
+   */
+  Unauthorized = 6,
+  /**
+   * The package's campaign is paused.
+   */
+  CampaignPaused = 7,
+  /**
+   * Eligibility checks passed but the token transfer failed.
+   */
+  TransferFailed = 8,
+  /**
+   * The recipient successfully claimed another package too recently.
+   */
+  CooldownActive = 9,
+}
+
+/**
+ * Per-package result returned by `batch_claim`.
+ */
+export interface BatchClaimResult {
+  /**
+   * Amount transferred to the claimant; zero unless `status` is `Success`.
+   */
+  amount: bigint;
+  package_id: bigint;
+  status: ClaimStatus;
+}
+
+/**
+ * Outcome of one package revoke or refund attempt in a batch.
+ */
+export enum BatchAdminActionStatus {
+  /**
+   * Enum Case: Success
+   */
+  Success = 0,
+  /**
+   * Enum Case: NotFound
+   */
+  NotFound = 1,
+  /**
+   * Enum Case: InvalidState
+   */
+  InvalidState = 2,
+  /**
+   * Enum Case: Expired
+   */
+  Expired = 3,
+  /**
+   * Enum Case: NotExpired
+   */
+  NotExpired = 4,
+  /**
+   * Enum Case: CampaignPaused
+   */
+  CampaignPaused = 5,
+  /**
+   * Enum Case: TransferFailed
+   */
+  TransferFailed = 6,
+}
+
+/**
+ * Struct: BatchAdminActionResult
+ */
+export interface BatchAdminActionResult {
+  amount: bigint;
+  package_id: bigint;
+  status: BatchAdminActionStatus;
+}
+
+/**
  * Error Enum: Error
  */
 export const Error = {
@@ -84,206 +287,3 @@ export const Error = {
    */
   31: { message: 'SurplusWithdrawalNotStale' },
 };
-
-/**
- * Struct: Config
- */
-export interface Config {
-  allowed_tokens: Array<string>;
-  /**
-   * Minimum number of seconds a recipient must wait between successful
-   * claims. `0` disables the cooldown.
-   */
-  claim_cooldown: bigint;
-  max_expires_in: bigint;
-  min_amount: bigint;
-}
-
-/**
- * Struct: Package
- */
-export interface Package {
-  amount: bigint;
-  claim_starts_at: bigint;
-  created_at: bigint;
-  evidence_hash: string;
-  expires_at: bigint;
-  id: bigint;
-  metadata: Map<string, string>;
-  recipient: string;
-  status: PackageStatus;
-  token: string;
-}
-
-/**
- * Struct: Aggregates
- */
-export interface Aggregates {
-  total_claimed: bigint;
-  total_committed: bigint;
-  total_expired_cancelled: bigint;
-}
-
-/**
- * Outcome of a single package claim attempt made as part of a `batch_claim`
- * call. `batch_claim` never fails a whole batch because one package could
- * not be claimed; instead each id resolves to one of these statuses.
- */
-export enum ClaimStatus {
-  /**
-   * Package was claimed and the payout was transferred.
-   */
-  Success = 0,
-  /**
-   * No package exists with the given id.
-   */
-  NotFound = 1,
-  /**
-   * Package status is not `Created` (already claimed, cancelled, or refunded).
-   */
-  NotActive = 2,
-  /**
-   * Current ledger time is before the package's `claim_starts_at`.
-   */
-  ClaimTooEarly = 3,
-  /**
-   * Package has passed its `expires_at` timestamp.
-   */
-  Expired = 4,
-  /**
-   * Package is guarded by a Merkle allowlist; use `claim_with_proof` instead.
-   */
-  RequiresProof = 5,
-  /**
-   * Caller is neither the package's recipient nor an authorised delegate.
-   */
-  Unauthorized = 6,
-  /**
-   * The package's campaign is paused.
-   */
-  CampaignPaused = 7,
-  /**
-   * Eligibility checks passed but the token transfer failed.
-   */
-  TransferFailed = 8,
-  /**
-   * The recipient successfully claimed another package too recently.
-   */
-  CooldownActive = 9,
-}
-
-/**
- * Enum: PackageStatus
- */
-export enum PackageStatus {
-  /**
-   * Enum Case: Created
-   */
-  Created = 0,
-  /**
-   * Enum Case: Claimed
-   */
-  Claimed = 1,
-  /**
-   * Enum Case: Expired
-   */
-  Expired = 2,
-  /**
-   * Enum Case: Cancelled
-   */
-  Cancelled = 3,
-  /**
-   * Enum Case: Refunded
-   */
-  Refunded = 4,
-}
-
-/**
- * Per-package result returned by `batch_claim`.
- */
-export interface BatchClaimResult {
-  /**
-   * Amount transferred to the claimant; zero unless `status` is `Success`.
-   */
-  amount: bigint;
-  package_id: bigint;
-  status: ClaimStatus;
-}
-
-/**
- * A proposed but not-yet-executed surplus withdrawal, stored under
- * `KEY_PENDING_WITHDRAWAL` in instance storage.
- */
-export interface PendingWithdrawal {
-  /**
-   * Amount (in smallest token units) to withdraw.
-   */
-  amount: bigint;
-  /**
-   * Earliest ledger timestamp at which `execute_surplus_withdrawal` may be called.
-   */
-  executable_at: bigint;
-  /**
-   * Destination address for the transfer.
-   */
-  to: string;
-  /**
-   * Token address for the withdrawal.
-   */
-  token: string;
-}
-
-/**
- * Struct: BatchAdminActionResult
- */
-export interface BatchAdminActionResult {
-  amount: bigint;
-  package_id: bigint;
-  status: BatchAdminActionStatus;
-}
-
-/**
- * Outcome of one package revoke or refund attempt in a batch.
- */
-export enum BatchAdminActionStatus {
-  /**
-   * Enum Case: Success
-   */
-  Success = 0,
-  /**
-   * Enum Case: NotFound
-   */
-  NotFound = 1,
-  /**
-   * Enum Case: InvalidState
-   */
-  InvalidState = 2,
-  /**
-   * Enum Case: Expired
-   */
-  Expired = 3,
-  /**
-   * Enum Case: NotExpired
-   */
-  NotExpired = 4,
-  /**
-   * Enum Case: CampaignPaused
-   */
-  CampaignPaused = 5,
-  /**
-   * Enum Case: TransferFailed
-   */
-  TransferFailed = 6,
-}
-
-/**
- * Struct: DelegateHistory
- */
-export interface DelegateHistory {
-  changed_at: bigint;
-  changed_by: string;
-  new_delegate: string;
-  package_id: bigint;
-  previous_delegate: string | null;
-  reason: string;
-}
