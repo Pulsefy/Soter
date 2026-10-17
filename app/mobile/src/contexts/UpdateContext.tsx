@@ -34,9 +34,13 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const forceUpgrade = compareVersions(versionInfo.minRequiredVersion, currentVersion) > 0;
       
       let hasSeen = true;
-      if (updateAvailable) {
+      const hasNotesForInstalledVersion =
+        versionInfo.releaseNotesVersion === currentVersion &&
+        versionInfo.releaseNotes.length > 0 &&
+        !forceUpgrade;
+      if (hasNotesForInstalledVersion) {
         const storedVersion = await AsyncStorage.getItem(SEEN_RELEASE_NOTES_KEY);
-        hasSeen = storedVersion === versionInfo.latestVersion;
+        hasSeen = storedVersion === currentVersion;
       }
 
       setState({
@@ -54,7 +58,7 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const markReleaseNotesSeen = async () => {
     if (state.versionInfo) {
-      await AsyncStorage.setItem(SEEN_RELEASE_NOTES_KEY, state.versionInfo.latestVersion);
+      await AsyncStorage.setItem(SEEN_RELEASE_NOTES_KEY, state.versionInfo.releaseNotesVersion);
       setState(prev => ({ ...prev, hasSeenReleaseNotes: true }));
     }
   };

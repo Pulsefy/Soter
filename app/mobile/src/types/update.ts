@@ -1,6 +1,7 @@
 export interface VersionInfo {
   latestVersion: string;
   minRequiredVersion: string;
+  releaseNotesVersion: string;
   releaseNotes: string[];
   storeUrl: {
     ios: string;

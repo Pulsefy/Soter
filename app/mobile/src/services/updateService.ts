@@ -6,31 +6,24 @@ export const fetchVersionInfo = async (): Promise<VersionInfo> => {
     const response = await fetch(`${config.apiUrl}/api/v1/config/version?platform=mobile`);
     if (!response.ok) throw new Error('Failed to fetch version info');
     const data = await response.json();
+    const releaseNotes = data.releaseNotes?.changes ?? data.releaseNotesArray ?? [];
     return {
       latestVersion: data.latestVersion,
       minRequiredVersion: data.minRequiredVersion || data.currentVersion,
-      releaseNotes: data.releaseNotes?.changes || data.releaseNotesArray || [
-        'Added support for on-chain verification',
-        'Improved sync reliability in low-bandwidth areas',
-        'Fixed a bug in QR code scanning for legacy NGO cards',
-        'Reduced app bundle size by 15%',
-      ],
+      releaseNotesVersion: data.releaseNotes?.version || data.latestVersion,
+      releaseNotes: Array.isArray(releaseNotes) ? releaseNotes : [],
       storeUrl: data.storeUrl || {
         ios: 'https://apps.apple.com/app/soter',
         android: 'https://play.google.com/store/apps/details?id=org.pulsefy.soter.mobile',
       },
     };
   } catch (error) {
-    console.error('UpdateService: Error fetching version info from backend, falling back to mock:', error);
+    console.error('UpdateService: Error fetching version info from backend:', error);
     return {
-      latestVersion: '1.1.0',
-      minRequiredVersion: '1.0.0',
-      releaseNotes: [
-        'Added support for on-chain verification',
-        'Improved sync reliability in low-bandwidth areas',
-        'Fixed a bug in QR code scanning for legacy NGO cards',
-        'Reduced app bundle size by 15%',
-      ],
+      latestVersion: '0.0.0',
+      minRequiredVersion: '0.0.0',
+      releaseNotesVersion: '0.0.0',
+      releaseNotes: [],
       storeUrl: {
         ios: 'https://apps.apple.com/app/soter',
         android: 'https://play.google.com/store/apps/details?id=org.pulsefy.soter.mobile',

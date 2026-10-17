@@ -13,17 +13,9 @@ import { useUpdate } from '../contexts/UpdateContext';
 
 export const ReleaseNotesModal: React.FC = () => {
   const { colors } = useTheme();
-  const { isUpdateAvailable, hasSeenReleaseNotes, versionInfo, markReleaseNotesSeen } = useUpdate();
+  const { isForceUpgrade, hasSeenReleaseNotes, versionInfo, markReleaseNotesSeen } = useUpdate();
 
-  // Only show if update is available, user hasn't seen notes, and not a force upgrade
-  // (Force upgrade has its own screen)
-  const isVisible = isUpdateAvailable && !hasSeenReleaseNotes && versionInfo && !versionInfo.minRequiredVersion.includes('force'); 
-  // Wait, I should probably just check if it's NOT a force upgrade based on the context state
-  // But actually, the context state isForceUpgrade is true if current < minRequired.
-  // If it's a force upgrade, we block everything. 
-  // If it's just an update, we show release notes.
-
-  if (!isUpdateAvailable || hasSeenReleaseNotes || !versionInfo) {
+  if (isForceUpgrade || hasSeenReleaseNotes || !versionInfo || versionInfo.releaseNotes.length === 0) {
     return null;
   }
 
