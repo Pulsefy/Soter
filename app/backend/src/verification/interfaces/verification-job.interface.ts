@@ -1,5 +1,6 @@
 import { ContractAwareMetadata } from '../dto/verification-result.dto';
 import { VerificationPriority } from '../dto/enqueue-verification.dto';
+import type { PartialResultInfo } from '../processing-budget';
 
 export interface AnchorMetadata {
   campaignRef?: string | null;
@@ -34,4 +35,10 @@ export interface VerificationResult {
   metadata?: ContractAwareMetadata;
   warnings?: string[];
   validationErrors?: string[];
+  /**
+   * Present only when the pipeline could not complete every step within the
+   * per-claim processing budget.  When set, the claim must be flagged for
+   * manual review and the incomplete steps must not be silently dropped.
+   */
+  partialResult?: PartialResultInfo;
 }

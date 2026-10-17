@@ -773,4 +773,266 @@ describe('VerificationService', () => {
       });
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Per-claim processing budget with partial-result fallback (issue #1416)
+  // ---------------------------------------------------------------------------
+  //
+  // These tests exercise the full multi-step pipeline (OCR → humanitarian
+  // verification → fraud scoring) in AI mode.  They cover:
+  //   1. A pipeline that completes within the budget — no partial result.
+  //   2. A pipeline that deliberately exceeds the budget — partial result is
+  //      returned, the claim is flagged for manual review, and incomplete
+  //      steps are explicitly listed rather than silently dropped.
+  // ---------------------------------------------------------------------------
+  describe('per-claim processing budget (issue #1416)', () => {
+    let aiService: VerificationService;
+    let aiPrisma: PrismaService;
+    let aiModules: TestingModule[] = [];
+
+    // Claim with a URL evidence ref so the OCR step runs.
+    const urlClaim: any = {
+      ...mockClaim,
+      id: 'budget-claim-id',
+      evidenceRef: 'https://example.com/evidence.jpg',
+    };
+
+    const validAIResponse = {
+      score: 0.88,
+      confidence: 0.92,
+      riskLevel: 'low' as const,
+      factors: ['Document authenticity verified'],
+      riskFactors: [],
+      recommendations: [],
+    };
+
+    /**
+     * Build a TestingModule configured for AI verification mode so the
+     * pipeline runs through performAIVerification and the ProcessingBudget
+     * is enforced.  The OpenAI client is constructed (with a dummy key) but
+     * callOpenAI is spied on so no real API calls are made.
+     */
+    const buildAiModule = async (budgetMs: string) => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          VerificationService,
+          {
+            provide: getQueueToken('verification'),
+            useValue: mockQueue,
+          },
+          {
+            provide: ConfigService,
+            useValue: {
+              get: jest.fn((key: string) => {
+                const config: Record<string, string> = {
+                  VERIFICATION_MODE: 'ai',
+                  VERIFICATION_THRESHOLD: '0.7',
+                  QUEUE_MAX_RETRIES: '3',
+                  AI_SERVICE_URL: 'http://localhost:8000',
+                  AI_SERVICE_TIMEOUT_MS: '30000',
+                  OPENAI_API_KEY: 'test-key',
+                  OPENAI_MODEL: 'gpt-4o-mini',
+                  CLAIM_PROCESSING_BUDGET_MS: budgetMs,
+                  STELLAR_CHAIN_ID: 'testnet',
+                  STELLAR_NETWORK: 'testnet',
+                };
+                return config[key];
+              }),
+            },
+          },
+          {
+            provide: PrismaService,
+            useValue: {
+              claim: {
+                findUnique: jest.fn(),
+                update: jest.fn(),
+              },
+            },
+          },
+          {
+            provide: AuditService,
+            useValue: {
+              record: jest.fn().mockResolvedValue(undefined),
+            },
+          },
+          {
+            provide: HttpService,
+            useValue: {
+              post: jest.fn().mockReturnValue(of({ data: {} })),
+            },
+          },
+          {
+            provide: VerificationMetadataService,
+            useValue: mockVerificationMetadataService,
+          },
+          {
+            provide: CorrelationPropagationUtil,
+            useValue: mockCorrelationPropagationUtil,
+          },
+          {
+            provide: MetricsService,
+            useValue: mockMetricsService,
+          },
+        ],
+      }).compile();
+      aiModules.push(module);
+      aiService = module.get<VerificationService>(VerificationService);
+      aiPrisma = module.get<PrismaService>(PrismaService);
+      return module;
+    };
+
+    afterEach(async () => {
+      await Promise.all(aiModules.map((m) => m?.close()));
+      aiModules = [];
+    });
+
+    it('should complete the full pipeline when within budget', async () => {
+      await buildAiModule('60000'); // generous 60s budget
+
+      jest
+        .spyOn(aiPrisma.claim, 'findUnique')
+        .mockResolvedValue(urlClaim);
+      jest
+        .spyOn(aiPrisma.claim, 'update')
+        .mockResolvedValue({ ...urlClaim, status: ClaimStatus.verified });
+
+      // Mock OCR to return quickly (no delay).
+      jest
+        .spyOn(aiService as any, 'buildOCRContext')
+        .mockResolvedValue('OCR extracted text');
+
+      // Mock the AI call to return a valid response.
+      jest
+        .spyOn(aiService as any, 'callOpenAI')
+        .mockResolvedValue(validAIResponse);
+
+      const result = await aiService.processVerification({
+        claimId: 'budget-claim-id',
+        timestamp: Date.now(),
+        priority: VerificationPriority.NORMAL,
+      });
+
+      // No partial result — the pipeline completed within budget.
+      expect(result.partialResult).toBeUndefined();
+      expect(result.score).toBe(0.88);
+      expect(result.confidence).toBe(0.92);
+      expect(result.details.riskLevel).toBe('low');
+
+      // The AI analysis and fraud scoring steps both ran.
+      expect((aiService as any).callOpenAI).toHaveBeenCalled();
+
+      // Claim should be auto-verified (score 0.88 ≥ threshold 0.7).
+      const updateCall = (aiPrisma.claim.update as jest.Mock).mock.calls[0]?.[0];
+      expect(updateCall?.data?.status).toBe('verified');
+    });
+
+    it('should return partial result and flag for manual review when budget is exceeded', async () => {
+      await buildAiModule('1'); // 1ms budget — will be exhausted after OCR
+
+      jest
+        .spyOn(aiPrisma.claim, 'findUnique')
+        .mockResolvedValue(urlClaim);
+      jest
+        .spyOn(aiPrisma.claim, 'update')
+        .mockResolvedValue({ ...urlClaim, status: ClaimStatus.requested });
+
+      // Mock OCR to take 50ms — exceeds the 1ms budget.
+      jest.spyOn(aiService as any, 'buildOCRContext').mockImplementation(
+        async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          return 'OCR extracted text';
+        },
+      );
+
+      // This should NOT be called because the budget is exhausted before it.
+      const callOpenAISpy = jest
+        .spyOn(aiService as any, 'callOpenAI')
+        .mockResolvedValue(validAIResponse);
+
+      const result = await aiService.processVerification({
+        claimId: 'budget-claim-id',
+        timestamp: Date.now(),
+        priority: VerificationPriority.NORMAL,
+      });
+
+      // Partial result — budget was exhausted.
+      expect(result.partialResult).toBeDefined();
+      expect(result.partialResult!.budgetExhausted).toBe(true);
+      expect(result.partialResult!.manualReviewRequired).toBe(true);
+
+      // OCR completed before the budget ran out.
+      expect(result.partialResult!.completedSteps).toContain('ocr');
+
+      // Humanitarian verification and fraud scoring were NOT silently
+      // dropped — they are explicitly listed as incomplete.
+      expect(result.partialResult!.incompleteSteps).toContain(
+        'humanitarian_verification',
+      );
+      expect(result.partialResult!.incompleteSteps).toContain('fraud_scoring');
+
+      // The AI call was never made.
+      expect(callOpenAISpy).not.toHaveBeenCalled();
+
+      // The claim must NOT be auto-verified — it stays in 'requested' status
+      // for manual review.
+      const updateCall = (aiPrisma.claim.update as jest.Mock).mock.calls[0]?.[0];
+      expect(updateCall?.data?.status).toBe('requested');
+
+      // The persisted verification metadata must include the manual review
+      // flag and partial step info.
+      const anchorMetadata = updateCall?.data?.anchorMetadata;
+      expect(anchorMetadata.verification.manualReviewRequired).toBe(true);
+      expect(anchorMetadata.verification.partialSteps).toBeDefined();
+      expect(anchorMetadata.verification.partialSteps.completedSteps).toContain(
+        'ocr',
+      );
+      expect(
+        anchorMetadata.verification.partialSteps.incompleteSteps,
+      ).toContain('humanitarian_verification');
+      expect(
+        anchorMetadata.verification.partialSteps.incompleteSteps,
+      ).toContain('fraud_scoring');
+    });
+
+    it('should not silently drop incomplete steps in the result details', async () => {
+      await buildAiModule('1');
+
+      jest
+        .spyOn(aiPrisma.claim, 'findUnique')
+        .mockResolvedValue(urlClaim);
+      jest
+        .spyOn(aiPrisma.claim, 'update')
+        .mockResolvedValue({ ...urlClaim, status: ClaimStatus.requested });
+
+      jest.spyOn(aiService as any, 'buildOCRContext').mockImplementation(
+        async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          return 'OCR extracted text';
+        },
+      );
+
+      jest
+        .spyOn(aiService as any, 'callOpenAI')
+        .mockResolvedValue(validAIResponse);
+
+      const result = await aiService.processVerification({
+        claimId: 'budget-claim-id',
+        timestamp: Date.now(),
+        priority: VerificationPriority.NORMAL,
+      });
+
+      // The result details must explicitly mention the incomplete steps.
+      const factors = result.details.factors as string[];
+      const incompleteMention = factors.some((f) =>
+        f.toLowerCase().includes('incomplete'),
+      );
+      expect(incompleteMention).toBe(true);
+
+      const recommendations = result.details.recommendations ?? [];
+      const manualReviewMention = recommendations.some((r) =>
+        r.toLowerCase().includes('manual review'),
+      );
+      expect(manualReviewMention).toBe(true);
+    });
+  });
 });
