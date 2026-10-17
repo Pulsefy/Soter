@@ -39,6 +39,7 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
   const mockOnchainAdapter = {
     createClaim: jest.fn(),
     disburse: jest.fn(),
+    getAidPackage: jest.fn(),
     initEscrow: jest.fn(),
   };
 
@@ -444,6 +445,8 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
         id: 'tx-submitted',
         operation: SorobanOperationType.disburse_claim,
         status: SorobanTransactionStatus.submitted,
+        packageId: 'package-1',
+        claimId: 'claim-1',
         attemptCount: 1,
         maxAttempts: 5,
         isRetryable: true,
@@ -453,6 +456,9 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
       mockPrismaService.sorobanTransaction.findUnique.mockResolvedValue(
         submittedTransaction,
       );
+      mockOnchainAdapter.getAidPackage.mockResolvedValue({
+        package: { status: 'Created' },
+      });
       mockOnchainAdapter.disburse.mockResolvedValue({
         transactionHash: 'tx-hash-disburse',
       });
@@ -473,6 +479,59 @@ describe('SorobanTransactionLifecycleService - Stuck Detection', () => {
           errorType: null,
         },
       });
+    });
+
+    it('reconciles a submitted disbursement after a crash without paying twice', async () => {
+      const submittedTransaction = {
+        id: 'tx-crash-window',
+        operation: SorobanOperationType.disburse_claim,
+        status: SorobanTransactionStatus.pending,
+        packageId: 'package-1',
+        claimId: 'claim-1',
+        attemptCount: 0,
+        maxAttempts: 5,
+        isRetryable: true,
+        nextRetryAt: new Date(),
+      };
+      const retryTransaction = {
+        ...submittedTransaction,
+        status: SorobanTransactionStatus.submitted,
+      };
+
+      mockPrismaService.sorobanTransaction.findUnique
+        .mockResolvedValueOnce(submittedTransaction)
+        .mockResolvedValueOnce(retryTransaction);
+      mockPrismaService.sorobanTransaction.update
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(new Error('process crashed before confirmation'))
+        .mockResolvedValueOnce({});
+      mockOnchainAdapter.disburse.mockResolvedValue({
+        transactionHash: 'tx-hash-submitted',
+      });
+
+      await expect(
+        service.executeTransaction('tx-crash-window'),
+      ).rejects.toThrow('process crashed before confirmation');
+
+      mockOnchainAdapter.getAidPackage.mockResolvedValue({
+        package: { status: 'Claimed' },
+      });
+      await service.executeTransaction('tx-crash-window');
+
+      expect(mockOnchainAdapter.disburse).toHaveBeenCalledTimes(1);
+      expect(mockPrismaService.sorobanTransaction.update).toHaveBeenLastCalledWith({
+        where: { id: 'tx-crash-window' },
+        data: {
+          status: SorobanTransactionStatus.confirmed,
+          confirmedAt: expect.any(Date),
+          lastError: null,
+          errorType: null,
+        },
+      });
+      expect(mockMetricsService.incrementCounter).toHaveBeenCalledWith(
+        'soroban_disbursement_reconciliation',
+        { outcome: 'already_disbursed' },
+      );
     });
 
     it('drops recovered transactions from detection and resets the stuck gauge', async () => {
