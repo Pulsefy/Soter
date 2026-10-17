@@ -12,7 +12,7 @@ import { CameraView, BarcodeScanningResult } from 'expo-camera';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
-import { createScanDeduper } from './scanDeduper';
+import { createScanDeduperSync } from './scanDeduper';
 import { useCameraPermission } from '../hooks/useCameraPermission';
 import { CameraPermissionDenied } from '../components/CameraPermissionDenied';
 import { useTranslation } from '../i18n/useTranslation';
@@ -62,7 +62,7 @@ export const parseAidIdFromQRCode = (data: string): string | null => {
 
 export const ScannerScreen: React.FC<Props> = ({ navigation }) => {
   const [scanned, setScanned] = useState(false);
-  const [isDuplicateScan] = useState(() => createScanDeduper());
+  const [isDuplicateScan] = useState(() => createScanDeduperSync());
   const { colors } = useTheme();
   const { t } = useTranslation();
 
