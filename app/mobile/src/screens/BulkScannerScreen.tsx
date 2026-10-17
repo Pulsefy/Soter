@@ -214,7 +214,13 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
             </View>
           )}
           {lastScanResult && lastScanResult.status === 'error' && (
-            <TouchableOpacity style={styles.retryButton} onPress={() => { setLastScanResult(null); setIsProcessing(false); }}>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => { setLastScanResult(null); setIsProcessing(false); }}
+              accessibilityRole="button"
+              accessibilityLabel="Retry scan"
+              accessibilityHint="Retry the last QR scan"
+            >
               <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
             </TouchableOpacity>
           )}
@@ -226,6 +232,9 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
           <TouchableOpacity
             style={styles.closeButton}
             onPress={() => navigation.goBack()}
+            accessibilityRole="button"
+            accessibilityLabel="End scanner session"
+            accessibilityHint="Exit the bulk scanner and return to the previous screen"
           >
             <Text style={styles.closeButtonText}>{t('scannerBulk.endSession')}</Text>
           </TouchableOpacity>
