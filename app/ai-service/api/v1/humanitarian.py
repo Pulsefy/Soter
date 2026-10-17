@@ -106,6 +106,7 @@ def _audit_inputs(request: HumanitarianVerificationRequest) -> Dict[str, Any]:
         "artifact_ids": list(request.artifact_ids),
         "provider_preference": request.provider_preference,
         "requested_timeout": request.timeout,
+        "language_hint": request.language_hint,
     }
 
 
@@ -215,6 +216,7 @@ def _build_verification_envelope(
             "artifact_tag": artifact_tag,
             "user_id": user_id,
             "user_role": user_role,
+            "language": raw.get("language") if isinstance(raw, dict) else None,
         },
     )
 
@@ -235,7 +237,7 @@ def _build_verification_envelope(
 @cached_response(
     prefix="humanitarian_verification",
     ttl_seconds=settings.cache_ttl_verification,
-    key_tags=["model_version", "artifact_tag", "org_id", "prompt_version"],
+    key_tags=["model_version", "artifact_tag", "org_id", "prompt_version", "language_hint"],
     content_hash_arg="content_hash",
 )
 async def _verify_claim_cached(
@@ -250,6 +252,7 @@ async def _verify_claim_cached(
     org_id: str,
     prompt_version: str = "",
     content_hash: str = "",
+    language_hint: str = "",
 ) -> Dict[str, Any]:
     """
     Cacheable wrapper around HumanitarianVerificationService.verify_claim.
@@ -284,9 +287,11 @@ async def _verify_claim_cached(
             provider_preference=provider_preference,
             timeout=timeout,
             prompt_version=prompt_version or None,
+            language_hint=language_hint or None,
+            org_id=org_id or None,
         )
     except TypeError as exc:
-        if "prompt_version" in str(exc) or "timeout" in str(exc):
+        if "prompt_version" in str(exc) or "timeout" in str(exc) or "language_hint" in str(exc) or "org_id" in str(exc):
             try:
                 return humanitarian_verification_service.verify_claim(
                     aid_claim=aid_claim,
@@ -294,14 +299,24 @@ async def _verify_claim_cached(
                     context_factors=context_factors,
                     provider_preference=provider_preference,
                     timeout=timeout,
+                    prompt_version=prompt_version or None,
                 )
             except TypeError:
-                return humanitarian_verification_service.verify_claim(
-                    aid_claim=aid_claim,
-                    supporting_evidence=supporting_evidence,
-                    context_factors=context_factors,
-                    provider_preference=provider_preference,
-                )
+                try:
+                    return humanitarian_verification_service.verify_claim(
+                        aid_claim=aid_claim,
+                        supporting_evidence=supporting_evidence,
+                        context_factors=context_factors,
+                        provider_preference=provider_preference,
+                        timeout=timeout,
+                    )
+                except TypeError:
+                    return humanitarian_verification_service.verify_claim(
+                        aid_claim=aid_claim,
+                        supporting_evidence=supporting_evidence,
+                        context_factors=context_factors,
+                        provider_preference=provider_preference,
+                    )
         raise
 
 
@@ -506,6 +521,8 @@ async def verify_humanitarian_claim(
                             timeout=timeout,
                             prompt_version=prompt_version,
                             on_token=lambda token: publish("token", token),
+                            language_hint=request.language_hint,
+                            org_id=x_org_id,
                         )
                         publish("result", raw_result)
                     except Exception as exc:
@@ -577,6 +594,7 @@ async def verify_humanitarian_claim(
             org_id=x_org_id,
             prompt_version=prompt_version,
             content_hash=content_hash,
+            language_hint=request.language_hint or "",
         )
         return _build_verification_envelope(
             http_request,
