@@ -1418,6 +1418,21 @@
             "default": "inference",
             "title": "Type",
             "type": "string"
+          },
+          "webhook_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional URL to receive signed task lifecycle callbacks, including processing and terminal status events.",
+            "title": "Webhook Url"
           }
         },
         "title": "InferenceRequest",
@@ -3619,7 +3634,7 @@
     },
     "/v1/ai/inference": {
       "post": {
-        "description": "Create a background task for heavy AI inference.\n\nOffloads time-consuming AI tasks to background workers. Use the\nreturned ``task_id`` to poll for results via ``GET /ai/status/{task_id}``.\n\nContract-aware metadata fields are used to anchor verification results\nto on-chain events during Testnet demos.",
+        "description": "Create a background task for heavy AI inference.\n\nOffloads time-consuming AI tasks to background workers. Use the\nreturned ``task_id`` to poll for results via ``GET /ai/status/{task_id}``.\nOptionally provide ``webhook_url`` to receive signed callbacks when\nprocessing begins and when the task completes or fails.\n\nContract-aware metadata fields are used to anchor verification results\nto on-chain events during Testnet demos.",
         "operationId": "create_inference_task_v1_ai_inference_post",
         "requestBody": {
           "content": {

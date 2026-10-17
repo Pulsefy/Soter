@@ -60,9 +60,7 @@ def test_registered_webhook_receives_processing_and_completion(monkeypatch):
         lambda *args, **kwargs: notifications.append((args, kwargs)),
     )
 
-    with patch(
-        "tasks._process_default_inference", return_value={"status": "success"}
-    ):
+    with patch("tasks._process_default_inference", return_value={"status": "success"}):
         tasks.process_heavy_inference_impl(
             None,
             "task-progress",
