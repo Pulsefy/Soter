@@ -1,0 +1,32 @@
+[
+  {
+    "id": "es_approve_001",
+    "input": {
+      "language": "es",
+      "aid_claim": "El equipo entregó 240 kits de higiene a los hogares registrados del sector norte.",
+      "supporting_evidence": ["Registro de distribución firmado por dos observadores"],
+      "context_factors": {"seguridad": "estable"}
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "es_reject_001",
+    "input": {
+      "language": "es",
+      "aid_claim": "Se distribuyeron 5000 paquetes de alimentos en el campamento.",
+      "supporting_evidence": ["El registro oficial documenta solo 1200 hogares"],
+      "context_factors": {"desplazamiento": "medio"}
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "es_ambiguous_001",
+    "input": {
+      "language": "es",
+      "aid_claim": "La comunidad informa que algunas familias no recibieron alimentos este mes.",
+      "supporting_evidence": ["Registros de distribución incompletos"],
+      "context_factors": {"desplazamiento": "alto"}
+    },
+    "expected": "ambiguous"
+  }
+]

@@ -22,6 +22,7 @@ import {
 
 export interface CreateSorobanTransactionParams {
   claimId?: string;
+  idempotencyKey?: string;
   operation: SorobanOperationType;
   packageId?: string;
   operatorAddress?: string;
@@ -155,22 +156,28 @@ export class SorobanTransactionLifecycleService {
       },
     );
 
-    const transaction = await this.prisma.sorobanTransaction.create({
-      data: {
-        claimId: params.claimId,
-        operation: params.operation,
-        packageId: params.packageId,
-        operatorAddress: params.operatorAddress,
-        recipientAddress: params.recipientAddress,
-        amount: params.amount,
-        tokenAddress: params.tokenAddress,
-        correlationId: params.correlationId,
-        metadata: params.metadata,
-        maxAttempts: params.maxAttempts || 5,
-        status: SorobanTransactionStatus.pending,
-        nextRetryAt: new Date(),
-      },
-    });
+    const data = {
+      claimId: params.claimId,
+      idempotencyKey: params.idempotencyKey,
+      operation: params.operation,
+      packageId: params.packageId,
+      operatorAddress: params.operatorAddress,
+      recipientAddress: params.recipientAddress,
+      amount: params.amount,
+      tokenAddress: params.tokenAddress,
+      correlationId: params.correlationId,
+      metadata: params.metadata,
+      maxAttempts: params.maxAttempts || 5,
+      status: SorobanTransactionStatus.pending,
+      nextRetryAt: new Date(),
+    };
+    const transaction = params.idempotencyKey
+      ? await this.prisma.sorobanTransaction.upsert({
+          where: { idempotencyKey: params.idempotencyKey },
+          create: data,
+          update: {},
+        })
+      : await this.prisma.sorobanTransaction.create({ data });
 
     // Emit metrics for transaction creation
     this.metricsService.incrementCounter('soroban_transaction_created', {
@@ -220,21 +227,6 @@ export class SorobanTransactionLifecycleService {
     transaction: SorobanTransaction & { claim: Claim | null },
     correlationId: string,
   ): Promise<void> {
-    // Check if transaction should be retried
-    if (
-      !transaction.isRetryable ||
-      transaction.attemptCount >= transaction.maxAttempts
-    ) {
-      this.loggerService.warn('Transaction cannot be retried', LOG_CONTEXT, {
-        transactionId,
-        attemptCount: transaction.attemptCount,
-        maxAttempts: transaction.maxAttempts,
-        isRetryable: transaction.isRetryable,
-        correlationId,
-      });
-      return;
-    }
-
     const attemptNumber = transaction.attemptCount + 1;
 
     this.loggerService.log(
@@ -248,97 +240,154 @@ export class SorobanTransactionLifecycleService {
     );
 
     const startTime = Date.now();
+    let reconciledOnchain = false;
+    let result: InitEscrowResult | CreateClaimResult | DisburseResult | undefined;
 
-    try {
-      // Update transaction status to submitted
+    if (
+      transaction.operation === SorobanOperationType.disburse_claim &&
+      (transaction.status === SorobanTransactionStatus.submitted ||
+        transaction.attemptCount > 0)
+    ) {
+      const packageState = await this.onchainAdapter.getAidPackage({
+        packageId: transaction.packageId!,
+      });
+      reconciledOnchain = packageState.package.status === 'Claimed';
+
+      if (!reconciledOnchain) {
+        this.loggerService.log(
+          'Reconciled disbursement as not yet completed onchain; retry may proceed',
+          LOG_CONTEXT,
+          { transactionId, claimId: transaction.claimId, correlationId },
+        );
+        this.metricsService.incrementCounter(
+          'soroban_disbursement_reconciliation',
+          { outcome: 'not_disbursed' },
+        );
+      }
+    }
+
+    if (!reconciledOnchain) {
+      if (
+        !transaction.isRetryable ||
+        transaction.attemptCount >= transaction.maxAttempts
+      ) {
+        this.loggerService.warn('Transaction cannot be retried', LOG_CONTEXT, {
+          transactionId,
+          attemptCount: transaction.attemptCount,
+          maxAttempts: transaction.maxAttempts,
+          isRetryable: transaction.isRetryable,
+          correlationId,
+        });
+        return;
+      }
+
       await this.updateTransactionStatus(
         transactionId,
         SorobanTransactionStatus.submitted,
       );
 
-      // Execute the transaction based on operation type
-      let result: InitEscrowResult | CreateClaimResult | DisburseResult;
-      switch (transaction.operation) {
-        case SorobanOperationType.create_claim:
-          result = await this.onchainAdapter.createClaim({
-            claimId: transaction.claimId!,
-            recipientAddress: transaction.recipientAddress!,
-            amount: transaction.amount!,
-            tokenAddress: transaction.tokenAddress!,
-            expiresAt: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days
-          });
-          break;
-
-        case SorobanOperationType.disburse_claim:
-          {
-            const metadata = transaction.metadata as Record<string, any> | null;
-            result = await this.onchainAdapter.disburse({
+      try {
+        switch (transaction.operation) {
+          case SorobanOperationType.create_claim:
+            result = await this.onchainAdapter.createClaim({
               claimId: transaction.claimId!,
-              packageId: transaction.packageId!,
+              recipientAddress: transaction.recipientAddress!,
+              amount: transaction.amount!,
               tokenAddress: transaction.tokenAddress!,
-              receiptPointer: metadata?.receiptPointer ?? undefined,
+              expiresAt: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
             });
-          }
-          break;
+            break;
 
-        case SorobanOperationType.init_escrow:
-          result = await this.onchainAdapter.initEscrow({
-            adminAddress: transaction.operatorAddress!,
-          });
-          break;
+          case SorobanOperationType.disburse_claim:
+            {
+              const metadata = transaction.metadata as
+                | Record<string, any>
+                | null;
+              result = await this.onchainAdapter.disburse({
+                claimId: transaction.claimId!,
+                packageId: transaction.packageId!,
+                tokenAddress: transaction.tokenAddress!,
+                receiptPointer: metadata?.receiptPointer ?? undefined,
+              });
+            }
+            break;
 
-        default:
-          throw new Error(
-            `Unsupported operation: ${transaction.operation as string}`,
-          );
+          case SorobanOperationType.init_escrow:
+            result = await this.onchainAdapter.initEscrow({
+              adminAddress: transaction.operatorAddress!,
+            });
+            break;
+
+          default:
+            throw new Error(
+              `Unsupported operation: ${transaction.operation as string}`,
+            );
+        }
+      } catch (error) {
+        await this.handleTransactionError(
+          transactionId,
+          error,
+          attemptNumber,
+          startTime,
+        );
+        return;
       }
+    }
 
-      // Transaction successful - update with confirmed status
-      await this.prisma.sorobanTransaction.update({
-        where: { id: transactionId },
-        data: {
-          status: SorobanTransactionStatus.confirmed,
+    // Confirmation write failures propagate, leaving submitted records for
+    // the retry scheduler to reconcile against the onchain package state.
+    await this.prisma.sorobanTransaction.update({
+      where: { id: transactionId },
+      data: {
+        status: SorobanTransactionStatus.confirmed,
+        ...(result && {
           txHash: result.transactionHash,
-          confirmedAt: new Date(),
           attemptCount: attemptNumber,
           lastRetryAt: new Date(),
-          lastError: null,
-          errorType: null,
-        },
-      });
+        }),
+        confirmedAt: new Date(),
+        lastError: null,
+        errorType: null,
+      },
+    });
 
-      const duration = (Date.now() - startTime) / 1000;
+    const duration = (Date.now() - startTime) / 1000;
 
-      // Emit success metrics
-      this.metricsService.recordSorobanTransactionLatency(
-        transaction.operation,
-        'success',
-        duration,
-      );
-      this.metricsService.incrementCounter('soroban_transaction_success', {
-        operation: transaction.operation,
-        attempt: attemptNumber.toString(),
-      });
-
+    if (reconciledOnchain) {
       this.loggerService.log(
-        'Soroban transaction completed successfully',
+        'Reconciled disbursement as already completed onchain',
         LOG_CONTEXT,
-        {
-          transactionId,
-          txHash: result.transactionHash,
-          duration,
-          attemptNumber,
-          correlationId,
-        },
+        { transactionId, claimId: transaction.claimId, correlationId },
       );
-    } catch (error) {
-      await this.handleTransactionError(
-        transactionId,
-        error,
-        attemptNumber,
-        startTime,
+      this.metricsService.incrementCounter(
+        'soroban_disbursement_reconciliation',
+        { outcome: 'already_disbursed' },
       );
+      return;
     }
+
+    // Emit success metrics
+    this.metricsService.recordSorobanTransactionLatency(
+      transaction.operation,
+      'success',
+      duration,
+    );
+    this.metricsService.incrementCounter('soroban_transaction_success', {
+      operation: transaction.operation,
+      attempt: attemptNumber.toString(),
+    });
+
+    this.loggerService.log(
+      'Soroban transaction completed successfully',
+      LOG_CONTEXT,
+      {
+        transactionId,
+        txHash: result?.transactionHash,
+        duration,
+        attemptNumber,
+        correlationId,
+      },
+    );
   }
 
   /**
@@ -551,14 +600,25 @@ export class SorobanTransactionLifecycleService {
 
     return this.prisma.sorobanTransaction.findMany({
       where: {
-        status: SorobanTransactionStatus.pending,
-        isRetryable: true,
-        nextRetryAt: {
-          lte: now,
-        },
-        attemptCount: {
-          lt: this.prisma.sorobanTransaction.fields.maxAttempts,
-        },
+        OR: [
+          {
+            status: SorobanTransactionStatus.pending,
+            isRetryable: true,
+            nextRetryAt: { lte: now },
+            attemptCount: {
+              lt: this.prisma.sorobanTransaction.fields.maxAttempts,
+            },
+          },
+          {
+            status: SorobanTransactionStatus.submitted,
+            operation: SorobanOperationType.disburse_claim,
+            isRetryable: true,
+            nextRetryAt: { lte: now },
+            attemptCount: {
+              lt: this.prisma.sorobanTransaction.fields.maxAttempts,
+            },
+          },
+        ],
       },
       orderBy: {
         nextRetryAt: 'asc',

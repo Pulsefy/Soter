@@ -306,6 +306,7 @@ enum RetryableErrorType {
 
 model SorobanTransaction {
   id                String                 @id @default(cuid())
+  idempotencyKey    String?                @unique
   claimId           String?
   claim             Claim?                 @relation(fields: [claimId], references: [id])
   

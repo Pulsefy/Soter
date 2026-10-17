@@ -340,6 +340,7 @@ export class ClaimsService {
         sorobanTransaction =
           await this.sorobanTransactionService.createTransaction({
             claimId: id,
+            idempotencyKey: `claim-disbursement:${id}`,
             operation: SorobanOperationType.disburse_claim,
             packageId,
             operatorAddress: 'admin',

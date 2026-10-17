@@ -57,6 +57,11 @@ class HumanitarianVerificationRequest(BaseModel):
         description="Explicit prompt version to use from registry (defaults to configured active version)",
         examples=["v1"],
     )
+    language: Optional[str] = Field(
+        default=None,
+        description="Language hint for the claim and verification prompt (en, es, fr, or ar)",
+        examples=["es"],
+    )
     anchor_metadata: Optional[AnchorMetadata] = None
 
     model_config = {
@@ -72,6 +77,7 @@ class HumanitarianVerificationRequest(BaseModel):
                     "provider_preference": "auto",
                     "timeout": 30.0,
                     "prompt_version": "v1",
+                    "language": "es",
                     "anchor_metadata": {
                         "campaign_ref": "campaign-2024-001",
                         "claim_id": "claim-abc123",

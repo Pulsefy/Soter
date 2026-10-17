@@ -392,6 +392,7 @@ describe('ClaimsService', () => {
       ).toHaveBeenCalledWith(
         expect.objectContaining({
           claimId: 'claim-123',
+          idempotencyKey: 'claim-disbursement:claim-123',
           operation: SorobanOperationType.disburse_claim,
           packageId: 'real-package-id',
         }),

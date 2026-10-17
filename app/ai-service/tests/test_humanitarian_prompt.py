@@ -1,4 +1,6 @@
 import pytest
+import json
+import os
 from typing import Any, Dict, List
 from services.prompt_registry import VerificationPrompt, PromptRegistry
 from services.humanitarian_prompt import (
@@ -256,3 +258,44 @@ class TestHumanitarianPromptEngine:
         assert "Unterminated string" in repair["user"]
         assert '{"verdict": "credible"' in repair["user"]
         assert "Original request prompt text" in repair["user"]
+
+    @pytest.mark.parametrize(
+        ("language", "expected_text"),
+        [
+            ("es", "Responde en español"),
+            ("fr", "Répondez en français"),
+            ("ar", "أجب باللغة العربية"),
+        ],
+    )
+    def test_localized_prompt_selection(self, language, expected_text):
+        prompt = self.engine.build_primary_prompt(
+            aid_claim="Humanitarian aid claim",
+            supporting_evidence=["Field report"],
+            context_factors={},
+            language=language,
+        )
+        assert expected_text in prompt["system"]
+        assert '"verdict": "credible|partially_credible|inconclusive|not_credible"' in prompt["user"]
+        assert self.registry.has(f"humanitarian_primary_{language}", "v1")
+
+    @pytest.mark.parametrize("language", ["es", "fr", "ar"])
+    def test_localized_golden_fixtures_cover_all_labels(self, language):
+        fixtures_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "regression_harness",
+            "fixtures",
+            f"golden_fixtures_{language}.json",
+        )
+        with open(fixtures_path, encoding="utf-8") as fixture_file:
+            cases = json.load(fixture_file)
+
+        assert {case["input"]["language"] for case in cases} == {language}
+        assert {case["expected"] for case in cases} == {"approve", "reject", "ambiguous"}
+        for case in cases:
+            prompt = self.engine.build_primary_prompt(
+                aid_claim=case["input"]["aid_claim"],
+                supporting_evidence=case["input"]["supporting_evidence"],
+                context_factors=case["input"]["context_factors"],
+                language=case["input"]["language"],
+            )
+            assert "Humanitarian" not in prompt["user"]
