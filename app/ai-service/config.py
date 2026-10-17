@@ -272,6 +272,15 @@ class Settings(BaseSettings):
     # (issue #1208). Only applies to jobs that have not started processing.
     async_job_idle_timeout_seconds: float = 600.0
 
+    # Per-claim total processing budget (issue #1416).
+    # A claim that chains multiple pipeline steps (OCR → humanitarian
+    # verification → fraud scoring) is subject to this wall-clock ceiling.
+    # When the budget is exceeded, completed steps are returned along with a
+    # ``needs_manual_review`` flag so the caller can queue the claim for human
+    # follow-up instead of silently dropping the incomplete results.
+    # Must be a positive number of seconds; 0 disables the budget.
+    claim_processing_budget_seconds: float = 120.0
+
     # Backend webhook URL for notifications
     backend_webhook_url: HttpUrl = (
         "http://localhost:3000/api/v1/webhooks/ai-verification"
@@ -426,6 +435,7 @@ class Settings(BaseSettings):
             ("CACHE_TTL_VERIFICATION", self.cache_ttl_verification),
             ("TASK_RETRY_DELAY_SECONDS", self.task_retry_delay_seconds),
             ("ASYNC_JOB_IDLE_TIMEOUT_SECONDS", self.async_job_idle_timeout_seconds),
+            ("CLAIM_PROCESSING_BUDGET_SECONDS", self.claim_processing_budget_seconds),
             (
                 "VERIFICATION_ARTIFACT_URL_TTL_SECONDS",
                 self.verification_artifact_url_ttl_seconds,
