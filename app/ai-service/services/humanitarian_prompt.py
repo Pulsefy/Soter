@@ -13,6 +13,138 @@ from services.prompt_registry import VerificationPrompt, PromptRegistry
 #: user prompt text changes so decision audit records (issue #990) can tie a
 #: past decision to the exact prompt that produced it.
 HUMANITARIAN_PROMPT_VERSION = "humanitarian-sphere-v1"
+SUPPORTED_HUMANITARIAN_LANGUAGES = ("en", "es", "fr", "ar")
+
+_LOCALIZED_PROMPTS = {
+    "es": {
+        "system": "Eres un analista objetivo de verificación humanitaria. Evalúa las afirmaciones únicamente con la evidencia y el contexto proporcionados. No infieras hechos que no estén presentes. Responde en español y devuelve solo JSON válido.",
+        "task": "Tarea de verificación de estándares humanitarios",
+        "instruction": "Evalúa si la afirmación es creíble, parcialmente creíble, inconclusa o no creíble. Relaciona el análisis con los criterios del Manual Esfera y explica la incertidumbre.",
+        "criteria": "Criterios Esfera",
+        "claim": "Afirmación de ayuda",
+        "evidence": "Evidencia de apoyo",
+        "context": "Factores contextuales (del backend)",
+        "summary": "resumen neutral breve",
+        "criterion": "string",
+        "status": "met|partially_met|not_met|unknown",
+        "reason": "string",
+        "fallback": "Verificación humanitaria alternativa",
+        "respond": "Responde solo con JSON:",
+        "criteria_names": ["agua, saneamiento e higiene", "seguridad alimentaria y nutrición", "alojamiento y asentamientos", "salud", "protección, inclusión y rendición de cuentas"],
+    },
+    "fr": {
+        "system": "Vous êtes un analyste objectif de vérification humanitaire. Évaluez les affirmations uniquement à partir des preuves et du contexte fournis. N'inférez aucun fait absent. Répondez en français et renvoyez uniquement du JSON valide.",
+        "task": "Tâche de vérification des normes humanitaires",
+        "instruction": "Évaluez si l'affirmation est crédible, partiellement crédible, indéterminée ou non crédible. Reliez l'analyse aux critères du Manuel Sphère et expliquez les incertitudes.",
+        "criteria": "Critères Sphère",
+        "claim": "Affirmation concernant l'aide",
+        "evidence": "Éléments de preuve",
+        "context": "Facteurs contextuels (du backend)",
+        "summary": "bref résumé neutre",
+        "criterion": "string",
+        "status": "met|partially_met|not_met|unknown",
+        "reason": "string",
+        "fallback": "Vérification humanitaire de secours",
+        "respond": "Répondez uniquement en JSON :",
+        "criteria_names": ["eau, assainissement et hygiène", "sécurité alimentaire et nutrition", "abris et établissements", "santé", "protection, inclusion et responsabilité"],
+    },
+    "ar": {
+        "system": "أنت محلل موضوعي للتحقق الإنساني. قيّم الادعاءات اعتماداً فقط على الأدلة والسياق المقدمين. لا تستنتج حقائق غير مذكورة. أجب باللغة العربية وأعد JSON صالحاً فقط.",
+        "task": "مهمة التحقق من المعايير الإنسانية",
+        "instruction": "قيّم ما إذا كان الادعاء موثوقاً أو موثوقاً جزئياً أو غير محسوم أو غير موثوق. اربط التحليل بمعايير دليل اسفير واشرح مواطن عدم اليقين.",
+        "criteria": "معايير اسفير",
+        "claim": "ادعاء المساعدة",
+        "evidence": "الأدلة الداعمة",
+        "context": "عوامل السياق (من النظام الخلفي)",
+        "summary": "ملخص محايد وموجز",
+        "criterion": "string",
+        "status": "met|partially_met|not_met|unknown",
+        "reason": "string",
+        "fallback": "التحقق الإنساني البديل",
+        "respond": "أجب بصيغة JSON فقط:",
+        "criteria_names": ["المياه والصرف الصحي والنظافة", "الأمن الغذائي والتغذية", "المأوى والمستوطنات", "الصحة", "الحماية والشمول والمساءلة"],
+    },
+}
+
+
+def normalize_humanitarian_language(language: Optional[str]) -> str:
+    """Normalize a caller-supplied language tag to a supported base language."""
+    normalized = (language or "en").strip().lower().replace("_", "-").split("-")[0]
+    if normalized not in SUPPORTED_HUMANITARIAN_LANGUAGES:
+        raise ValueError(
+            f"Unsupported humanitarian prompt language '{language}'. "
+            f"Supported languages: {', '.join(SUPPORTED_HUMANITARIAN_LANGUAGES)}"
+        )
+    return normalized
+
+
+def humanitarian_prompt_name(prompt_type: str, language: Optional[str] = None) -> str:
+    normalized = normalize_humanitarian_language(language)
+    base_name = f"humanitarian_{prompt_type}"
+    return base_name if normalized == "en" else f"{base_name}_{normalized}"
+
+
+class LocalizedHumanitarianPrompt(VerificationPrompt):
+    """Localized immutable prompt variant registered per language and type."""
+
+    def __init__(self, prompt_type: str, language: str):
+        self.prompt_type = prompt_type
+        self.language = language
+
+    @property
+    def name(self) -> str:
+        return humanitarian_prompt_name(self.prompt_type, self.language)
+
+    @property
+    def version(self) -> str:
+        return "v1"
+
+    @property
+    def description(self) -> str:
+        return f"Version 1 {self.prompt_type} humanitarian prompt in {self.language}."
+
+    def build_prompt(
+        self,
+        aid_claim: str,
+        supporting_evidence: List[str],
+        context_factors: Dict[str, Any],
+    ) -> Dict[str, str]:
+        localized = _LOCALIZED_PROMPTS[self.language]
+        evidence_text = format_evidence(supporting_evidence)
+        context_text = format_context_factors(context_factors)
+        criteria = "\n".join(
+            f"- {criterion}" for criterion in localized["criteria_names"]
+        )
+        if self.prompt_type == "primary":
+            task = (
+                f"{localized['task']}\n\n{localized['instruction']}\n\n"
+                f"{localized['criteria']}:\n{criteria}\n\n"
+            )
+            schema = (
+                '  "verdict": "credible|partially_credible|inconclusive|not_credible",\n'
+                '  "confidence": 0.0,\n'
+                f'  "summary": "{localized["summary"]}",\n'
+                '  "criteria_assessment": [\n'
+                f'    {{"criterion": "{localized["criterion"]}", "status": "{localized["status"]}", "reason": "{localized["reason"]}"}}\n'
+                "  ],\n"
+                '  "risk_flags": ["string"],\n'
+                '  "missing_information": ["string"],\n'
+                '  "recommended_next_steps": ["string"]'
+            )
+        else:
+            task = f"{localized['fallback']}\n\n"
+            schema = (
+                '{"verdict":"credible|partially_credible|inconclusive|not_credible",'
+                f'"confidence":0.0,"summary":"{localized["summary"]}",'
+                '"risk_flags":[],"missing_information":[],"recommended_next_steps":[]}'
+            )
+        user_prompt = (
+            f"{task}{localized['claim']}: {aid_claim}\n"
+            f"{localized['evidence']}:\n{evidence_text}\n"
+            f"{localized['context']}:\n{context_text}\n\n"
+            f"{localized['respond']}\n{{\n{schema}\n}}"
+        )
+        return {"system": localized["system"], "user": user_prompt}
 
 SPHERE_HANDBOOK_CRITERIA: Dict[str, List[str]] = {
     "water_supply_sanitation_hygiene": [
@@ -318,6 +450,12 @@ def create_default_prompt_registry() -> PromptRegistry:
     registry.register(HumanitarianPrimaryPromptV2(), set_active=False)
     registry.register(HumanitarianFallbackPromptV2(), set_active=False)
 
+    for language in SUPPORTED_HUMANITARIAN_LANGUAGES:
+        if language == "en":
+            continue
+        registry.register(LocalizedHumanitarianPrompt("primary", language))
+        registry.register(LocalizedHumanitarianPrompt("fallback", language))
+
     return registry
 
 
@@ -342,8 +480,11 @@ class HumanitarianPromptEngine:
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
         version: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
-        prompt = self.registry.get("humanitarian_primary", version=version)
+        prompt = self.registry.get(
+            humanitarian_prompt_name("primary", language), version=version
+        )
         return prompt.build_prompt(
             aid_claim=aid_claim,
             supporting_evidence=supporting_evidence,
@@ -356,8 +497,11 @@ class HumanitarianPromptEngine:
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
         version: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
-        prompt = self.registry.get("humanitarian_fallback", version=version)
+        prompt = self.registry.get(
+            humanitarian_prompt_name("fallback", language), version=version
+        )
         return prompt.build_prompt(
             aid_claim=aid_claim,
             supporting_evidence=supporting_evidence,

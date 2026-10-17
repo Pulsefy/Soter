@@ -1,0 +1,32 @@
+[
+  {
+    "id": "fr_approve_001",
+    "input": {
+      "language": "fr",
+      "aid_claim": "L'équipe a livré 240 kits d'hygiène aux ménages enregistrés du secteur nord.",
+      "supporting_evidence": ["Liste de distribution signée par deux observateurs"],
+      "context_factors": {"sécurité": "stable"}
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "fr_reject_001",
+    "input": {
+      "language": "fr",
+      "aid_claim": "Cinq mille colis alimentaires ont été distribués dans le camp.",
+      "supporting_evidence": ["Le registre officiel ne compte que 1200 ménages"],
+      "context_factors": {"déplacement": "moyen"}
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "fr_ambiguous_001",
+    "input": {
+      "language": "fr",
+      "aid_claim": "La communauté indique que certains ménages n'ont pas reçu d'aide alimentaire ce mois-ci.",
+      "supporting_evidence": ["Registres de distribution incomplets"],
+      "context_factors": {"déplacement": "élevé"}
+    },
+    "expected": "ambiguous"
+  }
+]

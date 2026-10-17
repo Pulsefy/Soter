@@ -18,6 +18,8 @@ from schemas.humanitarian import LLMVerificationPayload
 from services.humanitarian_prompt import (
     HumanitarianPromptEngine,
     default_prompt_registry,
+    humanitarian_prompt_name,
+    normalize_humanitarian_language,
 )
 from services.prompt_registry import PromptRegistry
 from services.circuit_breaker import CircuitBreaker
@@ -104,16 +106,18 @@ class HumanitarianVerificationService:
         primary_prompt_version: Optional[str] = None,
         fallback_prompt_version: Optional[str] = None,
         on_token: Optional[Callable[[str], None]] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
         try:
             evidence = supporting_evidence or []
             context = context_factors or {}
+            language = normalize_humanitarian_language(language)
 
             # Resolve primary and fallback prompt templates from registry
             pri_ver = primary_prompt_version or prompt_version
             primary_prompt_obj = self.prompt_registry.get(
-                "humanitarian_primary", version=pri_ver
+                humanitarian_prompt_name("primary", language), version=pri_ver
             )
             primary_prompt = primary_prompt_obj.build_prompt(
                 aid_claim=aid_claim,
@@ -129,7 +133,7 @@ class HumanitarianVerificationService:
             ):
                 fb_ver = prompt_version
             fallback_prompt_obj = self.prompt_registry.get(
-                "humanitarian_fallback", version=fb_ver
+                humanitarian_prompt_name("fallback", language), version=fb_ver
             )
             fallback_prompt = fallback_prompt_obj.build_prompt(
                 aid_claim=aid_claim,
