@@ -37,6 +37,10 @@ import {
 } from './verification-result.persistence';
 import { CorrelationPropagationUtil } from '../common/utils/correlation-propagation.util';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import {
+  ProcessingBudget,
+  PartialResultInfo,
+} from './processing-budget';
 
 // ---------------------------------------------------------------------------
 // OCR service types
@@ -144,6 +148,7 @@ export class VerificationService {
   private readonly openai: OpenAI | null;
   private readonly ocrCircuitBreaker: CircuitBreaker;
   private readonly llmCircuitBreaker: CircuitBreaker;
+  private readonly claimProcessingBudgetMs: number;
 
   constructor(
     @InjectQueue('verification') private verificationQueue: Queue,
@@ -206,6 +211,16 @@ export class VerificationService {
         10,
       ),
     });
+
+    // Per-claim processing budget (milliseconds).  When the full multi-step
+    // pipeline (OCR → humanitarian verification → fraud scoring) exceeds this
+    // wall-clock budget, the pipeline returns whatever steps completed, flags
+    // the claim for manual review, and lists the incomplete steps explicitly.
+    this.claimProcessingBudgetMs = parseInt(
+      this.configService.get<string>('CLAIM_PROCESSING_BUDGET_MS') ||
+        '60000',
+      10,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -321,7 +336,11 @@ export class VerificationService {
     } else if (this.verificationMode === 'mock') {
       result = this.generateMockVerification(claim);
     } else {
-      result = await this.performAIVerification(claim);
+      // Enforce a total per-claim processing budget across the full multi-step
+      // pipeline so cumulative step times cannot drift beyond a single
+      // configured wall-clock limit.
+      const budget = new ProcessingBudget(this.claimProcessingBudgetMs);
+      result = await this.performAIVerification(claim, budget);
     }
 
     // ENHANCED: Add contract-aware metadata to result
@@ -331,7 +350,12 @@ export class VerificationService {
       claim.campaignId,
     );
 
-    const shouldVerify = enhancedResult.score >= this.verificationThreshold;
+    const isPartial =
+      enhancedResult.partialResult?.manualReviewRequired === true;
+    // A partial result (budget exhausted) must never auto-verify regardless
+    // of the score — the claim is flagged for manual review instead.
+    const shouldVerify =
+      !isPartial && enhancedResult.score >= this.verificationThreshold;
 
     // Build anchor metadata to persist
     const anchorMetadataToPersist: Prisma.InputJsonObject | null =
@@ -382,6 +406,7 @@ export class VerificationService {
         packageId: enhancedResult.metadata?.packageId,
         network: enhancedResult.metadata?.network,
         anchorMetadata: anchorMetadataToPersist,
+        partialResult: enhancedResult.partialResult ?? null,
       },
     });
 
@@ -404,9 +429,15 @@ export class VerificationService {
    * 4. If OpenAI is unavailable or returns an unparseable response, the method
    *    falls back to a deterministic mock result rather than throwing, so the
    *    queue job never fails silently.
+   *
+   * A `ProcessingBudget` tracks the total wall-clock time across all steps.
+   * Before each step the remaining budget is checked; when it is exhausted the
+   * pipeline stops, returns whatever steps completed, and attaches a
+   * `partialResult` summary so the caller can flag the claim for manual review.
    */
   private async performAIVerification(
     claim: Claim,
+    budget: ProcessingBudget,
   ): Promise<VerificationResult> {
     this.logger.log(`Starting AI verification for claim ${claim.id}`);
 
@@ -420,43 +451,109 @@ export class VerificationService {
     }
 
     // ------------------------------------------------------------------
-    // Step 1 – Gather evidence context
+    // Step 1 – Gather evidence context (OCR)
     // ------------------------------------------------------------------
+    if (budget.isExhausted()) {
+      this.logger.warn(
+        `Claim ${claim.id}: budget exhausted before OCR step ` +
+          `(${budget.elapsedMs()}/${budget.budgetMs}ms) – returning partial result`,
+      );
+      budget.recordIncomplete(
+        'ocr',
+        'Processing budget exhausted before OCR step started',
+      );
+      budget.recordIncomplete(
+        'humanitarian_verification',
+        'Skipped – budget exhausted',
+      );
+      budget.recordIncomplete('fraud_scoring', 'Skipped – budget exhausted');
+      return this.buildPartialResult(budget);
+    }
+
     let evidenceContext: string;
 
     if (this.looksLikeUrl(claim.evidenceRef)) {
-      // Try OCR; on failure fall back to using the URL as-is in the prompt
+      const stepStart = Date.now();
       evidenceContext = await this.buildOCRContext(claim);
+      budget.recordCompleted('ocr', Date.now() - stepStart);
     } else {
-      // evidenceRef is a free-text description of need – use it directly
+      // evidenceRef is a free-text description of need – no OCR needed
+      budget.recordSkipped('ocr', 'evidenceRef is not a URL');
       evidenceContext = `Applicant's stated need:\n${claim.evidenceRef}`;
     }
 
     // ------------------------------------------------------------------
-    // Step 2 – Call OpenAI for semantic analysis
+    // Step 2 – Call OpenAI for humanitarian verification
     // ------------------------------------------------------------------
+    if (budget.isExhausted()) {
+      this.logger.warn(
+        `Claim ${claim.id}: budget exhausted after OCR, before AI analysis ` +
+          `(${budget.elapsedMs()}/${budget.budgetMs}ms) – returning partial result`,
+      );
+      budget.recordIncomplete(
+        'humanitarian_verification',
+        'Processing budget exhausted before AI analysis started',
+      );
+      budget.recordIncomplete('fraud_scoring', 'Skipped – budget exhausted');
+      return this.buildPartialResult(budget);
+    }
+
     if (!this.openai) {
       this.logger.warn(
         `OpenAI client not available – falling back to mock for claim ${claim.id}`,
       );
+      budget.recordSkipped(
+        'humanitarian_verification',
+        'OpenAI client not configured',
+      );
+      budget.recordSkipped('fraud_scoring', 'No AI analysis to score');
       return this.buildFallbackResult(
         'AI service not configured. Fallback scoring applied.',
       );
     }
 
+    let aiResult: AIVerificationResponse;
     try {
-      const aiResult = await this.callOpenAI(claim, evidenceContext);
-      return this.mapAIResponseToResult(aiResult);
+      const stepStart = Date.now();
+      aiResult = await this.callOpenAI(claim, evidenceContext);
+      budget.recordCompleted(
+        'humanitarian_verification',
+        Date.now() - stepStart,
+      );
     } catch (err) {
       // AI service unavailable or returned a bad response – degrade gracefully
       this.logger.error(
         `OpenAI call failed for claim ${claim.id}: ${(err as Error).message}. ` +
           `Falling back to mock result.`,
       );
-      return this.buildFallbackResult(
-        'AI analysis could not be completed. Manual review is required.',
+      budget.recordIncomplete(
+        'humanitarian_verification',
+        `AI analysis failed: ${(err as Error).message}`,
       );
+      budget.recordIncomplete('fraud_scoring', 'No AI analysis to score');
+      return this.buildPartialResult(budget);
     }
+
+    // ------------------------------------------------------------------
+    // Step 3 – Map AI response to fraud score
+    // ------------------------------------------------------------------
+    if (budget.isExhausted()) {
+      this.logger.warn(
+        `Claim ${claim.id}: budget exhausted after AI analysis, before fraud scoring ` +
+          `(${budget.elapsedMs()}/${budget.budgetMs}ms) – returning partial result`,
+      );
+      budget.recordIncomplete(
+        'fraud_scoring',
+        'Processing budget exhausted before fraud scoring started',
+      );
+      return this.buildPartialResult(budget);
+    }
+
+    const scoringStart = Date.now();
+    const mapped = this.mapAIResponseToResult(aiResult);
+    budget.recordCompleted('fraud_scoring', Date.now() - scoringStart);
+
+    return mapped;
   }
 
   // -------------------------------------------------------------------------
@@ -767,6 +864,39 @@ the JSON verdict.
   }
 
   /**
+   * Builds a partial verification result when the per-claim processing budget
+   * is exhausted.  The result uses a conservative score (below threshold) so
+   * the claim is not auto-verified, and attaches a `partialResult` summary
+   * that records which steps completed and which were left incomplete.
+   *
+   * The incomplete steps are never silently dropped — they are explicitly
+   * listed so operators can see exactly what was not processed.
+   */
+  private buildPartialResult(budget: ProcessingBudget): VerificationResult {
+    const partialInfo: PartialResultInfo = budget.toPartialResultInfo();
+    const incompleteSummary = partialInfo.incompleteSteps.join(', ');
+
+    return {
+      score: 0.55,
+      confidence: 0.4,
+      details: {
+        factors: [
+          `Processing budget exhausted (${partialInfo.elapsedMs}/${partialInfo.budgetMs}ms)`,
+          `Completed steps: ${partialInfo.completedSteps.join(', ') || 'none'}`,
+          `Incomplete steps: ${incompleteSummary || 'none'}`,
+        ],
+        riskLevel: 'medium',
+        recommendations: [
+          'Claim processing budget exceeded – manual review required',
+          `Incomplete steps to verify manually: ${incompleteSummary}`,
+        ],
+      },
+      processedAt: new Date(),
+      partialResult: partialInfo,
+    };
+  }
+
+  /**
    * Enhances a verification result with contract-aware metadata
    */
   private async enhanceResultWithMetadata(
@@ -805,6 +935,10 @@ the JSON verdict.
       metadata: enhanced.metadata,
       warnings: enhanced.warnings,
       validationErrors: enhanced.validationErrors,
+      // Preserve the partial-result info from the budget-tracked pipeline
+      // so it survives the metadata enhancement and reaches the persistence
+      // layer.
+      partialResult: result.partialResult,
     } as VerificationResult;
   }
 
