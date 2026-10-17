@@ -1,0 +1,32 @@
+[
+  {
+    "id": "ar_approve_001",
+    "input": {
+      "language": "ar",
+      "aid_claim": "سلّم الفريق ٢٤٠ مجموعة نظافة إلى الأسر المسجلة في القطاع الشمالي.",
+      "supporting_evidence": ["قائمة توزيع موقعة من مراقبين ميدانيين"],
+      "context_factors": {"الأمن": "مستقر"}
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "ar_reject_001",
+    "input": {
+      "language": "ar",
+      "aid_claim": "تم توزيع خمسة آلاف طرد غذائي في المخيم.",
+      "supporting_evidence": ["يسجل السجل الرسمي ١٢٠٠ أسرة فقط"],
+      "context_factors": {"النزوح": "متوسط"}
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "ar_ambiguous_001",
+    "input": {
+      "language": "ar",
+      "aid_claim": "أفاد المجتمع بأن بعض الأسر لم تتلق مساعدة غذائية هذا الشهر.",
+      "supporting_evidence": ["سجلات التوزيع غير مكتملة"],
+      "context_factors": {"النزوح": "مرتفع"}
+    },
+    "expected": "ambiguous"
+  }
+]

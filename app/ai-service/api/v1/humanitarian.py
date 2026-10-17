@@ -235,7 +235,13 @@ def _build_verification_envelope(
 @cached_response(
     prefix="humanitarian_verification",
     ttl_seconds=settings.cache_ttl_verification,
-    key_tags=["model_version", "artifact_tag", "org_id", "prompt_version"],
+    key_tags=[
+        "model_version",
+        "artifact_tag",
+        "org_id",
+        "prompt_version",
+        "language",
+    ],
     content_hash_arg="content_hash",
 )
 async def _verify_claim_cached(
@@ -249,6 +255,7 @@ async def _verify_claim_cached(
     artifact_tag: str,
     org_id: str,
     prompt_version: str = "",
+    language: str = "en",
     content_hash: str = "",
 ) -> Dict[str, Any]:
     """
@@ -284,9 +291,14 @@ async def _verify_claim_cached(
             provider_preference=provider_preference,
             timeout=timeout,
             prompt_version=prompt_version or None,
+            language=language,
         )
     except TypeError as exc:
-        if "prompt_version" in str(exc) or "timeout" in str(exc):
+        if (
+            "prompt_version" in str(exc)
+            or "timeout" in str(exc)
+            or "language" in str(exc)
+        ):
             try:
                 return humanitarian_verification_service.verify_claim(
                     aid_claim=aid_claim,
@@ -505,6 +517,7 @@ async def verify_humanitarian_claim(
                             provider_preference=request.provider_preference,
                             timeout=timeout,
                             prompt_version=prompt_version,
+                            language=request.language,
                             on_token=lambda token: publish("token", token),
                         )
                         publish("result", raw_result)
@@ -576,6 +589,7 @@ async def verify_humanitarian_claim(
             artifact_tag=artifact_tag,
             org_id=x_org_id,
             prompt_version=prompt_version,
+            language=request.language or "en",
             content_hash=content_hash,
         )
         return _build_verification_envelope(
