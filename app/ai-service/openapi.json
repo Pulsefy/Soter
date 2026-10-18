@@ -1256,6 +1256,21 @@
             "title": "Context Factors",
             "type": "object"
           },
+          "language_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit language hint/code for prompt verification instructions (e.g. 'en', 'es', 'fra')",
+            "examples": [
+              "en"
+            ],
+            "title": "Language Hint"
+          },
           "prompt_version": {
             "anyOf": [
               {

@@ -1,5 +1,5 @@
 import pytest
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from services.prompt_registry import VerificationPrompt, PromptRegistry
 from services.humanitarian_prompt import (
     HumanitarianPromptEngine,
