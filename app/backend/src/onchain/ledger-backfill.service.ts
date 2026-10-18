@@ -35,6 +35,15 @@ export interface BackfillResult {
 }
 
 /**
+ * Advisory lock key serializing backfill trigger decisions (the overlap
+ * check plus the checkpoint claim). Distinct from AUDIT_CHAIN_LOCK_KEY.
+ * Held for the duration of the claim transaction so that two concurrent
+ * POST /backfill requests — even for overlapping but non-identical ranges —
+ * cannot both pass the overlap check.
+ */
+const BACKFILL_TRIGGER_LOCK_KEY = 815302674n;
+
+/**
  * Builds a deterministic job key for a backfill range so that re-triggering
  * the same range either resumes an existing run or is rejected when one is
  * already in progress.
@@ -61,7 +70,14 @@ export class LedgerBackfillService {
   /**
    * Trigger (or resume) a backfill for a ledger range.
    *
-   * - If no checkpoint exists, a new one is created and the job is enqueued.
+   * The check-and-claim runs inside an interactive transaction holding a
+   * Postgres advisory lock, so it is race-safe: concurrent triggers are
+   * strictly serialized and the second request observes the first one's
+   * committed checkpoint before deciding whether to proceed.
+   *
+   * - If no checkpoint exists, a new one is created and the job is enqueued,
+   *   unless another `running` checkpoint covers an overlapping range —
+   *   concurrent overlapping backfills would race on the same ledger rows.
    * - If a `failed` or `cancelled` checkpoint exists, it is reset and re-enqueued
    *   from `lastProcessedLedger` so processing resumes rather than restarts.
    * - If a `running` checkpoint exists, a ConflictException is thrown.
@@ -92,131 +108,150 @@ export class LedgerBackfillService {
       `[backfill] Trigger request — range=${startLedger}-${endLedger} key=${jobKey} source=${this.ledgerSource.sourceKind}`,
     );
 
-    // Look up an existing checkpoint for this range.
-    const existing = await this.prisma.backfillCheckpoint.findUnique({
-      where: { jobKey },
-    });
+    const claim = await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(${BACKFILL_TRIGGER_LOCK_KEY})`;
 
-    if (existing) {
-      if (existing.status === 'running') {
+      // Look up an existing checkpoint for this range.
+      const existing = await tx.backfillCheckpoint.findUnique({
+        where: { jobKey },
+      });
+
+      if (existing) {
+        if (existing.status === 'running') {
+          this.logger.warn(
+            `[backfill] Job already running — key=${jobKey} id=${existing.id}`,
+          );
+          throw new ConflictException(
+            `A backfill job for ledger range ${startLedger}-${endLedger} is already running (id: ${existing.id}). ` +
+              `Use GET /admin/ledger/backfill/checkpoint/${existing.id} to monitor progress.`,
+          );
+        }
+
+        if (existing.status === 'completed') {
+          this.logger.log(
+            `[backfill] Already completed — key=${jobKey} id=${existing.id}`,
+          );
+          return { kind: 'completed', existing } as const;
+        }
+
+        // Resume from the last successful ledger.
+        const resumeFrom = existing.lastProcessedLedger || startLedger;
+        this.logger.log(
+          `[backfill] Resuming — key=${jobKey} id=${existing.id} from=${resumeFrom} status=${existing.status}`,
+        );
+
+        const checkpoint = await tx.backfillCheckpoint.update({
+          where: { id: existing.id },
+          data: {
+            status: 'running',
+            lastError: null,
+            triggeredBy: triggeredBy ?? existing.triggeredBy,
+            startedAt: new Date(),
+            completedAt: null,
+            heartbeatAt: new Date(),
+          },
+        });
+
+        return { kind: 'resumed', checkpoint, existing, resumeFrom } as const;
+      }
+
+      // Overlap guard: reject when any other running checkpoint covers an
+      // intersecting ledger range. Campaign scope is ignored on purpose —
+      // backfills attribute rows to the campaign they were triggered with,
+      // so two concurrent campaigns over the same on-chain entries would
+      // still collide on the same primary keys.
+      const overlapping = await tx.backfillCheckpoint.findFirst({
+        where: {
+          status: 'running',
+          startLedger: { lte: endLedger },
+          endLedger: { gte: startLedger },
+        },
+      });
+
+      if (overlapping) {
         this.logger.warn(
-          `[backfill] Job already running — key=${jobKey} id=${existing.id}`,
+          `[backfill] Overlapping job running — key=${jobKey} overlaps id=${overlapping.id} ` +
+            `range=${overlapping.startLedger}-${overlapping.endLedger}`,
         );
         throw new ConflictException(
-          `A backfill job for ledger range ${startLedger}-${endLedger} is already running (id: ${existing.id}). ` +
-            `Use GET /admin/ledger/backfill/checkpoint/${existing.id} to monitor progress.`,
+          `A backfill job (id: ${overlapping.id}) is already running for overlapping ledger range ` +
+            `${overlapping.startLedger}-${overlapping.endLedger}, which intersects the requested range ` +
+            `${startLedger}-${endLedger}. Concurrent overlapping backfills would race on the same ledger rows. ` +
+            `Use GET /admin/ledger/backfill/checkpoint/${overlapping.id} to monitor progress, or wait for it to finish.`,
         );
       }
 
-      if (existing.status === 'completed') {
-        this.logger.log(
-          `[backfill] Already completed — key=${jobKey} id=${existing.id}`,
-        );
-        return {
-          jobId: 'completed',
-          checkpointId: existing.id,
+      // Fresh run — create a checkpoint record first.
+      const checkpoint = await tx.backfillCheckpoint.create({
+        data: {
           jobKey,
           startLedger,
           endLedger,
-          status: 'completed',
-          processedCount: existing.processedCount,
-          skippedCount: existing.skippedCount,
-          errorCount: existing.errorCount,
-          totalCount,
-        };
-      }
-
-      // Resume from the last successful ledger.
-      const resumeFrom = existing.lastProcessedLedger || startLedger;
-      this.logger.log(
-        `[backfill] Resuming — key=${jobKey} id=${existing.id} from=${resumeFrom} status=${existing.status}`,
-      );
-
-      const checkpoint = await this.prisma.backfillCheckpoint.update({
-        where: { id: existing.id },
-        data: {
+          lastProcessedLedger: startLedger,
           status: 'running',
-          lastError: null,
-          triggeredBy: triggeredBy ?? existing.triggeredBy,
-          startedAt: new Date(),
-          completedAt: null,
+          campaignId,
+          batchSize,
+          triggeredBy,
           heartbeatAt: new Date(),
         },
       });
 
-      const job = await this.onchainQueue.add(
-        'ledger-backfill',
-        {
-          startLedger: resumeFrom,
-          endLedger,
-          campaignId,
-          batchSize,
-          checkpointId: checkpoint.id,
-        } satisfies BackfillJobData,
-        this.jobOptions(),
+      this.logger.log(
+        `[backfill] Created checkpoint — id=${checkpoint.id} key=${jobKey} range=${startLedger}-${endLedger}`,
       );
 
+      return { kind: 'created', checkpoint } as const;
+    });
+
+    if (claim.kind === 'completed') {
       return {
-        jobId: job.id ?? 'unknown',
-        checkpointId: checkpoint.id,
+        jobId: 'completed',
+        checkpointId: claim.existing.id,
         jobKey,
         startLedger,
         endLedger,
-        status: 'queued',
-        processedCount: existing.processedCount,
-        skippedCount: existing.skippedCount,
-        errorCount: existing.errorCount,
+        status: 'completed',
+        processedCount: claim.existing.processedCount,
+        skippedCount: claim.existing.skippedCount,
+        errorCount: claim.existing.errorCount,
         totalCount,
-        resumeFrom,
       };
     }
 
-    // Fresh run — create a checkpoint record first.
-    const checkpoint = await this.prisma.backfillCheckpoint.create({
-      data: {
-        jobKey,
-        startLedger,
-        endLedger,
-        lastProcessedLedger: startLedger,
-        status: 'running',
-        campaignId,
-        batchSize,
-        triggeredBy,
-        heartbeatAt: new Date(),
-      },
-    });
-
-    this.logger.log(
-      `[backfill] Created checkpoint — id=${checkpoint.id} key=${jobKey} range=${startLedger}-${endLedger}`,
-    );
+    // The checkpoint now durably claims the range, so the job is enqueued
+    // after the claim transaction commits.
+    const enqueueFromLedger =
+      claim.kind === 'resumed' ? claim.resumeFrom : startLedger;
 
     const job = await this.onchainQueue.add(
       'ledger-backfill',
       {
-        startLedger,
+        startLedger: enqueueFromLedger,
         endLedger,
         campaignId,
         batchSize,
-        checkpointId: checkpoint.id,
+        checkpointId: claim.checkpoint.id,
       } satisfies BackfillJobData,
       this.jobOptions(),
     );
 
     this.logger.log(
-      `[backfill] Enqueued — jobId=${job.id} checkpointId=${checkpoint.id}`,
+      `[backfill] Enqueued — jobId=${job.id} checkpointId=${claim.checkpoint.id}`,
     );
 
     return {
       jobId: job.id ?? 'unknown',
-      checkpointId: checkpoint.id,
+      checkpointId: claim.checkpoint.id,
       jobKey,
       startLedger,
       endLedger,
       status: 'queued',
-      processedCount: 0,
-      skippedCount: 0,
-      errorCount: 0,
+      processedCount:
+        claim.kind === 'resumed' ? claim.existing.processedCount : 0,
+      skippedCount: claim.kind === 'resumed' ? claim.existing.skippedCount : 0,
+      errorCount: claim.kind === 'resumed' ? claim.existing.errorCount : 0,
       totalCount,
+      ...(claim.kind === 'resumed' ? { resumeFrom: claim.resumeFrom } : {}),
     };
   }
 

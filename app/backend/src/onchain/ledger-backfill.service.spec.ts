@@ -17,6 +17,7 @@ const mockQueue = {
 const mockPrisma = {
   backfillCheckpoint: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     findMany: jest.fn(),
@@ -25,6 +26,8 @@ const mockPrisma = {
     findMany: jest.fn(),
     create: jest.fn(),
   },
+  $queryRaw: jest.fn(),
+  $transaction: jest.fn(),
 };
 
 const mockLedgerSource = {
@@ -62,6 +65,42 @@ function makeCheckpoint(overrides: Partial<Record<string, any>> = {}) {
   };
 }
 
+/** A `running` checkpoint used as an overlap boundary in tests. */
+function runningCheckpoint(startLedger: number, endLedger: number) {
+  return makeCheckpoint({
+    id: `ckp_${startLedger}_${endLedger}`,
+    jobKey: `backfill:${startLedger}:${endLedger}`,
+    startLedger,
+    endLedger,
+    status: 'running',
+  });
+}
+
+/**
+ * Points `backfillCheckpoint.findFirst` at an in-memory set of checkpoints,
+ * evaluating the service's `status` + range-overlap predicate the way
+ * Postgres would, so the tests exercise the real query shape.
+ */
+function installOverlapRows(rows: Array<Record<string, any>>) {
+  mockPrisma.backfillCheckpoint.findFirst.mockImplementation(
+    ({
+      where,
+    }: {
+      where: {
+        status: string;
+        startLedger: { lte: number };
+        endLedger: { gte: number };
+      };
+    }) =>
+      rows.find(
+        row =>
+          row.status === where.status &&
+          row.startLedger <= where.startLedger.lte &&
+          row.endLedger >= where.endLedger.gte,
+      ) ?? null,
+  );
+}
+
 /** A normalised on-chain movement as `StellarLedgerSource` would return one. */
 function makeEntry(overrides: Record<string, any> = {}) {
   return {
@@ -95,6 +134,16 @@ describe('LedgerBackfillService', () => {
     mockLedgerSource.describeUnavailable.mockReturnValue(
       'no on-chain source configured',
     );
+
+    // The service claims the range inside `prisma.$transaction` (holding a
+    // Postgres advisory lock in production). The stub transaction client is
+    // the top-level mock so existing stubs keep working.
+    mockPrisma.$queryRaw.mockResolvedValue([]);
+    mockPrisma.$transaction.mockImplementation(
+      (fn: (tx: unknown) => Promise<unknown>) => fn(mockPrisma),
+    );
+    // Default: no running checkpoint overlaps the requested range.
+    mockPrisma.backfillCheckpoint.findFirst.mockResolvedValue(null);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -162,6 +211,160 @@ describe('LedgerBackfillService', () => {
         ConflictException,
       );
       expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('rejects a fresh range that overlaps a running checkpoint', async () => {
+      mockPrisma.backfillCheckpoint.findUnique.mockResolvedValue(null);
+      installOverlapRows([runningCheckpoint(1000, 2000)]);
+
+      await expect(service.triggerBackfill(1500, 2500)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(mockPrisma.backfillCheckpoint.create).not.toHaveBeenCalled();
+      expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('names the conflicting range in the rejection message', async () => {
+      mockPrisma.backfillCheckpoint.findUnique.mockResolvedValue(null);
+      installOverlapRows([runningCheckpoint(1000, 2000)]);
+
+      await expect(service.triggerBackfill(1500, 2500)).rejects.toThrow(
+        /overlapping ledger range 1000-2000/,
+      );
+    });
+
+    it('rejects a range that merely touches the endpoint of a running checkpoint', async () => {
+      mockPrisma.backfillCheckpoint.findUnique.mockResolvedValue(null);
+      installOverlapRows([runningCheckpoint(1000, 2000)]);
+
+      await expect(service.triggerBackfill(2000, 3000)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('allows a fresh range that does not overlap any running checkpoint', async () => {
+      mockPrisma.backfillCheckpoint.findUnique.mockResolvedValue(null);
+      installOverlapRows([runningCheckpoint(1000, 2000)]);
+      const checkpoint = makeCheckpoint({
+        id: 'ckp_new',
+        jobKey: 'backfill:2001:3000',
+        startLedger: 2001,
+        endLedger: 3000,
+        status: 'running',
+      });
+      mockPrisma.backfillCheckpoint.create.mockResolvedValue(checkpoint);
+      mockQueue.add.mockResolvedValue({ id: 'job_003' });
+
+      const result = await service.triggerBackfill(2001, 3000);
+
+      expect(result.status).toBe('queued');
+      expect(result.checkpointId).toBe(checkpoint.id);
+      expect(mockQueue.add).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores non-running checkpoints when checking for overlap', async () => {
+      mockPrisma.backfillCheckpoint.findUnique.mockResolvedValue(null);
+      installOverlapRows([
+        makeCheckpoint({
+          startLedger: 1000,
+          endLedger: 2000,
+          status: 'failed',
+        }),
+      ]);
+      mockPrisma.backfillCheckpoint.create.mockResolvedValue(
+        makeCheckpoint({ id: 'ckp_new' }),
+      );
+      mockQueue.add.mockResolvedValue({ id: 'job_004' });
+
+      const result = await service.triggerBackfill(1000, 2000);
+
+      expect(result.status).toBe('queued');
+      expect(mockPrisma.backfillCheckpoint.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: 'running' }),
+        }),
+      );
+    });
+
+    it('only lets one of two concurrent overlapping triggers proceed', async () => {
+      // Simulates the Postgres behaviour the service relies on: the
+      // in-memory "table" is shared state, and the fake $transaction
+      // serialises critical sections the way pg_advisory_xact_lock does,
+      // so the second request observes the first request's committed
+      // checkpoint instead of racing past the overlap check.
+      const table = new Map<string, Record<string, unknown>>();
+      let lock: Promise<unknown> = Promise.resolve();
+      let idCounter = 0;
+
+      const makeTx = () => ({
+        $queryRaw: jest.fn().mockResolvedValue([]),
+        backfillCheckpoint: {
+          findUnique: jest.fn(
+            ({ where }: { where: { jobKey: string } }) =>
+              table.get(where.jobKey) ?? null,
+          ),
+          findFirst: jest.fn(
+            ({ where }: { where: Record<string, any> }) =>
+              [...table.values()].find(
+                row =>
+                  row.status === where.status &&
+                  (row.startLedger as number) <= where.startLedger.lte &&
+                  (row.endLedger as number) >= where.endLedger.gte,
+              ) ?? null,
+          ),
+          create: jest.fn(({ data }: { data: Record<string, unknown> }) => {
+            const row = {
+              id: `ckp_${++idCounter}`,
+              processedCount: 0,
+              skippedCount: 0,
+              errorCount: 0,
+              lastProcessedLedger: data.startLedger,
+              ...data,
+            };
+            table.set(data.jobKey as string, row);
+            return row;
+          }),
+          update: jest.fn(
+            ({
+              where,
+              data,
+            }: {
+              where: { id: string };
+              data: Record<string, unknown>;
+            }) => {
+              const row = [...table.values()].find(r => r.id === where.id);
+              return { ...row, ...data };
+            },
+          ),
+        },
+      });
+
+      mockPrisma.$transaction.mockImplementation(
+        (fn: (tx: unknown) => Promise<unknown>) => {
+          const run = lock.then(() => fn(makeTx()));
+          lock = run.catch(() => undefined);
+          return run;
+        },
+      );
+      mockQueue.add.mockResolvedValue({ id: 'job_concurrent' });
+
+      const [first, second] = await Promise.allSettled([
+        service.triggerBackfill(1000, 2000),
+        service.triggerBackfill(1500, 2500),
+      ]);
+
+      const settled = [first, second];
+      const fulfilled = settled.filter(r => r.status === 'fulfilled');
+      const rejected = settled.filter(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
+      );
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason).toBeInstanceOf(ConflictException);
+      expect(mockQueue.add).toHaveBeenCalledTimes(1);
+      expect(table.size).toBe(1);
     });
 
     it('resumes from lastProcessedLedger when checkpoint is failed', async () => {
