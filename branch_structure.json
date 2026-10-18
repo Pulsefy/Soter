@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1379-add-a-backend-admin-endpoint-to-query-circuit",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-1379-add-a-backend-admin-endpoint-to-query-circuit": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1379-add-a-backend-admin-endpoint-to-query-circuit",
+    "origin"
+  ]
+}

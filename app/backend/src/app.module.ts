@@ -61,6 +61,8 @@ import { CorrelationModule } from './common/modules/correlation.module';
 import { RecipientImportModule } from './recipient-import/recipient-import.module';
 import { DeviceTokensModule } from './device-tokens/device-tokens.module';
 import { validateAppConfig } from './config/validation';
+import { CircuitBreakerAdminModule } from './admin/circuit-breaker/circuit-breaker-admin.module';
+import { AdminCircuitBreakerModule } from './common/circuit-breaker/admin-circuit-breaker.module';
 
 const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
 
@@ -150,6 +152,8 @@ const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
     RedisModule,
     RecipientImportModule,
     DeviceTokensModule,
+    CircuitBreakerAdminModule,
+    AdminCircuitBreakerModule,
     ...(skipBackgroundJobs
       ? [
           ThrottlerModule.forRoot({
