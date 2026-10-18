@@ -591,6 +591,20 @@ export class LedgerBackfillService {
       );
     }
 
+    if (wouldCreate.length === 0) {
+      this.logger.debug(
+        `[backfill] Ledger range ${startLedger}-${endLedger}: 0 new, ${wouldSkip} skipped`,
+      );
+      return { processed: 0, skipped: wouldSkip };
+    }
+
+    if (!campaignId) {
+      throw new Error(
+        `Ledgers ${startLedger}-${endLedger}: cannot persist ledger entries without a campaignId. ` +
+          'Re-run the backfill with a campaignId.',
+      );
+    }
+
     // Persist the entries that would be created.
     for (const entry of wouldCreate) {
       await this.prisma.balanceLedger.create({
