@@ -6,6 +6,10 @@ This module powers:
 - Verification APIs
 - On-chain anchoring integrations
 
+## Dashboard summary cache policy
+
+The global dashboard summary endpoint uses the Redis-backed analytics aggregate at `analytics:global-stats-v2` with a bounded staleness policy of 300 seconds (5 minutes). Reads hit the cached aggregate first; a cache miss recomputes the totals from Prisma, and any campaign or claim mutation invalidates the analytics cache so the next read refreshes promptly. The cache is safe to miss on startup or startup with a cold Redis instance and gracefully falls back to a live database aggregation without breaking the API response shape.
+
 ## Local development
 
 From the repo root:

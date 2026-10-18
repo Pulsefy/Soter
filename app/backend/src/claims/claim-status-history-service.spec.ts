@@ -11,6 +11,7 @@ import { SorobanTransactionLifecycleService } from '../onchain/soroban-transacti
 import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
 import { VerificationService } from '../verification/verification.service';
 import { AppException } from '../common/dto/error-response.dto';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 describe('ClaimsService - getStatusHistory', () => {
   let service: ClaimsService;
@@ -45,6 +46,7 @@ describe('ClaimsService - getStatusHistory', () => {
         { provide: SorobanTransactionLifecycleService, useValue: {} },
         { provide: SorobanTransactionScheduler, useValue: {} },
         { provide: VerificationService, useValue: {} },
+        { provide: AnalyticsService, useValue: { invalidateCache: jest.fn() } },
       ],
     }).compile();
 

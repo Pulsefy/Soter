@@ -18,6 +18,7 @@ import { SorobanTransactionLifecycleService } from '../onchain/soroban-transacti
 import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
 import { VerificationMetadataService } from '../verification/metadata.service';
 import { CorrelationPropagationUtil } from '../common/utils/correlation-propagation.util';
+import { AnalyticsService } from '../analytics/analytics.service';
 import type { VerificationJobData } from '../verification/interfaces/verification-job.interface';
 
 type ClaimRow = {
@@ -129,6 +130,10 @@ describe('Claims -> verification pipeline integration', () => {
             debug: jest.fn(),
             getCorrelationId: jest.fn(),
           },
+        },
+        {
+          provide: AnalyticsService,
+          useValue: { invalidateCache: jest.fn() },
         },
         {
           provide: EncryptionService,
