@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
-import { TaskItem, fetchTaskList } from '../services/taskApi';
+import { TaskItem, fetchTaskList, getMockTaskList } from '../services/taskApi';
 import { cacheTaskList, loadCachedTaskList, getTaskCacheTimestamp } from '../services/taskCache';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { OfflineBanner } from '../components/OfflineBanner';
@@ -56,6 +56,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isCached, setIsCached] = useState(false);
+  const [isMockData, setIsMockData] = useState(false);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
 
@@ -68,6 +69,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
       if (isRefresh) setRefreshMessage(t('tasks.refreshed'));
       setTaskList(fresh);
       setIsCached(false);
+      setIsMockData(false);
       await cacheTaskList(fresh);
       setCachedAt(null);
     } catch {
@@ -76,13 +78,24 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
       if (cached && cached.length > 0) {
         setTaskList(cached);
         setIsCached(true);
+        setIsMockData(false);
         const ts = await getTaskCacheTimestamp();
         setCachedAt(ts);
       } else {
-        // No cache available - show empty state
-        setTaskList([]);
-        setIsCached(true);
-        setCachedAt(null);
+        // Fallback to mock data when both network and cache are unavailable
+        try {
+          const mock = getMockTaskList();
+          setTaskList(mock);
+          setIsMockData(true);
+          setIsCached(false);
+          setCachedAt(null);
+        } catch {
+          // If mock generator is unavailable (e.g. strict production check)
+          setTaskList([]);
+          setIsMockData(false);
+          setIsCached(true);
+          setCachedAt(null);
+        }
       }
     } finally {
       setLoading(false);
@@ -201,18 +214,36 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
           />
         }
         ListHeaderComponent={
-          isCached && isConnected ? (
-            <View
-              style={styles.staleNotice}
-              accessible
-              accessibilityRole="alert"
-              accessibilityLabel={t('tasks.cachedDataHint')}
-            >
-              <Text style={styles.staleText}>
-                {t('tasks.cachedData')}
-              </Text>
-            </View>
-          ) : null
+          <>
+            {isMockData && (
+              <View
+                testID="mock-badge"
+                style={styles.mockBanner}
+                accessible
+                accessibilityRole="alert"
+                accessibilityLabel="Notice: Showing mock task data. Backend unreachable and no cache exists."
+              >
+                <View style={styles.mockBadge}>
+                  <Text style={styles.mockBadgeText}>🔧 MOCK</Text>
+                </View>
+                <Text style={styles.mockBannerText}>
+                  Showing mock task data — backend unreachable
+                </Text>
+              </View>
+            )}
+            {isCached && isConnected ? (
+              <View
+                style={styles.staleNotice}
+                accessible
+                accessibilityRole="alert"
+                accessibilityLabel={t('tasks.cachedDataHint')}
+              >
+                <Text style={styles.staleText}>
+                  {t('tasks.cachedData')}
+                </Text>
+              </View>
+            ) : null}
+          </>
         }
         ListEmptyComponent={
           <View style={styles.centered} accessible accessibilityLabel={t('tasks.noTasks')}>
@@ -317,4 +348,33 @@ const makeStyles = (colors: AppColors) =>
       fontSize: 16,
       color: colors.textSecondary,
     },
+    mockBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.warningBg,
+      borderWidth: 1,
+      borderColor: colors.warningBorder,
+      borderRadius: 8,
+      padding: 10,
+      marginBottom: 12,
+      gap: 10,
+    },
+    mockBadge: {
+      backgroundColor: colors.warning,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+    },
+    mockBadgeText: {
+      color: '#FFFFFF',
+      fontWeight: '700',
+      fontSize: 11,
+    },
+    mockBannerText: {
+      color: colors.warning,
+      fontSize: 12,
+      fontWeight: '600',
+      flex: 1,
+    },
   });
+
