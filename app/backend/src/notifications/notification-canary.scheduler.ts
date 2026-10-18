@@ -208,8 +208,9 @@ function cronPartMatches(part: string, value: number, max: number): boolean {
   let range: string;
   let step = 1;
   if (part.includes('/')) {
-    [range, step] = part.split('/');
-    const parsed = Number(step);
+    const [rangePart, stepPart] = part.split('/');
+    range = rangePart;
+    const parsed = Number(stepPart);
     step = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
   } else {
     range = part;
