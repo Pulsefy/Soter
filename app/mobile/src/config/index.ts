@@ -38,6 +38,8 @@ export interface AppConfig {
   taskCacheMaxBytes: number;
   /** Ratio of cache usage at which the app warns operators */
   localCacheWarningRatio: number;
+  /** Retention window in milliseconds for cross-session scan deduplication */
+  crossSessionDedupeWindowMs: number;
   /** Base64-encoded SHA-256 SPKI pins for the API host (primary + backups) used for certificate pinning */
   certPinHashes: string[];
   /** Whether to pin all subdomains of the API host, not just the exact hostname */
@@ -129,6 +131,9 @@ const buildConfig = (): AppConfig => {
     localCacheWarningRatio: process.env.EXPO_PUBLIC_LOCAL_CACHE_WARNING_RATIO
       ? parseFloat(process.env.EXPO_PUBLIC_LOCAL_CACHE_WARNING_RATIO)
       : 0.8,
+    crossSessionDedupeWindowMs: process.env.EXPO_PUBLIC_CROSS_SESSION_DEDUPE_WINDOW_MS
+      ? parseInt(process.env.EXPO_PUBLIC_CROSS_SESSION_DEDUPE_WINDOW_MS, 10)
+      : 24 * 60 * 60 * 1000, // Default: 24 hours
     certPinHashes,
     certPinIncludeSubdomains: process.env.EXPO_PUBLIC_CERT_PIN_INCLUDE_SUBDOMAINS === 'true',
     logLevel: (process.env.EXPO_PUBLIC_LOG_LEVEL as LogLevel) || 'warn',

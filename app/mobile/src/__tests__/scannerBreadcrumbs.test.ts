@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/react-native';
 import { initCrashReporting } from '../services/crashReporting';
 import {
   recordItemDeduped,
+  recordItemDedupedCrossSession,
   recordItemFailed,
   recordItemQueued,
   recordScanReceived,
@@ -36,6 +37,7 @@ describe('scanner crash-reporting breadcrumbs', () => {
     recordScanStarted('bulk');
     recordScanReceived('bulk', { scanned: 1 });
     recordItemDeduped('bulk', { scanned: 1, skipped: 1 });
+    recordItemDedupedCrossSession('bulk', { scanned: 1, skipped: 1 });
     recordItemQueued('bulk', { scanned: 1, verified: 1 });
 
     const crumbs = recordedCrumbs();
@@ -43,10 +45,11 @@ describe('scanner crash-reporting breadcrumbs', () => {
       'bulk:scan_started',
       'bulk:scan_received',
       'bulk:item_deduped',
+      'bulk:item_deduped_cross_session',
       'bulk:item_queued',
     ]);
     expect(crumbs.every((crumb) => crumb.category === 'scanner')).toBe(true);
-    expect(addBreadcrumbMock).toHaveBeenCalledTimes(4);
+    expect(addBreadcrumbMock).toHaveBeenCalledTimes(5);
   });
 
   it('excludes raw scanned content and keeps only numeric counters', () => {

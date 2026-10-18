@@ -30,6 +30,8 @@ _SECRET_FIELDS = frozenset(
     {
         "openai_api_key",
         "groq_api_key",
+        "openai_fallback_api_key",
+        "groq_fallback_api_key",
         "ai_webhook_secret",
         "artifact_signing_secret",
     }
@@ -84,6 +86,12 @@ class Settings(BaseSettings):
     # API Keys
     openai_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
+    # Fallback API keys for key rotation (issue #1411).
+    # When the primary key fails with an authentication error (401), the
+    # provider will retry once using the fallback key, provided one is set.
+    # Fallback keys are optional; if not set or empty, no fallback retry occurs.
+    openai_fallback_api_key: Optional[str] = None
+    groq_fallback_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
     groq_model: str = "llama-3.3-70b-versatile"
     ai_deterministic_mode: bool = False
@@ -358,6 +366,16 @@ class Settings(BaseSettings):
             _add("OPENAI_API_KEY", "is set but blank")
         if self.groq_api_key is not None and not self.groq_api_key.strip():
             _add("GROQ_API_KEY", "is set but blank")
+        if (
+            self.openai_fallback_api_key is not None
+            and not self.openai_fallback_api_key.strip()
+        ):
+            _add("OPENAI_FALLBACK_API_KEY", "is set but blank")
+        if (
+            self.groq_fallback_api_key is not None
+            and not self.groq_fallback_api_key.strip()
+        ):
+            _add("GROQ_FALLBACK_API_KEY", "is set but blank")
 
         # --- Callback/webhook signing secret -----------------------------
         if self.ai_webhook_secret is not None:
@@ -748,6 +766,41 @@ class Settings(BaseSettings):
                 return True
 
         return False
+
+    def reload_api_keys(self) -> None:
+        """Reload API keys from environment variables at runtime (issue #1411).
+
+        Updates the active primary and fallback API key configuration from
+        the current environment without requiring an application restart.
+        Existing in-flight requests continue with the keys they started with;
+        subsequent requests use the updated configuration.
+
+        This method is thread-safe and updates the configuration in-place
+        without creating a new Settings instance.
+        """
+        import os
+
+        # Reload primary and fallback keys from environment variables
+        self.openai_api_key = os.getenv("OPENAI_API_KEY") or None
+        self.groq_api_key = os.getenv("GROQ_API_KEY") or None
+        self.openai_fallback_api_key = os.getenv("OPENAI_FALLBACK_API_KEY") or None
+        self.groq_fallback_api_key = os.getenv("GROQ_FALLBACK_API_KEY") or None
+
+        # Validate the reloaded keys
+        if self.openai_api_key is not None and not self.openai_api_key.strip():
+            raise ValueError("OPENAI_API_KEY is set but blank")
+        if self.groq_api_key is not None and not self.groq_api_key.strip():
+            raise ValueError("GROQ_API_KEY is set but blank")
+        if (
+            self.openai_fallback_api_key is not None
+            and not self.openai_fallback_api_key.strip()
+        ):
+            raise ValueError("OPENAI_FALLBACK_API_KEY is set but blank")
+        if (
+            self.groq_fallback_api_key is not None
+            and not self.groq_fallback_api_key.strip()
+        ):
+            raise ValueError("GROQ_FALLBACK_API_KEY is set but blank")
 
 
 settings = Settings()

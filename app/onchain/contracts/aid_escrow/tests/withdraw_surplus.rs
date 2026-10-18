@@ -1,13 +1,14 @@
 #![cfg(test)]
 
 use aid_escrow::{
-    AidEscrow, AidEscrowClient, Error, PendingWithdrawal, SURPLUS_WITHDRAWAL_DELAY_SECS,
+    AidEscrow, AidEscrowClient, Error, PendingWithdrawal,
+    DEFAULT_SURPLUS_WITHDRAWAL_STALENESS_SECS, SURPLUS_WITHDRAWAL_DELAY_SECS,
 };
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Ledger},
+    testutils::{Address as _, Events, Ledger},
     token::{StellarAssetClient, TokenClient},
-    Address, Env, Map,
+    Address, Env, Map, Symbol, TryFromVal,
 };
 
 const UNIT: i128 = 10_000_000;
@@ -432,6 +433,98 @@ fn get_pending_withdrawal_returns_proposal_fields() {
     assert_eq!(p.amount, 2 * UNIT);
     assert_eq!(p.token, token_client.address);
     assert_eq!(p.executable_at, now + SURPLUS_WITHDRAWAL_DELAY_SECS);
+}
+
+#[test]
+fn default_staleness_window_is_configurable_and_must_exceed_timelock() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _) = setup_funded(&env, 1);
+
+    assert_eq!(
+        client.get_surplus_staleness_secs(),
+        DEFAULT_SURPLUS_WITHDRAWAL_STALENESS_SECS
+    );
+    let configured = SURPLUS_WITHDRAWAL_DELAY_SECS + 10;
+    client.set_surplus_staleness_secs(&configured);
+    assert_eq!(client.get_surplus_staleness_secs(), configured);
+
+    let too_short = SURPLUS_WITHDRAWAL_DELAY_SECS;
+    assert_eq!(
+        client.try_set_surplus_staleness_secs(&too_short),
+        Err(Ok(Error::InvalidSurplusWithdrawalStaleness))
+    );
+}
+
+#[test]
+fn sweep_rejects_a_proposal_before_its_staleness_window() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, token_client, _, _) = setup_funded(&env, 1);
+    let to = Address::generate(&env);
+    let stale_after = SURPLUS_WITHDRAWAL_DELAY_SECS + 10;
+    client.set_surplus_staleness_secs(&stale_after);
+    client.propose_surplus_withdrawal(&to, &UNIT, &token_client.address);
+
+    // The execution delay has elapsed, but the proposal has not reached its
+    // separately configured stale age.
+    advance_time(&env, stale_after - 1);
+    assert_eq!(
+        client.try_sweep_stale_surplus_withdrawal(),
+        Err(Ok(Error::SurplusWithdrawalNotStale))
+    );
+    assert!(client.get_pending_withdrawal().is_some());
+}
+
+#[test]
+fn stale_sweep_clears_pending_proposal_and_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, token_client, _, _) = setup_funded(&env, 1);
+    let to = Address::generate(&env);
+    let stale_after = SURPLUS_WITHDRAWAL_DELAY_SECS + 10;
+    client.set_surplus_staleness_secs(&stale_after);
+    client.propose_surplus_withdrawal(&to, &UNIT, &token_client.address);
+    let contract_balance_before = token_client.balance(&client.address);
+    let recipient_balance_before = token_client.balance(&to);
+
+    advance_time(&env, stale_after);
+    client.sweep_stale_surplus_withdrawal();
+
+    let events = env.events().all();
+    assert_eq!(events.len(), 1);
+    let (_, topics, _) = events.last().unwrap();
+    let topic = Symbol::try_from_val(&env, &topics.first().unwrap()).unwrap();
+    assert_eq!(topic, Symbol::new(&env, "surplus_withdrawal_swept"));
+    assert_eq!(client.get_pending_withdrawal(), None);
+    assert_eq!(
+        token_client.balance(&client.address),
+        contract_balance_before
+    );
+    assert_eq!(token_client.balance(&to), recipient_balance_before);
+}
+
+#[test]
+fn sweep_returns_not_pending_after_execution_or_cancellation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, token_client, _, _) = setup_funded(&env, 2);
+    let to = Address::generate(&env);
+
+    client.propose_surplus_withdrawal(&to, &UNIT, &token_client.address);
+    client.cancel_surplus_withdrawal();
+    assert_eq!(
+        client.try_sweep_stale_surplus_withdrawal(),
+        Err(Ok(Error::SurplusWithdrawalNotPending))
+    );
+
+    client.propose_surplus_withdrawal(&to, &UNIT, &token_client.address);
+    advance_time(&env, SURPLUS_WITHDRAWAL_DELAY_SECS);
+    client.execute_surplus_withdrawal();
+    assert_eq!(
+        client.try_sweep_stale_surplus_withdrawal(),
+        Err(Ok(Error::SurplusWithdrawalNotPending))
+    );
 }
 
 // ---------------------------------------------------------------------------
