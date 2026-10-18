@@ -1,14 +1,16 @@
-import pytest
 from typing import Any, Dict, List, Optional
-from services.prompt_registry import VerificationPrompt, PromptRegistry
+
+import pytest
+
 from services.humanitarian_prompt import (
-    HumanitarianPromptEngine,
-    HumanitarianPrimaryPromptV1,
     HumanitarianFallbackPromptV1,
-    HumanitarianPrimaryPromptV2,
     HumanitarianFallbackPromptV2,
+    HumanitarianPrimaryPromptV1,
+    HumanitarianPrimaryPromptV2,
+    HumanitarianPromptEngine,
     create_default_prompt_registry,
 )
+from services.prompt_registry import PromptRegistry, VerificationPrompt
 
 
 class CustomTestPrompt(VerificationPrompt):
@@ -265,6 +267,7 @@ class TestHumanitarianPromptEngine:
         self, monkeypatch
     ):
         from config import settings
+
         monkeypatch.setattr(settings, "default_prompt_language", "fr")
         monkeypatch.setattr(settings, "org_default_languages", {})
         monkeypatch.setattr(settings, "campaign_default_languages", {})
@@ -274,6 +277,7 @@ class TestHumanitarianPromptEngine:
 
     def test_resolve_language_explicit_hint_takes_precedence(self, monkeypatch):
         from config import settings
+
         monkeypatch.setattr(settings, "default_prompt_language", "en")
         monkeypatch.setattr(settings, "org_default_languages", {"org-1": "es"})
         monkeypatch.setattr(settings, "campaign_default_languages", {"camp-1": "de"})
@@ -287,6 +291,7 @@ class TestHumanitarianPromptEngine:
 
     def test_resolve_language_campaign_default_override(self, monkeypatch):
         from config import settings
+
         monkeypatch.setattr(settings, "default_prompt_language", "en")
         monkeypatch.setattr(settings, "org_default_languages", {"org-1": "es"})
         monkeypatch.setattr(settings, "campaign_default_languages", {"camp-1": "ar"})
@@ -300,6 +305,7 @@ class TestHumanitarianPromptEngine:
 
     def test_resolve_language_org_default_override(self, monkeypatch):
         from config import settings
+
         monkeypatch.setattr(settings, "default_prompt_language", "en")
         monkeypatch.setattr(settings, "org_default_languages", {"org-1": "es"})
         monkeypatch.setattr(settings, "campaign_default_languages", {})
