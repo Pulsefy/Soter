@@ -1,6 +1,9 @@
 import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import { Injectable } from '@nestjs/common';
+import { RecipientRemovalReasonCode } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
+import { PrismaService } from '../prisma/prisma.service';
+import { RecipientRemovalQueryDto } from './dto/recipient-removal.dto';
 
 export type ImportRowStatus = 'valid' | 'warning' | 'error';
 export type ImportMessageSeverity = 'warning' | 'error';
@@ -53,6 +56,82 @@ const PHONE_HEADERS = ['phone', 'phonenumber', 'mobile'];
 
 @Injectable()
 export class RecipientsService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async remove(
+    recipientRef: string,
+    reasonCode: RecipientRemovalReasonCode,
+    reason: string | undefined,
+    removedBy: string,
+    ngoId?: string,
+  ) {
+    if (
+      typeof recipientRef !== 'string' ||
+      typeof removedBy !== 'string' ||
+      !Object.values(RecipientRemovalReasonCode).includes(reasonCode)
+    ) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'A recipient reference, authenticated actor, and valid reason code are required.',
+      );
+    }
+    const normalizedRecipientRef = recipientRef.trim();
+    const normalizedActor = removedBy.trim();
+    if (!normalizedRecipientRef || !normalizedActor) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'A recipient reference and authenticated actor are required.',
+      );
+    }
+
+    return this.prisma.recipientRemoval.create({
+      data: {
+        recipientRef: normalizedRecipientRef,
+        ngoId: ngoId ?? null,
+        reasonCode,
+        reason: reason?.trim() || null,
+        removedBy: normalizedActor,
+      },
+    });
+  }
+
+  async findRemovals(query: RecipientRemovalQueryDto = {}, ngoId?: string) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 50;
+    if (
+      !Number.isInteger(page) ||
+      page < 1 ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 200
+    ) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Page must be positive and limit must be between 1 and 200.',
+      );
+    }
+    const recipientRef = query.recipientRef?.trim();
+    const where = {
+      ...(recipientRef ? { recipientRef } : {}),
+      ...(ngoId ? { ngoId } : {}),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.recipientRemoval.findMany({
+        where,
+        orderBy: [{ removedAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.recipientRemoval.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
+  }
+
   /**
    * Validates the raw contents of an uploaded recipient CSV and produces
    * row-level results that can be serialized to JSON or a CSV report.

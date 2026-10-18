@@ -112,6 +112,7 @@
     "languageHint": "Choose the language used across the app",
     "securityTitle": "Security",
     "biometricLock": "Biometric Lock",
+    "sharedDeviceMode": "Shared Device Mode",
     "pushNotifications": "Push Notifications",
     "autoDetect": "Auto-detect",
     "aidCache": "Aid cache",

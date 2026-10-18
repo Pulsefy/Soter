@@ -112,6 +112,7 @@
     "languageHint": "Elige el idioma utilizado en toda la app",
     "securityTitle": "Seguridad",
     "biometricLock": "Bloqueo biométrico",
+    "sharedDeviceMode": "Modo dispositivo compartido",
     "pushNotifications": "Notificaciones push",
     "autoDetect": "Detección automática",
     "aidCache": "Caché de ayuda",

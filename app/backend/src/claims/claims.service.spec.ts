@@ -22,6 +22,7 @@ import {
 import { SorobanTransactionLifecycleService } from '../onchain/soroban-transaction-lifecycle.service';
 import { SorobanTransactionScheduler } from '../onchain/soroban-transaction.scheduler';
 import { VerificationService } from '../verification/verification.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 describe('ClaimsService', () => {
   let service: ClaimsService;
@@ -31,6 +32,7 @@ describe('ClaimsService', () => {
   let _metricsService: MetricsService;
   let _auditService: AuditService;
   let configService: ConfigService;
+  let analyticsServiceMock: { invalidateCache: jest.Mock };
 
   // Typed as any to bypass strict checks on newer structural fields like expiresAt, cancelledAt, etc.
   const mockClaim: any = {
@@ -118,6 +120,8 @@ describe('ClaimsService', () => {
   };
 
   beforeEach(async () => {
+    analyticsServiceMock = { invalidateCache: jest.fn() };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ClaimsService,
@@ -203,6 +207,10 @@ describe('ClaimsService', () => {
           provide: VerificationService,
           useValue: mockVerificationService,
         },
+        {
+          provide: AnalyticsService,
+          useValue: analyticsServiceMock,
+        },
       ],
     }).compile();
 
@@ -225,6 +233,41 @@ describe('ClaimsService', () => {
       tokenAddress: 'G' + 'A'.repeat(55),
       evidenceRef: 'evidence-456',
     };
+
+    it('invalidates the dashboard cache after creating a claim', async () => {
+      prismaService.campaign.findUnique.mockResolvedValue({ id: 'campaign-1' });
+      prismaService.$transaction.mockImplementation(callback => {
+        const tx = {
+          claim: {
+            create: jest.fn().mockResolvedValue({
+              id: 'claim-new',
+              campaignId: createDto.campaignId,
+              amount: createDto.amount,
+              recipientRef: createDto.recipientRef,
+              evidenceRef: createDto.evidenceRef,
+              status: ClaimStatus.requested,
+              campaign: { id: 'campaign-1' },
+            }),
+          },
+          balanceLedger: {
+            create: jest.fn().mockResolvedValue({ id: 'ledger-1' }),
+          },
+        };
+        return callback(tx as any);
+      });
+      prismaService.claim.findUnique.mockResolvedValue(null);
+      prismaService.claim.update.mockResolvedValue(null);
+      mockVerificationService.enqueueVerification.mockResolvedValue({
+        jobId: 'job-1',
+        priority: 0,
+      });
+
+      await service.create(createDto);
+
+      expect(analyticsServiceMock.invalidateCache).toHaveBeenCalledWith(
+        'claim_updated',
+      );
+    });
 
     const mockCampaign = {
       id: 'campaign-1',
@@ -257,7 +300,7 @@ describe('ClaimsService', () => {
       };
       jest
         .spyOn(prismaService, '$transaction')
-        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) =>
+        .mockImplementation((callback: (tx: any) => Promise<unknown>) =>
           callback(tx),
         );
       return tx;

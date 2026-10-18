@@ -52,7 +52,8 @@ export class LedgerAdminController {
     description:
       'Start or resume a backfill job to process a range of ledgers and populate missing ledger entries. ' +
       'Uses a durable checkpoint so interrupted runs resume from `lastProcessedLedger` rather than restarting. ' +
-      'Re-triggering the same range while a run is already in progress returns 409.',
+      'Re-triggering the same range while a run is already in progress returns 409. ' +
+      'Pass `dryRun: true` to preview what would be created/updated without persisting anything.',
   })
   @ApiBody({
     schema: {
@@ -78,6 +79,11 @@ export class LedgerAdminController {
           type: 'string',
           description: 'Optional actor identifier for audit trail',
         },
+        dryRun: {
+          type: 'boolean',
+          description:
+            'Report only, without persisting changes (default: false)',
+        },
       },
       required: ['startLedger', 'endLedger'],
     },
@@ -85,18 +91,52 @@ export class LedgerAdminController {
   @ApiAcceptedResponse({
     description: 'Backfill job queued or resumed successfully.',
     schema: {
-      example: {
-        jobId: 'job_123',
-        checkpointId: 'ckp_abc',
-        jobKey: 'backfill:1000:2000',
-        startLedger: 1000,
-        endLedger: 2000,
-        status: 'queued',
-        processedCount: 0,
-        skippedCount: 0,
-        errorCount: 0,
-        totalCount: 1001,
-      },
+      oneOf: [
+        {
+          description: 'Normal backfill job queued',
+          example: {
+            jobId: 'job_123',
+            checkpointId: 'ckp_abc',
+            jobKey: 'backfill:1000:2000',
+            startLedger: 1000,
+            endLedger: 2000,
+            status: 'queued',
+            processedCount: 0,
+            skippedCount: 0,
+            errorCount: 0,
+            totalCount: 1001,
+          },
+        },
+        {
+          description: 'Dry-run preview',
+          example: {
+            jobId: 'dry-run',
+            jobKey: 'backfill:1000:2000',
+            startLedger: 1000,
+            endLedger: 2000,
+            campaignId: 'cmp_1',
+            status: 'dry-run',
+            totalCount: 1001,
+            wouldCreate: 45,
+            wouldSkip: 12,
+            unattributable: 0,
+            countsByEventType: {
+              disburse: 30,
+              refund: 15,
+            },
+            sampleRecords: [
+              {
+                id: 'e1',
+                ledger: 1005,
+                eventType: 'disburse',
+                amount: 1000,
+                txHash: 'abc123',
+                packageId: 'pkg_testnet',
+              },
+            ],
+          },
+        },
+      ],
     },
   })
   @ApiBadRequestResponse({ description: 'Invalid request parameters.' })
@@ -117,6 +157,7 @@ export class LedgerAdminController {
       campaignId?: string;
       batchSize?: number;
       triggeredBy?: string;
+      dryRun?: boolean;
     },
   ) {
     const {
@@ -125,6 +166,7 @@ export class LedgerAdminController {
       campaignId,
       batchSize = 100,
       triggeredBy,
+      dryRun = false,
     } = body;
 
     if (startLedger > endLedger) {
@@ -137,6 +179,7 @@ export class LedgerAdminController {
       campaignId,
       batchSize,
       triggeredBy,
+      dryRun,
     );
   }
 
