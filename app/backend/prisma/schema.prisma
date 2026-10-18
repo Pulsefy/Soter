@@ -235,6 +235,7 @@ model VerificationRequest {
   @@index([orgId])
   @@index([status])
   @@index([reviewedAt])
+  @@index([status, deletedAt, createdAt(sort: Desc)])
 }
 
 model Claim {
