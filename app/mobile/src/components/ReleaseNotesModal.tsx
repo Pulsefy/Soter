@@ -29,7 +29,7 @@ export const ReleaseNotesModal: React.FC = () => {
         <SafeAreaView style={[styles.container, { backgroundColor: colors.surface }]}>
           <View style={styles.header}>
             <Text style={[styles.title, { color: colors.textPrimary }]}>
-              What's New in {versionInfo.latestVersion}
+              What&apos;s New in {versionInfo.releaseNotesVersion}
             </Text>
           </View>
 
