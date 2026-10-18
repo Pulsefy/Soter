@@ -81,6 +81,13 @@ jest.mock('../contexts/CrashReportingContext', () => ({
   }),
 }));
 
+jest.mock('../contexts/SharedDeviceContext', () => ({
+  useSharedDevice: () => ({
+    enabled: false,
+    toggle: jest.fn(),
+  }),
+}));
+
 jest.mock('../contexts/WalletContext', () => ({
   useWallet: () => mockWalletState,
 }));

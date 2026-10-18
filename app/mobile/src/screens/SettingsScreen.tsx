@@ -20,6 +20,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
 import { useCrashReporting } from '../contexts/CrashReportingContext';
 import { useSyncDeferral } from '../contexts/SyncDeferralContext';
+import { useSharedDevice } from '../contexts/SharedDeviceContext';
 import { config } from '../config';
 import { useWallet } from '../contexts/WalletContext';
 import { getAccountExplorerUrl } from '../explorerUtils';
@@ -82,6 +83,7 @@ export const SettingsScreen: React.FC = () => {
     enabled: crashReportingEnabled,
     toggle: toggleCrashReporting,
   } = useCrashReporting();
+  const { enabled: sharedDeviceEnabled, toggle: toggleSharedDevice } = useSharedDevice();
   const { syncFrequency, setSyncFrequency } = useSyncDeferral();
   const { publicKey, status: walletStatus } = useWallet();
   const isWalletConnected = walletStatus === 'connected';
@@ -440,6 +442,39 @@ ${structuredLogger.getDiagnosticsText(12)}`;
             accessibilityRole="alert"
           >
             Biometrics are not available or not enrolled on this device.
+          </Text>
+        )}
+
+        {/* Shared Device Mode toggle */}
+        <View
+          style={styles.row}
+          accessible
+          accessibilityRole="switch"
+          accessibilityLabel="Shared Device Mode"
+          accessibilityHint="Automatically sign out when the app is backgrounded. Useful for devices shared between workers."
+          accessibilityValue={{ text: sharedDeviceEnabled ? 'on' : 'off' }}
+          accessibilityState={{ checked: sharedDeviceEnabled }}
+          onAccessibilityTap={() => void toggleSharedDevice(!sharedDeviceEnabled)}
+        >
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>{t('settings.sharedDeviceMode')}</Text>
+            <Text style={styles.rowSubtitle}>
+              Automatically sign out when the app is backgrounded
+            </Text>
+          </View>
+          <Switch
+            value={sharedDeviceEnabled}
+            onValueChange={(v) => void toggleSharedDevice(v)}
+            trackColor={{ false: colors.border, true: colors.brand.primary }}
+            thumbColor="#FFFFFF"
+            importantForAccessibility="no-hide-descendants"
+            accessibilityElementsHidden
+          />
+        </View>
+
+        {sharedDeviceEnabled && (
+          <Text style={styles.hint} accessibilityRole="alert">
+            When enabled, the wallet session will be cleared if the app is backgrounded for more than 5 seconds. Re-authentication will be required on return.
           </Text>
         )}
 

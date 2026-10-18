@@ -32,6 +32,7 @@ import { ReleaseNotesModal } from './src/components/ReleaseNotesModal';
 import { ForceUpgradeScreen } from './src/screens/ForceUpgradeScreen';
 import { NetworkGuardBanner } from './src/components/NetworkGuardBanner';
 import { markColdStartPhase } from './src/startup/coldStartTracker';
+import { SharedDeviceProvider } from './src/contexts/SharedDeviceContext';
 
 // ---------------------------------------------------------------------------
 // Deep-link configuration for React Navigation
@@ -102,31 +103,33 @@ const AppInner = () => {
 
   return (
     <WalletProvider>
-      <BiometricProvider>
-        <SyncDeferralProvider>
-          <SyncProvider>
-            {/*
-              NetworkGuardBanner sits outside NavigationContainer so it renders
-              on every screen — including HomeScreen on cold start — without
-              needing to be wired into each individual screen.
-            */}
-            <NetworkGuardBanner />
-            <NavigationContainer
-              linking={linking}
-              theme={navTheme}
-              ref={navigationRef}
-              onReady={() => {
-                markColdStartPhase('navigationReady');
-                setIsNavReady(true);
-              }}
-            >
-              <AppNavigator />
-              <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-            </NavigationContainer>
-            <ReleaseNotesModal />
-          </SyncProvider>
-        </SyncDeferralProvider>
-      </BiometricProvider>
+      <SharedDeviceProvider>
+        <BiometricProvider>
+          <SyncDeferralProvider>
+            <SyncProvider>
+              {/*
+                NetworkGuardBanner sits outside NavigationContainer so it renders
+                on every screen — including HomeScreen on cold start — without
+                needing to be wired into each individual screen.
+              */}
+              <NetworkGuardBanner />
+              <NavigationContainer
+                linking={linking}
+                theme={navTheme}
+                ref={navigationRef}
+                onReady={() => {
+                  markColdStartPhase('navigationReady');
+                  setIsNavReady(true);
+                }}
+              >
+                <AppNavigator />
+                <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+              </NavigationContainer>
+              <ReleaseNotesModal />
+            </SyncProvider>
+          </SyncDeferralProvider>
+        </BiometricProvider>
+      </SharedDeviceProvider>
     </WalletProvider>
   );
 };
