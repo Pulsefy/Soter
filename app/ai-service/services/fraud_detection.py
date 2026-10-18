@@ -5,7 +5,10 @@ Clusters claim metadata by similarity and flags outliers or clusters that exceed
 """
 
 import logging
-from typing import List
+import uuid
+from collections import deque
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
@@ -28,6 +31,23 @@ logger = logging.getLogger(__name__)
 audit_logger = logging.getLogger("audit.fraud_detection")
 
 
+#: Maximum number of recent decisions kept in memory for feedback linking.
+#: This is a sliding window - older decisions are evicted as new ones arrive.
+#: The audit log remains the durable record; this buffer only enables
+# looking up the original score/band when a reviewer submits feedback.
+
+_RECENT_DECISIONS_MAX = 10000
+_recent_decisions: "deque[dict]" = deque(maxlen=_RECENT_DECISIONS_MAX)
+_recent_decisions_by_id: Dict[str, dict] = {}
+
+
+#: Reviewer feedback records. Each record references the original
+#: decision audit entry (by decision_id) rather than duplicating claim
+#: content, and captures the reviewer's final outcome.
+
+_feedback_records: List[dict] = []
+
+
 def _band_for_score(score: float, pass_max: float, review_max: float) -> FraudBand:
     """Map a normalised fraud_risk_score (0-1) to a decision band.
 
@@ -40,20 +60,43 @@ def _band_for_score(score: float, pass_max: float, review_max: float) -> FraudBa
     return FraudBand.REJECT
 
 
-def _log_decision(result: ClaimFraudResult, pass_max: float, review_max: float) -> None:
+def _log_decision(result: ClaimFraudResult, pass_max: float, review_max: float) -> str:
     """Record a single claim's decision for audit purposes.
 
     Logs the score, the band it was assigned, and the exact thresholds that were active at decision time - so if thresholds are retuned later, past decisions remain fully explainable from the logs alone.
+
+    Returns the generated decision_id, which is the handle that reviewer
+    feedback records use to reference this audit entry (without copying
+    claim content into the feedback record).
     """
+    decision_id = uuid.uuid4().hex
     audit_logger.info(
-        "fraud_decision claim_id=%s score=%s band=%s "
-        "fraud_pass_max_score=%s fraud_review_max_score=%s",
+        "fraud_decision decision_id=%s claim_id=%s score=%s band=%s "
+        "fraud_pass_max_score=%s fraud_review_max_score=%s rules_version=%s",
+        decision_id,
         result.claim_id,
         result.fraud_risk_score,
         result.band.value,
         pass_max,
         review_max,
+        FRAUD_RULES_VERSION,
     )
+    record = {
+        "decision_id": decision_id,
+        "claim_id": result.claim_id,
+        "fraud_risk_score": result.fraud_risk_score,
+        "band": result.band.value,
+        "pass_max": pass_max,
+        "review_max": review_max,
+        "rules_version": FRAUD_RULES_VERSION,
+        "decided_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if len(_recent_decisions) >= _RECENT_DECISIONS_MAX:
+        evicted = _recent_decisions.popleft()
+        _recent_decisions_by_id.pop(evicted["decision_id"], None)
+    _recent_decisions.append(record)
+    _recent_decisions_by_id[decision_id] = record
+    return decision_id
 
 
 #: Version of the fraud scoring rules. Fraud detection is statistical rather
@@ -156,3 +199,108 @@ def detect_fraud(claims: List[ClaimMetadata]) -> List[ClaimFraudResult]:
         sum(r.is_flagged for r in results),
     )
     return results
+
+
+def record_reviewer_feedback(
+    decision_id: str,
+    final_outcome: str,
+    reviewer_id: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict:
+    """Capture a reviewer's final decision on a flagged claim.
+
+    The feedback record links back to the original fraud score and band via
+    the decision_id of the existing audit entry. It deliberately does not
+    copy claim content (IP, evidence hash, location, amount) - only the
+    claim_id handle and the reviewer outcome are stored.
+
+    Raises KeyError if the decision_id is not known (e.g. evicted from the
+    rolling window or never issued), and ValueError for an unknown outcome.
+    """
+    normalised = final_outcome.strip().upper()
+    if normalised not in _ALLOWED_OUTCOMES:
+        raise ValueError(
+            f"final_outcome must be one of {sorted(_ALLOWED_OUTCOMES)}, got {final_outcome!r}"
+        )
+    decision = _recent_decisions_by_id.get(decision_id)
+    if decision is None:
+        raise KeyError(
+            f"unknown decision_id {decision_id!r}; no matching audit entry"
+        )
+    record = {
+        "decision_id": decision_id,
+        "claim_id": decision["claim_id"],
+        "predicted_band": decision["band"],
+        "fraud_risk_score": decision["fraud_risk_score"],
+        "rules_version": decision["rules_version"],
+        "final_outcome": normalised,
+        "reviewer_id": reviewer_id,
+        "notes": notes,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _feedback_records.append(record)
+    audit_logger.info(
+        "fraud_feedback decision_id=%s claim_id=%s predicted_band=%s "
+        "final_outcome=%s reviewer_id=%s",
+        decision_id,
+        record["claim_id"],
+        record["predicted_band"],
+        normalised,
+        reviewer_id,
+    )
+    return record
+
+
+def get_feedback_report(window_days: int = 30) -> dict:
+    """Compare predicted bands against actual outcomes over a rolling window.
+
+    This is distinct from the fixture-based calibration report: it uses
+    real reviewer outcomes captured via record_reviewer_feedback. Returns a
+    confusion matrix between predicted band and final outcome, along with
+    per-band accuracy and total counts.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+    predicted_bands = [b.value for b in FraudBand]
+    outcomes = sorted(_ALLOWED_OUTCOMES)
+    confusion: Dict[str, Dict[str, int]] = {
+        pb: {o: 0 for o in outcomes} for pb in predicted_bands
+    }
+    total = 0
+    matched = 0
+    for record in _feedback_records:
+        try:
+            recorded_at = datetime.fromisoformat(record["recorded_at"])
+        except ValueError:
+            continue
+        if recorded_at < cutoff:
+            continue
+        pb = record["predicted_band"]
+        o = record["final_outcome"]
+        if pb not in confusion or o not in confusion[pb]:
+            continue
+        confusion[pb][o] += 1
+        total += 1
+        if pb == o:
+            matched += 1
+    per_band = {}
+    for pb in predicted_bands:
+        row_total = sum(confusion[pb].values())
+        per_band[pb] = {
+            "count": row_total,
+            "correct": confusion[pb].get(pb, 0),
+            "accuracy": (
+                round(confusion[pb].get(pb, 0) / row_total, 4)
+                if row_total
+                else None
+            ),
+        }
+    return {
+        "window_days": window_days,
+        "total_records": total,
+        "overall_accuracy": round(matched / total, 4) if total else None,
+        "confusion_matrix": confusion,
+        "per_band": per_band,
+    }
+
+
+_ALLOWED_OUTCOMES = {"APPROVED", "REJECTED", "FRAUD", "LEGITIMATE"}

@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1412-add-a-feedback-loop-for-fraud-detection-outcomes",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-1412-add-a-feedback-loop-for-fraud-detection-outcomes": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1412-add-a-feedback-loop-for-fraud-detection-outcomes",
+    "origin"
+  ]
+}

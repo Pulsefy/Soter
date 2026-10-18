@@ -60,7 +60,7 @@ class TestFraudDetectionEndpoint:
         assert resp.status_code == 422
 
     def test_outlier_gets_higher_score(self):
-        """A claim with a very different IP should score higher than identical ones."""
+        """A!claim with a very different IP should score higher than identical ones."""
         claims = [
             {"claim_id": f"c{i}", "ip_address": "1.2.3.4", "amount": 100.0}
             for i in range(8)
@@ -151,3 +151,78 @@ class TestFraudResponseIncludesBand:
         resp = client.post("/v1/fraud/detect", json=payload)
         result = resp.json()["result"][0]
         assert result["band"] == "PASS"
+
+
+class TestReviewerFeedbackLoop:
+    """Covers the reviewer feedback loop for flagged claims."""
+
+    def test_reviewer_decision_links_to_score_and_band(self):
+        from services.fraud_feedback import record_reviewer_decision, get_feedback_record
+
+        record = record_reviewer_decision(
+            claim_id="fb1",
+            fraud_risk_score=0.82,
+            band="REJECT",
+            decision="REJECT",
+            audit_entry_id="audit-123",
+            reviewer_id="rev-1",
+        )
+        assert record["claim_id"] == "fb1"
+        assert record["fraud_risk_score"] == 0.82
+        assert record["band"] == "REJECT"
+        assert record["decision"] == "REJECT"
+        assert record["audit_entry_id"] == "audit-123"
+
+        stored = get_feedback_record("fb1")
+        assert stored is not None
+        assert stored["audit_entry_id"] == "audit-123"
+
+    def test_feedback_does_not_duplicate_claim_content(self):
+        from services.fraud_feedback import record_reviewer_decision, get_feedback_record
+
+        record_reviewer_decision(
+            claim_id="fb2",
+            fraud_risk_score=0.55,
+            band="REVIEW",
+            decision="APPROVE ",
+            audit_entry_id="audit-456",
+            reviewer_id="rev-2",
+        )
+        stored = get_feedback_record("fb2")
+        for forbidden in ("ip_address", "evidence_hash", "amount", "claim_content"):
+            assert forbidden not in stored
+
+    def test_rolling_report_compares_bands_to_outcomes(self):
+        from services.fraud_feedback import (
+            record_reviewer_decision,
+            build_rolling_outcome_report,
+        )
+
+        record_reviewer_decision(
+            claim_id="rp1",
+            fraud_risk_score=0.9,
+            band="REJECT",
+            decision="REJECT",
+            audit_entry_id="audit-rp1",
+            reviewer_id="rev-1",
+        )
+        record_reviewer_decision(
+            claim_id="rp2",
+            fraud_risk_score=0.5,
+            band="REVIEW",
+            decision="APPROVE",
+            audit_entry_id="audit-rp2",
+            reviewer_id="rev-2",
+        )
+        report = build_rolling_outcome_report()
+        assert "predicted_vs_actual" in report
+        assert report["total_records"] >= 2
+        assert report["predicted_vs_actual"]["REJECT"]["REJECT"] >= 1
+        assert report["predicted_vs_actual"]["REVIEW"]["APPROVE"] >= 1
+
+    def test_rolling_report_is_distinct_from_calibration(self):
+        from services.fraud_feedback import build_rolling_outcome_report
+
+        report = build_rolling_outcome_report()
+        assert report["report_type"] == "rolling_outcomes"
+        assert report["report_type"] != "fixture_calibration"
