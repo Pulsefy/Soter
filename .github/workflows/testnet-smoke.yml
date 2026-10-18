@@ -1,4 +1,4 @@
-name: Testnet Integration Harness
+Name: Testnet Integration Harness
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
   integration-harness:
     name: Testnet Integration Harness
     runs-on: ubuntu-latest
-# NOTE: GitHub Actions does not allow referencing the `secrets` context
+    # NOTE: GitHub Actions does not allow referencing the `secrets` context
     # directly inside a job-level `if:` conditional. The previous version had:
     #
     #   if: >
@@ -66,7 +66,7 @@ jobs:
           npm ci
 
       - name: Run integration harness
-if: steps.secrets-check.outputs.has-secrets == 'true'
+        if: steps.secrets-check.outputs.has-secrets == 'true'
         continue-on-error: true  # flake: testnet RPC/npm registry is transient; retries pass with no code change
         working-directory: tools/testnet-smoke
         env:
@@ -81,4 +81,3 @@ if: steps.secrets-check.outputs.has-secrets == 'true'
           SMOKE_OP_TIMEOUT_MS: ${{ vars.SMOKE_OP_TIMEOUT_MS || '120000' }}
         run: |
           node index.js
-
