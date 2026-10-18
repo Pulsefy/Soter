@@ -34,6 +34,20 @@ from exceptions import AIServiceError
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "close_provider_http_clients",
+    "FixtureProvider",
+    "GroqProvider",
+    "LLMResponse",
+    "ModelProvider",
+    "OCRField",
+    "OCRResponse",
+    "OpenAIProvider",
+    "ProviderRegistry",
+    "TesseractOCRProvider",
+    "validate_fallback_order",
+]
+
 
 class _ProviderHTTPClientPool:
     """Lazily shared HTTP clients with idle connection recycling."""

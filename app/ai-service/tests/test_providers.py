@@ -4,6 +4,7 @@ import httpx
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 
+from services import providers as provider_module
 from services.providers import (
     ModelProvider,
     ProviderRegistry,
@@ -334,10 +335,10 @@ class TestOpenAIProvider:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            close_provider_http_clients()
+            provider_module.close_provider_http_clients()
             with patch("httpx.Client", return_value=mock_client_instance):
                 resp = OpenAIProvider().llm_chat("sys", "usr", model="gpt-4")
-            close_provider_http_clients()
+            provider_module.close_provider_http_clients()
             assert resp.content == "test content"
             assert resp.provider == "openai"
             # No "usage" key in the mocked response: unavailable, not 0
@@ -367,10 +368,10 @@ class TestOpenAIProvider:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            close_provider_http_clients()
+            provider_module.close_provider_http_clients()
             with patch("httpx.Client", return_value=mock_client_instance):
                 resp = OpenAIProvider().llm_chat("sys", "usr", model="gpt-4")
-            close_provider_http_clients()
+            provider_module.close_provider_http_clients()
             assert resp.prompt_tokens == 42
             assert resp.completion_tokens == 17
             assert resp.total_tokens == 59
@@ -393,7 +394,7 @@ class TestOpenAIProvider:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
             mock_settings.provider_http_idle_timeout_seconds = 300
-            close_provider_http_clients()
+            provider_module.close_provider_http_clients()
             with patch(
                 "httpx.Client", side_effect=[stale_client, fresh_client]
             ) as MockClient:
@@ -402,7 +403,7 @@ class TestOpenAIProvider:
             assert response.content == "recovered"
             assert MockClient.call_count == 2
             stale_client.close.assert_called_once_with()
-            close_provider_http_clients()
+            provider_module.close_provider_http_clients()
 
 
 class TestGroqProvider:
