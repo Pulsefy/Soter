@@ -121,7 +121,11 @@ export class LedgerBackfillService {
     for (let ledger = startLedger; ledger <= endLedger; ledger += batchSize) {
       const batchEnd = Math.min(ledger + batchSize - 1, endLedger);
 
-      const result = await this.detectLedgerChanges(ledger, batchEnd, campaignId);
+      const result = await this.detectLedgerChanges(
+        ledger,
+        batchEnd,
+        campaignId,
+      );
       wouldCreate = wouldCreate.concat(result.wouldCreate);
       wouldSkip += result.wouldSkip;
       unattributable = unattributable.concat(result.unattributable);
@@ -344,8 +348,14 @@ export class LedgerBackfillService {
     skipped: number;
     errors: string[];
   }> {
-    const { startLedger, endLedger, campaignId, batchSize, checkpointId, dryRun } =
-      data;
+    const {
+      startLedger,
+      endLedger,
+      campaignId,
+      batchSize,
+      checkpointId,
+      dryRun,
+    } = data;
     const errors: string[] = [];
     let processed = 0;
     let skipped = 0;

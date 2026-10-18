@@ -4,7 +4,6 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { StellarLedgerSource } from './stellar-ledger-source';
 import { PrismaService } from '../prisma/prisma.service';
-import type { DryRunResult } from './ledger-backfill.service';
 
 // ---------------------------------------------------------------------------
 // Minimal stubs
@@ -422,9 +421,9 @@ describe('LedgerBackfillService', () => {
     it('refuses to run when no live on-chain source is configured', async () => {
       mockLedgerSource.isEnabled.mockReturnValue(false);
 
-      await expect(
-        service.triggerDryRun(1000, 2000),
-      ).rejects.toThrow(NotImplementedException);
+      await expect(service.triggerDryRun(1000, 2000)).rejects.toThrow(
+        NotImplementedException,
+      );
       expect(mockPrisma.balanceLedger.findMany).not.toHaveBeenCalled();
     });
 
@@ -436,12 +435,7 @@ describe('LedgerBackfillService', () => {
         makeEntry({ id: 'e3', eventType: 'disburse', amount: 750 }),
       ]);
 
-      const result = await service.triggerDryRun(
-        1000,
-        1000,
-        'cmp_1',
-        100,
-      );
+      const result = await service.triggerDryRun(1000, 1000, 'cmp_1', 100);
 
       expect(result.status).toBe('dry-run');
       expect(result.wouldCreate).toBe(3);
@@ -508,7 +502,14 @@ describe('LedgerBackfillService', () => {
         makeEntry({ id: 'e1' }),
       ]);
 
-      const result = await service.triggerBackfill(1000, 2000, 'cmp_1', 100, undefined, true);
+      const result = await service.triggerBackfill(
+        1000,
+        2000,
+        'cmp_1',
+        100,
+        undefined,
+        true,
+      );
 
       expect(result.status).toBe('dry-run');
       expect(mockQueue.add).not.toHaveBeenCalled();
@@ -521,7 +522,14 @@ describe('LedgerBackfillService', () => {
       mockPrisma.backfillCheckpoint.create.mockResolvedValue(checkpoint);
       mockQueue.add.mockResolvedValue({ id: 'job_001' });
 
-      const result = await service.triggerBackfill(1000, 2000, 'cmp_1', 100, undefined, false);
+      const result = await service.triggerBackfill(
+        1000,
+        2000,
+        'cmp_1',
+        100,
+        undefined,
+        false,
+      );
 
       expect(result.status).toBe('queued');
       expect(mockQueue.add).toHaveBeenCalled();

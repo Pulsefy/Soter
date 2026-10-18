@@ -26,11 +26,7 @@ import {
   ApiNotFoundResponse,
   ApiConflictResponse,
 } from '@nestjs/swagger';
-import {
-  LedgerBackfillService,
-  BackfillResult,
-  DryRunResult,
-} from './ledger-backfill.service';
+import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
 import { SorobanCorrelationTraceService } from './soroban-correlation-trace.service';
@@ -85,7 +81,8 @@ export class LedgerAdminController {
         },
         dryRun: {
           type: 'boolean',
-          description: 'Report only, without persisting changes (default: false)',
+          description:
+            'Report only, without persisting changes (default: false)',
         },
       },
       required: ['startLedger', 'endLedger'],
