@@ -280,5 +280,8 @@
     "step3": "Verifica que tu saldo esté actualizado para realizar acciones en la cadena.",
     "linksTitle": "Faucets Oficiales de Stellar",
     "faucetNote": "Visible solo en entornos testnet."
+  },
+  "backpressure": {
+    "notice": "El procesamiento puede ser más lento de lo habitual en este momento. Su acción se completará igualmente."
   }
 }

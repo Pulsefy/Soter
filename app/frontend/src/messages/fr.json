@@ -280,5 +280,8 @@
     "step3": "Vérifiez que votre solde est mis à jour pour effectuer des actions on-chain.",
     "linksTitle": "Faucets Officiels Stellar",
     "faucetNote": "Visible uniquement dans les environnements testnet."
+  },
+  "backpressure": {
+    "notice": "Le traitement peut être plus lent que d’habitude en ce moment. Votre action sera tout de même prise en compte."
   }
 }

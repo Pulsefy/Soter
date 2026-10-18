@@ -378,5 +378,8 @@
     "step3": "Verify your balance is updated to perform onchain actions.",
     "linksTitle": "Official Stellar Faucets",
     "faucetNote": "Visible only in testnet environments."
+  },
+  "backpressure": {
+    "notice": "Processing may be slower than usual right now. Your action will still go through."
   }
 }

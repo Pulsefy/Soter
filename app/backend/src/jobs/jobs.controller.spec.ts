@@ -5,11 +5,13 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { RETENTION_PURGE_QUEUE } from '../retention-policy/retention-purge.processor';
 import { HttpException } from '@nestjs/common';
 import { Request } from 'express';
+import { QueueBackpressureService } from './services/queue-backpressure.service';
 
 describe('JobsController', () => {
   let controller: JobsController;
   let dlqService: any;
   let verificationQueue: any;
+  let backpressure: { getState: jest.Mock };
 
   beforeEach(async () => {
     dlqService = {
@@ -17,6 +19,8 @@ describe('JobsController', () => {
       getJobHistory: jest.fn().mockResolvedValue({}),
       replayJob: jest.fn().mockResolvedValue({ success: true }),
     };
+
+    backpressure = { getState: jest.fn() };
 
     verificationQueue = {
       getWaitingCount: jest.fn().mockResolvedValue(0),
@@ -31,6 +35,10 @@ describe('JobsController', () => {
       controllers: [JobsController],
       providers: [
         { provide: DlqService, useValue: dlqService },
+        {
+          provide: QueueBackpressureService,
+          useValue: backpressure,
+        },
         { provide: getQueueToken('verification'), useValue: verificationQueue },
         {
           provide: getQueueToken('notifications'),
@@ -86,5 +94,17 @@ describe('JobsController', () => {
         HttpException,
       );
     });
+  });
+
+  it('surfaces the queue backpressure signal', async () => {
+    const state = {
+      active: true,
+      level: 'elevated',
+      queues: [{ name: 'verification', level: 'elevated' }],
+      checkedAt: '2026-01-01T00:00:00.000Z',
+    };
+    backpressure.getState.mockResolvedValue(state);
+
+    await expect(controller.getBackpressure()).resolves.toEqual(state);
   });
 });
