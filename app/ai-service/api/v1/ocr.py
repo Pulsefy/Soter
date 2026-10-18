@@ -208,6 +208,9 @@ async def queue_batch_ocr_jobs(
 
     document_statuses: list[BatchOCRDocumentStatus] = []
     for image in files:
+        # Pre-set to None so that if the read itself fails, the except
+        # branch still records a document with no retained payload (it is
+        # failed-but-not-retryable) rather than crashing the whole batch.
         contents: Optional[bytes] = None
         try:
             contents = await image.read()
@@ -244,6 +247,10 @@ async def queue_batch_ocr_jobs(
         [document.status for document in batch.documents.values()]
     )
     return BatchOCRResponse(
+        # The submission itself succeeded as long as the batch isn't wholly
+        # failed: a ``partially_failed`` batch still has work accepted, so
+        # ``success`` stays True and the caller inspects ``status``/``summary``
+        # for the per-document breakdown.
         success=batch_status != "failed",
         batch_id=batch.batch_id,
         status=batch_status,
@@ -631,6 +638,9 @@ def _summarize(batch: OCRBatch) -> BatchOCRSummary:
         elif document.status == "succeeded":
             summary.succeeded += 1
         else:
+            # The only remaining state in BatchOCRDocumentState is ``failed``
+            # (pending/processing/succeeded are handled above), so anything
+            # else counts as failed rather than being silently dropped.
             summary.failed += 1
     return summary
 

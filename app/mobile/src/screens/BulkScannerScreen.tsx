@@ -15,10 +15,12 @@ import { useTheme } from '../theme/ThemeContext';
 import { useTranslation } from '../i18n/useTranslation';
 import { useSync } from '../contexts/SyncContext';
 import { createScanDeduper } from './scanDeduper';
+import { config } from '../config';
 import { useCameraPermission } from '../hooks/useCameraPermission';
 import { CameraPermissionDenied } from '../components/CameraPermissionDenied';
 import {
   recordItemDeduped,
+  recordItemDedupedCrossSession,
   recordItemFailed,
   recordItemQueued,
   recordScanReceived,
@@ -49,11 +51,17 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
     failed: 0,
     skipped: 0,
   });
+  const [isDuplicateScan, setIsDuplicateScan] = useState<Awaited<ReturnType<typeof createScanDeduper>> | null>(null);
 
   const { colors } = useTheme();
   const { t } = useTranslation();
   const { queueClaimConfirmation, isConnected } = useSync();
-  const [isDuplicateScan] = useState(() => createScanDeduper());
+
+  useEffect(() => {
+    recordScanStarted('bulk');
+    // Initialize the async deduper with configured retention window
+    createScanDeduper(undefined, config.crossSessionDedupeWindowMs).then(setIsDuplicateScan);
+  }, []);
 
   const {
     permissionState,
@@ -66,18 +74,22 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
     statusMessage,
   } = useCameraPermission();
 
-  useEffect(() => {
-    recordScanStarted('bulk');
-  }, []);
-
   const handleBarCodeScanned = async ({ data }: BarcodeScanningResult) => {
     if (isProcessing) return;
+    if (!isDuplicateScan) return; // Still initializing
 
     const normalizedData = data.trim();
-    if (isDuplicateScan(normalizedData)) {
-      recordItemDeduped('bulk', { ...stats, skipped: stats.skipped + 1 });
-      setStats(prev => ({ ...prev, skipped: prev.skipped + 1 }));
-      setLastScanResult({ status: 'skipped', message: 'Duplicate scan skipped. Ready for the next package.' });
+    const dedupeResult = await isDuplicateScan(normalizedData);
+    if (dedupeResult.isDuplicate) {
+      if (dedupeResult.source === 'cross_session') {
+        recordItemDedupedCrossSession('bulk', { ...stats, skipped: stats.skipped + 1 });
+        setStats(prev => ({ ...prev, skipped: prev.skipped + 1 }));
+        setLastScanResult({ status: 'skipped', message: 'Already scanned in a previous session. Ready for the next package.' });
+      } else {
+        recordItemDeduped('bulk', { ...stats, skipped: stats.skipped + 1 });
+        setStats(prev => ({ ...prev, skipped: prev.skipped + 1 }));
+        setLastScanResult({ status: 'skipped', message: 'Duplicate scan skipped. Ready for the next package.' });
+      }
       return;
     }
 
@@ -214,7 +226,13 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
             </View>
           )}
           {lastScanResult && lastScanResult.status === 'error' && (
-            <TouchableOpacity style={styles.retryButton} onPress={() => { setLastScanResult(null); setIsProcessing(false); }}>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => { setLastScanResult(null); setIsProcessing(false); }}
+              accessibilityRole="button"
+              accessibilityLabel="Retry scan"
+              accessibilityHint="Retry the last QR scan"
+            >
               <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
             </TouchableOpacity>
           )}
@@ -226,6 +244,9 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
           <TouchableOpacity
             style={styles.closeButton}
             onPress={() => navigation.goBack()}
+            accessibilityRole="button"
+            accessibilityLabel="End scanner session"
+            accessibilityHint="Exit the bulk scanner and return to the previous screen"
           >
             <Text style={styles.closeButtonText}>{t('scannerBulk.endSession')}</Text>
           </TouchableOpacity>

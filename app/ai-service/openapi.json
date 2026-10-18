@@ -1427,6 +1427,21 @@
             "default": "inference",
             "title": "Type",
             "type": "string"
+          },
+          "webhook_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional URL to receive signed task lifecycle callbacks, including processing and terminal status events.",
+            "title": "Webhook Url"
           }
         },
         "title": "InferenceRequest",
@@ -3563,9 +3578,19 @@
     },
     "/v1/ai/humanitarian/verify": {
       "post": {
-        "description": "Verify an aid claim against standardised humanitarian criteria.\n\nValidates that all referenced evidence artifacts belong to the requesting\norganization before processing.  Maintains audit logs for access attempts.\n\n``artifact_access_control`` and ``humanitarian_verification_service`` are\nresolved from ``request.app.state``.  Production wires them up in the\nlifespan of ``main.app``; tests inject lightweight Mocks via the same\nstate so we never have to monkeypatch ``main`` module globals.",
+        "description": "Verify an aid claim against standardised humanitarian criteria.\n\nValidates that all referenced evidence artifacts belong to the requesting\norganization before processing.  Maintains audit logs for access attempts.\nSet ``stream=true`` to receive provider token events followed by the usual\nresult envelope; streaming bypasses response caching to return live output.\n\n``artifact_access_control`` and ``humanitarian_verification_service`` are\nresolved from ``request.app.state``.  Production wires them up in the\nlifespan of ``main.app``; tests inject lightweight Mocks via the same\nstate so we never have to monkeypatch ``main`` module globals.",
         "operationId": "verify_humanitarian_claim_v1_ai_humanitarian_verify_post",
         "parameters": [
+          {
+            "in": "query",
+            "name": "stream",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Stream",
+              "type": "boolean"
+            }
+          },
           {
             "in": "header",
             "name": "X-Org-Id",
@@ -3637,7 +3662,7 @@
     },
     "/v1/ai/inference": {
       "post": {
-        "description": "Create a background task for heavy AI inference.\n\nOffloads time-consuming AI tasks to background workers. Use the\nreturned ``task_id`` to poll for results via ``GET /ai/status/{task_id}``.\n\nContract-aware metadata fields are used to anchor verification results\nto on-chain events during Testnet demos.",
+        "description": "Create a background task for heavy AI inference.\n\nOffloads time-consuming AI tasks to background workers. Use the\nreturned ``task_id`` to poll for results via ``GET /ai/status/{task_id}``.\nOptionally provide ``webhook_url`` to receive signed callbacks when\nprocessing begins and when the task completes or fails.\n\nContract-aware metadata fields are used to anchor verification results\nto on-chain events during Testnet demos.",
         "operationId": "create_inference_task_v1_ai_inference_post",
         "requestBody": {
           "content": {

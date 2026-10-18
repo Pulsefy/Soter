@@ -92,6 +92,9 @@ export const ClaimReceiptScreen: React.FC<Props> = ({ route, navigation }) => {
         <TouchableOpacity
           style={[styles.button, { backgroundColor: colors.brand.primary }]}
           onPress={handleClose}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Return to the previous screen"
         >
           <Text style={styles.buttonText}>{t('claimReceipt.goBack')}</Text>
         </TouchableOpacity>
@@ -113,6 +116,9 @@ export const ClaimReceiptScreen: React.FC<Props> = ({ route, navigation }) => {
         <TouchableOpacity
           style={[styles.button, { backgroundColor: colors.brand.primary }]}
           onPress={handleClose}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Return to the previous screen"
         >
           <Text style={styles.buttonText}>{t('claimReceipt.goBack')}</Text>
         </TouchableOpacity>
@@ -228,6 +234,9 @@ export const ClaimReceiptScreen: React.FC<Props> = ({ route, navigation }) => {
       <TouchableOpacity
         style={[styles.closeButton, { backgroundColor: colors.brand.primary }]}
         onPress={handleClose}
+        accessibilityRole="button"
+        accessibilityLabel="Done"
+        accessibilityHint="Close the claim receipt screen"
       >
         <Text style={styles.closeButtonText}>{t('common.done')}</Text>
       </TouchableOpacity>

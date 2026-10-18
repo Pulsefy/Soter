@@ -39,7 +39,7 @@ pub use crate::keys::{
     KEY_DELEGATE_HISTORY, KEY_DISTRIBUTORS, KEY_MAX_DISTRIBUTORS, KEY_PAUSED, KEY_PAUSE_CLAIM,
     KEY_PAUSE_CREATE, KEY_PAUSE_REFUND, KEY_PAUSE_WITHDRAW, KEY_PENDING_ADMIN,
     KEY_PENDING_WITHDRAWAL, KEY_PKG_COUNTER, KEY_PKG_IDX, KEY_RECIPIENT_LAST_CLAIM,
-    KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
+    KEY_SURPLUS_WITHDRAWAL_STALENESS, KEY_TOTAL_CLAIMED, KEY_TOTAL_LOCKED, KEY_VERSION,
 };
 
 /// Upper bound on the number of package ids accepted by `batch_claim` in a
@@ -118,6 +118,11 @@ pub struct Aggregates {
 /// withdrawal and executing it.  Set to 24 hours (86 400 s) to give
 /// observers a meaningful observation window.
 pub const SURPLUS_WITHDRAWAL_DELAY_SECS: u64 = 86_400;
+
+/// Default maximum age of a pending surplus withdrawal before it can be
+/// swept. This is measured from proposal time, independently of the 24-hour
+/// execution timelock.
+pub const DEFAULT_SURPLUS_WITHDRAWAL_STALENESS_SECS: u64 = 30 * 24 * 60 * 60;
 
 /// A proposed but not-yet-executed surplus withdrawal, stored under
 /// `KEY_PENDING_WITHDRAWAL` in instance storage.
@@ -246,6 +251,10 @@ pub enum Error {
     /// gate (see `merkle_root_from_metadata`, which would otherwise treat
     /// it as "no Merkle gate configured").
     InvalidMerkleRoot = 29,
+    /// A staleness period must exceed the execution timelock.
+    InvalidSurplusWithdrawalStaleness = 30,
+    /// A pending withdrawal has not yet reached its configured staleness age.
+    SurplusWithdrawalNotStale = 31,
 }
 
 // --- Contract Events (indexer-friendly; stable topics & payloads) ---
@@ -394,6 +403,18 @@ pub struct SurplusWithdrawalCancelled {
     pub to: Address,
     pub token: Address,
     pub amount: i128,
+    pub timestamp: u64,
+}
+
+/// Emitted when a stale pending surplus withdrawal is cleared. Sweeping does
+/// not transfer funds; it only removes the abandoned proposal.
+#[contractevent]
+pub struct SurplusWithdrawalSwept {
+    pub schema_version: u32,
+    pub to: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub proposed_at: u64,
     pub timestamp: u64,
 }
 
@@ -2426,6 +2447,61 @@ impl AidEscrow {
         }
         .publish(&env);
 
+        Ok(())
+    }
+
+    /// Sets the maximum proposal age before a pending surplus withdrawal can
+    /// be swept. The window is measured from proposal time and must exceed the
+    /// execution timelock so an eligible proposal always has time to execute.
+    pub fn set_surplus_staleness_secs(env: Env, staleness_secs: u64) -> Result<(), Error> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+        if staleness_secs <= SURPLUS_WITHDRAWAL_DELAY_SECS {
+            return Err(Error::InvalidSurplusWithdrawalStaleness);
+        }
+        env.storage()
+            .instance()
+            .set(&KEY_SURPLUS_WITHDRAWAL_STALENESS, &staleness_secs);
+        Ok(())
+    }
+
+    /// Returns the configured maximum age for pending surplus withdrawals.
+    pub fn get_surplus_staleness_secs(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&KEY_SURPLUS_WITHDRAWAL_STALENESS)
+            .unwrap_or(DEFAULT_SURPLUS_WITHDRAWAL_STALENESS_SECS)
+    }
+
+    /// Permissionlessly clears an abandoned surplus withdrawal after its
+    /// configured maximum age. The proposal timestamp is derived from the
+    /// stored execution time, preserving compatibility with existing records.
+    pub fn sweep_stale_surplus_withdrawal(env: Env) -> Result<(), Error> {
+        let proposal: PendingWithdrawal = env
+            .storage()
+            .instance()
+            .get(&KEY_PENDING_WITHDRAWAL)
+            .ok_or(Error::SurplusWithdrawalNotPending)?;
+        let proposed_at = proposal
+            .executable_at
+            .saturating_sub(SURPLUS_WITHDRAWAL_DELAY_SECS);
+        let staleness_secs = Self::get_surplus_staleness_secs(env.clone());
+        let stale_at = proposed_at.saturating_add(staleness_secs);
+        let now = env.ledger().timestamp();
+        if now < stale_at {
+            return Err(Error::SurplusWithdrawalNotStale);
+        }
+
+        env.storage().instance().remove(&KEY_PENDING_WITHDRAWAL);
+        SurplusWithdrawalSwept {
+            schema_version: EVENT_SCHEMA_VERSION,
+            to: proposal.to,
+            token: proposal.token,
+            amount: proposal.amount,
+            proposed_at,
+            timestamp: now,
+        }
+        .publish(&env);
         Ok(())
     }
 

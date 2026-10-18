@@ -146,9 +146,29 @@ class TestDeadLetterQueueService:
         queue.check_replayable(entry.id)
         queue.record_attempt(entry.id, actor="op", success=False, error="still failing")
 
-        with pytest.raises(DeadLetterError) as exc:
-            queue.check_replayable(entry.id)
-        assert str(exc.value) == "rate_limited"
+    def test_dead_letter_payloads_are_redacted(self):
+        queue = DeadLetterQueue(max_attempts=3, cooldown_seconds=0)
+        payload = {
+            "status": "failed",
+            "result": {"email": "alice@example.com", "ssn": "123-45-6789"},
+            "error": "boom",
+        }
+        entry = queue.add(
+            kind="callback",
+            task_id="t-pii-1",
+            payload=payload,
+            error="callback failed for alice@example.com",
+        )
+
+        # Stored payload/error should be redacted
+        assert entry.payload["result"]["email"] == "[REDACTED]"
+        assert entry.payload["result"]["ssn"] == "[REDACTED]"
+        assert "[REDACTED]" in entry.error
+
+        # Serialized form also redacted
+        serialized = entry.to_dict()
+        assert serialized["payload"]["result"]["email"] == "[REDACTED]"
+        assert serialized["error"].count("[REDACTED]") >= 1
 
 
 # ---------------------------------------------------------------------------

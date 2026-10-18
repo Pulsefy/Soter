@@ -48,6 +48,15 @@ import {
   ProposeSurplusWithdrawalParams,
   SurplusWithdrawalParams,
   SurplusWithdrawalResult,
+  SetDelegateParams,
+  SetDelegateResult,
+  RevokeDelegateParams,
+  RevokeDelegateResult,
+  GetDelegateParams,
+  GetDelegateResult,
+  GetDelegateHistoryParams,
+  GetDelegateHistoryResult,
+  DelegateHistoryEntry,
 } from './onchain.adapter';
 import {
   parsePendingWithdrawal,
@@ -674,6 +683,117 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     } catch {
       return { hash, status: 'unknown', timestamp: new Date() };
     }
+  }
+
+  async setDelegate(params: SetDelegateParams): Promise<SetDelegateResult> {
+    this.logger.log(
+      `setDelegate packageId=${params.packageId} delegate=${params.delegateAddress}`,
+    );
+    const method = params.expiresAt
+      ? 'set_delegate_with_expiry'
+      : 'set_delegate';
+    const args = params.expiresAt
+      ? [
+          params.adminAddress,
+          params.packageId,
+          params.delegateAddress,
+          params.expiresAt,
+        ]
+      : [params.adminAddress, params.packageId, params.delegateAddress];
+
+    await this.invokeContract(method, args);
+
+    return {
+      packageId: params.packageId,
+      delegateAddress: params.delegateAddress,
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+      expiresAt: params.expiresAt,
+      metadata: { contractId: this.contractId, method },
+    };
+  }
+
+  async revokeDelegate(
+    params: RevokeDelegateParams,
+  ): Promise<RevokeDelegateResult> {
+    this.logger.log(`revokeDelegate packageId=${params.packageId}`);
+    await this.invokeContract('revoke_delegate', [
+      params.adminAddress,
+      params.packageId,
+    ]);
+    return {
+      packageId: params.packageId,
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+      metadata: { contractId: this.contractId },
+    };
+  }
+
+  async getDelegate(params: GetDelegateParams): Promise<GetDelegateResult> {
+    const result = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId: this.contractId,
+      key: 'delegate_info_' + params.packageId,
+    });
+
+    let delegateAddress: string | undefined;
+    let expiresAt: number | undefined;
+
+    if (result !== null && result !== undefined) {
+      const tuple = result as [string, number | null | undefined] | null;
+      if (Array.isArray(tuple) && tuple.length >= 1) {
+        delegateAddress = String(tuple[0]);
+        expiresAt =
+          tuple[1] !== null && tuple[1] !== undefined
+            ? Number(tuple[1])
+            : undefined;
+      }
+    }
+
+    return {
+      packageId: params.packageId,
+      delegateAddress,
+      expiresAt,
+      timestamp: new Date(),
+    };
+  }
+
+  async getDelegateHistory(
+    params: GetDelegateHistoryParams,
+  ): Promise<GetDelegateHistoryResult> {
+    const result = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId: this.contractId,
+      key: 'delegate_history_' + params.packageId,
+    });
+
+    const rawHistory = Array.isArray(result) ? result : [];
+    const history: DelegateHistoryEntry[] = rawHistory.map(
+      (entry: Record<string, unknown>) => ({
+        packageId:
+          entry?.package_id != null
+            ? String(entry.package_id as string | number)
+            : params.packageId,
+        previousDelegate:
+          entry?.previous_delegate != null
+            ? String(entry.previous_delegate as string)
+            : undefined,
+        newDelegate:
+          entry?.new_delegate != null
+            ? String(entry.new_delegate as string)
+            : '',
+        changedBy:
+          entry?.changed_by != null ? String(entry.changed_by as string) : '',
+        changedAt: Number(entry?.changed_at ?? 0),
+        reason: entry?.reason != null ? String(entry.reason as string) : '',
+      }),
+    );
+
+    return {
+      packageId: params.packageId,
+      history,
+      timestamp: new Date(),
+    };
   }
 }
 

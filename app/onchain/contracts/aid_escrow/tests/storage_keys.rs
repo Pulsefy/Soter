@@ -27,6 +27,8 @@ fn singletons() -> Vec<soroban_sdk::Symbol> {
     vec![
         KEY_ADMIN,
         KEY_PENDING_ADMIN,
+        KEY_PENDING_WITHDRAWAL,
+        KEY_SURPLUS_WITHDRAWAL_STALENESS,
         KEY_VERSION,
         KEY_CONFIG,
         KEY_DISTRIBUTORS,
@@ -53,7 +55,7 @@ fn singletons() -> Vec<soroban_sdk::Symbol> {
 #[test]
 fn singleton_keys_are_pairwise_distinct() {
     let all = singletons();
-    assert_eq!(all.len(), 22);
+    assert_eq!(all.len(), 24);
     for i in 0..all.len() {
         for j in (i + 1)..all.len() {
             assert_ne!(
@@ -192,5 +194,5 @@ fn no_two_constructors_share_a_ledger_entry_in_a_live_env() {
 /// STORAGE_KEYS.md. Update both together.
 #[test]
 fn singleton_catalog_matches_documented_layout() {
-    assert_eq!(singletons().len(), 22);
+    assert_eq!(singletons().len(), 24);
 }

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
-import { TaskItem, fetchTaskList, getMockTaskList } from '../services/taskApi';
+import { TaskItem, fetchTaskList } from '../services/taskApi';
 import { cacheTaskList, loadCachedTaskList, getTaskCacheTimestamp } from '../services/taskCache';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { OfflineBanner } from '../components/OfflineBanner';
@@ -79,9 +79,8 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
         const ts = await getTaskCacheTimestamp();
         setCachedAt(ts);
       } else {
-        // Fallback to mock data if no cache exists
-        const mock = getMockTaskList();
-        setTaskList(mock);
+        // No cache available - show empty state
+        setTaskList([]);
         setIsCached(true);
         setCachedAt(null);
       }

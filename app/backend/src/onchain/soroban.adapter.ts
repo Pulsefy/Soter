@@ -55,6 +55,15 @@ import {
   ProposeSurplusWithdrawalParams,
   SurplusWithdrawalParams,
   SurplusWithdrawalResult,
+  SetDelegateParams,
+  SetDelegateResult,
+  RevokeDelegateParams,
+  RevokeDelegateResult,
+  GetDelegateParams,
+  GetDelegateResult,
+  GetDelegateHistoryParams,
+  GetDelegateHistoryResult,
+  DelegateHistoryEntry,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
@@ -1266,6 +1275,143 @@ export class SorobanAdapter implements OnchainAdapter {
       status: result.status,
       amountDisbursed: result.amountDisbursed,
       metadata: result.metadata,
+    };
+  }
+
+  async setDelegate(params: SetDelegateParams): Promise<SetDelegateResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(
+      `[${cid}] setDelegate packageId=${params.packageId} delegate=${params.delegateAddress}`,
+    );
+
+    const method = params.expiresAt
+      ? 'set_delegate_with_expiry'
+      : 'set_delegate';
+    const args = params.expiresAt
+      ? [
+          this.scvAddress(params.adminAddress),
+          this.scvU64(parseInt(params.packageId, 10)),
+          this.scvAddress(params.delegateAddress),
+          this.scvU64(params.expiresAt),
+        ]
+      : [
+          this.scvAddress(params.adminAddress),
+          this.scvU64(parseInt(params.packageId, 10)),
+          this.scvAddress(params.delegateAddress),
+        ];
+
+    const { hash } = await this.submitContractOp(method, args, cid);
+
+    return {
+      packageId: params.packageId,
+      delegateAddress: params.delegateAddress,
+      transactionHash: hash,
+      timestamp: new Date(),
+      status: 'success',
+      expiresAt: params.expiresAt,
+      metadata: {
+        contractId: this.contractId,
+        admin: params.adminAddress,
+        method,
+      },
+    };
+  }
+
+  async revokeDelegate(
+    params: RevokeDelegateParams,
+  ): Promise<RevokeDelegateResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] revokeDelegate packageId=${params.packageId}`);
+
+    const { hash } = await this.submitContractOp(
+      'revoke_delegate',
+      [
+        this.scvAddress(params.adminAddress),
+        this.scvU64(parseInt(params.packageId, 10)),
+      ],
+      cid,
+    );
+
+    return {
+      packageId: params.packageId,
+      transactionHash: hash,
+      timestamp: new Date(),
+      status: 'success',
+      metadata: {
+        contractId: this.contractId,
+        admin: params.adminAddress,
+      },
+    };
+  }
+
+  async getDelegate(params: GetDelegateParams): Promise<GetDelegateResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] getDelegate packageId=${params.packageId}`);
+
+    const result = await this.simulateReadOnly(
+      'get_delegate_info',
+      [this.scvU64(parseInt(params.packageId, 10))],
+      cid,
+    );
+
+    // result is Option<(Address, Option<u64>)> — either null or [address, expiresAt|null]
+    let delegateAddress: string | undefined;
+    let expiresAt: number | undefined;
+
+    if (result !== null && result !== undefined) {
+      const tuple = result as [string, bigint | null | undefined];
+      if (Array.isArray(tuple) && tuple.length >= 1) {
+        delegateAddress = String(tuple[0]);
+        expiresAt =
+          tuple[1] !== null && tuple[1] !== undefined
+            ? Number(tuple[1])
+            : undefined;
+      }
+    }
+
+    return {
+      packageId: params.packageId,
+      delegateAddress,
+      expiresAt,
+      timestamp: new Date(),
+    };
+  }
+
+  async getDelegateHistory(
+    params: GetDelegateHistoryParams,
+  ): Promise<GetDelegateHistoryResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(
+      `[${cid}] getDelegateHistory packageId=${params.packageId}`,
+    );
+
+    const result = await this.simulateReadOnly(
+      'get_delegate_history',
+      [this.scvU64(parseInt(params.packageId, 10))],
+      cid,
+    );
+
+    const rawHistory = Array.isArray(result) ? result : [];
+    const history: DelegateHistoryEntry[] = rawHistory.map((entry: any) => ({
+      packageId: String(entry?.package_id ?? params.packageId),
+      previousDelegate:
+        entry?.previous_delegate != null
+          ? String(entry.previous_delegate)
+          : undefined,
+      newDelegate: String(entry?.new_delegate ?? ''),
+      changedBy: String(entry?.changed_by ?? ''),
+      changedAt: Number(entry?.changed_at ?? 0),
+      reason: String(entry?.reason ?? ''),
+    }));
+
+    return {
+      packageId: params.packageId,
+      history,
+      timestamp: new Date(),
     };
   }
 }

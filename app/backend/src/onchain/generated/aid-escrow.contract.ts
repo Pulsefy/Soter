@@ -278,4 +278,12 @@ export const Error = {
    * it as "no Merkle gate configured").
    */
   29: { message: 'InvalidMerkleRoot' },
+  /**
+   * A staleness period must exceed the execution timelock.
+   */
+  30: { message: 'InvalidSurplusWithdrawalStaleness' },
+  /**
+   * A pending withdrawal has not yet reached its configured staleness age.
+   */
+  31: { message: 'SurplusWithdrawalNotStale' },
 };
