@@ -609,7 +609,10 @@ class Settings(BaseSettings):
                         )
 
         # --- Prompt language configuration (issue configurable default language) --
-        if not isinstance(self.default_prompt_language, str) or not self.default_prompt_language.strip():
+        if (
+            not isinstance(self.default_prompt_language, str)
+            or not self.default_prompt_language.strip()
+        ):
             _add("DEFAULT_PROMPT_LANGUAGE", "must be a non-empty string language code")
 
         for mapping_key, mapping in (
@@ -624,7 +627,10 @@ class Settings(BaseSettings):
                         _add(mapping_key, "keys must be non-empty strings")
                         break
                     if not isinstance(lang, str) or not lang.strip():
-                        _add(mapping_key, f"language for '{target_id}' must be a non-empty string language code")
+                        _add(
+                            mapping_key,
+                            f"language for '{target_id}' must be a non-empty string language code",
+                        )
                         break
 
         # --- Production requirements (defense in depth) ------------------

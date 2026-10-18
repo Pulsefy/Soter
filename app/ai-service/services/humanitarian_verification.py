@@ -114,8 +114,14 @@ class HumanitarianVerificationService:
             context = context_factors or {}
 
             # Resolve effective prompt language from hint or configured defaults
-            resolved_campaign = campaign_ref or context.get("campaign_ref") or context.get("campaign_id")
-            resolved_org = org_id or context.get("org_id") or context.get("organization_id")
+            resolved_campaign = (
+                campaign_ref
+                or context.get("campaign_ref")
+                or context.get("campaign_id")
+            )
+            resolved_org = (
+                org_id or context.get("org_id") or context.get("organization_id")
+            )
             effective_language = self.prompt_engine.resolve_language(
                 language_hint=language_hint,
                 org_id=resolved_org,

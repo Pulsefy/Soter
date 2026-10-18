@@ -261,7 +261,9 @@ class TestHumanitarianPromptEngine:
         assert '{"verdict": "credible"' in repair["user"]
         assert "Original request prompt text" in repair["user"]
 
-    def test_resolve_language_no_hint_resolves_to_configured_default(self, monkeypatch):
+    def test_resolve_language_no_hint_resolves_to_configured_default(
+        self, monkeypatch
+    ):
         from config import settings
         monkeypatch.setattr(settings, "default_prompt_language", "fr")
         monkeypatch.setattr(settings, "org_default_languages", {})

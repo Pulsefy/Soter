@@ -237,7 +237,13 @@ def _build_verification_envelope(
 @cached_response(
     prefix="humanitarian_verification",
     ttl_seconds=settings.cache_ttl_verification,
-    key_tags=["model_version", "artifact_tag", "org_id", "prompt_version", "language_hint"],
+    key_tags=[
+        "model_version",
+        "artifact_tag",
+        "org_id",
+        "prompt_version",
+        "language_hint",
+    ],
     content_hash_arg="content_hash",
 )
 async def _verify_claim_cached(
@@ -291,7 +297,12 @@ async def _verify_claim_cached(
             org_id=org_id or None,
         )
     except TypeError as exc:
-        if "prompt_version" in str(exc) or "timeout" in str(exc) or "language_hint" in str(exc) or "org_id" in str(exc):
+        if (
+            "prompt_version" in str(exc)
+            or "timeout" in str(exc)
+            or "language_hint" in str(exc)
+            or "org_id" in str(exc)
+        ):
             try:
                 return humanitarian_verification_service.verify_claim(
                     aid_claim=aid_claim,

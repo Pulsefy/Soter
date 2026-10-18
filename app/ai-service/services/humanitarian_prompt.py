@@ -44,6 +44,7 @@ def resolve_default_language(
 
     return getattr(settings, "default_prompt_language", "en") or "en"
 
+
 SPHERE_HANDBOOK_CRITERIA: Dict[str, List[str]] = {
     "water_supply_sanitation_hygiene": [
         "Minimum daily water access is sufficient and equitable.",
