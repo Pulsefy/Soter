@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DeliveryAdapter, DeliveryResult } from './delivery-adapter.interface';
+import {
+  DeliveryAdapter,
+  DeliveryResult,
+  ProviderReachabilityResult,
+} from './delivery-adapter.interface';
 
 /**
  * SMS delivery adapter using the Twilio REST API (issue #941).
@@ -12,6 +16,7 @@ import { DeliveryAdapter, DeliveryResult } from './delivery-adapter.interface';
 @Injectable()
 export class TwilioSmsAdapter implements DeliveryAdapter {
   readonly channel = 'sms' as const;
+  readonly provider = 'twilio';
   private readonly logger = new Logger(TwilioSmsAdapter.name);
 
   private readonly accountSid: string;
@@ -39,6 +44,55 @@ export class TwilioSmsAdapter implements DeliveryAdapter {
     this.accountSid = accountSid;
     this.authToken = authToken;
     this.fromNumber = fromNumber;
+  }
+
+  /**
+   * Validate the account credentials against a cheap read-only endpoint
+   * without sending an SMS.
+   */
+  async checkReachability(
+    timeoutMs: number,
+  ): Promise<ProviderReachabilityResult> {
+    const start = Date.now();
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${this.accountSid}.json`;
+    const credentials = Buffer.from(
+      `${this.accountSid}:${this.authToken}`,
+    ).toString('base64');
+
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Basic ${credentials}`,
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (response.ok) {
+        return {
+          provider: this.provider,
+          reachable: true,
+          latencyMs: Date.now() - start,
+        };
+      }
+
+      return {
+        provider: this.provider,
+        reachable: false,
+        latencyMs: Date.now() - start,
+        error: `Twilio health check failed: HTTP ${response.status}`,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Twilio health check failed: ${message}`);
+
+      return {
+        provider: this.provider,
+        reachable: false,
+        latencyMs: Date.now() - start,
+        error: `Twilio health check failed: ${message}`,
+      };
+    }
   }
 
   async send(params: {

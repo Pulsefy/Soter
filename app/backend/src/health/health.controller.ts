@@ -101,7 +101,8 @@ export class HealthController {
   @ApiOperation({
     summary: 'Readiness probe',
     description:
-      'Checks Postgres, Redis, the AI service, Soroban RPC, and the configured on-chain adapter with per-dependency timeouts. ' +
+      'Checks Postgres, Redis, the AI service, Soroban RPC, the configured on-chain adapter, and the email/SMS notification providers with per-dependency timeouts. ' +
+      'Notification provider outages are reported as degraded rather than not_ready. ' +
       'Results are cached briefly to protect against probe load. Responds 200 when ready or ' +
       'degraded (non-critical dependency down), and 503 when a required dependency is down.',
   })
@@ -141,6 +142,16 @@ export class HealthController {
               contractVersion: '1.0.0',
             },
           },
+          notificationProviders: {
+            status: 'up',
+            latencyMs: 42,
+            details: {
+              providers: {
+                email: { status: 'up', provider: 'sendgrid', latencyMs: 20 },
+                sms: { status: 'up', provider: 'twilio', latencyMs: 21 },
+              },
+            },
+          },
         },
       },
     },
@@ -178,6 +189,16 @@ export class HealthController {
               connected: true,
               contractName: 'Soroban AidEscrow Contract',
               contractVersion: '1.0.0',
+            },
+          },
+          notificationProviders: {
+            status: 'up',
+            latencyMs: 42,
+            details: {
+              providers: {
+                email: { status: 'up', provider: 'sendgrid', latencyMs: 20 },
+                sms: { status: 'up', provider: 'twilio', latencyMs: 21 },
+              },
             },
           },
         },

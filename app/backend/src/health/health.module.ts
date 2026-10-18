@@ -6,9 +6,10 @@ import { ProviderHealthRegistryService } from './provider-health-registry.servic
 import { LoggerModule } from '../logger/logger.module';
 import { OnchainModule } from '../onchain/onchain.module';
 import { RedisModule } from '../redis/redis.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [LoggerModule, OnchainModule, RedisModule],
+  imports: [LoggerModule, OnchainModule, RedisModule, NotificationsModule],
   controllers: [HealthController],
   providers: [HealthService, MetadataService, ProviderHealthRegistryService],
   exports: [ProviderHealthRegistryService],

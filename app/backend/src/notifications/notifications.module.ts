@@ -6,6 +6,7 @@ import { NotificationProcessor } from './notifications.processor';
 import { NotificationBackpressureService } from './notification-backpressure.service';
 import { NotificationQueueMetricsScheduler } from './notification-queue-metrics.scheduler';
 import { NotificationCanaryScheduler } from './notification-canary.scheduler';
+import { NotificationProviderHealthService } from './notification-provider-health.service';
 import { OutboxController } from './outbox.controller';
 import { NotificationsController } from './notifications.controller';
 import { JobsModule } from '../jobs/jobs.module';
@@ -73,6 +74,7 @@ function createSmsAdapter(config: ConfigService): DeliveryAdapter {
     NotificationBackpressureService,
     NotificationQueueMetricsScheduler,
     NotificationCanaryScheduler,
+    NotificationProviderHealthService,
     {
       provide: EMAIL_ADAPTER,
       useFactory: createEmailAdapter,
@@ -84,6 +86,6 @@ function createSmsAdapter(config: ConfigService): DeliveryAdapter {
       inject: [ConfigService],
     },
   ],
-  exports: [NotificationsService],
+  exports: [NotificationsService, NotificationProviderHealthService],
 })
 export class NotificationsModule {}
