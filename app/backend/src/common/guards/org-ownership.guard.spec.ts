@@ -1,4 +1,5 @@
-import { ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { AppException } from '../../common/dto/error-response.dto';
+import { ExecutionContext } from '@nestjs/common';
 import { AppRole } from '../../auth/app-role.enum';
 import { OrgOwnershipGuard } from './org-ownership.guard';
 
@@ -35,7 +36,7 @@ describe('OrgOwnershipGuard', () => {
       { role: AppRole.ngo, ngoId: 'ngo-1' },
       { ngoId: 'ngo-2' },
     );
-    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+    expect(() => guard.canActivate(ctx)).toThrow(AppException);
   });
 
   it('allows ngo when no ngoId on resource (listing)', () => {
@@ -45,7 +46,7 @@ describe('OrgOwnershipGuard', () => {
 
   it('throws when user is not set', () => {
     const ctx = makeContext(undefined);
-    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+    expect(() => guard.canActivate(ctx)).toThrow(AppException);
   });
 
   it('allows operator without ngoId check', () => {

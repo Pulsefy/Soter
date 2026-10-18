@@ -3,8 +3,11 @@
 import React, { useState } from 'react';
 import { X, MessageSquare, Send, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
+import { useTranslations } from 'next-intl';
+import { useNetworkGuard } from '@/hooks/useNetworkGuard';
 import { StatusBadge, RiskBadge } from './StatusBadge';
 import { ReviewActionDialog } from './ReviewActionDialog';
+import type { ReviewActionType } from './ReviewActionDialog';
 import {
   useVerificationDetail,
   useVerificationNotes,
@@ -15,6 +18,8 @@ import type { RiskLevel } from '@/types/verification-review';
 interface VerificationDetailPanelProps {
   verificationId: string;
   onClose: () => void;
+  /** Notifies the parent queue once a decision is accepted, so it can move focus. */
+  onDecision?: (action: ReviewActionType) => void;
 }
 
 function AiScoreBar({ score }: { score: number }) {
@@ -46,9 +51,12 @@ function AiScoreBar({ score }: { score: number }) {
 export function VerificationDetailPanel({
   verificationId,
   onClose,
+  onDecision,
 }: VerificationDetailPanelProps) {
   const { data: item, isLoading } = useVerificationDetail(verificationId);
   const { data: notes } = useVerificationNotes(verificationId);
+  const { isMismatch, expectedNetwork } = useNetworkGuard();
+  const t = useTranslations();
   const addNote = useAddNote(verificationId);
 
   const [noteText, setNoteText] = useState('');
@@ -57,6 +65,7 @@ export function VerificationDetailPanel({
   >(null);
 
   async function handleAddNote() {
+    if (isMismatch) return;
     if (!noteText.trim()) return;
     await addNote.mutateAsync({ content: noteText.trim() });
     setNoteText('');
@@ -236,7 +245,8 @@ export function VerificationDetailPanel({
                   />
                   <button
                     onClick={() => void handleAddNote()}
-                    disabled={!noteText.trim() || addNote.isPending}
+                    disabled={!noteText.trim() || addNote.isPending || isMismatch}
+                    title={isMismatch ? t('wallet.networkMismatchShort', { expectedNetwork: expectedNetwork.toUpperCase() }) : undefined}
                     aria-label="Add note"
                     className="h-8 w-8 flex items-center justify-center rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                   >
@@ -279,6 +289,7 @@ export function VerificationDetailPanel({
           action={activeAction}
           open={!!activeAction}
           onOpenChange={open => !open && setActiveAction(null)}
+          onSuccess={onDecision}
         />
       )}
     </>

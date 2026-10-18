@@ -2,12 +2,15 @@
 
 @import "leaflet/dist/leaflet.css";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #111827;
   --nav-background: #ffffff;
-  --nav-foreground: #171717;
+  --nav-foreground: #111827;
   --nav-border: #e5e7eb;
+  color-scheme: light;
 }
 
 html.dark {
@@ -16,25 +19,16 @@ html.dark {
   --nav-background: #1e293b;
   --nav-foreground: #f1f5f9;
   --nav-border: #334155;
+  color-scheme: dark;
 }
 
 html.light {
   --background: #ffffff;
-  --foreground: #1e3a8a; /* Changed from blue-800 to blue-900 */
+  --foreground: #111827;
   --nav-background: #ffffff;
-  --nav-foreground: #1e3a8a; /* Changed from blue-800 to blue-900 */
+  --nav-foreground: #111827;
   --nav-border: #e5e7eb;
-}
-
-/* Force Navbar background to white in light theme, overriding any conflicts */
-html.light nav {
-  background-color: #ffffff !important;
-  color: var(--nav-foreground) !important;
-}
-
-/* Force body text color in light theme, overriding any conflicts */
-html.light body {
-  color: var(--foreground) !important;
+  color-scheme: light;
 }
 @theme inline {
   --color-background: var(--background);
@@ -47,6 +41,156 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+html.dark [class~="text-gray-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-gray-800"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-800"]:not([class*="dark:text-"]),
+html.dark [class~="text-neutral-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-neutral-800"]:not([class*="dark:text-"]) {
+  color: #f8fafc;
+}
+
+html.dark [class~="text-gray-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-gray-600"]:not([class*="dark:text-"]),
+html.dark [class~="text-gray-500"]:not([class*="dark:text-"]),
+html.dark [class~="text-gray-400"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-600"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-500"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-400"]:not([class*="dark:text-"]),
+html.dark [class~="text-neutral-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-neutral-600"]:not([class*="dark:text-"]),
+html.dark [class~="text-neutral-500"]:not([class*="dark:text-"]),
+html.dark [class~="text-neutral-400"]:not([class*="dark:text-"]) {
+  color: #cbd5e1;
+}
+
+html.dark [class~="text-blue-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-blue-800"]:not([class*="dark:text-"]),
+html.dark [class~="text-blue-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-blue-600"]:not([class*="dark:text-"]) {
+  color: #93c5fd;
+}
+
+html.dark [class~="text-green-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-green-800"]:not([class*="dark:text-"]),
+html.dark [class~="text-green-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-green-600"]:not([class*="dark:text-"]),
+html.dark [class~="text-emerald-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-emerald-800"]:not([class*="dark:text-"]),
+html.dark [class~="text-emerald-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-emerald-600"]:not([class*="dark:text-"]) {
+  color: #86efac;
+}
+
+html.dark [class~="text-yellow-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-yellow-800"]:not([class*="dark:text-"]),
+html.dark [class~="text-yellow-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-yellow-600"]:not([class*="dark:text-"]),
+html.dark [class~="text-amber-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-amber-800"]:not([class*="dark:text-"]),
+html.dark [class~="text-amber-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-amber-600"]:not([class*="dark:text-"]) {
+  color: #fde68a;
+}
+
+html.dark [class~="text-red-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-red-800"]:not([class*="dark:text-"]),
+html.dark [class~="text-red-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-red-600"]:not([class*="dark:text-"]),
+html.dark [class~="text-red-500"]:not([class*="dark:text-"]),
+html.dark [class~="text-rose-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-rose-800"]:not([class*="dark:text-"]),
+html.dark [class~="text-rose-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-rose-600"]:not([class*="dark:text-"]),
+html.dark [class~="text-rose-500"]:not([class*="dark:text-"]) {
+  color: #fca5a5;
+}
+
+html.dark [class~="bg-white"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-gray-50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-slate-50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-neutral-50"]:not([class*="dark:bg-"]) {
+  background-color: #111827;
+}
+
+html.dark [class~="bg-gray-100"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-slate-100"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-neutral-100"]:not([class*="dark:bg-"]) {
+  background-color: #1f2937;
+}
+
+html.dark [class~="bg-blue-50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-blue-100"]:not([class*="dark:bg-"]) {
+  background-color: rgba(30, 58, 138, 0.45);
+}
+
+html.dark [class~="bg-green-50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-green-100"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-emerald-50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-emerald-100"]:not([class*="dark:bg-"]) {
+  background-color: rgba(6, 78, 59, 0.45);
+}
+
+html.dark [class~="bg-yellow-50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-yellow-100"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-amber-50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-amber-100"]:not([class*="dark:bg-"]) {
+  background-color: rgba(120, 53, 15, 0.45);
+}
+
+html.dark [class~="bg-red-50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-red-100"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-rose-50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-rose-100"]:not([class*="dark:bg-"]) {
+  background-color: rgba(127, 29, 29, 0.45);
+}
+
+html.dark [class~="border-gray-100"]:not([class*="dark:border-"]),
+html.dark [class~="border-gray-200"]:not([class*="dark:border-"]),
+html.dark [class~="border-gray-300"]:not([class*="dark:border-"]),
+html.dark [class~="border-slate-100"]:not([class*="dark:border-"]),
+html.dark [class~="border-slate-200"]:not([class*="dark:border-"]),
+html.dark [class~="border-slate-300"]:not([class*="dark:border-"]),
+html.dark [class~="border-neutral-100"]:not([class*="dark:border-"]),
+html.dark [class~="border-neutral-200"]:not([class*="dark:border-"]),
+html.dark [class~="border-neutral-300"]:not([class*="dark:border-"]) {
+  border-color: #334155;
+}
+
+html.dark [class~="border-blue-200"]:not([class*="dark:border-"]),
+html.dark [class~="border-blue-300"]:not([class*="dark:border-"]) {
+  border-color: #1d4ed8;
+}
+
+html.dark [class~="border-green-200"]:not([class*="dark:border-"]),
+html.dark [class~="border-emerald-200"]:not([class*="dark:border-"]) {
+  border-color: #047857;
+}
+
+html.dark [class~="border-yellow-200"]:not([class*="dark:border-"]),
+html.dark [class~="border-amber-200"]:not([class*="dark:border-"]) {
+  border-color: #92400e;
+}
+
+html.dark [class~="border-red-200"]:not([class*="dark:border-"]),
+html.dark [class~="border-red-400"]:not([class*="dark:border-"]),
+html.dark [class~="border-rose-200"]:not([class*="dark:border-"]) {
+  border-color: #b91c1c;
+}
+
+html.dark :where(input, textarea, select):not([class*="dark:text-"]) {
+  color: #f8fafc;
+}
+
+html.dark :where(input, textarea, select):not([class*="dark:bg-"]) {
+  background-color: #111827;
+}
+
+html.dark :where(input, textarea, select)::placeholder {
+  color: #94a3b8;
 }
 
 /* Global default focus-visible ring — ensures any interactive element that

@@ -1,4 +1,5 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { SessionService } from '../session/session.service';
 import { VerificationFlowService } from './verification-flow.service';
 import { SessionType } from '@prisma/client';
@@ -84,7 +85,9 @@ export class EnhancedVerificationFlowService {
       !session.currentStep ||
       session.currentStep.stepName !== 'otp_validation'
     ) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'OTP validation step is not current or available',
       );
     }
@@ -92,7 +95,11 @@ export class EnhancedVerificationFlowService {
     const metadata = session.metadata;
     const otpSessionId = metadata?.originalOtpSessionId as string | undefined;
     if (!otpSessionId) {
-      throw new BadRequestException('Original OTP session ID not found');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Original OTP session ID not found',
+      );
     }
 
     try {
@@ -153,7 +160,9 @@ export class EnhancedVerificationFlowService {
       s => s.stepName === 'document_upload',
     );
     if (!documentStep) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Document upload step not found in session',
       );
     }
@@ -199,7 +208,9 @@ export class EnhancedVerificationFlowService {
       s => s.stepName === 'identity_verification',
     );
     if (!identityStep) {
-      throw new BadRequestException(
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         'Identity verification step not found in session',
       );
     }

@@ -1,5 +1,4 @@
-import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { CampaignStatus } from '@prisma/client';
 
 export class ExportCampaignsQueryDto {
@@ -22,17 +21,4 @@ export class ExportCampaignsQueryDto {
   @IsOptional()
   @IsString()
   ngoId?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(200)
-  limit?: number;
 }

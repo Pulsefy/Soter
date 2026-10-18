@@ -3,7 +3,17 @@ import React from 'react';
 import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
 import { EnhancedVerificationFlow } from '../EnhancedVerificationFlow';
+import { ToastProvider } from '@/components/ToastProvider';
 import * as networkGuard from '@/hooks/useNetworkGuard';
+
+jest.mock('next-intl', () => ({
+  useTranslations: () => (key: string, params?: Record<string, string>) => {
+    if (key === 'wallet.networkMismatch') {
+      return `Network mismatch — your wallet is on ${params?.walletNetwork} but this app requires ${params?.expectedNetwork}. Open Freighter and switch to the correct network to continue.`;
+    }
+    return key;
+  },
+}));
 
 // Mocking the hooks that are used in EnhancedVerificationFlow to prevent errors
 jest.mock('@/hooks/useNetworkGuard');
@@ -29,7 +39,11 @@ describe('EnhancedVerificationFlow UI Network Guard', () => {
             expectedNetwork: 'mainnet'
         });
 
-        render(<EnhancedVerificationFlow />);
+        render(
+            <ToastProvider>
+                <EnhancedVerificationFlow />
+            </ToastProvider>
+        );
 
         // The banner should be rendered
         expect(screen.getByText(/Network mismatch/i)).toBeInTheDocument();
@@ -47,7 +61,11 @@ describe('EnhancedVerificationFlow UI Network Guard', () => {
             expectedNetwork: 'mainnet'
         });
 
-        render(<EnhancedVerificationFlow />);
+        render(
+            <ToastProvider>
+                <EnhancedVerificationFlow />
+            </ToastProvider>
+        );
 
         // The banner should NOT be rendered
         expect(screen.queryByText(/Network mismatch/i)).not.toBeInTheDocument();

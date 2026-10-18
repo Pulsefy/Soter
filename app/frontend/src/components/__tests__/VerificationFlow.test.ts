@@ -10,6 +10,10 @@
  * manual integration testing documented in the walkthrough.
  */
 
+jest.mock('next-intl', () => ({
+  useTranslations: () => () => '',
+}));
+
 import { detectPii, parseVerificationDraft, validateUploadForm } from '../VerificationFlow';
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Component tests for screens (unit level)
  */
 import React from 'react';

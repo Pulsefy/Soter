@@ -1,0 +1,4 @@
+/* Keep Next.js's development-only status portal out of the product screenshot. */
+nextjs-portal {
+  display: none !important;
+}

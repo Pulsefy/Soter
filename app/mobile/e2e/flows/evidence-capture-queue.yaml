@@ -1,0 +1,62 @@
+# Core field flow: capture evidence and upload it while online.
+#
+# The emulator cannot drive the native camera/gallery picker, so the E2E
+# build exposes a "simulate capture" control (EvidenceUploadScreen, gated by
+# the build-time E2E flag — see src/e2e/e2eBuildFlag.ts) that feeds a bundled
+# image through the real compression/upload pipeline. With connectivity
+# available the upload is expected to complete inline rather than be queued.
+appId: org.pulsefy.soter.mobile
+name: evidence-capture-queue
+tags:
+  - e2e
+  - evidence
+---
+- launchApp:
+    clearState: true
+
+# Wait for Home to render before opening the link. A deep link delivered
+# while the JS runtime is still booting is dropped — the intent reaches
+# MainActivity, but the Linking listener that would route it does not exist
+# yet, and the app stays on Home. Waiting for the first screen guarantees the
+# listener is attached.
+- extendedWaitUntil:
+    visible:
+      id: "scan-fab"
+    timeout: 60000
+
+# Open evidence capture directly (the aid details screen sits behind a
+# biometric gate, which would otherwise make the flow depend on device
+# biometric enrolment).
+- openLink: "soter://aid/E2E-AID-1/evidence"
+
+- extendedWaitUntil:
+    visible:
+      id: "e2e-simulate-capture"
+    timeout: 60000
+
+# Populate the capture pipeline. The preview card this inserts sits above the
+# upload card and pushes the upload button past the bottom of the viewport,
+# so scroll to it before tapping (the command is a no-op if it is already on
+# screen).
+- tapOn:
+    id: "e2e-simulate-capture"
+- scrollUntilVisible:
+    element:
+      id: "upload-evidence-button"
+    direction: DOWN
+    timeout: 30000
+    # "Fully inside the viewport" is satisfied while the button is still
+    # behind the system navigation bar; the tap would then land on the bar's
+    # home button, background the app and fail the assertion below. Keep
+    # scrolling until the button clears it (see offline-queue.yaml).
+    centerElement: true
+- tapOn:
+    id: "upload-evidence-button"
+    enabled: true
+
+# Online: the upload completes against the E2E backend without queueing. The
+# status line renders directly above the button, so it is on screen already
+# (the screen is scrolled to the button).
+- extendedWaitUntil:
+    visible: "Evidence uploaded successfully."
+    timeout: 60000

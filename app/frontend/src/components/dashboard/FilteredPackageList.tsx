@@ -1,7 +1,9 @@
 'use client';
 
 import React from 'react';
+import { useTranslations } from 'next-intl';
 import { useAidPackages } from '@/hooks/useAidPackages';
+import { Pagination } from '@/components/Pagination';
 import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { getAppUserRole, isOperationsRole } from '@/lib/app-role';
 import type { AidPackage, AidPackageFilters, AidPackageStatus } from '@/types/aid-package';
@@ -17,15 +19,15 @@ const STATUS_STYLES: Record<AidPackageStatus, string> = {
 
 const TABLE_HEADERS = ['ID', 'Title', 'Region', 'Amount', 'Recipients', 'Status', 'Token'];
 
-function StatusBadge({ status }: { status: AidPackageStatus }) {
+const StatusBadge = React.memo(function StatusBadge({ status }: { status: AidPackageStatus }) {
   return (
     <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[status]}`}>
       {status}
     </span>
   );
-}
+});
 
-function SkeletonRow() {
+const SkeletonRow = React.memo(function SkeletonRow() {
   return (
     <tr>
       {TABLE_HEADERS.map(h => (
@@ -35,9 +37,9 @@ function SkeletonRow() {
       ))}
     </tr>
   );
-}
+});
 
-function PackageCard({ pkg }: { pkg: AidPackage }) {
+const PackageCard = React.memo(function PackageCard({ pkg }: { pkg: AidPackage }) {
   return (
     <div className="p-4 rounded-lg border border-gray-100 dark:border-gray-800 space-y-1.5">
       <div className="flex items-start justify-between gap-2">
@@ -55,20 +57,30 @@ function PackageCard({ pkg }: { pkg: AidPackage }) {
       <p className="text-xs font-mono text-gray-400">{pkg.id}</p>
     </div>
   );
-}
+});
 
 interface FilteredPackageListProps {
   filters: AidPackageFilters;
+  page?: number;
+  size?: number;
+  onPageChange?: (page: number) => void;
 }
 
-export function FilteredPackageList({ filters }: FilteredPackageListProps) {
-  const { data: packages, isLoading, error } = useAidPackages(filters);
+export const FilteredPackageList = React.memo(function FilteredPackageList({ filters, page = 1, size = 10, onPageChange }: FilteredPackageListProps) {
+  const t = useTranslations();
+  const { data: response, isLoading, error } = useAidPackages(filters, { page, size });
+  const packages = response?.data ?? [];
+  const totalItems = response?.total ?? 0;
+  const totalPages = response?.totalPages ?? 1;
   const role = getAppUserRole();
   const hasFilters = Boolean(filters.search || filters.status || filters.token);
 
   if (error) {
     return (
-      <div className="p-4 border border-red-200 rounded-lg bg-red-50 dark:bg-red-950/30 dark:border-red-900 text-red-700 dark:text-red-400 text-sm">
+      <div
+        data-testid="packages-error"
+        className="p-4 border border-red-200 rounded-lg bg-red-50 dark:bg-red-950/30 dark:border-red-900 text-red-700 dark:text-red-400 text-sm"
+      >
         Error loading packages: {error.message}
       </div>
     );
@@ -77,7 +89,10 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
   return (
     <>
       {/* Desktop table */}
-      <div className="hidden md:block overflow-x-auto">
+      <div
+        className="hidden md:block overflow-x-auto"
+        data-testid={isLoading ? 'packages-loading' : undefined}
+      >
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 dark:border-gray-800 text-left">
@@ -122,38 +137,69 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
             ) : (
               <tr>
                 <td colSpan={TABLE_HEADERS.length} className="py-12 text-center">
-                  <div className="mx-auto max-w-3xl text-left">
+                  <div className="mx-auto max-w-3xl text-left" data-testid="packages-empty-state">
                     <AppEmptyState
                       compact
-                      eyebrow={hasFilters ? 'No Matches' : 'No Packages Yet'}
+                      eyebrow={
+                        hasFilters
+                          ? t('emptyStates.dashboard.noMatches.eyebrow')
+                          : t('emptyStates.dashboard.noPackages.eyebrow')
+                      }
                       title={
                         hasFilters
-                          ? 'No aid packages match the current filters'
+                          ? t('emptyStates.dashboard.noMatches.title')
                           : isOperationsRole(role)
-                            ? 'No aid packages have been published yet'
-                            : 'No aid packages are available to browse yet'
+                            ? t('emptyStates.dashboard.noPackages.operatorTitle')
+                            : t('emptyStates.dashboard.noPackages.viewerTitle')
                       }
                       description={
                         hasFilters
-                          ? 'Try widening the search, clearing filters, or switching token and status selections.'
+                          ? t('emptyStates.dashboard.noMatches.description')
                           : isOperationsRole(role)
-                            ? 'This workspace does not have package data yet. Contributors can switch on mock responses or create campaign data to populate downstream views.'
-                            : 'There is no live distribution data in this environment yet, but you can still explore verification and sample workflows.'
+                            ? t('emptyStates.dashboard.noPackages.operatorDescription')
+                            : t('emptyStates.dashboard.noPackages.viewerDescription')
                       }
                       actions={
                         hasFilters
                           ? [
-                              { href: '/dashboard', label: 'Reset dashboard filters', icon: 'next' },
-                              { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                              {
+                                href: '/dashboard',
+                                label: t('emptyStates.dashboard.noMatches.resetAction'),
+                                icon: 'next',
+                              },
+                              {
+                                href: '/help',
+                                label: t('emptyStates.dashboard.noMatches.secondaryAction'),
+                                icon: 'docs',
+                                variant: 'secondary',
+                              },
                             ]
                           : isOperationsRole(role)
                             ? [
-                                { href: '/campaigns', label: 'Create sample campaign', icon: 'sample' },
-                                { href: '/help', label: 'Open contributor help', icon: 'docs', variant: 'secondary' },
+                                {
+                                  href: '/campaigns',
+                                  label: t('emptyStates.dashboard.noPackages.operatorAction'),
+                                  icon: 'next',
+                                },
+                                {
+                                  href: '/help',
+                                  label: t('emptyStates.dashboard.noPackages.secondaryAction'),
+                                  icon: 'docs',
+                                  variant: 'secondary',
+                                },
                               ]
                             : [
-                                { href: '/', label: 'Try verification flow', icon: 'next' },
-                                { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                                {
+                                  href: '/',
+                                  label: t('emptyStates.dashboard.noPackages.viewerAction'),
+                                  icon: 'next',
+                                },
+                                {
+                                  href: '/help',
+                                  label: t('emptyStates.dashboard.noPackages.secondaryAction'),
+                                  icon: 'docs',
+                                  variant: 'secondary',
+                                },
                               ]
                       }
                     />
@@ -183,37 +229,72 @@ export function FilteredPackageList({ filters }: FilteredPackageListProps) {
         ) : packages && packages.length > 0 ? (
           packages.map(pkg => <PackageCard key={pkg.id} pkg={pkg} />)
         ) : (
-          <AppEmptyState
-            compact
-            eyebrow={hasFilters ? 'No Matches' : 'No Packages Yet'}
-            title={
-              hasFilters
-                ? 'No aid packages match the current filters'
-                : isOperationsRole(role)
-                  ? 'No aid packages have been published yet'
-                  : 'No aid packages are available to browse yet'
-            }
-            description={
-              hasFilters
-                ? 'Try widening the search, clearing filters, or switching token and status selections.'
-                : isOperationsRole(role)
-                  ? 'Create a sample campaign or enable mock responses to make the dashboard easier to review.'
-                  : 'This environment does not have live aid packages yet, but the rest of the product can still be explored with sample flows.'
-            }
-            actions={
-              isOperationsRole(role)
-                ? [
-                    { href: '/campaigns', label: 'Create sample campaign', icon: 'sample' },
-                    { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
-                  ]
-                : [
-                    { href: '/', label: 'Try verification flow', icon: 'next' },
-                    { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
-                  ]
-            }
-          />
+          <div data-testid="packages-empty-state-mobile">
+            <AppEmptyState
+              compact
+              eyebrow={
+                hasFilters
+                  ? t('emptyStates.dashboard.noMatches.eyebrow')
+                  : t('emptyStates.dashboard.noPackages.eyebrow')
+              }
+              title={
+                hasFilters
+                  ? t('emptyStates.dashboard.noMatches.title')
+                  : isOperationsRole(role)
+                    ? t('emptyStates.dashboard.noPackages.operatorTitle')
+                    : t('emptyStates.dashboard.noPackages.viewerTitle')
+              }
+              description={
+                hasFilters
+                  ? t('emptyStates.dashboard.noMatches.description')
+                  : isOperationsRole(role)
+                    ? t('emptyStates.dashboard.noPackages.operatorDescription')
+                    : t('emptyStates.dashboard.noPackages.viewerDescription')
+              }
+              actions={
+                isOperationsRole(role)
+                  ? [
+                      {
+                        href: '/campaigns',
+                        label: t('emptyStates.dashboard.noPackages.operatorAction'),
+                        icon: 'next',
+                      },
+                      {
+                        href: '/help',
+                        label: t('emptyStates.dashboard.noPackages.secondaryAction'),
+                        icon: 'docs',
+                        variant: 'secondary',
+                      },
+                    ]
+                  : [
+                      {
+                        href: '/',
+                        label: t('emptyStates.dashboard.noPackages.viewerAction'),
+                        icon: 'next',
+                      },
+                      {
+                        href: '/help',
+                        label: t('emptyStates.dashboard.noPackages.secondaryAction'),
+                        icon: 'docs',
+                        variant: 'secondary',
+                      },
+                    ]
+              }
+            />
+          </div>
         )}
       </div>
+
+      {/* Pagination */}
+      {!isLoading && totalItems > 0 && (
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={size}
+          totalItems={totalItems}
+          onPageChange={onPageChange ?? (() => {})}
+        />
+      )}
     </>
   );
-}
+});

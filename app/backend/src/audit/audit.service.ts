@@ -1,10 +1,12 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
-
 import { Prisma } from '@prisma/client';
+import { MetricsService } from 'src/audit/metrics.service';
+import { AuditChainService } from './audit-chain.service';
 
 export interface AuditLogParams {
   actorId: string;
@@ -65,22 +67,37 @@ export interface ExportAuditResult {
 
 @Injectable()
 export class AuditService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private metrics: MetricsService,
+    private chain: AuditChainService,
+  ) {}
 
   anonymize(value: string): string {
     return createHash('sha256').update(value).digest('hex').slice(0, 16);
   }
 
   async record(params: AuditLogParams) {
-    return this.prisma.auditLog.create({
-      data: {
-        actorId: params.actorId,
-        entity: params.entity,
-        entityId: params.entityId,
-        action: params.action,
-        metadata: (params.metadata as Prisma.InputJsonValue) ?? {},
-      },
+    const end = this.metrics.dbQueryDuration.startTimer({
+      operation: 'create',
+      entity: 'AuditLog',
     });
+    try {
+      // Appends are hash-chained (tamper-evident); see
+      // docs/audit-log-integrity.md. The chain service serializes concurrent
+      // appends with a Postgres advisory lock and assigns the entry's
+      // sequence, prevHash and entryHash atomically.
+      const result = await this.chain.appendToChain(params);
+      end();
+      return result;
+    } catch (error) {
+      this.metrics.dbErrorsTotal.inc({
+        operation: 'create',
+        entity: 'AuditLog',
+      });
+      end();
+      throw error;
+    }
   }
 
   async findLogs(query: AuditQuery) {
@@ -101,17 +118,30 @@ export class AuditService {
       if (query.endTime) where.timestamp.lte = new Date(query.endTime);
     }
 
-    const [rows, total] = await this.prisma.$transaction([
-      this.prisma.auditLog.findMany({
-        where,
-        orderBy: { timestamp: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.auditLog.count({ where }),
-    ]);
-
-    return { data: rows, total, page, limit };
+    const end = this.metrics.dbQueryDuration.startTimer({
+      operation: 'findMany',
+      entity: 'AuditLog',
+    });
+    try {
+      const [rows, total] = await this.prisma.$transaction([
+        this.prisma.auditLog.findMany({
+          where,
+          orderBy: { timestamp: 'desc' },
+          skip,
+          take: limit,
+        }),
+        this.prisma.auditLog.count({ where }),
+      ]);
+      end();
+      return { data: rows, total, page, limit };
+    } catch (error) {
+      this.metrics.dbErrorsTotal.inc({
+        operation: 'findMany',
+        entity: 'AuditLog',
+      });
+      end();
+      throw error;
+    }
   }
 
   async exportLogs(query: ExportAuditQuery): Promise<ExportAuditResult> {
@@ -127,37 +157,59 @@ export class AuditService {
 
     if (query.from || query.to) {
       if (query.from && isNaN(Date.parse(query.from))) {
-        throw new BadRequestException(`Invalid 'from' date: ${query.from}`);
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Invalid 'from' date: ${query.from}`,
+        );
       }
       if (query.to && isNaN(Date.parse(query.to))) {
-        throw new BadRequestException(`Invalid 'to' date: ${query.to}`);
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Invalid 'to' date: ${query.to}`,
+        );
       }
       where.timestamp = {};
       if (query.from) where.timestamp.gte = new Date(query.from);
       if (query.to) where.timestamp.lte = new Date(query.to);
     }
 
-    const [rows, total] = await this.prisma.$transaction([
-      this.prisma.auditLog.findMany({
-        where,
-        orderBy: { timestamp: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.auditLog.count({ where }),
-    ]);
+    const end = this.metrics.dbQueryDuration.startTimer({
+      operation: 'export',
+      entity: 'AuditLog',
+    });
+    try {
+      const [rows, total] = await this.prisma.$transaction([
+        this.prisma.auditLog.findMany({
+          where,
+          orderBy: { timestamp: 'desc' },
+          skip,
+          take: limit,
+        }),
+        this.prisma.auditLog.count({ where }),
+      ]);
+      end();
 
-    const data: AnonymizedAuditLog[] = rows.map(row => ({
-      id: row.id,
-      actorHash: this.anonymize(row.actorId),
-      entity: row.entity,
-      entityHash: this.anonymize(row.entityId),
-      action: row.action,
-      timestamp: row.timestamp,
-      metadata: row.metadata,
-    }));
+      const data: AnonymizedAuditLog[] = rows.map(row => ({
+        id: row.id,
+        actorHash: this.anonymize(row.actorId),
+        entity: row.entity,
+        entityHash: this.anonymize(row.entityId),
+        action: row.action,
+        timestamp: row.timestamp,
+        metadata: row.metadata,
+      }));
 
-    return { data, total, page, limit };
+      return { data, total, page, limit };
+    } catch (error) {
+      this.metrics.dbErrorsTotal.inc({
+        operation: 'export',
+        entity: 'AuditLog',
+      });
+      end();
+      throw error;
+    }
   }
 
   buildCsv(rows: AnonymizedAuditLog[]): string {

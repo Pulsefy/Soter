@@ -1,10 +1,10 @@
 #![cfg(test)]
 
-use aid_escrow::{AidEscrow, AidEscrowClient, Error};
+use aid_escrow::{AidEscrow, AidEscrowClient, BatchAdminActionStatus, Error, PackageStatus};
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{Address as _, Ledger as _},
     token::{StellarAssetClient, TokenClient},
-    Address, Env, Map, Vec,
+    Address, Env, Map, String, Symbol, Vec,
 };
 
 const UNIT: i128 = 10_000_000; // 1.0 Token for 7-decimal assets
@@ -215,4 +215,315 @@ fn test_batch_create_packages_empty_arrays() {
         &Vec::new(&env),
     );
     assert_eq!(ids.len(), 0);
+}
+
+#[test]
+fn test_batch_revoke_is_partial_and_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(3 * UNIT));
+    client.fund(&token_client.address, &admin, &(3 * UNIT));
+
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(Address::generate(&env));
+    recipients.push_back(Address::generate(&env));
+    recipients.push_back(Address::generate(&env));
+    let mut amounts = Vec::new(&env);
+    amounts.push_back(UNIT);
+    amounts.push_back(UNIT);
+    amounts.push_back(UNIT);
+    let ids = client.batch_create_packages(
+        &admin,
+        &recipients,
+        &amounts,
+        &token_client.address,
+        &86400,
+        &empty_metadata(&env, 3),
+    );
+
+    let mut revoke_ids = Vec::new(&env);
+    revoke_ids.push_back(ids.get(0).unwrap());
+    revoke_ids.push_back(99);
+    revoke_ids.push_back(ids.get(1).unwrap());
+    revoke_ids.push_back(ids.get(0).unwrap());
+    let results = client.batch_revoke(&revoke_ids);
+
+    assert_eq!(
+        results.get(0).unwrap().status,
+        BatchAdminActionStatus::Success
+    );
+    assert_eq!(
+        results.get(1).unwrap().status,
+        BatchAdminActionStatus::NotFound
+    );
+    assert_eq!(
+        results.get(2).unwrap().status,
+        BatchAdminActionStatus::Success
+    );
+    assert_eq!(
+        results.get(3).unwrap().status,
+        BatchAdminActionStatus::InvalidState
+    );
+    assert_eq!(client.get_total_locked(&token_client.address), UNIT);
+    assert_eq!(client.get_total_claimed(&token_client.address), 0);
+    assert_eq!(
+        client.get_aggregates(&token_client.address).total_committed,
+        UNIT
+    );
+}
+
+#[test]
+fn test_batch_refund_is_partial_and_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(3 * UNIT));
+    client.fund(&token_client.address, &admin, &(3 * UNIT));
+
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(Address::generate(&env));
+    recipients.push_back(Address::generate(&env));
+    recipients.push_back(Address::generate(&env));
+    let mut amounts = Vec::new(&env);
+    amounts.push_back(UNIT);
+    amounts.push_back(UNIT);
+    amounts.push_back(UNIT);
+    let ids = client.batch_create_packages(
+        &admin,
+        &recipients,
+        &amounts,
+        &token_client.address,
+        &1,
+        &empty_metadata(&env, 3),
+    );
+
+    client.revoke(&ids.get(0).unwrap());
+    env.ledger().set_timestamp(2);
+
+    let mut refund_ids = Vec::new(&env);
+    refund_ids.push_back(ids.get(0).unwrap());
+    refund_ids.push_back(ids.get(1).unwrap());
+    refund_ids.push_back(99);
+    refund_ids.push_back(ids.get(1).unwrap());
+    let results = client.batch_refund(&refund_ids);
+
+    assert_eq!(
+        results.get(0).unwrap().status,
+        BatchAdminActionStatus::Success
+    );
+    assert_eq!(
+        results.get(1).unwrap().status,
+        BatchAdminActionStatus::Success
+    );
+    assert_eq!(
+        results.get(2).unwrap().status,
+        BatchAdminActionStatus::NotFound
+    );
+    assert_eq!(
+        results.get(3).unwrap().status,
+        BatchAdminActionStatus::InvalidState
+    );
+    assert_eq!(client.get_total_locked(&token_client.address), UNIT);
+    let aggregates = client.get_aggregates(&token_client.address);
+    assert_eq!(aggregates.total_committed, UNIT);
+    assert_eq!(aggregates.total_expired_cancelled, 2 * UNIT);
+    assert_eq!(client.get_total_claimed(&token_client.address), 0);
+}
+
+#[test]
+fn test_batch_refund_respects_campaign_pause() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+
+    client.init(&admin);
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(recipient);
+    let mut amounts = Vec::new(&env);
+    amounts.push_back(UNIT);
+
+    let mut metadata = Map::new(&env);
+    metadata.set(
+        Symbol::new(&env, "campaign_ref"),
+        String::from_str(&env, "camp-a"),
+    );
+    let mut metadatas = Vec::new(&env);
+    metadatas.push_back(metadata);
+
+    let ids = client.batch_create_packages(
+        &admin,
+        &recipients,
+        &amounts,
+        &token_client.address,
+        &1,
+        &metadatas,
+    );
+
+    // Advance past expiry so the package would otherwise be refundable.
+    env.ledger().set_timestamp(2);
+    client.pause_campaign(&String::from_str(&env, "camp-a"));
+
+    let mut refund_ids = Vec::new(&env);
+    refund_ids.push_back(ids.get(0).unwrap());
+    let results = client.batch_refund(&refund_ids);
+
+    assert_eq!(
+        results.get(0).unwrap().status,
+        BatchAdminActionStatus::CampaignPaused
+    );
+    // Nothing should have moved: still locked, still Created.
+    assert_eq!(client.get_total_locked(&token_client.address), UNIT);
+    assert_eq!(
+        client.get_package(&ids.get(0).unwrap()).status,
+        PackageStatus::Created
+    );
+}
+
+#[test]
+fn test_batch_refund_reports_transfer_failed_and_preserves_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+
+    client.init(&admin);
+    token_admin_client.mint(&admin, &UNIT);
+    client.fund(&token_client.address, &admin, &UNIT);
+
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(recipient);
+    let mut amounts = Vec::new(&env);
+    amounts.push_back(UNIT);
+
+    let ids = client.batch_create_packages(
+        &admin,
+        &recipients,
+        &amounts,
+        &token_client.address,
+        &1,
+        &empty_metadata(&env, 1),
+    );
+
+    env.ledger().set_timestamp(2);
+    // Drain the contract's own token balance so the refund transfer reverts.
+    token_admin_client.burn(&contract_id, &UNIT);
+
+    let mut refund_ids = Vec::new(&env);
+    refund_ids.push_back(ids.get(0).unwrap());
+    let results = client.batch_refund(&refund_ids);
+
+    assert_eq!(
+        results.get(0).unwrap().status,
+        BatchAdminActionStatus::TransferFailed
+    );
+    // Accounting and status must be untouched on a failed transfer.
+    assert_eq!(
+        client.get_package(&ids.get(0).unwrap()).status,
+        PackageStatus::Created
+    );
+    assert_eq!(client.get_total_locked(&token_client.address), UNIT);
+}
+
+#[test]
+fn test_batch_revoke_and_refund_are_idempotent_across_separate_calls() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = setup_token(&env, &token_admin);
+    let contract_id = env.register(AidEscrow, ());
+    let client = AidEscrowClient::new(&env, &contract_id);
+
+    client.init(&admin);
+    token_admin_client.mint(&admin, &(2 * UNIT));
+    client.fund(&token_client.address, &admin, &(2 * UNIT));
+
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(Address::generate(&env));
+    recipients.push_back(Address::generate(&env));
+    let mut amounts = Vec::new(&env);
+    amounts.push_back(UNIT);
+    amounts.push_back(UNIT);
+    let ids = client.batch_create_packages(
+        &admin,
+        &recipients,
+        &amounts,
+        &token_client.address,
+        &1,
+        &empty_metadata(&env, 2),
+    );
+
+    // --- revoke: first call succeeds, second call (separate tx) is a no-op ---
+    let mut revoke_ids = Vec::new(&env);
+    revoke_ids.push_back(ids.get(0).unwrap());
+    let first_revoke = client.batch_revoke(&revoke_ids);
+    assert_eq!(
+        first_revoke.get(0).unwrap().status,
+        BatchAdminActionStatus::Success
+    );
+    let locked_after_first = client.get_total_locked(&token_client.address);
+
+    let second_revoke = client.batch_revoke(&revoke_ids);
+    assert_eq!(
+        second_revoke.get(0).unwrap().status,
+        BatchAdminActionStatus::InvalidState
+    );
+    assert_eq!(
+        client.get_total_locked(&token_client.address),
+        locked_after_first
+    );
+
+    // --- refund: first call succeeds, second call (separate tx) is a no-op ---
+    env.ledger().set_timestamp(2);
+    let mut refund_ids = Vec::new(&env);
+    refund_ids.push_back(ids.get(1).unwrap());
+    let first_refund = client.batch_refund(&refund_ids);
+    assert_eq!(
+        first_refund.get(0).unwrap().status,
+        BatchAdminActionStatus::Success
+    );
+    let admin_balance_after_first = token_client.balance(&admin);
+    let locked_after_first_refund = client.get_total_locked(&token_client.address);
+
+    let second_refund = client.batch_refund(&refund_ids);
+    assert_eq!(
+        second_refund.get(0).unwrap().status,
+        BatchAdminActionStatus::InvalidState
+    );
+    // No double payout, no accounting drift on the repeated call.
+    assert_eq!(token_client.balance(&admin), admin_balance_after_first);
+    assert_eq!(
+        client.get_total_locked(&token_client.address),
+        locked_after_first_refund
+    );
 }

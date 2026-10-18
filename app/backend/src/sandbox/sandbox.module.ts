@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '../prisma/prisma.module';
+import { SandboxService } from './sandbox.service';
 import { SandboxController } from './sandbox.controller';
-import { SandboxGuard } from './sandbox.guard';
-import { SeedService } from './seed.service';
+import { PrismaModule } from '../prisma/prisma.module';
+import { LoggerModule } from '../logger/logger.module';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, LoggerModule, ConfigModule],
+  providers: [SandboxService],
   controllers: [SandboxController],
-  providers: [SeedService, SandboxGuard],
 })
 export class SandboxModule {}

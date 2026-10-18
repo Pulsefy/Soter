@@ -1,5 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisService } from '../../../cache/redis.service';
+import { MetricsService } from '../../observability/metrics/metrics.service';
+
+export interface CacheKeyGroupStats {
+  name: string;
+  pattern: string;
+  count: number;
+}
+
+export interface CacheStats {
+  totalKeys: number;
+  keyGroups: CacheKeyGroupStats[];
+  hits: number;
+  misses: number;
+  invalidations: number;
+}
 
 /**
  * Service for managing cache invalidation across the application.
@@ -9,145 +24,154 @@ import { RedisService } from '../../../cache/redis.service';
 export class CacheInvalidationService {
   private readonly logger = new Logger(CacheInvalidationService.name);
 
-  constructor(private readonly redisService: RedisService) {}
+  /**
+   * Logical cache key groups, used both for invalidation and for
+   * reporting real, Redis-backed key counts per domain in getCacheStats().
+   * Patterns are not mutually exclusive by design (e.g. a verification
+   * claim may also match the "claims" wildcard elsewhere), so key-group
+   * counts should be read as coverage per domain, not a strict partition.
+   */
+  private readonly keyGroups: { name: string; pattern: string }[] = [
+    { name: 'verification', pattern: 'cache:response:*verification*' },
+    { name: 'user', pattern: 'cache:response:*user*' },
+    { name: 'aid-package', pattern: 'cache:response:*packages*' },
+    { name: 'aid-escrow', pattern: 'cache:response:*aid-escrow*' },
+    { name: 'transaction', pattern: 'cache:response:*transaction*' },
+    { name: 'analytics', pattern: 'cache:response:*analytics*' },
+  ];
+
+  private readonly allResponsesPattern = 'cache:response:*';
+
+  constructor(
+    private readonly redisService: RedisService,
+    private readonly metricsService: MetricsService,
+  ) {}
+
+  /**
+   * Delete all keys matching the given patterns and record an invalidation
+   * metric under `keyGroup` for every pattern that actually deleted a key.
+   */
+  private async invalidatePatterns(
+    keyGroup: string,
+    patterns: string[],
+  ): Promise<number> {
+    let totalDeleted = 0;
+    for (const pattern of patterns) {
+      const deleted = await this.redisService.delByPattern(pattern);
+      if (deleted > 0) {
+        totalDeleted += deleted;
+        this.metricsService.incrementCacheInvalidation(keyGroup);
+        this.logger.debug(
+          `Invalidated ${deleted} ${keyGroup} cache entries (pattern: ${pattern})`,
+        );
+      }
+    }
+    return totalDeleted;
+  }
 
   /**
    * Invalidate all verification-related caches for a specific verification ID
    */
   async invalidateVerification(verificationId: string): Promise<void> {
-    const patterns = [
+    await this.invalidatePatterns('verification', [
       `cache:response:*verification*${verificationId}*`,
       `cache:response:*verification/${verificationId}*`,
       `cache:response:*claims/${verificationId}*`,
-    ];
-
-    for (const pattern of patterns) {
-      const deleted = await this.redisService.delByPattern(pattern);
-      if (deleted > 0) {
-        this.logger.debug(
-          `Invalidated ${deleted} verification cache entries for ID ${verificationId}`,
-        );
-      }
-    }
+    ]);
   }
 
   /**
    * Invalidate all verification metrics caches
    */
   async invalidateVerificationMetrics(): Promise<void> {
-    const deleted = await this.redisService.delByPattern(
+    await this.invalidatePatterns('verification', [
       'cache:response:*verification*metrics*',
-    );
-    if (deleted > 0) {
-      this.logger.debug(
-        `Invalidated ${deleted} verification metrics cache entries`,
-      );
-    }
+    ]);
   }
 
   /**
    * Invalidate all caches for a specific user
    */
   async invalidateUserCaches(userId: string): Promise<void> {
-    const patterns = [
+    await this.invalidatePatterns('user', [
       `cache:response:*user/${userId}*`,
       `cache:response:*userId=${userId}*`,
-    ];
-
-    for (const pattern of patterns) {
-      const deleted = await this.redisService.delByPattern(pattern);
-      if (deleted > 0) {
-        this.logger.debug(
-          `Invalidated ${deleted} user cache entries for user ${userId}`,
-        );
-      }
-    }
+    ]);
   }
 
   /**
    * Invalidate all aid package caches for a specific package ID
    */
   async invalidateAidPackage(packageId: string): Promise<void> {
-    const patterns = [
+    await this.invalidatePatterns('aid-package', [
       `cache:response:*packages/${packageId}*`,
       `cache:response:*aid-escrow*${packageId}*`,
-    ];
-
-    for (const pattern of patterns) {
-      const deleted = await this.redisService.delByPattern(pattern);
-      if (deleted > 0) {
-        this.logger.debug(
-          `Invalidated ${deleted} aid package cache entries for ID ${packageId}`,
-        );
-      }
-    }
+    ]);
   }
 
   /**
    * Invalidate all aid package statistics caches
    */
   async invalidateAidPackageStats(): Promise<void> {
-    const deleted = await this.redisService.delByPattern(
+    await this.invalidatePatterns('aid-package', [
       'cache:response:*aid-escrow*stats*',
-    );
-    if (deleted > 0) {
-      this.logger.debug(
-        `Invalidated ${deleted} aid package stats cache entries`,
-      );
-    }
+    ]);
   }
 
   /**
    * Invalidate transaction status caches for a specific transaction hash
    */
   async invalidateTransaction(txHash: string): Promise<void> {
-    const patterns = [
+    await this.invalidatePatterns('transaction', [
       `cache:response:*transactions/${txHash}*`,
       `cache:response:*transaction*${txHash}*`,
-    ];
-
-    for (const pattern of patterns) {
-      const deleted = await this.redisService.delByPattern(pattern);
-      if (deleted > 0) {
-        this.logger.debug(
-          `Invalidated ${deleted} transaction cache entries for hash ${txHash}`,
-        );
-      }
-    }
+    ]);
   }
 
   /**
    * Invalidate all analytics caches
    */
   async invalidateAnalytics(): Promise<void> {
-    const deleted = await this.redisService.delByPattern(
-      'cache:response:*analytics*',
-    );
-    if (deleted > 0) {
-      this.logger.debug(`Invalidated ${deleted} analytics cache entries`);
-    }
+    await this.invalidatePatterns('analytics', ['cache:response:*analytics*']);
   }
 
   /**
    * Invalidate all response caches (nuclear option)
    */
   async invalidateAll(): Promise<void> {
-    const deleted = await this.redisService.delByPattern('cache:response:*');
+    const deleted = await this.redisService.delByPattern(
+      this.allResponsesPattern,
+    );
+    this.metricsService.incrementCacheInvalidation('all');
     this.logger.warn(`Invalidated ALL cache entries (${deleted} keys)`);
   }
 
   /**
-   * Get cache statistics
+   * Get real, Redis-backed cache statistics: total key count, per key-group
+   * key counts (Redis key health), and cumulative hit/miss/invalidation
+   * counters collected from the response cache.
    */
-  getCacheStats(): {
-    totalKeys: number;
-    patterns: { pattern: string; count: number }[];
-  } {
-    // This would require implementing a SCAN-based key counter
-    // For now, return a placeholder
-    return {
-      totalKeys: 0,
-      patterns: [],
-    };
+  async getCacheStats(): Promise<CacheStats> {
+    const [totalKeys, keyGroups, hits, misses, invalidations] =
+      await Promise.all([
+        this.redisService.countKeysByPattern(this.allResponsesPattern),
+        Promise.all(
+          this.keyGroups.map(async group => ({
+            name: group.name,
+            pattern: group.pattern,
+            count: await this.redisService.countKeysByPattern(group.pattern),
+          })),
+        ),
+        this.metricsService.getCacheHitsTotal(),
+        this.metricsService.getCacheMissesTotal(),
+        this.metricsService.getCacheInvalidationsTotal(),
+      ]);
+
+    this.metricsService.setCacheKeyGroupSize('total', totalKeys);
+    for (const group of keyGroups) {
+      this.metricsService.setCacheKeyGroupSize(group.name, group.count);
+    }
+
+    return { totalKeys, keyGroups, hits, misses, invalidations };
   }
 }

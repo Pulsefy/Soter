@@ -9,7 +9,7 @@
  * a code-review violation.
  */
 
-import { CampaignStatus, ClaimStatus } from '@prisma/client';
+import { CampaignStatus, CancelReasonCode, ClaimStatus } from '@prisma/client';
 
 // ---------------------------------------------------------------------------
 // Seed shape interfaces
@@ -63,6 +63,12 @@ export interface DemoClaimSeed {
    * At least one entry in `DEMO_CLAIM_SEEDS` must supply this field.
    */
   evidenceRef?: string;
+  /**
+   * Structured cancellation reason. Only meaningful when `status` is
+   * `cancelled` — the cancel endpoint requires one, and the demo dataset
+   * should exercise the cancellation breakdown like real data does.
+   */
+  cancelReasonCode?: CancelReasonCode;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,5 +213,14 @@ export const DEMO_CLAIM_SEEDS: DemoClaimSeed[] = [
     amount: 1_000,
     status: ClaimStatus.approved,
     evidenceRef: 'evidence/demo-recipient-003/approval-doc.pdf',
+  },
+  {
+    // Rejected claim — rejected after review.
+    campaignName: DEMO_CAMPAIGN_SEEDS[1].name, // 'Demo Campaign — Active'
+    recipientRef: 'demo-recipient-004',
+    amount: 250,
+    status: ClaimStatus.cancelled,
+    evidenceRef: 'evidence/demo-recipient-004/rejection-reason.pdf',
+    cancelReasonCode: CancelReasonCode.evidence_rejected,
   },
 ];

@@ -51,6 +51,7 @@ export interface InternalNote {
 export interface ReviewFilters {
   status: VerificationStatus | '';
   riskLevel: RiskLevel | '';
+  campaignId: string;
   dateFrom: string;
   dateTo: string;
   page: number;

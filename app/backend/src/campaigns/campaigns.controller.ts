@@ -33,6 +33,7 @@ import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { ExportCampaignsQueryDto } from './dto/export-campaigns.dto';
 import { ApiResponseDto } from '../common/dto/api-response.dto';
+import { streamCsvResponse } from '../common/csv/stream-csv-response';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
 import { Throttle } from '@nestjs/throttler';
@@ -105,6 +106,22 @@ export class CampaignsController {
   async get(@Param('id') id: string) {
     const campaign = await this.campaigns.findOne(id);
     return ApiResponseDto.ok(campaign, 'Campaign fetched successfully');
+  }
+
+  @Get(':id/timeline')
+  @ApiOperation({
+    summary: 'Get campaign milestone timeline',
+    description:
+      'Returns issuance, verification, claim, and disbursement milestones derived from backend and onchain state.',
+  })
+  @ApiOkResponse({ description: 'Campaign timeline retrieved successfully.' })
+  @ApiNotFoundResponse({ description: 'The specified campaign was not found.' })
+  async getTimeline(@Param('id') id: string) {
+    const timeline = await this.campaigns.getTimeline(id);
+    return ApiResponseDto.ok(
+      timeline,
+      'Campaign timeline fetched successfully',
+    );
   }
 
   @Patch(':id')
@@ -233,11 +250,12 @@ export class CampaignsController {
   @ApiOperation({
     summary: 'Export campaigns as CSV',
     description:
-      'Exports campaign summaries as CSV with support for date range, status, organization, and pagination filters. ' +
-      'Excludes sensitive internal metadata and deleted records.',
+      'Streams campaign summaries as CSV with support for date range, status, and organization filters. ' +
+      'Rows are fetched and written in bounded batches so exporting a large number of campaigns does not ' +
+      'buffer the full result set in memory. Excludes sensitive internal metadata and deleted records.',
   })
   @ApiOkResponse({
-    description: 'Campaigns exported successfully.',
+    description: 'Campaigns exported successfully as a streamed CSV response.',
     content: {
       'text/csv': {
         schema: { type: 'string' },
@@ -271,32 +289,17 @@ export class CampaignsController {
     description: 'Organization ID filter',
   })
   @ApiQuery({ name: 'ngoId', required: false, description: 'NGO ID filter' })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    description: 'Page number (default: 1)',
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    description: 'Items per page (default: 50, max: 200)',
-  })
   async exportCampaigns(
     @Query() query: ExportCampaignsQueryDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const result = await this.campaigns.exportCampaigns(query);
+    @Res() res: Response,
+  ): Promise<void> {
+    const total = await this.campaigns.countExport(query);
 
-    const csv = this.campaigns.buildCsv(result.data);
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="campaigns-export-${Date.now()}.csv"`,
+    await streamCsvResponse(
+      res,
+      `campaigns-export-${Date.now()}.csv`,
+      this.campaigns.streamExportCsv(query),
+      total,
     );
-    res.setHeader('X-Total-Count', String(result.total));
-    res.setHeader('X-Page', String(result.page));
-    res.setHeader('X-Limit', String(result.limit));
-
-    return csv;
   }
 }

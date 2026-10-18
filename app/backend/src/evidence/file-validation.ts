@@ -1,4 +1,5 @@
-import { BadRequestException, PayloadTooLargeException } from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { PayloadTooLargeException } from '@nestjs/common';
 import type { Request } from 'express';
 import * as path from 'path';
 
@@ -111,11 +112,16 @@ export function evidenceFileFilter(
   cb: (error: Error | null, acceptFile: boolean) => void,
 ): void {
   if (!isSafeFilename(file.originalname)) {
-    return cb(new BadRequestException('Invalid filename'), false);
+    return cb(
+      new AppException(ERROR_CODES.BAD_REQUEST, 400, 'Invalid filename'),
+      false,
+    );
   }
   if (!(ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
     return cb(
-      new BadRequestException(
+      new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Invalid MIME type: ${file.mimetype}. Allowed types: ${ALLOWED_MIME_TYPES.join(', ')}`,
       ),
       false,
@@ -124,7 +130,9 @@ export function evidenceFileFilter(
   const ext = path.extname(file.originalname).toLowerCase();
   if (!ext || !(ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
     return cb(
-      new BadRequestException(
+      new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
         `Invalid file extension: ${ext || '(none)'}. Allowed extensions: ${ALLOWED_EXTENSIONS.join(', ')}`,
       ),
       false,
@@ -157,70 +165,118 @@ export interface ValidatedFile {
 }
 
 /**
- * Deep, content-aware validation of a fully buffered uploaded file. This runs
- * after Multer has accepted the stream and complements {@link evidenceFileFilter}
- * by inspecting the actual bytes:
+ * Validates that `filename`'s extension is on the allow-list and is
+ * consistent with `mimetype` (e.g. rejects `evil.txt` declared as
+ * `application/pdf`). Used both for fully-buffered uploads and for the
+ * upload-session flow, where the extension/MIME pair is declared up front
+ * (before any bytes have been received).
  *
- *  - file presence and non-emptiness,
- *  - size ceiling (boundary-safe),
- *  - safe filename,
- *  - MIME allow-list,
- *  - extension allow-list,
- *  - extension/MIME consistency,
- *  - magic-byte signature matching the declared type.
- *
- * Throws {@link BadRequestException} (or {@link PayloadTooLargeException} for
- * oversized files) describing the first failure encountered.
+ * Returns the lower-cased extension on success; throws
+ * {@link BadRequestException} describing the first failure otherwise.
  */
-export function validateUploadedFile(
-  file: Express.Multer.File | undefined,
-): ValidatedFile {
-  if (!file) {
-    throw new BadRequestException('No file uploaded');
-  }
-
-  if (!file.buffer || file.size === 0 || file.buffer.length === 0) {
-    throw new BadRequestException('Uploaded file is empty');
-  }
-
-  if (file.size > MAX_FILE_SIZE) {
-    throw new PayloadTooLargeException(
-      `File too large. Maximum allowed size is ${MAX_FILE_SIZE / (1024 * 1024)}MB`,
-    );
-  }
-
-  if (!isSafeFilename(file.originalname)) {
-    throw new BadRequestException('Invalid filename');
-  }
-
-  if (!(ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
-    throw new BadRequestException(
-      `Invalid MIME type: ${file.mimetype}. Allowed types: ${ALLOWED_MIME_TYPES.join(', ')}`,
-    );
-  }
-
-  const ext = path.extname(file.originalname).toLowerCase();
+export function validateExtensionForMime(
+  filename: string,
+  mimetype: string,
+): string {
+  const ext = path.extname(filename).toLowerCase();
   if (!ext || !(ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
-    throw new BadRequestException(
+    throw new AppException(
+      ERROR_CODES.BAD_REQUEST,
+      400,
       `Invalid file extension: ${ext || '(none)'}. Allowed extensions: ${ALLOWED_EXTENSIONS.join(', ')}`,
     );
   }
 
   const allowedForExt = EXTENSION_MIME_MAP[ext] ?? [];
-  if (!allowedForExt.includes(file.mimetype)) {
-    throw new BadRequestException(
-      `Declared MIME type ${file.mimetype} does not match extension ${ext}`,
+  if (!allowedForExt.includes(mimetype)) {
+    throw new AppException(
+      ERROR_CODES.BAD_REQUEST,
+      400,
+      `Declared MIME type ${mimetype} does not match extension ${ext}`,
     );
   }
 
-  assertContentMatchesType(file);
+  return ext;
+}
 
-  return {
+/** A file's identity (name/type/size) plus its full byte content. */
+export interface FileContent {
+  filename: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
+/**
+ * Deep, content-aware validation of a fully buffered file, regardless of how
+ * it arrived (a direct multipart upload or a reassembled upload-session).
+ * Inspects the actual bytes rather than trusting client-declared metadata:
+ *
+ *  - non-emptiness,
+ *  - size ceiling (boundary-safe),
+ *  - safe filename,
+ *  - MIME allow-list,
+ *  - extension allow-list and extension/MIME consistency,
+ *  - magic-byte signature matching the declared type.
+ *
+ * Throws {@link BadRequestException} (or {@link PayloadTooLargeException} for
+ * oversized files) describing the first failure encountered.
+ */
+export function validateFileContent(input: FileContent): ValidatedFile {
+  const { filename, mimetype, size, buffer } = input;
+
+  if (!buffer || size === 0 || buffer.length === 0) {
+    throw new AppException(
+      ERROR_CODES.BAD_REQUEST,
+      400,
+      'Uploaded file is empty',
+    );
+  }
+
+  if (size > MAX_FILE_SIZE) {
+    throw new PayloadTooLargeException(
+      `File too large. Maximum allowed size is ${MAX_FILE_SIZE / (1024 * 1024)}MB`,
+    );
+  }
+
+  if (!isSafeFilename(filename)) {
+    throw new AppException(ERROR_CODES.BAD_REQUEST, 400, 'Invalid filename');
+  }
+
+  if (!(ALLOWED_MIME_TYPES as readonly string[]).includes(mimetype)) {
+    throw new AppException(
+      ERROR_CODES.BAD_REQUEST,
+      400,
+      `Invalid MIME type: ${mimetype}. Allowed types: ${ALLOWED_MIME_TYPES.join(', ')}`,
+    );
+  }
+
+  const ext = validateExtensionForMime(filename, mimetype);
+
+  assertContentMatchesType(mimetype, buffer);
+
+  return { filename, size, mimetype, extension: ext };
+}
+
+/**
+ * Deep, content-aware validation of a fully buffered uploaded file. This runs
+ * after Multer has accepted the stream and complements {@link evidenceFileFilter}
+ * by inspecting the actual bytes. See {@link validateFileContent} for the
+ * checks performed.
+ */
+export function validateUploadedFile(
+  file: Express.Multer.File | undefined,
+): ValidatedFile {
+  if (!file) {
+    throw new AppException(ERROR_CODES.BAD_REQUEST, 400, 'No file uploaded');
+  }
+
+  return validateFileContent({
     filename: file.originalname,
-    size: file.size,
     mimetype: file.mimetype,
-    extension: ext,
-  };
+    size: file.size,
+    buffer: file.buffer,
+  });
 }
 
 /**
@@ -229,15 +285,15 @@ export function validateUploadedFile(
  * it rejects content that looks like a known binary format (a disguised
  * executable or document).
  */
-function assertContentMatchesType(file: Express.Multer.File): void {
-  const buffer = file.buffer;
-
-  if (file.mimetype === 'text/plain') {
+function assertContentMatchesType(mimetype: string, buffer: Buffer): void {
+  if (mimetype === 'text/plain') {
     // A text file must not begin with a known binary signature, and must not
     // contain a NUL byte in its leading bytes (a strong binary indicator).
     for (const sig of MAGIC_SIGNATURES) {
       if (startsWith(buffer, sig.bytes)) {
-        throw new BadRequestException(
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
           'File contents do not match the declared text/plain type',
         );
       }
@@ -245,7 +301,9 @@ function assertContentMatchesType(file: Express.Multer.File): void {
     const sampleLen = Math.min(buffer.length, 512);
     for (let i = 0; i < sampleLen; i++) {
       if (buffer[i] === 0x00) {
-        throw new BadRequestException(
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
           'File contents do not match the declared text/plain type',
         );
       }
@@ -253,10 +311,12 @@ function assertContentMatchesType(file: Express.Multer.File): void {
     return;
   }
 
-  const signature = MAGIC_SIGNATURES.find(s => s.mime === file.mimetype);
+  const signature = MAGIC_SIGNATURES.find(s => s.mime === mimetype);
   if (signature && !startsWith(buffer, signature.bytes)) {
-    throw new BadRequestException(
-      `File contents do not match the declared ${file.mimetype} type`,
+    throw new AppException(
+      ERROR_CODES.BAD_REQUEST,
+      400,
+      `File contents do not match the declared ${mimetype} type`,
     );
   }
 }

@@ -1,30 +1,47 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { TaskItem } from './taskApi';
+import type { TaskItem } from './taskApi';
+import { config } from '../config';
+import {
+  TASK_CACHE_KEY,
+  TASK_CACHE_TIMESTAMP_KEY,
+  clearBoundedCache,
+  getCacheSummary,
+  loadCachedItems,
+  persistBoundedCache,
+} from './localCache';
+import type { CacheWriteResult } from './localCache';
 
-const CACHE_KEY = '@soter/task_list';
-const CACHE_TIMESTAMP_KEY = '@soter/task_list_timestamp';
+const taskCacheOptions = {
+  cacheKey: TASK_CACHE_KEY,
+  timestampKey: TASK_CACHE_TIMESTAMP_KEY,
+  maxBytes: config.taskCacheMaxBytes,
+  warningRatio: config.localCacheWarningRatio,
+  getIdentity: (item: TaskItem) => ({ id: item.id, relatedAidId: item.assignedPackageId }),
+  getEvictionTimestamp: (item: TaskItem) => {
+    const timestamp = new Date(item.dueDate).getTime();
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  },
+};
 
 /** Persist task list to AsyncStorage */
-export const cacheTaskList = async (data: TaskItem[]): Promise<void> => {
-  await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data));
-  await AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
-};
+export const cacheTaskList = async (
+  data: TaskItem[],
+  maxBytes = config.taskCacheMaxBytes,
+): Promise<CacheWriteResult<TaskItem>> =>
+  persistBoundedCache(data, { ...taskCacheOptions, maxBytes });
 
 /** Load cached task list from AsyncStorage */
-export const loadCachedTaskList = async (): Promise<TaskItem[] | null> => {
-  const raw = await AsyncStorage.getItem(CACHE_KEY);
-  if (!raw) return null;
-  return JSON.parse(raw) as TaskItem[];
-};
+export const loadCachedTaskList = async (): Promise<TaskItem[] | null> =>
+  loadCachedItems<TaskItem>(TASK_CACHE_KEY);
 
 /** Returns the ISO timestamp of the last successful cache write, or null */
 export const getTaskCacheTimestamp = async (): Promise<string | null> => {
-  const ts = await AsyncStorage.getItem(CACHE_TIMESTAMP_KEY);
+  const ts = await AsyncStorage.getItem(TASK_CACHE_TIMESTAMP_KEY);
   if (!ts) return null;
   return new Date(parseInt(ts, 10)).toLocaleString();
 };
 
-/** Clear the cached task list */
-export const clearTaskCache = async (): Promise<void> => {
-  await AsyncStorage.multiRemove([CACHE_KEY, CACHE_TIMESTAMP_KEY]);
-};
+/** Clear synced cached tasks while preserving unsynced local changes. */
+export const clearTaskCache = async () => clearBoundedCache<TaskItem>(taskCacheOptions);
+
+export const getTaskCacheSummary = async () => getCacheSummary<TaskItem>(taskCacheOptions);

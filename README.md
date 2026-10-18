@@ -3,7 +3,6 @@
 </p>
 
 # Soter
-
 Soter is a humanitarian aid distribution platform built on the Stellar ecosystem (Soroban). It combines on-chain escrow and auditable events with off-chain verification and field-ready client apps.
 
 ## Features
@@ -26,7 +25,7 @@ Soter is a humanitarian aid distribution platform built on the Stellar ecosystem
 - Smart Contracts (Soroban/Rust): AidEscrow escrow + claim flows ([onchain README](app/onchain/README.md))
 - Frontend (Next.js): admin/donor UI, dashboards, wallet flows ([frontend README](app/frontend/README.md))
 - Mobile (Expo): field operations + pilot flows ([mobile README](app/mobile/README.md))
-- AI Service (FastAPI): OCR/anonymization/fraud checks for verification flows ([ai-service README](app/ai-service/README.md))
+- AI Service (FastAPI): OCR/anonymization/fraud checks for verification flows ([ai-service README](app/ai-service/README.md) · [operations guide](app/ai-service/AI_SERVICE_OPERATIONS.md) · [API reference](app/ai-service/openapi.json))
 
 ## Tech stack
 
@@ -107,13 +106,24 @@ pnpm start
 Helpful starting points:
 - Backend Soroban integration notes: [SOROBAN_INTEGRATION.md](app/backend/src/onchain/SOROBAN_INTEGRATION.md)
 - Contract docs and method/event reference: [onchain README](app/onchain/README.md)
+- AI Service operations and resilience guide: [AI_SERVICE_OPERATIONS.md](app/ai-service/AI_SERVICE_OPERATIONS.md)
 
 ## Testing
 
 - Backend: `cd app/backend && npm test` and `npm run test:e2e`
 - Frontend: `cd app/frontend && pnpm lint && pnpm type-check && pnpm test`
-- Mobile: `cd app/mobile && pnpm test && pnpm lint`
+- Mobile: `cd app/mobile && pnpm test && pnpm lint`; core field flows end-to-end: `pnpm e2e:android` (see [app/mobile/E2E_TESTING.md](app/mobile/E2E_TESTING.md))
 - AI service: `cd app/ai-service && pytest`
+
+## Documentation
+
+Cross-cutting docs live in [`doc/`](doc/):
+
+- [Onboarding: the wave-based contribution workflow](doc/onboarding-wave-workflow.md) — how waves work, how to claim an issue, turnaround, and review expectations.
+- [Architecture decision log](doc/decisions/README.md) — append-only record of significant architecture decisions and why they were made.
+- [Claims-to-verification flow](doc/claims-verification-flow.md) — the claim and verification lifecycles, how they connect, and the target wiring state.
+- [Frontend & mobile API integration guide](doc/api-integration-guide.md) — how to call the backend from each client, demo/mock behavior, and the OpenAPI source of truth.
+- [Security model and sensitive data handling](doc/security-model.md) — trust boundaries, sensitive-data inventory, authentication per boundary, redaction/retention/purge behavior, and the known gaps.
 
 ## Contributing
 

@@ -40,7 +40,7 @@ describe('RequestCorrelationMiddleware', () => {
       verbose: jest.fn(),
       getLogger: jest.fn(),
       child: jest.fn(),
-    } as unknown as jest.Mocked<LoggerService>;
+    };
 
     middleware = new RequestCorrelationMiddleware(mockLogger);
   });

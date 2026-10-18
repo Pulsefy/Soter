@@ -7,6 +7,7 @@ import {
   VerificationJobData,
   VerificationResult,
 } from './interfaces/verification-job.interface';
+import { VerificationPriority } from './dto/enqueue-verification.dto';
 
 describe('VerificationProcessor', () => {
   let processor: VerificationProcessor;
@@ -15,6 +16,7 @@ describe('VerificationProcessor', () => {
   const mockJobData: VerificationJobData = {
     claimId: 'test-claim-id',
     timestamp: Date.now(),
+    priority: VerificationPriority.NORMAL,
   };
 
   const mockResult: VerificationResult = {

@@ -1,16 +1,23 @@
+import { AppException } from '../common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+
 import { EntityLinkingService } from './entity-linking.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
+import { ENTITY_LINK_CONFIDENCE_CONFIG } from '../common/config/entity-link-confidence.config';
 
 describe('EntityLinkingService', () => {
   let service: EntityLinkingService;
   let prisma: PrismaService;
+  let auditService: jest.Mocked<AuditService>;
+  let metricsService: jest.Mocked<MetricsService>;
 
   const mockPrisma = {
     entityLink: {
       create: jest.fn(),
       findMany: jest.fn(),
+      findUnique: jest.fn(),
       count: jest.fn(),
       update: jest.fn(),
     },
@@ -34,23 +41,46 @@ describe('EntityLinkingService', () => {
       findFirst: jest.fn(),
       findMany: jest.fn(),
     },
+    campaign: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
+    claim: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
+    verificationRequest: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
+  };
+
+  const mockAuditService = {
+    record: jest.fn(),
+  };
+
+  const mockMetricsService = {
+    adjustEntityLinkReviewQueueDepth: jest.fn(),
+    setEntityLinkReviewQueueDepth: jest.fn(),
+    incrementEntityLinkReviewDecision: jest.fn(),
+    recordEntityLinkReviewDuration: jest.fn(),
   };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EntityLinkingService,
-        {
-          provide: PrismaService,
-          useValue: mockPrisma,
-        },
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+        { provide: MetricsService, useValue: mockMetricsService },
       ],
     }).compile();
 
     service = module.get<EntityLinkingService>(EntityLinkingService);
     prisma = module.get<PrismaService>(PrismaService);
+    auditService = module.get(AuditService);
+    metricsService = module.get(MetricsService);
 
-    // Clear all mocks before each test
     jest.clearAllMocks();
   });
 
@@ -58,14 +88,14 @@ describe('EntityLinkingService', () => {
     expect(service).toBeDefined();
   });
 
-  describe('linkEntity', () => {
-    it('should create entity link with valid data', async () => {
+  describe('linkEntity - confidence banding', () => {
+    it('auto-accepts a link at or above the threshold', async () => {
       const dto = {
         sourceType: 'claim' as const,
         sourceId: 'claim-123',
         extractedName: 'Test Organization',
         entityType: 'organization' as const,
-        confidenceScore: 0.95,
+        confidenceScore: ENTITY_LINK_CONFIDENCE_CONFIG.AUTO_ACCEPT_THRESHOLD,
         matchMethod: 'exact',
       };
 
@@ -76,18 +106,94 @@ describe('EntityLinkingService', () => {
         locationId: null,
         assetId: null,
         projectId: null,
+        reviewStatus: 'auto_accepted',
+        queuedAt: null,
         isActive: true,
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNotes: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
 
       const result = await service.linkEntity(dto);
 
-      expect(result).toBeDefined();
-      expect(result.sourceType).toBe('claim');
-      expect(result.extractedName).toBe('Test Organization');
-      expect(result.confidenceScore).toBe(0.95);
-      expect(prisma.entityLink.create).toHaveBeenCalled();
+      expect(result.reviewStatus).toBe('auto_accepted');
+      expect(result.isActive).toBe(true);
+      expect(prisma.entityLink.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            reviewStatus: 'auto_accepted',
+            isActive: true,
+            queuedAt: null,
+          }),
+        }),
+      );
+      expect(
+        metricsService.adjustEntityLinkReviewQueueDepth,
+      ).not.toHaveBeenCalled();
+      expect(auditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entity: 'EntityLink',
+          entityId: 'link-1',
+          action: 'auto_accepted',
+        }),
+      );
+    });
+
+    it('routes a below-threshold link to the review queue instead of applying it', async () => {
+      const belowThreshold =
+        ENTITY_LINK_CONFIDENCE_CONFIG.AUTO_ACCEPT_THRESHOLD - 0.1;
+      const dto = {
+        sourceType: 'claim' as const,
+        sourceId: 'claim-123',
+        extractedName: 'Ambiguous Org',
+        entityType: 'organization' as const,
+        confidenceScore: belowThreshold,
+        matchMethod: 'fuzzy',
+      };
+
+      mockPrisma.entityLink.create.mockResolvedValue({
+        id: 'link-2',
+        ...dto,
+        organizationId: null,
+        locationId: null,
+        assetId: null,
+        projectId: null,
+        reviewStatus: 'pending_review',
+        queuedAt: new Date(),
+        isActive: false,
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNotes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const result = await service.linkEntity(dto);
+
+      expect(result.reviewStatus).toBe('pending_review');
+      expect(result.isActive).toBe(false);
+      expect(prisma.entityLink.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            reviewStatus: 'pending_review',
+            isActive: false,
+            queuedAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(
+        metricsService.adjustEntityLinkReviewQueueDepth,
+      ).toHaveBeenCalledWith('organization', 1);
+      expect(auditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'queued_for_review',
+          metadata: expect.objectContaining({
+            confidenceScore: belowThreshold,
+          }),
+        }),
+      );
     });
 
     it('should throw BadRequestException for invalid confidence score', async () => {
@@ -99,9 +205,7 @@ describe('EntityLinkingService', () => {
         confidenceScore: 1.5, // Invalid: > 1
       };
 
-      await expect(service.linkEntity(dto)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.linkEntity(dto)).rejects.toThrow(AppException);
     });
 
     it('should throw NotFoundException for non-existent registry ID', async () => {
@@ -116,7 +220,7 @@ describe('EntityLinkingService', () => {
 
       mockPrisma.registryOrganization.findUnique.mockResolvedValue(null);
 
-      await expect(service.linkEntity(dto)).rejects.toThrow(NotFoundException);
+      await expect(service.linkEntity(dto)).rejects.toThrow(AppException);
     });
   });
 
@@ -130,6 +234,8 @@ describe('EntityLinkingService', () => {
           extractedName: 'Test Org',
           entityType: 'organization',
           confidenceScore: 0.9,
+          reviewStatus: 'auto_accepted',
+          queuedAt: null,
           isActive: true,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -153,6 +259,19 @@ describe('EntityLinkingService', () => {
             sourceType: 'claim',
             confidenceScore: { gte: 0.8 },
           }),
+        }),
+      );
+    });
+
+    it('filters by reviewStatus when provided', async () => {
+      mockPrisma.entityLink.findMany.mockResolvedValue([]);
+      mockPrisma.entityLink.count.mockResolvedValue(0);
+
+      await service.queryLinks({ reviewStatus: 'pending_review' });
+
+      expect(prisma.entityLink.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ reviewStatus: 'pending_review' }),
         }),
       );
     });
@@ -241,41 +360,218 @@ describe('EntityLinkingService', () => {
     });
   });
 
-  describe('reviewLink', () => {
-    it('should update link review status', async () => {
-      const mockUpdated = {
-        id: 'link-1',
-        sourceType: 'claim',
-        sourceId: 'claim-123',
-        extractedName: 'Test',
-        entityType: 'organization',
-        confidenceScore: 0.9,
-        reviewedBy: 'user-1',
-        reviewedAt: new Date(),
-        isActive: false,
-        reviewNotes: 'Incorrect match',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+  describe('getReviewQueue', () => {
+    it('lists only pending_review links, oldest queued first', async () => {
+      mockPrisma.entityLink.findMany.mockResolvedValue([]);
+      mockPrisma.entityLink.count.mockResolvedValue(0);
 
-      mockPrisma.entityLink.update.mockResolvedValue(mockUpdated);
+      await service.getReviewQueue({ entityType: 'organization' });
 
-      const result = await service.reviewLink('link-1', {
-        reviewedBy: 'user-1',
-        isActive: false,
-        reviewNotes: 'Incorrect match',
+      expect(prisma.entityLink.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { reviewStatus: 'pending_review', entityType: 'organization' },
+          orderBy: { queuedAt: 'asc' },
+        }),
+      );
+    });
+  });
+
+  describe('decideReview', () => {
+    const queuedLink = {
+      id: 'link-1',
+      sourceType: 'claim',
+      sourceId: 'claim-123',
+      extractedName: 'Ambiguous Org',
+      entityType: 'organization',
+      organizationId: null,
+      locationId: null,
+      assetId: null,
+      projectId: null,
+      confidenceScore: 0.6,
+      matchMethod: 'fuzzy',
+      reviewStatus: 'pending_review',
+      queuedAt: new Date(Date.now() - 60_000),
+      isActive: false,
+      reviewedBy: null,
+      reviewedAt: null,
+      reviewNotes: null,
+      createdAt: new Date(Date.now() - 60_000),
+      updatedAt: new Date(Date.now() - 60_000),
+    };
+
+    it('throws NotFoundException for a nonexistent link', async () => {
+      mockPrisma.entityLink.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.decideReview('missing', { action: 'accept' }, 'reviewer-1'),
+      ).rejects.toThrow(AppException);
+    });
+
+    it('throws BadRequestException when the link is not pending review', async () => {
+      mockPrisma.entityLink.findUnique.mockResolvedValue({
+        ...queuedLink,
+        reviewStatus: 'accepted',
       });
 
-      expect(result.isActive).toBe(false);
-      expect(result.reviewedBy).toBe('user-1');
+      await expect(
+        service.decideReview('link-1', { action: 'accept' }, 'reviewer-1'),
+      ).rejects.toThrow(AppException);
+    });
+
+    it('accepts a queued link: activates it and records audit + metrics', async () => {
+      mockPrisma.entityLink.findUnique.mockResolvedValue(queuedLink);
+      mockPrisma.entityLink.update.mockResolvedValue({
+        ...queuedLink,
+        reviewStatus: 'accepted',
+        isActive: true,
+        reviewedBy: 'reviewer-1',
+        reviewedAt: new Date(),
+        reviewNotes: 'looks right',
+      });
+
+      const result = await service.decideReview(
+        'link-1',
+        { action: 'accept', reviewNotes: 'looks right' },
+        'reviewer-1',
+      );
+
+      expect(result.reviewStatus).toBe('accepted');
+      expect(result.isActive).toBe(true);
       expect(prisma.entityLink.update).toHaveBeenCalledWith({
         where: { id: 'link-1' },
         data: expect.objectContaining({
-          reviewedBy: 'user-1',
-          isActive: false,
-          reviewNotes: 'Incorrect match',
+          reviewStatus: 'accepted',
+          isActive: true,
+          reviewedBy: 'reviewer-1',
+          reviewNotes: 'looks right',
         }),
       });
+      expect(
+        metricsService.adjustEntityLinkReviewQueueDepth,
+      ).toHaveBeenCalledWith('organization', -1);
+      expect(
+        metricsService.incrementEntityLinkReviewDecision,
+      ).toHaveBeenCalledWith('accept');
+      expect(
+        metricsService.recordEntityLinkReviewDuration,
+      ).toHaveBeenCalledWith('accept', expect.any(Number));
+      expect(auditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: 'reviewer-1',
+          entity: 'EntityLink',
+          entityId: 'link-1',
+          action: 'review_accept',
+          metadata: expect.objectContaining({ decision: 'accept' }),
+        }),
+      );
+    });
+
+    it('rejects a queued link: deactivates it without touching registry fields', async () => {
+      mockPrisma.entityLink.findUnique.mockResolvedValue(queuedLink);
+      mockPrisma.entityLink.update.mockResolvedValue({
+        ...queuedLink,
+        reviewStatus: 'rejected',
+        isActive: false,
+        reviewedBy: 'reviewer-1',
+        reviewedAt: new Date(),
+      });
+
+      const result = await service.decideReview(
+        'link-1',
+        { action: 'reject', reviewNotes: 'wrong entity' },
+        'reviewer-1',
+      );
+
+      expect(result.reviewStatus).toBe('rejected');
+      expect(result.isActive).toBe(false);
+      expect(prisma.entityLink.update).toHaveBeenCalledWith({
+        where: { id: 'link-1' },
+        data: expect.objectContaining({
+          reviewStatus: 'rejected',
+          isActive: false,
+        }),
+      });
+      expect(
+        metricsService.incrementEntityLinkReviewDecision,
+      ).toHaveBeenCalledWith('reject');
+    });
+
+    it('remaps a queued link to a different registry entity', async () => {
+      mockPrisma.entityLink.findUnique.mockResolvedValue(queuedLink);
+      mockPrisma.registryLocation.findUnique.mockResolvedValue({
+        id: 'loc-99',
+        registryId: 'LOC-099',
+      });
+      mockPrisma.entityLink.update.mockResolvedValue({
+        ...queuedLink,
+        entityType: 'location',
+        organizationId: null,
+        locationId: 'loc-99',
+        confidenceScore: 1.0,
+        matchMethod: 'manual',
+        reviewStatus: 'remapped',
+        isActive: true,
+        reviewedBy: 'reviewer-1',
+        reviewedAt: new Date(),
+      });
+
+      const result = await service.decideReview(
+        'link-1',
+        {
+          action: 'remap',
+          remapEntityType: 'location',
+          remapRegistryId: 'LOC-099',
+          reviewNotes: 'actually a location',
+        },
+        'reviewer-1',
+      );
+
+      expect(result.reviewStatus).toBe('remapped');
+      expect(result.locationId).toBe('loc-99');
+      expect(prisma.entityLink.update).toHaveBeenCalledWith({
+        where: { id: 'link-1' },
+        data: expect.objectContaining({
+          entityType: 'location',
+          organizationId: null,
+          locationId: 'loc-99',
+          matchMethod: 'manual',
+          confidenceScore: 1.0,
+          reviewStatus: 'remapped',
+          isActive: true,
+        }),
+      });
+      expect(
+        metricsService.incrementEntityLinkReviewDecision,
+      ).toHaveBeenCalledWith('remap');
+    });
+
+    it('rejects a remap decision missing the target registry record', async () => {
+      mockPrisma.entityLink.findUnique.mockResolvedValue(queuedLink);
+
+      await expect(
+        service.decideReview(
+          'link-1',
+          { action: 'remap', remapEntityType: 'location' },
+          'reviewer-1',
+        ),
+      ).rejects.toThrow(AppException);
+    });
+
+    it('throws NotFoundException when the remap target registry record does not exist', async () => {
+      mockPrisma.entityLink.findUnique.mockResolvedValue(queuedLink);
+      mockPrisma.registryLocation.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.decideReview(
+          'link-1',
+          {
+            action: 'remap',
+            remapEntityType: 'location',
+            remapRegistryId: 'LOC-MISSING',
+          },
+          'reviewer-1',
+        ),
+      ).rejects.toThrow(AppException);
     });
   });
 
@@ -356,6 +652,190 @@ describe('EntityLinkingService', () => {
       expect(result).toHaveLength(1);
       expect(result[0].name).toBe('Relief Project A');
       expect(result[0].entityType).toBe('project');
+    });
+  });
+
+  describe('multi-tenant isolation (org scoping)', () => {
+    const callerOrgId = 'org-alpha';
+    const foreignOrgId = 'org-beta';
+
+    describe('linkEntity ownership enforcement', () => {
+      it('throws FORBIDDEN when linking to a campaign not owned by caller org', async () => {
+        mockPrisma.campaign.findFirst.mockResolvedValue(null);
+
+        await expect(
+          service.linkEntity(
+            {
+              sourceType: 'campaign',
+              sourceId: 'camp-foreign',
+              extractedName: 'Test Org',
+              entityType: 'organization',
+              confidenceScore: 0.95,
+            },
+            callerOrgId,
+          ),
+        ).rejects.toThrow(AppException);
+
+        expect(mockPrisma.campaign.findFirst).toHaveBeenCalledWith({
+          where: { id: 'camp-foreign', orgId: callerOrgId },
+          select: { id: true },
+        });
+      });
+
+      it('allows link creation when campaign belongs to caller org', async () => {
+        mockPrisma.campaign.findFirst.mockResolvedValue({ id: 'camp-own' });
+        mockPrisma.registryOrganization.findFirst.mockResolvedValue({
+          id: 'org-rec-1',
+          name: 'Test Org',
+        });
+        mockPrisma.entityLink.create.mockResolvedValue({
+          id: 'link-own',
+          sourceType: 'campaign',
+          sourceId: 'camp-own',
+          extractedName: 'Test Org',
+          entityType: 'organization',
+          confidenceScore: 0.95,
+          matchMethod: 'exact',
+          reviewStatus: 'auto_accepted',
+          isActive: true,
+        });
+
+        const result = await service.linkEntity(
+          {
+            sourceType: 'campaign',
+            sourceId: 'camp-own',
+            extractedName: 'Test Org',
+            entityType: 'organization',
+            confidenceScore: 0.95,
+          },
+          callerOrgId,
+        );
+
+        expect(result.id).toBe('link-own');
+      });
+
+      it('bypasses ownership check when orgId is undefined (admin caller)', async () => {
+        mockPrisma.registryOrganization.findFirst.mockResolvedValue({
+          id: 'org-rec-1',
+          name: 'Test Org',
+        });
+        mockPrisma.entityLink.create.mockResolvedValue({
+          id: 'link-admin',
+          sourceType: 'campaign',
+          sourceId: 'camp-any',
+          extractedName: 'Test Org',
+          entityType: 'organization',
+          confidenceScore: 0.95,
+          matchMethod: 'exact',
+          reviewStatus: 'auto_accepted',
+          isActive: true,
+        });
+
+        await service.linkEntity({
+          sourceType: 'campaign',
+          sourceId: 'camp-any',
+          extractedName: 'Test Org',
+          entityType: 'organization',
+          confidenceScore: 0.95,
+        });
+
+        expect(mockPrisma.campaign.findFirst).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('getLinksByCampaign ownership enforcement', () => {
+      it('throws FORBIDDEN when accessing campaign of another org', async () => {
+        mockPrisma.campaign.findFirst.mockResolvedValue(null);
+
+        await expect(
+          service.getLinksByCampaign('camp-foreign', undefined, callerOrgId),
+        ).rejects.toThrow(AppException);
+      });
+    });
+
+    describe('getLinksByClaim ownership enforcement', () => {
+      it('throws FORBIDDEN when accessing claim of another org', async () => {
+        mockPrisma.claim.findFirst.mockResolvedValue(null);
+
+        await expect(
+          service.getLinksByClaim('claim-foreign', undefined, callerOrgId),
+        ).rejects.toThrow(AppException);
+      });
+    });
+
+    describe('getLinksByVerification ownership enforcement', () => {
+      it('throws FORBIDDEN when accessing verification of another org', async () => {
+        mockPrisma.verificationRequest.findFirst.mockResolvedValue(null);
+
+        await expect(
+          service.getLinksByVerification('ver-foreign', undefined, callerOrgId),
+        ).rejects.toThrow(AppException);
+      });
+    });
+
+    describe('decideReview ownership enforcement', () => {
+      it('throws FORBIDDEN when link belongs to another org', async () => {
+        mockPrisma.entityLink.findUnique.mockResolvedValue({
+          id: 'link-foreign',
+          sourceType: 'campaign',
+          sourceId: 'camp-foreign',
+          reviewStatus: 'pending_review',
+        });
+        mockPrisma.campaign.findFirst.mockResolvedValue({
+          orgId: foreignOrgId,
+        });
+
+        await expect(
+          service.decideReview(
+            'link-foreign',
+            { action: 'accept' },
+            'reviewer-1',
+            callerOrgId,
+          ),
+        ).rejects.toThrow(AppException);
+      });
+    });
+
+    describe('queryLinks and getReviewQueue scoping', () => {
+      it('scopes queryLinks with owned source IDs when orgId is provided', async () => {
+        mockPrisma.campaign.findMany.mockResolvedValue([{ id: 'c1' }]);
+        mockPrisma.claim.findMany.mockResolvedValue([{ id: 'cl1' }]);
+        mockPrisma.verificationRequest.findMany.mockResolvedValue([
+          { id: 'v1' },
+        ]);
+        mockPrisma.entityLink.findMany.mockResolvedValue([]);
+        mockPrisma.entityLink.count.mockResolvedValue(0);
+
+        await service.queryLinks({}, callerOrgId);
+
+        expect(mockPrisma.entityLink.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              sourceId: { in: ['c1', 'cl1', 'v1'] },
+            }),
+          }),
+        );
+      });
+
+      it('scopes getReviewQueue with owned source IDs when orgId is provided', async () => {
+        mockPrisma.campaign.findMany.mockResolvedValue([{ id: 'c1' }]);
+        mockPrisma.claim.findMany.mockResolvedValue([{ id: 'cl1' }]);
+        mockPrisma.verificationRequest.findMany.mockResolvedValue([
+          { id: 'v1' },
+        ]);
+        mockPrisma.entityLink.findMany.mockResolvedValue([]);
+        mockPrisma.entityLink.count.mockResolvedValue(0);
+
+        await service.getReviewQueue({}, callerOrgId);
+
+        expect(mockPrisma.entityLink.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              sourceId: { in: ['c1', 'cl1', 'v1'] },
+            }),
+          }),
+        );
+      });
     });
   });
 });

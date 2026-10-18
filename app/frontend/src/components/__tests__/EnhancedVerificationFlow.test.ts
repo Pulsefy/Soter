@@ -1,3 +1,7 @@
+jest.mock('next-intl', () => ({
+  useTranslations: () => () => '',
+}));
+
 import { parseEnhancedVerificationDraft } from '../EnhancedVerificationFlow';
 
 describe('parseEnhancedVerificationDraft', () => {

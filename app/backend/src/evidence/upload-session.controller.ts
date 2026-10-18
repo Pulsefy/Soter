@@ -1,3 +1,4 @@
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import {
   Controller,
   Post,
@@ -7,7 +8,6 @@ import {
   Request,
   UseInterceptors,
   UploadedFile,
-  BadRequestException,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -24,7 +24,11 @@ import {
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 import { UploadSessionService } from './upload-session.service';
-import { CreateUploadSessionDto, UploadChunkDto } from './upload-session.dto';
+import {
+  CreateUploadSessionDto,
+  FinalizeUploadSessionDto,
+  UploadChunkDto,
+} from './upload-session.dto';
 import { evidenceMulterOptions } from './file-validation';
 
 @ApiTags('Evidence Upload Sessions')
@@ -57,12 +61,20 @@ export class UploadSessionController {
     @Request() req: ExpressRequest,
   ) {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('No chunk data uploaded');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'No chunk data uploaded',
+      );
     }
     const ownerId = req.user?.apiKeyId ?? req.user?.authType ?? 'system';
     const index = Number(dto.index);
     if (!Number.isInteger(index) || index < 0) {
-      throw new BadRequestException('index must be a non-negative integer');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'index must be a non-negative integer',
+      );
     }
     return this.uploadSessionService.uploadChunk(
       id,
@@ -76,11 +88,19 @@ export class UploadSessionController {
   @Post(':id/finalize')
   @Roles(AppRole.operator, AppRole.admin)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Finalize session and assemble evidence file' })
+  @ApiOperation({
+    summary: 'Finalize session and assemble evidence file',
+    description:
+      'Optionally associates the artifact with a claim, subject to the configured per-claim artifact limit.',
+  })
   @ApiOkResponse({ description: 'Evidence queued.' })
-  finalize(@Param('id') id: string, @Request() req: ExpressRequest) {
+  finalize(
+    @Param('id') id: string,
+    @Body() dto: FinalizeUploadSessionDto,
+    @Request() req: ExpressRequest,
+  ) {
     const ownerId = req.user?.apiKeyId ?? req.user?.authType ?? 'system';
-    return this.uploadSessionService.finalize(id, ownerId);
+    return this.uploadSessionService.finalize(id, ownerId, dto?.claimId);
   }
 
   @Get(':id/status')

@@ -1,0 +1,221 @@
+[
+  {
+    "id": "approve_001",
+    "input": {
+      "aid_claim": "Relief teams delivered 2,000 hygiene kits to all registered households in Sector B last week.",
+      "supporting_evidence": [
+        "Distribution list #B-17 signed by two field monitors",
+        "Warehouse dispatch manifest #WM-221",
+        "Beneficiary sign-off sheets, 196 of 200 returned"
+      ],
+      "context_factors": {
+        "security_status": "stable",
+        "weather": "clear",
+        "displacement_level": "low"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "approve_002",
+    "input": {
+      "aid_claim": "A mobile health clinic treated 340 patients in flood-affected communities over a three-week period.",
+      "supporting_evidence": [
+        "Clinic patient log signed by the nurse supervisor",
+        "Medicine inventory reconciliation report",
+        "Weekly reporting form submitted to the district health office"
+      ],
+      "context_factors": {
+        "disaster_type": "flood",
+        "health_access": "limited"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "approve_003",
+    "input": {
+      "aid_claim": "Monthly food assistance reached 1,500 families with ration baskets in the displacement camp.",
+      "supporting_evidence": [
+        "Monthly distribution manifest countersigned by camp management",
+        "Beneficiary ration cards verified against the camp registry",
+        "Receipt acknowledgment from the cooperating food agency"
+      ],
+      "context_factors": {
+        "displacement_level": "high",
+        "food_security_status": "critical"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "approve_004",
+    "input": {
+      "aid_claim": "Water trucking delivered 45,000 liters of safe drinking water per day to three villages for two weeks.",
+      "supporting_evidence": [
+        "Water quality test results showing chlorine residual within standard",
+        "Truck delivery log with timestamps and driver signatures",
+        "Sign-off from the village water committees"
+      ],
+      "context_factors": {
+        "water_access": "severely_limited",
+        "season": "dry"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "approve_005",
+    "input": {
+      "aid_claim": "Emergency shelter kits were distributed to 800 households whose homes were destroyed in the earthquake.",
+      "supporting_evidence": [
+        "Procurement invoice for 800 shelter kits",
+        "Distribution list cross-checked against the damage assessment",
+        "Post-distribution monitoring survey showing 92 percent satisfaction"
+      ],
+      "context_factors": {
+        "disaster_type": "earthquake",
+        "housing_damage": "severe"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "reject_001",
+    "input": {
+      "aid_claim": "We distributed 5,000 food parcels in Camp Alpha last month.",
+      "supporting_evidence": [
+        "Claimant-provided distribution list for 5,000 parcels",
+        "Official camp registry recording only 1,200 households"
+      ],
+      "context_factors": {
+        "displacement_level": "medium"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "reject_002",
+    "input": {
+      "aid_claim": "This household requires emergency cash assistance for the current period.",
+      "supporting_evidence": [
+        "Payment ledger showing the same beneficiary ID already paid on 2025-03-10",
+        "Duplicate claim submission form referencing the same payout"
+      ],
+      "context_factors": {
+        "cash_program": "active"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "reject_003",
+    "input": {
+      "aid_claim": "The claimant's home was completely destroyed by the flood and requires full reconstruction.",
+      "supporting_evidence": [
+        "Aerial survey photos dated after the flood showing the home intact",
+        "On-site inspection report by an independent assessor"
+      ],
+      "context_factors": {
+        "disaster_type": "flood"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "reject_004",
+    "input": {
+      "aid_claim": "We need to replace 600 shelter kits that were distributed during the storm response.",
+      "supporting_evidence": [
+        "Distribution records showing 250 kits recorded as distributed",
+        "Damage assessment report listing 180 affected households"
+      ],
+      "context_factors": {
+        "disaster_type": "storm"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "reject_005",
+    "input": {
+      "aid_claim": "The beneficiary listed on this form is entitled to the full assistance package.",
+      "supporting_evidence": [
+        "Registration database lookup result showing the beneficiary ID does not exist",
+        "Inconsistency report on the attached identity documents"
+      ],
+      "context_factors": {
+        "identity_verification": "failed"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "ambiguous_001",
+    "input": {
+      "aid_claim": "The claimant says their family received no food assistance this month.",
+      "supporting_evidence": [
+        "Incomplete distribution records that cannot confirm delivery to the claimant's zone"
+      ],
+      "context_factors": {
+        "displacement_level": "high"
+      }
+    },
+    "expected": "ambiguous"
+  },
+  {
+    "id": "ambiguous_002",
+    "input": {
+      "aid_claim": "A community leader reports that some households received duplicate aid packages.",
+      "supporting_evidence": [
+        "Verbal report from a community leader without specific household identifiers"
+      ],
+      "context_factors": {
+        "report_channel": "community_meeting"
+      }
+    },
+    "expected": "ambiguous"
+  },
+  {
+    "id": "ambiguous_003",
+    "input": {
+      "aid_claim": "Water tankers did not reach the village during the response period.",
+      "supporting_evidence": [
+        "Witness statement A stating daily water deliveries occurred",
+        "Witness statement B stating no deliveries were observed"
+      ],
+      "context_factors": {
+        "water_access": "limited"
+      }
+    },
+    "expected": "ambiguous"
+  },
+  {
+    "id": "ambiguous_004",
+    "input": {
+      "aid_claim": "The household is owed repair materials for partial shelter damage.",
+      "supporting_evidence": [
+        "Claimant itemized list of requested materials",
+        "Field verification visit requested but not yet completed"
+      ],
+      "context_factors": {
+        "disaster_type": "flood",
+        "verification_status": "pending"
+      }
+    },
+    "expected": "ambiguous"
+  },
+  {
+    "id": "ambiguous_005",
+    "input": {
+      "aid_claim": "The damaged latrine documented in the claim should be replaced.",
+      "supporting_evidence": [
+        "Supporting photos whose metadata timestamps predate the reported disaster by six months"
+      ],
+      "context_factors": {
+        "disaster_type": "flood"
+      }
+    },
+    "expected": "ambiguous"
+  }
+]

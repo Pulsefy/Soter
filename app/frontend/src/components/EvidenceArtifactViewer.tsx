@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState, useRef, useCallback } from 'react';
+import Image from 'next/image';
 import type {
   EvidenceArtifact,
   ArtifactViewerState,
   RedactionRegion,
   RedactionTool,
   ViewMode,
-  PIIDetectionResult,
 } from '@/types/evidence-artifact';
 
 interface EvidenceArtifactViewerProps {
@@ -222,10 +222,15 @@ export const EvidenceArtifactViewer: React.FC<EvidenceArtifactViewerProps> = ({
       case 'image':
         return (
           <div className="relative overflow-hidden">
-            <img
+            {/* Evidence content is a blob/data URL, so Next's loader-based
+                optimization cannot apply; unoptimized keeps 1:1 rendering. */}
+            <Image
               ref={imageRef}
               src={content}
               alt={metadata.filename}
+              width={1200}
+              height={900}
+              unoptimized
               className="w-full h-auto"
               style={{
                 transform: `scale(${viewerState.zoomLevel}) translate(${viewerState.panPosition.x}px, ${viewerState.panPosition.y}px)`,

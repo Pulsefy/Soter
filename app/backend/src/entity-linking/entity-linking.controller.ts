@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   Query,
+  Request,
   UseGuards,
   Logger,
 } from '@nestjs/common';
@@ -16,12 +17,38 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
+import { Request as ExpressRequest } from 'express';
 import { EntityLinkingService } from './entity-linking.service';
-import { CreateEntityLinkDto, EntityLinkQueryDto } from './dto/entity-link.dto';
+import {
+  CreateEntityLinkDto,
+  EntityLinkQueryDto,
+  EntityLinkReviewQueueQueryDto,
+  ReviewEntityLinkDto,
+} from './dto/entity-link.dto';
 import { ApiKeyGuard } from '../common/guards/api-key.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
+
+interface AuthenticatedUser {
+  role?: string;
+  ngoId?: string;
+  orgId?: string;
+  sub?: string;
+  apiKeyId?: string;
+}
+
+/**
+ * Extract the caller's organisation ID from the authenticated user context.
+ * Admin-role callers receive `undefined` so they bypass org-scope enforcement
+ * in the service layer (platform-level access).
+ */
+function extractOrgId(req: ExpressRequest): string | undefined {
+  const user = req.user as AuthenticatedUser | undefined;
+  if (!user) return undefined;
+  if (user.role === AppRole.admin) return undefined;
+  return user.orgId ?? user.ngoId ?? undefined;
+}
 
 @Controller('entity-linking')
 @ApiTags('Entity Linking')
@@ -39,9 +66,12 @@ export class EntityLinkingController {
     description:
       'Create a link between an extracted entity and a canonical registry record with confidence scoring',
   })
-  async linkEntity(@Body() dto: CreateEntityLinkDto) {
+  async linkEntity(
+    @Body() dto: CreateEntityLinkDto,
+    @Request() req: ExpressRequest,
+  ) {
     this.logger.log(`Creating entity link for ${dto.extractedName}`);
-    return this.entityLinkingService.linkEntity(dto);
+    return this.entityLinkingService.linkEntity(dto, extractOrgId(req));
   }
 
   @Get('links')
@@ -62,10 +92,24 @@ export class EntityLinkingController {
   })
   @ApiQuery({ name: 'minConfidence', required: false, type: Number })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean })
+  @ApiQuery({
+    name: 'reviewStatus',
+    required: false,
+    enum: [
+      'auto_accepted',
+      'pending_review',
+      'accepted',
+      'rejected',
+      'remapped',
+    ],
+  })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  async queryLinks(@Query() query: EntityLinkQueryDto) {
-    return this.entityLinkingService.queryLinks(query);
+  async queryLinks(
+    @Query() query: EntityLinkQueryDto,
+    @Request() req: ExpressRequest,
+  ) {
+    return this.entityLinkingService.queryLinks(query, extractOrgId(req));
   }
 
   @Get('campaign/:campaignId')
@@ -82,9 +126,14 @@ export class EntityLinkingController {
   })
   async getLinksByCampaign(
     @Param('campaignId') campaignId: string,
-    @Query('entityType') entityType?: string,
+    @Query('entityType') entityType: string | undefined,
+    @Request() req: ExpressRequest,
   ) {
-    return this.entityLinkingService.getLinksByCampaign(campaignId, entityType);
+    return this.entityLinkingService.getLinksByCampaign(
+      campaignId,
+      entityType,
+      extractOrgId(req),
+    );
   }
 
   @Get('claim/:claimId')
@@ -100,9 +149,14 @@ export class EntityLinkingController {
   })
   async getLinksByClaim(
     @Param('claimId') claimId: string,
-    @Query('entityType') entityType?: string,
+    @Query('entityType') entityType: string | undefined,
+    @Request() req: ExpressRequest,
   ) {
-    return this.entityLinkingService.getLinksByClaim(claimId, entityType);
+    return this.entityLinkingService.getLinksByClaim(
+      claimId,
+      entityType,
+      extractOrgId(req),
+    );
   }
 
   @Get('verification/:verificationId')
@@ -119,27 +173,65 @@ export class EntityLinkingController {
   })
   async getLinksByVerification(
     @Param('verificationId') verificationId: string,
-    @Query('entityType') entityType?: string,
+    @Query('entityType') entityType: string | undefined,
+    @Request() req: ExpressRequest,
   ) {
     return this.entityLinkingService.getLinksByVerification(
       verificationId,
       entityType,
+      extractOrgId(req),
     );
+  }
+
+  @Get('review-queue')
+  @ApiOperation({
+    summary: 'List entity links awaiting review',
+    description:
+      'Returns links whose confidence score fell below the auto-accept threshold, oldest-queued first',
+  })
+  @ApiQuery({
+    name: 'entityType',
+    required: false,
+    enum: ['organization', 'location', 'asset', 'project'],
+  })
+  @ApiQuery({
+    name: 'sourceType',
+    required: false,
+    enum: ['campaign', 'claim', 'verification'],
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getReviewQueue(
+    @Query() query: EntityLinkReviewQueueQueryDto,
+    @Request() req: ExpressRequest,
+  ) {
+    return this.entityLinkingService.getReviewQueue(query, extractOrgId(req));
   }
 
   @Patch('review/:linkId')
   @ApiOperation({
-    summary: 'Review and update entity link',
-    description: 'Manually review and curate an entity link',
+    summary: 'Decide a queued (or previously decided) entity link',
+    description:
+      'Reviewer accepts, rejects, or remaps a link. Only links currently pending review can be decided.',
   })
   @ApiParam({ name: 'linkId', description: 'Entity Link ID' })
-  async reviewLink(
+  async decideReview(
     @Param('linkId') linkId: string,
-    @Body()
-    reviewData: { reviewedBy: string; isActive: boolean; reviewNotes?: string },
+    @Body() dto: ReviewEntityLinkDto,
+    @Request() req: ExpressRequest,
   ) {
-    this.logger.log(`Reviewing entity link ${linkId}`);
-    return this.entityLinkingService.reviewLink(linkId, reviewData);
+    const user = req.user as AuthenticatedUser | undefined;
+    const reviewerId: string = user?.sub ?? user?.apiKeyId ?? 'system';
+
+    this.logger.log(
+      `Reviewer ${reviewerId} decided "${dto.action}" on entity link ${linkId}`,
+    );
+    return this.entityLinkingService.decideReview(
+      linkId,
+      dto,
+      reviewerId,
+      extractOrgId(req),
+    );
   }
 
   @Get('registry/search')

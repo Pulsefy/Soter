@@ -1,6 +1,4 @@
-import { config } from '../config';
-
-const API_URL = config.apiUrl;
+import { apiGet, apiPost } from './requestLayer';
 
 export interface AidItem {
   id: string;
@@ -11,7 +9,17 @@ export interface AidItem {
   createdAt: string;
 }
 
-export type ClaimStatus = 'requested' | 'verified' | 'disbursed';
+export type ClaimStatus = 'requested' | 'verified' | 'approved' | 'disbursed';
+
+export type ClaimTimelineStatus = 'verification' | 'approval' | 'claim' | 'disbursement';
+
+export interface ClaimTimelineEvent {
+  status: ClaimTimelineStatus;
+  label?: string;
+  timestamp?: string;
+  transactionHash?: string;
+  explorerUrl?: string;
+}
 
 export interface AidDetails {
   id: string;
@@ -28,83 +36,34 @@ export interface AidDetails {
   status: ClaimStatus;
   claimId: string;
   createdAt: string;
+  verifiedAt?: string;
+  approvedAt?: string;
+  claimedAt?: string;
+  disbursedAt?: string;
+  verificationTransactionHash?: string;
+  approvalTransactionHash?: string;
+  claimTransactionHash?: string;
+  disbursementTransactionHash?: string;
+  timeline?: ClaimTimelineEvent[];
 }
 
 /** Fetch aid overview list from the backend */
 export const fetchAidList = async (): Promise<AidItem[]> => {
-  const response = await fetch(`${API_URL}/aid`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  const { data } = await apiGet<AidItem[]>('/aid');
+  return data;
 };
 
 /** Fetch detailed aid package info from the backend */
-export const fetchAidDetails = async (aidId: string): Promise<AidDetails> => {
-  const response = await fetch(`${API_URL}/aid/${aidId}`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+export const fetchAidDetails = async (aidId: string, correlationId?: string): Promise<AidDetails> => {
+  const { data } = await apiGet<AidDetails>(`/aid/${aidId}`, { correlationId });
+  return data;
 };
-
-/** Fallback mock data used when the backend is unreachable */
-export const getMockAidList = (): AidItem[] => [
-  {
-    id: '1',
-    title: 'Emergency Food Supply',
-    description: 'Distribution of emergency food packages to affected families.',
-    status: 'active',
-    location: 'Sector A, Zone 3',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    title: 'Medical Aid Convoy',
-    description: 'Mobile medical units providing first aid and triage.',
-    status: 'active',
-    location: 'Northern District',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: '3',
-    title: 'Shelter Allocation',
-    description: 'Temporary shelter setup for displaced residents.',
-    status: 'pending',
-    location: 'Central Camp',
-    createdAt: new Date().toISOString(),
-  },
-];
 
 /** Submit a claim to the backend with an idempotency key */
-export const submitClaim = async (claimId: string, idempotencyKey: string): Promise<unknown> => {
-  const response = await fetch(`${API_URL}/claims/${claimId}/submit`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Idempotency-Key': idempotencyKey,
-    },
+export const submitClaim = async (claimId: string, idempotencyKey: string, correlationId?: string): Promise<unknown> => {
+  const { data } = await apiPost(`/claims/${claimId}/submit`, undefined, {
+    idempotencyKey,
+    correlationId,
   });
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return data;
 };
-
-/** Fallback mock detail data */
-export const getMockAidDetails = (aidId: string): AidDetails => ({
-  id: aidId,
-  title: 'Emergency Food Supply',
-  description: 'Distribution of emergency food packages to affected families.',
-  recipient: {
-    name: 'Amina Yusuf',
-    id: 'REC-2041',
-    wallet: 'GAKD...Q9X2',
-  },
-  tokenType: 'USDC',
-  amount: '150',
-  expiryDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString(),
-  status: 'verified',
-  claimId: `claim-${aidId}`,
-  createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(),
-});

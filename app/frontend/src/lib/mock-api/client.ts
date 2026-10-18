@@ -26,17 +26,38 @@ export async function fetchClient(
 
     const handler = handlers[pathWithoutQuery];
     if (handler) {
-      console.log(`[Mock API] Intercepting request to: ${urlString}`);
+      // Emit a visible warning instead of a silent console.log so contributors
+      // are aware they are NOT seeing live API data.
+      console.warn(
+        `[Demo Mode] Intercepting request to: ${urlString} — mock response active. ` +
+          "Set NEXT_PUBLIC_USE_MOCKS=false and NEXT_PUBLIC_API_URL to a real backend to use live data."
+      );
       // Simulate network delay
       await new Promise((resolve) => setTimeout(resolve, 500));
-      return handler(urlString, init);
+      const mockResponse = await handler(urlString, init);
+      // Tag the response so callers can detect mock state without inspecting
+      // the body or relying on a URL pattern match.
+      const tagged = new Response(mockResponse.body, mockResponse);
+      tagged.headers.set("X-Demo-Mode", "mock");
+      return tagged;
     }
 
     // Support dynamic campaign endpoints like /campaigns/:id
     if (pathWithoutQuery.startsWith('/campaigns/') && handlers['/campaigns/:id']) {
-      console.log(`[Mock API] Intercepting dynamic campaign request to: ${urlString}`);
+      console.warn(
+        `[Demo Mode] Intercepting dynamic campaign request to: ${urlString} — mock response active.`
+      );
       await new Promise((resolve) => setTimeout(resolve, 500));
       return handlers['/campaigns/:id'](urlString, init);
+    }
+
+    // Support dynamic verification-inbox endpoints like /v1/verification-inbox/:id, .../approve, .../reject, etc.
+    if (pathWithoutQuery.startsWith('/v1/verification-inbox/') && handlers['/v1/verification-inbox/:id']) {
+      console.warn(
+        `[Demo Mode] Intercepting dynamic verification-inbox request to: ${urlString} — mock response active.`
+      );
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return handlers['/v1/verification-inbox/:id'](urlString, init);
     }
   }
 

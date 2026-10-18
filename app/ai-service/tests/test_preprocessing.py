@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 from PIL import Image
-from services.preprocessing import ImagePreprocessor
+from services.preprocessing import ImagePreprocessor, ImageQualityError
 import metrics
 from unittest.mock import patch, MagicMock
 
@@ -43,24 +43,26 @@ class TestImagePreprocessor:
         denoised = self.preprocessor.denoise(img)
         assert denoised.mode == "L"
 
-    @patch('metrics.PIPELINE_STEP_LATENCY.labels')
+    @patch("metrics.PIPELINE_STEP_LATENCY.labels")
     def test_preprocess_pipeline(self, mock_labels):
         mock_observe = MagicMock()
         mock_labels.return_value.observe = mock_observe
-        
-        img = Image.new("RGB", (1000, 1000), color="blue")
+
+        arr = np.random.randint(0, 255, (1000, 1000, 3), dtype=np.uint8)
+        img = Image.fromarray(arr, mode="RGB")
         result = self.preprocessor.preprocess(
             img, threshold_method="otsu", denoise=True
         )
         assert result.mode == "L"
         assert result.size[0] <= 2000
         assert result.size[1] <= 2000
-        
-        mock_labels.assert_called_with(step_name='preprocess')
+
+        mock_labels.assert_called_with(step_name="preprocess")
         mock_observe.assert_called_once()
 
     def test_preprocess_with_custom_threshold(self):
-        img = Image.new("RGB", (500, 500), color="green")
+        arr = np.random.randint(0, 255, (500, 500, 3), dtype=np.uint8)
+        img = Image.fromarray(arr, mode="RGB")
         result = self.preprocessor.preprocess(
             img, threshold_method="otsu", denoise=False
         )
@@ -68,8 +70,8 @@ class TestImagePreprocessor:
 
     def test_preprocess_empty_image(self):
         img = Image.new("RGB", (10, 10), color="white")
-        result = self.preprocessor.preprocess(img)
-        assert result.mode == "L"
+        with pytest.raises(ImageQualityError, match="resolution too low"):
+            self.preprocessor.preprocess(img)
 
     def test_image_to_numpy(self):
         img = Image.new("RGB", (50, 50), color="red")

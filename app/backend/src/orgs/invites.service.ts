@@ -1,9 +1,5 @@
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AppRole, InviteStatus } from '@prisma/client';
@@ -28,7 +24,7 @@ export class InvitesService {
     if (!org) {
       // For demo purposes, if org doesn't exist, let's create it if it's the first time
       // But in real app, we should throw 404.
-      // throw new NotFoundException('Organization not found');
+      // throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Organization not found');
       await this.prisma.organization.create({
         data: { id: data.orgId, name: `Org ${data.orgId}` },
       });
@@ -67,19 +63,32 @@ export class InvitesService {
       where: { id: inviteId },
     });
 
-    if (!invite) throw new NotFoundException('Invite not found');
+    if (!invite)
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Invite not found');
     if (invite.status !== InviteStatus.pending) {
-      throw new BadRequestException(`Invite is already ${invite.status}`);
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Invite is already ${invite.status}`,
+      );
     }
     if (invite.expiresAt < new Date()) {
       await this.prisma.invite.update({
         where: { id: inviteId },
         data: { status: InviteStatus.expired },
       });
-      throw new BadRequestException('Invite has expired');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Invite has expired',
+      );
     }
     if (invite.email !== userEmail) {
-      throw new ForbiddenException('This invite is not for you');
+      throw new AppException(
+        ERROR_CODES.FORBIDDEN,
+        403,
+        'This invite is not for you',
+      );
     }
 
     // Assign role to user (create or update user)
@@ -119,7 +128,8 @@ export class InvitesService {
       where: { id: inviteId },
     });
 
-    if (!invite) throw new NotFoundException('Invite not found');
+    if (!invite)
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Invite not found');
 
     const updated = await this.prisma.invite.update({
       where: { id: inviteId },

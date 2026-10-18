@@ -1,27 +1,32 @@
 'use client';
 
-import { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { ErrorState } from '@/components/ErrorState';
+import { isRetrySafe, normalizeError } from '@/lib/error-utils';
+import { reportClientError } from '@/utils/reportClientError';
 
-export default function Error({
+export default function ErrorBoundary({
   error,
   reset,
 }: {
-  error: Error & { digest?: string };
+  error: Error & { digest?: string; correlationId?: string; traceId?: string };
   reset: () => void;
 }) {
+  const normalized = normalizeError(error);
+  const correlationId = normalized.correlationId;
+  const canRetry = isRetrySafe(error, normalized.category);
+
   useEffect(() => {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('Route segment error.', error);
-    }
-  }, [error]);
+    void reportClientError(error, correlationId || error.digest);
+  }, [error, correlationId]);
 
   return (
     <ErrorState
-      title="We couldn't load this page"
-      description="Soter ran into a temporary problem while preparing this route. Try again or return home to continue."
       error={error}
-      onTryAgain={reset}
+      correlationId={correlationId}
+      canRetry={canRetry}
+      onTryAgain={canRetry ? reset : undefined}
+      onNavigate={reset}
     />
   );
 }

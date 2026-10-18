@@ -1,3 +1,4 @@
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import {
   Controller,
   Get,
@@ -25,6 +26,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { ClaimsService } from './claims.service';
+import { extractCorrelationId } from '../common/utils/correlation-id.util';
 import { CancelAndReissueService } from './cancel-and-reissue.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import {
@@ -32,14 +34,20 @@ import {
   ClaimShareResponseDto,
   SendReceiptShareDto,
 } from './dto/claim-receipt.dto';
+import { ClaimStatusHistoryDto } from './dto/claim-status-history.dto';
 import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
+import { CancellationReportQueryDto } from './dto/cancellation-report-query.dto';
+import { CancellationReportDto } from './dto/cancellation-report.dto';
+import { DisburseClaimDto } from './dto/disburse-claim.dto';
 import { ExportClaimsQueryDto } from './dto/export-claims.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
 import { InternalNotesService } from 'src/common/services/internal-notes.service';
 import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
+import { SorobanEventCorrelationService } from '../onchain/soroban-event-correlation.service';
+import { streamCsvResponse } from '../common/csv/stream-csv-response';
 
 @ApiTags('Onchain Proxy')
 @ApiBearerAuth('JWT-auth')
@@ -49,7 +57,28 @@ export class ClaimsController {
     private readonly claimsService: ClaimsService,
     private readonly cancelAndReissueService: CancelAndReissueService,
     private readonly internalNotesService: InternalNotesService,
+    private readonly eventCorrelationService: SorobanEventCorrelationService,
   ) {}
+
+  private ensureOrgAccess(user: any, claim: any) {
+    if (!user)
+      throw new AppException(ERROR_CODES.FORBIDDEN, 403, 'Not authenticated');
+    // Admins bypass this check
+    if (user.role === AppRole.admin) return;
+    // Only NGO role is org-scoped for this guard
+    if (user.role !== AppRole.ngo) return;
+
+    const claimOrgId = claim?.campaign?.orgId ?? null;
+    if (!claimOrgId) return; // nothing to check
+
+    if (!user.ngoId || user.ngoId !== claimOrgId) {
+      throw new AppException(
+        ERROR_CODES.FORBIDDEN,
+        403,
+        'Access denied: resource belongs to a different organization',
+      );
+    }
+  }
 
   @Post()
   @ApiOperation({
@@ -82,6 +111,82 @@ export class ClaimsController {
     return this.claimsService.findAll();
   }
 
+  /**
+   * Declared before `@Get(':id')` so Express does not bind the literal path
+   * segment `cancellations` to the `:id` param and shadow this route.
+   */
+  @Get('cancellations/reasons')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Cancellation breakdown by reason',
+    description:
+      'Groups cancelled claims by their structured `cancelReasonCode`, ' +
+      'returning a count and total amount per code. ' +
+      'Cancelled claims with no code (written before the reason-code migration) ' +
+      'are reported in `uncodedCount` rather than dropped, so `totalCancelled` ' +
+      'always reconciles with the sum of the breakdown. ' +
+      'Filters apply to `cancelledAt`, not `createdAt`.',
+  })
+  @ApiOkResponse({
+    description: 'Cancellation breakdown retrieved successfully.',
+    type: CancellationReportDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid date filter.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - operator or admin role required.',
+  })
+  @ApiQuery({
+    name: 'campaignId',
+    required: false,
+    description: 'Restrict the report to a single campaign.',
+  })
+  @ApiQuery({
+    name: 'from',
+    required: false,
+    description: 'Earliest `cancelledAt` to include (ISO-8601).',
+  })
+  @ApiQuery({
+    name: 'to',
+    required: false,
+    description: 'Latest `cancelledAt` to include (ISO-8601).',
+  })
+  getCancellationReport(@Query() query: CancellationReportQueryDto) {
+    return this.cancelAndReissueService.getCancellationReport(query);
+  }
+
+  /**
+   * Declared before `@Get(':id')` so Express does not bind the literal path
+   * segment `status-history` to the `:id` param and shadow this route.
+   */
+  @Get(':id/status-history')
+  @ApiOperation({
+    summary: 'Get claim status history',
+    description:
+      'Retrieves the chronological status transition history for a claim, ' +
+      'including timestamps, previous/new status, and the actor or trigger responsible for each transition.',
+  })
+  @ApiOkResponse({
+    description: 'Claim status history retrieved successfully.',
+    type: ClaimStatusHistoryDto,
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Access denied - resource belongs to a different organization.',
+  })
+  @ApiNotFoundResponse({
+    description: 'The specified claim was not found.',
+  })
+  async getStatusHistory(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ): Promise<ClaimStatusHistoryDto> {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
+    return this.claimsService.getStatusHistory(id);
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Get claim details',
@@ -94,8 +199,10 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  findOne(@Param('id') id: string) {
-    return this.claimsService.findOne(id);
+  async findOne(@Param('id') id: string, @Request() req: ExpressRequest) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
+    return claim;
   }
 
   @Post(':id/verify')
@@ -116,7 +223,9 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  verify(@Param('id') id: string) {
+  async verify(@Param('id') id: string, @Request() req: ExpressRequest) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.claimsService.verify(id);
   }
 
@@ -138,7 +247,9 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  approve(@Param('id') id: string) {
+  async approve(@Param('id') id: string, @Request() req: ExpressRequest) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.claimsService.approve(id);
   }
 
@@ -184,8 +295,20 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  disburse(@Param('id') id: string) {
-    return this.claimsService.disburse(id);
+  async disburse(
+    @Param('id') id: string,
+    @Body() dto: DisburseClaimDto,
+    @Request() req: ExpressRequest,
+  ) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
+    // Pass the request's correlation ID down so the Soroban transaction record,
+    // the queued job and every log line of the disbursement path share one ID.
+    return this.claimsService.disburse(
+      id,
+      dto.receiptPointer,
+      extractCorrelationId(req) ?? undefined,
+    );
   }
 
   @Patch(':id/archive')
@@ -202,7 +325,9 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  archive(@Param('id') id: string) {
+  async archive(@Param('id') id: string, @Request() req: ExpressRequest) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.claimsService.archive(id);
   }
 
@@ -218,7 +343,12 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  getReceipt(@Param('id') id: string): Promise<ClaimReceiptDto> {
+  async getReceipt(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ): Promise<ClaimReceiptDto> {
+    const claim = await this.claimsService.resolveClaimByIdentifier(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.claimsService.getReceipt(id);
   }
 
@@ -238,10 +368,13 @@ export class ClaimsController {
   @ApiNotFoundResponse({
     description: 'The specified claim was not found.',
   })
-  shareReceipt(
+  async shareReceipt(
     @Param('id') id: string,
     @Body() shareDto: SendReceiptShareDto,
+    @Request() req: ExpressRequest,
   ): Promise<ClaimShareResponseDto> {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.claimsService.shareReceipt(id, shareDto);
   }
 
@@ -258,11 +391,13 @@ export class ClaimsController {
   @ApiForbiddenResponse({
     description: 'Access denied - staff role required.',
   })
-  addNote(
+  async addNote(
     @Param('id') id: string,
     @Body() dto: CreateInternalNoteDto,
     @Request() req: ExpressRequest,
   ) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     const authorId = req.user?.apiKeyId || req.user?.authType || 'system';
     return this.internalNotesService.createNote('claim', id, authorId, dto);
   }
@@ -280,8 +415,61 @@ export class ClaimsController {
   @ApiForbiddenResponse({
     description: 'Access denied - staff role required.',
   })
-  getNotes(@Param('id') id: string) {
+  async getNotes(@Param('id') id: string, @Request() req: ExpressRequest) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.internalNotesService.findNotesByEntity('claim', id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Event Correlation
+  // ---------------------------------------------------------------------------
+
+  @Get(':id/events')
+  @Roles(AppRole.operator, AppRole.admin)
+  @ApiOperation({
+    summary: 'Get on-chain event correlations for a claim',
+    description:
+      'Retrieves all Soroban on-chain events correlated to a claim, including transaction hashes, ledger numbers, and event topics.',
+  })
+  @ApiOkResponse({
+    description: 'Event correlations retrieved successfully.',
+    schema: {
+      example: {
+        claimId: 'claim_123',
+        events: [
+          {
+            id: 'corr_abc123',
+            eventTopic: 'claim_created',
+            txHash: 'ABC123...',
+            ledger: 12345,
+            eventIndex: 0,
+            payload: { claim_id: 'claim_123', amount: '1000' },
+            correlationSource: 'scheduled',
+            createdAt: '2026-03-30T12:30:00.000Z',
+          },
+        ],
+        total: 2,
+      },
+    },
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - staff role required.',
+  })
+  @ApiNotFoundResponse({ description: 'Claim not found.' })
+  async getClaimEvents(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
+    const events =
+      await this.eventCorrelationService.getCorrelationsForClaim(id);
+    return {
+      claimId: id,
+      events,
+      total: events.length,
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -295,17 +483,27 @@ export class ClaimsController {
     description:
       'Cancels an active claim (requested / verified / approved). ' +
       'Releases the locked budget back to the campaign and records a full audit trail. ' +
-      'Disbursed claims cannot be cancelled.',
+      'Disbursed claims cannot be cancelled. ' +
+      'A structured `code` is required so cancellations can be reported on; the ' +
+      'optional free-text `reason` is stored as detail alongside it.',
   })
   @ApiOkResponse({ description: 'Claim cancelled successfully.' })
   @ApiBadRequestResponse({
-    description: 'Claim is already cancelled or in a non-cancellable status.',
+    description:
+      'Claim is already cancelled, in a non-cancellable status, or the ' +
+      'supplied cancellation code is not a valid CancelReasonCode.',
   })
   @ApiForbiddenResponse({
     description: 'Access denied - operator role required.',
   })
   @ApiNotFoundResponse({ description: 'Claim not found.' })
-  cancel(@Param('id') id: string, @Body() dto: CancelClaimDto) {
+  async cancel(
+    @Param('id') id: string,
+    @Body() dto: CancelClaimDto,
+    @Request() req: ExpressRequest,
+  ) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.cancelAndReissueService.cancel(id, dto);
   }
 
@@ -342,7 +540,13 @@ export class ClaimsController {
     description: 'Access denied - operator role required.',
   })
   @ApiNotFoundResponse({ description: 'Original claim not found.' })
-  reissue(@Param('id') id: string, @Body() dto: ReissueClaimDto) {
+  async reissue(
+    @Param('id') id: string,
+    @Body() dto: ReissueClaimDto,
+    @Request() req: ExpressRequest,
+  ) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.cancelAndReissueService.reissue(id, dto);
   }
 
@@ -363,7 +567,12 @@ export class ClaimsController {
     description: 'Access denied - operator role required.',
   })
   @ApiNotFoundResponse({ description: 'Claim not found.' })
-  getReissueHistory(@Param('id') id: string) {
+  async getReissueHistory(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
     return this.cancelAndReissueService.getReissueHistory(id);
   }
 
@@ -373,11 +582,13 @@ export class ClaimsController {
   @ApiOperation({
     summary: 'Export claims as CSV',
     description:
-      'Exports claim records as CSV with support for date range, status, organization, token, and pagination filters. ' +
-      'Excludes sensitive recipient data (recipientRef is encrypted and not exported).',
+      'Streams claim records as CSV with support for date range, status, organization, and token filters. ' +
+      'Rows are fetched and written in bounded batches so exporting a large number of claims does not ' +
+      'buffer the full result set in memory. Excludes sensitive recipient data (recipientRef is encrypted ' +
+      'and not exported).',
   })
   @ApiOkResponse({
-    description: 'Claims exported successfully.',
+    description: 'Claims exported successfully as a streamed CSV response.',
     content: {
       'text/csv': {
         schema: { type: 'string' },
@@ -420,32 +631,17 @@ export class ClaimsController {
     required: false,
     description: 'Token address filter',
   })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    description: 'Page number (default: 1)',
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    description: 'Items per page (default: 50, max: 200)',
-  })
   async exportClaims(
     @Query() query: ExportClaimsQueryDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const result = await this.claimsService.exportClaims(query);
+    @Res() res: Response,
+  ): Promise<void> {
+    const total = await this.claimsService.countExport(query);
 
-    const csv = this.claimsService.buildCsv(result.data);
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="claims-export-${Date.now()}.csv"`,
+    await streamCsvResponse(
+      res,
+      `claims-export-${Date.now()}.csv`,
+      this.claimsService.streamExportCsv(query),
+      total,
     );
-    res.setHeader('X-Total-Count', String(result.total));
-    res.setHeader('X-Page', String(result.page));
-    res.setHeader('X-Limit', String(result.limit));
-
-    return csv;
   }
 }

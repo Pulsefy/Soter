@@ -29,18 +29,19 @@ export async function withRetryTimeout<T>(
   let lastError: Error | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let timeoutTimer: NodeJS.Timeout | undefined;
     try {
       const result = await Promise.race([
         fn(),
-        new Promise<T>((_, reject) =>
-          setTimeout(
+        new Promise<T>((_, reject) => {
+          timeoutTimer = setTimeout(
             () =>
               reject(
                 new Error(`Operation timed out after ${operationTimeoutMs}ms`),
               ),
             operationTimeoutMs,
-          ),
-        ),
+          );
+        }),
       ]);
       return result;
     } catch (error) {
@@ -56,6 +57,10 @@ export async function withRetryTimeout<T>(
           maxDelayMs,
         );
         await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    } finally {
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
       }
     }
   }

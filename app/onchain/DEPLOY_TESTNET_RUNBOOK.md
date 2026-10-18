@@ -4,11 +4,27 @@ This runbook documents a repeatable procedure for building, deploying, initializ
 
 ## Recorded Deployments
 
-Each successful deployment produces a canonical record under `deployments/`.
+Each successful deployment produces a canonical record under `deployments/` and an entry in the machine-readable [deployments/registry.json](deployments/registry.json).
 
-| Date       | Network | Contract ID                                                  | Record |
-| :--------- | :------ | :----------------------------------------------------------- | :----- |
-| 2026-06-03 | Testnet | `CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG`  | [deployments/testnet-2026-06-03.md](deployments/testnet-2026-06-03.md) |
+| Date       | Network | Version | Contract ID                                                  | Tag              | Record |
+| :--------- | :------ | :------ | :----------------------------------------------------------- | :--------------- | :----- |
+| 2026-06-03 | Testnet | 0.1.0   | `CDSBJ27PKTNFTRW6OKPCVXDRUSSRUIQUG6DW5PUTKLDXTDT23NQIS6JG`  | `v0.1.0-testnet` | [deployments/testnet-2026-06-03.md](deployments/testnet-2026-06-03.md) |
+
+### Reproducible one-shot deploy
+
+From `app/onchain` with a funded `.env`:
+
+```bash
+./scripts/deploy-testnet.sh
+```
+
+This builds WASM, deploys via `deploy.sh`, writes `deployments/registry.json`, verifies the artifact checksum against that registry entry, and prints the semver/git tag (`v<crate-version>-testnet`).
+
+To create the local git tag automatically:
+
+```bash
+./scripts/deploy-testnet.sh --tag-git
+```
 
 ## 1. Purpose
 
@@ -86,10 +102,16 @@ Use the existing deploy script to publish the contract to Testnet.
 
 ```bash
 cd /workspaces/Soter/app/onchain
+./scripts/deploy-testnet.sh
+```
+
+Or deploy only (registry update still runs on success):
+
+```bash
 ./scripts/deploy.sh --network testnet
 ```
 
-If the deploy succeeds, note the returned contract ID.
+If the deploy succeeds, note the returned contract ID and version tag (`v<semver>-testnet`). The script updates `deployments/registry.json` and writes `deployments/testnet-YYYY-MM-DD.md` automatically when `python3` is available.
 
 Example expected output:
 
@@ -99,6 +121,8 @@ Example expected output:
 ```
 
 If the script updates `.env`, it will also write `CONTRACT_ID=<id>` there.
+
+After registration, the deployment flow prints a machine-readable verification result. It exits nonzero if the SHA-256 checksum of the uploaded Wasm artifact differs from the checksum recorded next to the contract ID in `deployments/registry.json`.
 
 ### Manual deploy alternative
 

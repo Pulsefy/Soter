@@ -23,6 +23,7 @@ except ImportError:
 TestClient = None
 try:
     from fastapi.testclient import TestClient as _TestClient
+
     TestClient = _TestClient
 except ImportError:
     pass
@@ -156,6 +157,7 @@ class TestCORSMiddleware:
             pytest.skip("TestClient not available - fastapi not installed")
         try:
             from main import app
+
             return TestClient(app)
         except ImportError:
             pytest.skip("Cannot import main app - dependencies not available")
@@ -163,21 +165,17 @@ class TestCORSMiddleware:
     def test_cors_headers_allowed_origin(self, client):
         """Test that allowed origins receive CORS headers."""
         with patch("config.Settings.is_origin_allowed", return_value=True):
-            response = client.get(
-                "/health",
-                headers={"Origin": "https://example.com"}
-            )
+            response = client.get("/health", headers={"Origin": "https://example.com"})
             assert response.status_code == 200
             assert "access-control-allow-origin" in response.headers
-            assert response.headers["access-control-allow-origin"] == "https://example.com"
+            assert (
+                response.headers["access-control-allow-origin"] == "https://example.com"
+            )
 
     def test_cors_headers_disallowed_origin(self, client):
         """Test that disallowed origins do not receive CORS headers."""
         with patch("config.Settings.is_origin_allowed", return_value=False):
-            response = client.get(
-                "/health",
-                headers={"Origin": "https://evil.com"}
-            )
+            response = client.get("/health", headers={"Origin": "https://evil.com"})
             assert response.status_code == 200
             assert "access-control-allow-origin" not in response.headers
 
@@ -189,10 +187,12 @@ class TestCORSMiddleware:
                 headers={
                     "Origin": "https://example.com",
                     "Access-Control-Request-Method": "GET",
-                }
+                },
             )
             assert response.status_code == 200
-            assert response.headers["access-control-allow-origin"] == "https://example.com"
+            assert (
+                response.headers["access-control-allow-origin"] == "https://example.com"
+            )
             assert "GET" in response.headers["access-control-allow-methods"]
             assert "access-control-allow-credentials" in response.headers
 
@@ -204,7 +204,7 @@ class TestCORSMiddleware:
                 headers={
                     "Origin": "https://evil.com",
                     "Access-Control-Request-Method": "GET",
-                }
+                },
             )
             assert response.status_code == 204
             assert "access-control-allow-origin" not in response.headers
@@ -227,6 +227,7 @@ class TestSensitiveEndpointCORSProtection:
             pytest.skip("TestClient not available - fastapi not installed")
         try:
             from main import app
+
             return TestClient(app)
         except ImportError:
             pytest.skip("Cannot import main app - dependencies not available")
@@ -242,7 +243,7 @@ class TestSensitiveEndpointCORSProtection:
                     "X-User-Role": "admin",
                     "X-Org-Id": "org123",
                     "X-User-Id": "user123",
-                }
+                },
             )
             assert response.status_code == 403
             assert "CORS_NOT_ALLOWED" in response.text
@@ -258,7 +259,7 @@ class TestSensitiveEndpointCORSProtection:
                 "X-User-Role": "admin",
                 "X-Org-Id": "org123",
                 "X-User-Id": "user123",
-            }
+            },
         )
         # Should not be 403 from CORS
         assert response.status_code != 403 or "CORS_NOT_ALLOWED" not in response.text
@@ -266,12 +267,11 @@ class TestSensitiveEndpointCORSProtection:
     def test_non_sensitive_endpoint_allows_cors(self, client):
         """Test that non-sensitive endpoints allow CORS for allowed origins."""
         with patch("config.Settings.is_origin_allowed", return_value=True):
-            response = client.get(
-                "/health",
-                headers={"Origin": "https://example.com"}
-            )
+            response = client.get("/health", headers={"Origin": "https://example.com"})
             assert response.status_code == 200
-            assert response.headers["access-control-allow-origin"] == "https://example.com"
+            assert (
+                response.headers["access-control-allow-origin"] == "https://example.com"
+            )
 
 
 class TestVercelPreviewSupport:
@@ -286,16 +286,20 @@ class TestVercelPreviewSupport:
             cors_allow_vercel_previews=True,
             cors_custom_origins="",
         )
-        
+
         # Valid Vercel preview URLs
         assert settings.is_origin_allowed("https://abc123.vercel.app") is True
         assert settings.is_origin_allowed("https://my-project-xyz.vercel.app") is True
-        assert settings.is_origin_allowed("https://deploy-preview-123.vercel.app") is True
-        
+        assert (
+            settings.is_origin_allowed("https://deploy-preview-123.vercel.app") is True
+        )
+
         # Invalid URLs
         assert settings.is_origin_allowed("https://evil.com") is False
         assert settings.is_origin_allowed("https://vercel.app.evil.com") is False
-        assert settings.is_origin_allowed("http://abc123.vercel.app") is False  # Wrong scheme
+        assert (
+            settings.is_origin_allowed("http://abc123.vercel.app") is False
+        )  # Wrong scheme
 
     def test_vercel_preview_disabled(self):
         """Test that Vercel previews can be disabled."""
@@ -306,7 +310,7 @@ class TestVercelPreviewSupport:
             cors_allow_vercel_previews=False,
             cors_custom_origins="",
         )
-        
+
         assert settings.is_origin_allowed("https://abc123.vercel.app") is False
         assert settings.is_origin_allowed("https://example.com") is True
 
@@ -323,7 +327,7 @@ class TestProductionOriginAllowlist:
             cors_allow_vercel_previews=False,
             cors_custom_origins="",
         )
-        
+
         assert settings.is_origin_allowed("https://app.example.com") is True
         assert settings.is_origin_allowed("https://admin.example.com") is True
         assert settings.is_origin_allowed("https://api.example.com") is True
@@ -338,7 +342,7 @@ class TestProductionOriginAllowlist:
             cors_allow_vercel_previews=False,
             cors_custom_origins="https://staging.example.com,https://partner.example.org",
         )
-        
+
         assert settings.is_origin_allowed("https://example.com") is True
         assert settings.is_origin_allowed("https://staging.example.com") is True
         assert settings.is_origin_allowed("https://partner.example.org") is True
@@ -353,7 +357,7 @@ class TestProductionOriginAllowlist:
             cors_allow_vercel_previews=False,
             cors_custom_origins="",
         )
-        
+
         assert settings.is_origin_allowed("https://example.com") is True
         assert settings.is_origin_allowed("https://app.example.com") is True
         assert settings.is_origin_allowed("https://admin.example.com") is True

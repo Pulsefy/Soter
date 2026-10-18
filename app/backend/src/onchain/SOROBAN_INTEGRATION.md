@@ -4,6 +4,11 @@
 
 This implementation provides a complete backend service layer for the Soroban AidEscrow contract. It abstracts away the complexity of blockchain interactions and provides a clean REST API for clients.
 
+For the current status of every public AidEscrow function, see the
+[backend coverage inventory](../../../onchain/contracts/aid_escrow/BACKEND_COVERAGE.md).
+Update that inventory in the same change whenever adapter coverage or a
+contract public function changes.
+
 ## Architecture
 
 ### Layers

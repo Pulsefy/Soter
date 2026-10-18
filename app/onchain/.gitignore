@@ -5,3 +5,6 @@ target
 .soroban
 .stellar
 .env
+
+# Generated registry (re-generated deterministically from source data)
+deployments/contract-registry.json

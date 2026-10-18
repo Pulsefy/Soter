@@ -11,6 +11,7 @@ import {
   Request,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -25,10 +26,13 @@ import {
   ApiUnauthorizedResponse,
   ApiNotFoundResponse,
   ApiForbiddenResponse,
+  ApiBody,
+  ApiResponse,
 } from '@nestjs/swagger';
 import { VerificationService } from './verification.service';
 import { VerificationFlowService } from './verification-flow.service';
 import { CreateVerificationDto } from './dto/create-verification.dto';
+import { EnqueueVerificationDto } from './dto/enqueue-verification.dto';
 import { API_VERSIONS } from '../common/constants/api-version.constants';
 import { StartVerificationDto } from './dto/start-verification.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
@@ -54,16 +58,24 @@ export class VerificationController {
 
   @Post('claims/:id/enqueue')
   @Version('1')
+  @Throttle({ default: { limit: 30, ttl: 60 } }) // Strict: General verification operations
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
     summary: 'Enqueue claim verification job',
     description:
-      'Add a claim to the verification queue for async processing. Returns immediately with job ID.',
+      'Add a claim to the verification queue for async processing. ' +
+      'Accepts an optional priority tier (1=urgent, 2=high, 3=normal, 4=low). ' +
+      'Urgent jobs bypass all lower-priority backlog. Returns immediately with job ID and resolved priority.',
   })
   @ApiParam({
     name: 'id',
     description: 'Unique identifier of the claim to verify',
     example: 'clv789xyz123',
+  })
+  @ApiBody({
+    type: EnqueueVerificationDto,
+    description: 'Optional priority tier and anchor metadata.',
+    required: false,
   })
   @ApiAcceptedResponse({
     description: 'Verification job enqueued successfully.',
@@ -71,6 +83,8 @@ export class VerificationController {
       example: {
         jobId: '12345',
         claimId: 'clv789xyz123',
+        priority: 3,
+        priorityLabel: 'NORMAL',
         status: 'queued',
         message: 'Verification job enqueued successfully',
       },
@@ -80,16 +94,23 @@ export class VerificationController {
     description: 'The requested claim could not be found.',
   })
   @ApiBadRequestResponse({
-    description: 'Invalid claim ID or malformed request.',
+    description:
+      'Invalid claim ID, unsupported priority value, or malformed request.',
   })
   @ApiUnauthorizedResponse({
     description: 'Invalid or missing API key.',
   })
-  async enqueueVerification(@Param('id') id: string) {
-    const { jobId } = await this.verificationService.enqueueVerification(id);
+  async enqueueVerification(
+    @Param('id') id: string,
+    @Body() body?: EnqueueVerificationDto,
+  ) {
+    const { jobId, priority } =
+      await this.verificationService.enqueueVerification(id, body);
     return {
       jobId,
       claimId: id,
+      priority,
+      priorityLabel: String(priority),
       status: 'queued',
       message: 'Verification job enqueued successfully',
     };
@@ -101,7 +122,8 @@ export class VerificationController {
   @ApiOperation({
     summary: 'Get verification queue metrics',
     description:
-      'Retrieve current queue statistics including waiting, active, completed, and failed job counts',
+      'Retrieve current queue statistics including waiting, active, completed, and failed job counts. ' +
+      'Also returns a per-priority breakdown of the current waiting queue.',
   })
   @ApiOkResponse({
     description: 'Queue metrics retrieved successfully.',
@@ -112,6 +134,12 @@ export class VerificationController {
         completed: 150,
         failed: 3,
         total: 160,
+        priorityBreakdown: {
+          urgent: 1,
+          high: 2,
+          normal: 2,
+          low: 0,
+        },
       },
     },
   })
@@ -124,6 +152,7 @@ export class VerificationController {
 
   @Post('start')
   @Version('1')
+  @Throttle({ default: { limit: 20, ttl: 60 } }) // Strictest: OTP/email/phone operations
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Start verification flow (OTP/email/phone)',
@@ -163,12 +192,17 @@ export class VerificationController {
     description:
       'Invalid input parameters or rate limit exceeded for this identifier.',
   })
+  @ApiResponse({
+    status: 429,
+    description: 'Too many requests. High-cost operation (email/SMS sending).',
+  })
   async startVerification(@Body() dto: StartVerificationDto) {
     return this.verificationFlowService.start(dto);
   }
 
   @Post('resend')
   @Version('1')
+  @Throttle({ default: { limit: 20, ttl: 60 } }) // Strictest: Resend is also OTP/email/phone operation
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Resend verification code',
@@ -192,12 +226,17 @@ export class VerificationController {
   @ApiNotFoundResponse({
     description: 'The specified verification session was not found.',
   })
+  @ApiResponse({
+    status: 429,
+    description: 'Too many requests. High-cost operation (email/SMS sending).',
+  })
   async resendVerification(@Body() dto: ResendVerificationDto) {
     return this.verificationFlowService.resend(dto);
   }
 
   @Post('complete')
   @Version('1')
+  @Throttle({ default: { limit: 20, ttl: 60 } }) // Strictest: OTP verification attempts
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Complete verification with OTP',
@@ -220,12 +259,18 @@ export class VerificationController {
   @ApiNotFoundResponse({
     description: 'The specified verification session was not found.',
   })
+  @ApiResponse({
+    status: 429,
+    description:
+      'Too many failed attempts or rate limit exceeded for verification.',
+  })
   async completeVerification(@Body() dto: CompleteVerificationDto) {
     return this.verificationFlowService.complete(dto);
   }
 
   @Post()
   @Version(API_VERSIONS.V1)
+  @Throttle({ default: { limit: 30, ttl: 60 } }) // Strict: General verification operations
   @ApiOperation({
     summary: 'Submit identity verification request (v1)',
     description:
@@ -251,6 +296,7 @@ export class VerificationController {
   @ApiUnauthorizedResponse({
     description: 'Missing or invalid authentication credentials.',
   })
+  @ApiResponse({ status: 429, description: 'Too many verification requests.' })
   create(@Body() createVerificationDto: CreateVerificationDto) {
     return this.verificationService.create(createVerificationDto);
   }

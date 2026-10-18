@@ -1,11 +1,24 @@
+import { AppException } from '../src/common/dto/error-response.dto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AidEscrowService } from '../src/onchain/aid-escrow.service';
 import { AidEscrowController } from '../src/onchain/aid-escrow.controller';
 import { MockOnchainAdapter } from '../src/onchain/onchain.adapter.mock';
 import { ONCHAIN_ADAPTER_TOKEN } from '../src/onchain/onchain.adapter';
 import { BudgetService } from '../src/common/budget/budget.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SorobanEventCorrelationService } from '../src/onchain/soroban-event-correlation.service';
+
+const mockEventCorrelationService = {
+  getCorrelationsForPackage: jest.fn().mockResolvedValue([]),
+  getCorrelationsForClaim: jest.fn().mockResolvedValue([]),
+  correlateTransaction: jest
+    .fn()
+    .mockResolvedValue({ correlated: 0, skipped: 0, errors: 0, details: [] }),
+  getAllCorrelations: jest
+    .fn()
+    .mockResolvedValue({ data: [], total: 0, page: 1, limit: 20 }),
+};
 
 describe('Transaction Status Polling', () => {
   let service: AidEscrowService;
@@ -22,6 +35,14 @@ describe('Transaction Status Polling', () => {
         BudgetService,
         { provide: PrismaService, useValue: {} },
         { provide: ONCHAIN_ADAPTER_TOKEN, useValue: mockAdapter },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('testnet') },
+        },
+        {
+          provide: SorobanEventCorrelationService,
+          useValue: mockEventCorrelationService,
+        },
       ],
     }).compile();
 
@@ -137,13 +158,13 @@ describe('Transaction Status Polling', () => {
 
     it('throws BadRequestException for empty hash', async () => {
       await expect(controller.getTransactionStatus('')).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
     });
 
     it('throws BadRequestException for hash that is too short', async () => {
       await expect(controller.getTransactionStatus('ABC')).rejects.toThrow(
-        BadRequestException,
+        AppException,
       );
     });
 

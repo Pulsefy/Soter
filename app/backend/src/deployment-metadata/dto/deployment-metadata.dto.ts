@@ -1,4 +1,11 @@
-import { IsString, IsOptional, IsDateString, IsObject } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsDateString,
+  IsObject,
+  IsInt,
+  IsPositive,
+} from 'class-validator';
 
 export class CreateDeploymentMetadataDto {
   @IsString()
@@ -29,8 +36,13 @@ export class CreateDeploymentMetadataDto {
   transactionHash?: string;
 
   @IsOptional()
+  @IsInt()
+  @IsPositive()
+  contractVersion?: number;
+
+  @IsOptional()
   @IsObject()
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export class UpdateDeploymentMetadataDto {
@@ -51,8 +63,13 @@ export class UpdateDeploymentMetadataDto {
   transactionHash?: string;
 
   @IsOptional()
+  @IsInt()
+  @IsPositive()
+  contractVersion?: number;
+
+  @IsOptional()
   @IsObject()
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export class DeploymentMetadataResponseDto {
@@ -65,7 +82,16 @@ export class DeploymentMetadataResponseDto {
   commitSha?: string;
   deployer?: string;
   transactionHash?: string;
-  metadata?: Record<string, any>;
+  contractVersion?: number;
+  metadata?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export class MigrateDeploymentResponseDto {
+  deployment: DeploymentMetadataResponseDto;
+  previousVersion: number;
+  verifiedVersion: number;
+  transactionHash: string;
+  migratedAt: Date;
 }

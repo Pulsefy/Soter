@@ -1,0 +1,127 @@
+name: Frontend Quality
+
+# Lint, type-check, unit tests and a production build for app/frontend.
+#
+# Before this workflow the frontend had no CI for any of these gates — only the
+# bundle-budget and mock-handler contract jobs in frontend-ci.yml — so a broken
+# frontend change could merge to main undetected.
+#
+# Baseline status against main is tracked in app/frontend/docs/ci-baseline.md.
+# All four gates are green and blocking; add each job to the branch-protection
+# required status checks (see the baseline doc for the list).
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'app/frontend/**'
+      - '.github/workflows/frontend-quality.yml'
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'app/frontend/**'
+      - '.github/workflows/frontend-quality.yml'
+
+# Supersede in-flight runs for the same ref instead of queueing them.
+concurrency:
+  group: frontend-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        working-directory: app/frontend
+        run: pnpm run lint
+
+  type-check:
+    name: Type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `next build` also type-checks, but running tsc directly keeps the failure
+      # attributable to types (and fails fast, before the production build).
+      - name: Type check (tsc --noEmit)
+        working-directory: app/frontend
+        run: pnpm run type-check
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        working-directory: app/frontend
+        run: pnpm run test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: app/frontend
+        run: pnpm run build

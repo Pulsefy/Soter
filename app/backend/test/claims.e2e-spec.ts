@@ -259,6 +259,62 @@ describe('Claims (e2e)', () => {
       .post(`${base}/${claim.id}/verify`)
       .expect(400);
   });
+  it('POST /claims/:id/disburse with receiptPointer stores and returns it', async () => {
+    const campaign = await prisma.campaign.create({
+      data: { name: 'Test Campaign', budget: 1000 },
+    });
+
+    const claim = await prisma.claim.create({
+      data: {
+        campaignId: campaign.id,
+        amount: 50,
+        recipientRef: 'recipient-1',
+        status: 'approved',
+      },
+    });
+
+    const res = await request(app.getHttpServer())
+      .post(`${base}/${claim.id}/disburse`)
+      .send({ receiptPointer: 'ipfs://QmTestReceipt123' })
+      .expect(200);
+
+    const body = bodyAs<ClaimResponseDto>(res);
+    expect(body.success).toBe(true);
+    expect(body.data.status).toBe('disbursed');
+
+    // Verify receiptPointer was stored on the claim
+    const updated = await prisma.claim.findUnique({ where: { id: claim.id } });
+    expect(updated?.receiptPointer).toBe('ipfs://QmTestReceipt123');
+  });
+
+  it('POST /claims/:id/disburse without receiptPointer is backward compatible', async () => {
+    const campaign = await prisma.campaign.create({
+      data: { name: 'Test Campaign', budget: 1000 },
+    });
+
+    const claim = await prisma.claim.create({
+      data: {
+        campaignId: campaign.id,
+        amount: 50,
+        recipientRef: 'recipient-1',
+        status: 'approved',
+      },
+    });
+
+    const res = await request(app.getHttpServer())
+      .post(`${base}/${claim.id}/disburse`)
+      .send({}) // Empty body, no receiptPointer
+      .expect(200);
+
+    const body = bodyAs<ClaimResponseDto>(res);
+    expect(body.success).toBe(true);
+    expect(body.data.status).toBe('disbursed');
+
+    // Verify receiptPointer was not set
+    const updated = await prisma.claim.findUnique({ where: { id: claim.id } });
+    expect(updated?.receiptPointer).toBeNull();
+  });
+
   it('POST /claims rejects claim if over campaign budget', async () => {
     // Create a campaign with a small budget
     const campaign = await prisma.campaign.create({

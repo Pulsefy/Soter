@@ -2,8 +2,8 @@
 
 import { useRouter, usePathname } from 'next/navigation';
 import { useLocale } from 'next-intl';
-import { useTransition } from 'react';
-import { Globe } from 'lucide-react';
+import { useEffect, useTransition } from 'react';
+import { Globe, Loader2 } from 'lucide-react';
 import { useLocaleStore } from '@/lib/localeStore';
 import type { Locale } from '@/i18n';
 
@@ -17,21 +17,33 @@ export function LanguageSelector() {
   const router = useRouter();
   const pathname = usePathname();
   const currentLocale = useLocale() as Locale;
-  const { setLocale } = useLocaleStore();
+  const { locale: storedLocale, setLocale } = useLocaleStore();
   const [isPending, startTransition] = useTransition();
+
+  // On mount: if the user previously chose a different locale, restore it by
+  // navigating to the stored locale's path so the URL and store stay in sync.
+  useEffect(() => {
+    if (storedLocale && storedLocale !== currentLocale) {
+      startTransition(() => {
+        const segments = pathname.split('/');
+        segments[1] = storedLocale;
+        router.replace(segments.join('/'));
+      });
+    }
+    // Only run on mount — exhaustive-deps intentionally omitted for storedLocale
+    // and currentLocale because we only want the initial sync, not a reactive loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLocaleChange = (newLocale: Locale) => {
     if (newLocale === currentLocale) return;
 
     startTransition(() => {
-      // Update the locale in the store
       setLocale(newLocale);
 
-      // Navigate to the new locale - replace the current locale in the path
       const segments = pathname.split('/');
-      segments[1] = newLocale; // Replace the locale segment
-      const newPath = segments.join('/');
-      router.push(newPath);
+      segments[1] = newLocale;
+      router.push(segments.join('/'));
     });
   };
 
@@ -50,10 +62,21 @@ export function LanguageSelector() {
           </option>
         ))}
       </select>
-      <Globe
-        size={16}
-        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-500 dark:text-slate-400 pointer-events-none"
-      />
+
+      {/* Show a spinner while navigating, globe icon otherwise */}
+      {isPending ? (
+        <Loader2
+          size={16}
+          className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-blue-500 pointer-events-none"
+          aria-hidden="true"
+        />
+      ) : (
+        <Globe
+          size={16}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 pointer-events-none"
+          aria-hidden="true"
+        />
+      )}
     </div>
   );
 }

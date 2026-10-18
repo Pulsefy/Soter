@@ -7,6 +7,7 @@ import {
   ONCHAIN_ADAPTER_TOKEN,
   InitEscrowParams,
   InitEscrowResult,
+  AidPackage,
   CreateAidPackageParams,
   CreateAidPackageResult,
   BatchCreateAidPackagesParams,
@@ -15,10 +16,14 @@ import {
   ClaimAidPackageResult,
   DisburseAidPackageParams,
   DisburseAidPackageResult,
+  ExtendAidPackageExpiryParams,
+  ExtendAidPackageExpiryResult,
   GetAidPackageParams,
   GetAidPackageResult,
   GetAidPackageCountParams,
   GetAidPackageCountResult,
+  GetCampaignTokenTotalsParams,
+  GetCampaignTokenTotalsResult,
   GetTokenBalanceParams,
   GetTokenBalanceResult,
   CreateClaimParams,
@@ -32,7 +37,76 @@ import {
   GetTransactionStatusParams,
   GetTransactionStatusResult,
   TxStatus,
+  ContractVersionParams,
+  MigrateContractParams,
+  MigrateContractResult,
+  AdminState,
+  AdminTransferParams,
+  AdminTransferResult,
+  TransferAdminParams,
+  PendingWithdrawal,
+  ProposeSurplusWithdrawalParams,
+  SurplusWithdrawalParams,
+  SurplusWithdrawalResult,
+  SetDelegateParams,
+  SetDelegateResult,
+  RevokeDelegateParams,
+  RevokeDelegateResult,
+  GetDelegateParams,
+  GetDelegateResult,
+  GetDelegateHistoryParams,
+  GetDelegateHistoryResult,
+  DelegateHistoryEntry,
 } from './onchain.adapter';
+import {
+  parsePendingWithdrawal,
+  timelockRemainingSeconds,
+} from './utils/pending-withdrawal';
+import {
+  isSurplusWithdrawalTimelockError,
+  SurplusWithdrawalTimelockNotElapsedError,
+} from './utils/surplus-withdrawal.errors';
+
+/**
+ * Narrow an RPC result to a plain object so its fields can be read.
+ *
+ * Soroban RPC responses are untyped JSON, so every field access has to tolerate
+ * a missing, null or non-object payload. Returns an empty record rather than
+ * null so callers can read through with their existing ?? defaults.
+ */
+function asRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
+/** Read a field from an untyped RPC result as a string, with a fallback. */
+function readString(value: unknown, fallback: string): string {
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : fallback;
+}
+
+const PACKAGE_STATUSES = [
+  'Created',
+  'Claimed',
+  'Expired',
+  'Cancelled',
+  'Refunded',
+] as const satisfies readonly AidPackage['status'][];
+
+/**
+ * Read a package status from an untyped RPC result.
+ *
+ * Falls back to 'Created' when the chain reports a status this build does not
+ * recognise, rather than passing an unknown string through the adapter contract.
+ */
+function readPackageStatus(value: unknown): AidPackage['status'] {
+  return PACKAGE_STATUSES.includes(value as AidPackage['status'])
+    ? (value as AidPackage['status'])
+    : 'Created';
+}
 
 /** Calls the Soroban RPC endpoint and returns the result value. */
 async function rpcCall(
@@ -74,10 +148,11 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
   private async invokeContract(
     method: string,
     args: unknown[],
+    contractId = this.contractId,
   ): Promise<unknown> {
     const sim = await rpcCall(this.http, this.rpcUrl, 'simulateTransaction', {
       transaction: JSON.stringify({
-        contractId: this.contractId,
+        contractId,
         method,
         args,
       }),
@@ -88,7 +163,7 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     }
     const result = await rpcCall(this.http, this.rpcUrl, 'sendTransaction', {
       transaction: JSON.stringify({
-        contractId: this.contractId,
+        contractId,
         method,
         args,
         networkPassphrase: this.networkPassphrase,
@@ -158,9 +233,9 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
   async claimAidPackage(
     params: ClaimAidPackageParams,
   ): Promise<ClaimAidPackageResult> {
-    await this.invokeContract('claim_package', [
+    await this.invokeContract('claim', [
       params.packageId,
-      params.recipientAddress,
+      params.receiptPointer ?? null,
     ]);
     return {
       packageId: params.packageId,
@@ -174,9 +249,9 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
   async disburseAidPackage(
     params: DisburseAidPackageParams,
   ): Promise<DisburseAidPackageResult> {
-    await this.invokeContract('disburse_package', [
+    await this.invokeContract('disburse', [
       params.packageId,
-      params.operatorAddress,
+      params.receiptPointer ?? null,
     ]);
     return {
       packageId: params.packageId,
@@ -187,6 +262,32 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     };
   }
 
+  async extendAidPackageExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    this.logger.log(
+      `extendAidPackageExpiry id=${params.packageId} newExpiresAt=${params.newExpiresAt}`,
+    );
+    await this.invokeContract('extend_expiry', [
+      params.packageId,
+      params.newExpiresAt,
+    ]);
+    return {
+      packageId: params.packageId,
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+      newExpiresAt: params.newExpiresAt,
+    };
+  }
+
+  // Alias for contract function naming alignment
+  async extendExpiry(
+    params: ExtendAidPackageExpiryParams,
+  ): Promise<ExtendAidPackageExpiryResult> {
+    return this.extendAidPackageExpiry(params);
+  }
+
   async getAidPackage(
     params: GetAidPackageParams,
   ): Promise<GetAidPackageResult> {
@@ -194,16 +295,16 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       contractId: this.contractId,
       key: params.packageId,
     });
-    const pkg = result as any;
+    const pkg = asRecord(result);
     return {
       package: {
         id: params.packageId,
-        recipient: pkg?.recipient ?? '',
-        amount: String(pkg?.amount ?? '0'),
-        token: pkg?.token ?? '',
-        status: pkg?.status ?? 'Created',
-        createdAt: Number(pkg?.created_at ?? 0),
-        expiresAt: Number(pkg?.expires_at ?? 0),
+        recipient: readString(pkg.recipient, ''),
+        amount: readString(pkg.amount, '0'),
+        token: readString(pkg.token, ''),
+        status: readPackageStatus(pkg.status),
+        createdAt: Number(pkg.created_at ?? 0),
+        expiresAt: Number(pkg.expires_at ?? 0),
       },
       timestamp: new Date(),
     };
@@ -216,12 +317,39 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       contractId: this.contractId,
       key: 'aggregates_' + params.token,
     });
-    const agg = result as any;
+    const agg = asRecord(result);
     return {
       aggregates: {
-        totalCommitted: String(agg?.total_committed ?? '0'),
-        totalClaimed: String(agg?.total_claimed ?? '0'),
-        totalExpiredCancelled: String(agg?.total_expired_cancelled ?? '0'),
+        totalCommitted: readString(agg.total_committed, '0'),
+        totalClaimed: readString(agg.total_claimed, '0'),
+        totalExpiredCancelled: readString(agg.total_expired_cancelled, '0'),
+      },
+      timestamp: new Date(),
+    };
+  }
+
+  async getCampaignTokenTotals(
+    params: GetCampaignTokenTotalsParams,
+  ): Promise<GetCampaignTokenTotalsResult> {
+    const campaignRef = params.campaignRef;
+    const [locked, claimed] = await Promise.all([
+      rpcCall(this.http, this.rpcUrl, 'getContractData', {
+        contractId: this.contractId,
+        key: 'campaign_token_locked_' + campaignRef + '_' + params.tokenAddress,
+      }),
+      rpcCall(this.http, this.rpcUrl, 'getContractData', {
+        contractId: this.contractId,
+        key:
+          'campaign_token_claimed_' + campaignRef + '_' + params.tokenAddress,
+      }),
+    ]);
+
+    return {
+      totals: {
+        campaignRef,
+        tokenAddress: params.tokenAddress,
+        totalLocked: readString(locked, '0'),
+        totalClaimed: readString(claimed, '0'),
       },
       timestamp: new Date(),
     };
@@ -237,7 +365,7 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     return {
       tokenAddress: params.tokenAddress,
       accountAddress: params.accountAddress,
-      balance: String((result as any) ?? '0'),
+      balance: readString(result, '0'),
       timestamp: new Date(),
     };
   }
@@ -247,9 +375,45 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       contractId: this.contractId,
       key: 'metadata',
     });
+    const meta = asRecord(result);
     return {
-      version: (result as any)?.version ?? '1.0.0',
-      name: (result as any)?.name ?? 'Soroban Contract',
+      version: readString(meta.version, '1.0.0'),
+      name: readString(meta.name, 'Soroban Contract'),
+      timestamp: new Date(),
+    };
+  }
+
+  async getContractVersion(params: ContractVersionParams): Promise<number> {
+    const result = await this.invokeContract(
+      'get_version',
+      [],
+      params.contractId,
+    );
+    const version = Number(result);
+    if (!Number.isInteger(version) || version < 0) {
+      throw new Error(
+        `Invalid contract version returned for ${params.contractId}`,
+      );
+    }
+    return version;
+  }
+
+  async migrateContract(
+    params: MigrateContractParams,
+  ): Promise<MigrateContractResult> {
+    const previousVersion = await this.getContractVersion({
+      contractId: params.contractId,
+    });
+    await this.invokeContract(
+      'migrate',
+      [params.newVersion],
+      params.contractId,
+    );
+    return {
+      contractId: params.contractId,
+      transactionHash: '',
+      previousVersion,
+      newVersion: params.newVersion,
       timestamp: new Date(),
     };
   }
@@ -260,7 +424,166 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       key: 'paused',
     });
     return {
-      isPaused: (result as any) ?? false,
+      isPaused: typeof result === 'boolean' ? result : false,
+      timestamp: new Date(),
+    };
+  }
+
+  async getAdminState(params: AdminTransferParams = {}): Promise<AdminState> {
+    const contractId = params.contractId ?? this.contractId;
+    const admin = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId,
+      key: 'admin',
+    });
+    const pendingAdmin = await rpcCall(
+      this.http,
+      this.rpcUrl,
+      'getContractData',
+      { contractId, key: 'pending_admin' },
+    );
+    return {
+      adminAddress: readString(admin, ''),
+      pendingAdminAddress:
+        typeof pendingAdmin === 'string' && pendingAdmin.length > 0
+          ? pendingAdmin
+          : null,
+      timestamp: new Date(),
+    };
+  }
+
+  async transferAdmin(
+    params: TransferAdminParams,
+  ): Promise<AdminTransferResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract(
+      'transfer_admin',
+      [params.newAdminAddress],
+      contractId,
+    );
+    return this.buildAdminTransferResult(contractId);
+  }
+
+  async acceptAdmin(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract('accept_admin', [], contractId);
+    return this.buildAdminTransferResult(contractId);
+  }
+
+  async cancelAdminTransfer(
+    params: AdminTransferParams = {},
+  ): Promise<AdminTransferResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract('cancel_admin_transfer', [], contractId);
+    return this.buildAdminTransferResult(contractId);
+  }
+
+  private async buildAdminTransferResult(
+    contractId: string,
+  ): Promise<AdminTransferResult> {
+    const state = await this.getAdminState({ contractId });
+    return {
+      contractId,
+      transactionHash: '',
+      adminAddress: state.adminAddress,
+      pendingAdminAddress: state.pendingAdminAddress,
+      timestamp: state.timestamp,
+    };
+  }
+
+  async getPendingWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<PendingWithdrawal | null> {
+    const contractId = params.contractId ?? this.contractId;
+    const result = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId,
+      key: 'pending_withdrawal',
+    });
+    return parsePendingWithdrawal(result);
+  }
+
+  async proposeSurplusWithdrawal(
+    params: ProposeSurplusWithdrawalParams,
+  ): Promise<SurplusWithdrawalResult> {
+    const contractId = params.contractId ?? this.contractId;
+    const to = params.to?.trim();
+    const token = params.token?.trim();
+    const amount = params.amount?.trim();
+
+    if (!to) {
+      throw new Error('to is required to propose a surplus withdrawal');
+    }
+    if (!token) {
+      throw new Error('token is required to propose a surplus withdrawal');
+    }
+    if (!amount || !/^\d+$/.test(amount) || BigInt(amount) <= 0n) {
+      throw new Error(
+        'amount must be a positive integer string in the token base unit',
+      );
+    }
+
+    await this.invokeContract(
+      'propose_surplus_withdrawal',
+      [to, amount, token],
+      contractId,
+    );
+
+    return {
+      contractId,
+      transactionHash: '',
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
+      timestamp: new Date(),
+    };
+  }
+
+  async cancelSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    const contractId = params.contractId ?? this.contractId;
+    await this.invokeContract('cancel_surplus_withdrawal', [], contractId);
+    return {
+      contractId,
+      transactionHash: '',
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
+      timestamp: new Date(),
+    };
+  }
+
+  async executeSurplusWithdrawal(
+    params: SurplusWithdrawalParams = {},
+  ): Promise<SurplusWithdrawalResult> {
+    const contractId = params.contractId ?? this.contractId;
+    const pending = await this.getPendingWithdrawal({ contractId });
+
+    if (pending) {
+      const remaining = timelockRemainingSeconds(pending);
+      if (remaining > 0) {
+        throw new SurplusWithdrawalTimelockNotElapsedError(
+          `SurplusWithdrawalTimelockActive: withdrawal of ${pending.amount} to ` +
+            `${pending.to} becomes executable in ${remaining}s ` +
+            `(at ledger timestamp ${pending.executableAt})`,
+          pending.executableAt,
+        );
+      }
+    }
+
+    try {
+      await this.invokeContract('execute_surplus_withdrawal', [], contractId);
+    } catch (error) {
+      if (isSurplusWithdrawalTimelockError(error)) {
+        throw new SurplusWithdrawalTimelockNotElapsedError(
+          'SurplusWithdrawalTimelockActive: the surplus withdrawal timelock delay has not elapsed',
+          pending?.executableAt ?? null,
+        );
+      }
+      throw error;
+    }
+
+    return {
+      contractId,
+      transactionHash: '',
+      pendingWithdrawal: await this.getPendingWithdrawal({ contractId }),
       timestamp: new Date(),
     };
   }
@@ -270,9 +593,10 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       contractId: this.contractId,
       key: 'fee_config',
     });
+    const fee = asRecord(result);
     return {
-      feePercentage: (result as any)?.fee_percentage ?? '0',
-      maxFee: (result as any)?.max_fee ?? '0',
+      feePercentage: readString(fee.fee_percentage, '0'),
+      maxFee: readString(fee.max_fee, '0'),
       timestamp: new Date(),
     };
   }
@@ -282,11 +606,12 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       contractId: this.contractId,
       key: 'summary_' + packageId,
     });
+    const summary = asRecord(result);
     return {
       packageId,
-      totalAmount: (result as any)?.total_amount ?? '0',
-      claimedAmount: (result as any)?.claimed_amount ?? '0',
-      status: (result as any)?.status ?? 'Active',
+      totalAmount: readString(summary.total_amount, '0'),
+      claimedAmount: readString(summary.claimed_amount, '0'),
+      status: readString(summary.status, 'Active'),
       timestamp: new Date(),
     };
   }
@@ -312,6 +637,7 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     const result = await this.disburseAidPackage({
       packageId: params.packageId,
       operatorAddress: params.recipientAddress ?? this.secretKey,
+      receiptPointer: params.receiptPointer,
     });
     return {
       transactionHash: result.transactionHash,
@@ -329,9 +655,9 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       const result = await rpcCall(this.http, this.rpcUrl, 'getTransaction', {
         hash,
       });
-      const r = result as any;
+      const r = asRecord(result);
       let status: TxStatus;
-      switch (r?.status) {
+      switch (r.status) {
         case 'SUCCESS':
           status = 'succeeded';
           break;
@@ -348,15 +674,126 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
         hash,
         status,
         timestamp: new Date(),
-        ledger: typeof r?.ledger === 'number' ? r.ledger : undefined,
+        ledger: typeof r.ledger === 'number' ? r.ledger : undefined,
         errorMessage:
           status === 'failed'
-            ? (r?.resultXdr ?? 'Transaction failed')
+            ? readString(r.resultXdr, 'Transaction failed')
             : undefined,
       };
     } catch {
       return { hash, status: 'unknown', timestamp: new Date() };
     }
+  }
+
+  async setDelegate(params: SetDelegateParams): Promise<SetDelegateResult> {
+    this.logger.log(
+      `setDelegate packageId=${params.packageId} delegate=${params.delegateAddress}`,
+    );
+    const method = params.expiresAt
+      ? 'set_delegate_with_expiry'
+      : 'set_delegate';
+    const args = params.expiresAt
+      ? [
+          params.adminAddress,
+          params.packageId,
+          params.delegateAddress,
+          params.expiresAt,
+        ]
+      : [params.adminAddress, params.packageId, params.delegateAddress];
+
+    await this.invokeContract(method, args);
+
+    return {
+      packageId: params.packageId,
+      delegateAddress: params.delegateAddress,
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+      expiresAt: params.expiresAt,
+      metadata: { contractId: this.contractId, method },
+    };
+  }
+
+  async revokeDelegate(
+    params: RevokeDelegateParams,
+  ): Promise<RevokeDelegateResult> {
+    this.logger.log(`revokeDelegate packageId=${params.packageId}`);
+    await this.invokeContract('revoke_delegate', [
+      params.adminAddress,
+      params.packageId,
+    ]);
+    return {
+      packageId: params.packageId,
+      transactionHash: '',
+      timestamp: new Date(),
+      status: 'success',
+      metadata: { contractId: this.contractId },
+    };
+  }
+
+  async getDelegate(params: GetDelegateParams): Promise<GetDelegateResult> {
+    const result = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId: this.contractId,
+      key: 'delegate_info_' + params.packageId,
+    });
+
+    let delegateAddress: string | undefined;
+    let expiresAt: number | undefined;
+
+    if (result !== null && result !== undefined) {
+      const tuple = result as [string, number | null | undefined] | null;
+      if (Array.isArray(tuple) && tuple.length >= 1) {
+        delegateAddress = String(tuple[0]);
+        expiresAt =
+          tuple[1] !== null && tuple[1] !== undefined
+            ? Number(tuple[1])
+            : undefined;
+      }
+    }
+
+    return {
+      packageId: params.packageId,
+      delegateAddress,
+      expiresAt,
+      timestamp: new Date(),
+    };
+  }
+
+  async getDelegateHistory(
+    params: GetDelegateHistoryParams,
+  ): Promise<GetDelegateHistoryResult> {
+    const result = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId: this.contractId,
+      key: 'delegate_history_' + params.packageId,
+    });
+
+    const rawHistory = Array.isArray(result) ? result : [];
+    const history: DelegateHistoryEntry[] = rawHistory.map(
+      (entry: Record<string, unknown>) => ({
+        packageId:
+          entry?.package_id != null
+            ? String(entry.package_id as string | number)
+            : params.packageId,
+        previousDelegate:
+          entry?.previous_delegate != null
+            ? String(entry.previous_delegate as string)
+            : undefined,
+        newDelegate:
+          entry?.new_delegate != null
+            ? String(entry.new_delegate as string)
+            : '',
+        changedBy:
+          entry?.changed_by != null ? String(entry.changed_by as string) : '',
+        changedAt: Number(entry?.changed_at ?? 0),
+        reason: entry?.reason != null ? String(entry.reason as string) : '',
+      }),
+    );
+
+    return {
+      packageId: params.packageId,
+      history,
+      timestamp: new Date(),
+    };
   }
 }
 

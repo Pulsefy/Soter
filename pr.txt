@@ -1,0 +1,126 @@
+﻿================================================================================
+PULL REQUEST DESCRIPTION — issue #1407
+================================================================================
+Branch:        user-avatar
+Commit:        715c10e  "Add campaign-level fund conservation property-based test (#1407)"
+Repo:          https://github.com/Belzabeem/Soter.git
+Related issue: #1407
+================================================================================
+
+1. SUMMARY
+--------------------------------------------------------------------------------
+This PR adds campaign-level fund conservation property-based testing to the
+aid_escrow Soroban contract test suite, verifying that per-campaign accounting
+(locked + claimed + refunded <= funded) and per-campaign aggregates consistently
+sum to token-level totals across randomized multi-campaign operation sequences.
+
+It also adds a negative/deterministic bug-detection test proving the invariant
+check is not vacuous: a deliberately introduced conservation bug makes the
+assertion panic while the real contract state passes.
+
+Only one file contains meaningful code changes:
+  app/onchain/contracts/aid_escrow/tests/property_based_invariants.rs
+  (+528 / -16 lines)
+
+No contract source is modified; this is test-only. The production contracts
+already expose the required getters (try_reassign_package,
+get_campaign_token_locked, get_campaign_token_claimed), and cargo check
+-p aid_escrow --tests succeeded before and after the change.
+
+2. TESTS ADDED
+--------------------------------------------------------------------------------
+
+2.1 test_campaign_fund_conservation_invariants (property-based / randomized)
+--------------------------------------------------------------------------------
+Purpose: Assert campaign-level fund conservation under randomized multi-campaign
+operation sequences where two campaigns share one token.
+
+Setup:
+- Seeds an escrow with one shared Stellar asset token.
+- Creates camp-1 and camp-2 packages (tagged via campaign_ref metadata) plus
+  untagged packages, all funded against the same token.
+
+Operation loop (50 iterations x 30-80 randomized ops each):
+- fund / create_package / claim / revoke / refund / reassign_package /
+  advance_time, selected via a seeded Rng (StdRng) so runs are reproducible.
+- Every operation mutates the real contract AND the caller's own per-campaign
+  / untagged aggregate accounting (locked, claimed, refunded, funded).
+
+Invariant check after EVERY operation
+  (pure helper check_campaign_conservation_invariants):
+
+  (a) Per-campaign conservation:
+      For each campaign: locked + claimed + refunded <= funded
+      (reads campaign_locked / campaign_claimed live from contract getters
+       get_campaign_token_locked / get_campaign_token_claimed).
+
+  (b) Cross-campaign consistency against token-level totals:
+      sum(campaign_locked) <= token_locked   (allowing untagged remainder)
+      sum(campaign_claimed) <= token_claimed
+      sum(campaign_funded) <= token_funded
+      untagged_* never attributed to any campaign.
+
+Result: 2 passed, 0 failed (both new tests) in ~79s.
+
+2.2 test_campaign_conservation_bug_detection (deterministic negative test)
+--------------------------------------------------------------------------------
+Purpose: Prove the invariant check catches real conservation violations instead
+of being a vacuous assertion.
+
+Flow:
+1. Constructs a known-good multi-package state across camp-1, camp-2, and one
+   untagged package (claim, disburse, revoke, refund-after-expiry).
+2. Calls check_campaign_conservation_invariants against the real contract state
+   -> must pass.
+3. Deliberately injects a conservation bug: undercounts camp-1's funded
+   accounting by one package's amount (simulating a skipped increment_locked
+   campaign delta).
+4. Re-runs the same check against corrupted values via catch_unwind -> must
+   panic.
+5. Asserts the panic occurred (acceptance criterion #3 from issue #1407).
+
+3. FILES CHANGED
+--------------------------------------------------------------------------------
+app/onchain/contracts/aid_escrow/tests/property_based_invariants.rs
+  | +528 / -16 lines
+  | Test-only additions:
+  |   - campaign_meta() helper — builds create_package metadata tagged with a
+  |     campaign_ref so packages are attributed to a campaign by the contract.
+  |   - check_campaign_conservation_invariants() — pure aggregate-level invariant
+  |     checker exercised both against real contract state and against corrupted
+  |     values.
+  |   - test_campaign_fund_conservation_invariants() — randomized property test.
+  |   - test_campaign_conservation_bug_detection() — deterministic negative test.
+
+No contract source files were modified.
+
+4. VALIDATION
+--------------------------------------------------------------------------------
+cargo check -p aid_escrow --tests -> succeeded
+cargo test -p aid_escrow --test property_based_invariants test_campaign
+                                                -> 2 passed, 0 failed (~79s)
+
+Bug-detection acceptance: the injected funded-undercount bug reliably makes
+check_campaign_conservation_invariants panic, confirming the check is
+effective.
+
+5. NOTES / SCOPE
+--------------------------------------------------------------------------------
+- Test-only change; no production contract logic altered.
+- Snapshot artifacts generated locally during test runs were excluded from the
+  commit (the tests use direct assertions, not insta/assert_snapshot).
+- The commit is staged on branch user-avatar and pushed to origin/user-avatar.
+- PR has NOT been pushed/created via this tooling (per request); create the PR
+  on GitHub pointing branch user-avatar -> main, then link it to issue #1407.
+
+6. NEXT STEPS (manual, not performed here)
+--------------------------------------------------------------------------------
+- Open a PR on GitHub: branch user-avatar -> main
+- Title: "Add campaign-level fund conservation property-based test (#1407)"
+- Body: paste contents of this pr.txt
+- Link the PR to issue #1407
+- Request review and merge after CI passes.
+
+================================================================================
+END OF PR DESCRIPTION
+================================================================================

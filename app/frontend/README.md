@@ -2,6 +2,8 @@
 
 The frontend for Soter, built with Next.js 15+, providing a modern, responsive interface for transparent humanitarian aid distribution on the Stellar blockchain.
 
+> **Calling the backend?** See the [Frontend & Mobile API Integration Guide](../../doc/api-integration-guide.md) for the intended client pattern, the mock-api layer and demo mode, and how the OpenAPI spec is the source of truth for request/response shapes.
+
 ## Overview
 
 This Next.js application serves as the user-facing interface for the Soter platform, enabling:
@@ -64,6 +66,35 @@ Or from this directory:
 cd app/frontend
 pnpm install
 ```
+
+### Distribution map performance
+
+The map targets at most 250 rendered markers, including clusters, for a 10,000-point dataset. It only clusters points in the padded Leaflet viewport and keeps marker components keyed and memoized across filter changes. Override the target with `NEXT_PUBLIC_MAP_TARGET_MARKERS`; tune the zoom thresholds with `NEXT_PUBLIC_MAP_GRID_WORLD`, `NEXT_PUBLIC_MAP_GRID_REGIONAL`, `NEXT_PUBLIC_MAP_GRID_LOCAL`, and `NEXT_PUBLIC_MAP_GRID_DETAIL`.
+
+Run the large-fixture regression check with:
+
+```bash
+pnpm test -- --runInBand src/components/dashboard/__tests__/AidDistributionMap.performance.test.ts
+```
+
+### Dashboard visual regression
+
+The frontend CI workflow compares full-page Chromium screenshots of the dashboard in light and dark themes. It uses fixed API data and map tiles so the screenshots stay independent of backend and map-provider changes. CI runs on Windows to match the screenshot rendering platform used for the committed baselines.
+
+Run the visual check locally from this directory:
+
+```bash
+pnpm exec playwright install chromium
+pnpm run test:visual
+```
+
+When a dashboard change is intentional, update the reference images in the same pull request:
+
+```bash
+pnpm run test:visual:update
+```
+
+Review the PNG changes under `tests/visual/dashboard.visual.ts-snapshots/` before committing them with the UI change.
 
 ### Environment Setup
 
@@ -161,6 +192,31 @@ To enable the mock API layer for development when the backend is unavailable:
 1.  Set `NEXT_PUBLIC_USE_MOCKS=true` in your `.env.local` file.
 2.  The application will intercept requests to supported endpoints (e.g., `/health`, `/aid-packages`) and return mock data.
 3.  Mock handlers are defined in `src/lib/mock-api/handlers.ts`.
+
+When `NEXT_PUBLIC_USE_MOCKS=true` a **Demo Mode banner** is shown at the top of every page so contributors and testers always know they are not seeing live data.
+
+## Demo / Degraded Mode
+
+The platform surfaces three distinct modes to make data provenance explicit:
+
+| Mode | Trigger | What it means |
+|---|---|---|
+| `fixture` | `NEXT_PUBLIC_USE_MOCKS=true` **or** `NEXT_PUBLIC_DEMO_MODE=true` **or** AI service `TEST_PROVIDER_MODE=true` | All AI responses come from local fixture files. No API keys required. |
+| `deterministic` | AI service `AI_DETERMINISTIC_MODE=true` | AI inference returns hardcoded stable outputs. Useful for CI. |
+| `live` | All mock flags are off and a real API key is configured | Real AI provider is active. |
+
+A coloured banner is rendered at the top of the app for `fixture` and `deterministic` modes.  
+The AI service also stamps every response with the `X-Demo-Mode` header (`fixture`, `deterministic`, or `live`) and exposes a `/health/mode` JSON endpoint for programmatic consumers.
+
+### Enabling demo mode for contributors
+
+Add to `.env.local`:
+
+```env
+NEXT_PUBLIC_USE_MOCKS=true
+# or, to force the banner independently of the mock layer:
+# NEXT_PUBLIC_DEMO_MODE=true
+```
 
 ## Key Features Implementation
 
@@ -346,6 +402,26 @@ Tests will be added as the project matures. Planned testing stack:
 - **Unit**: Jest + React Testing Library
 - **E2E**: Playwright
 - **Integration**: Testing against local backend
+
+### Route smoke tests
+
+`src/integration/verification-review.smoke.test.tsx` is the smoke test for the
+reviewer-facing `/[locale]/verification-review` route. It renders the real page
+in jsdom against a real HTTP backend started in-process
+(`src/integration/support/verification-inbox-test-backend.ts`) and walks the
+reviewer flow: load the route, list the queue, approve a case, reject a case.
+Every step is its own test, named `[load]`, `[list]`, `[action:approve]` and
+`[action:reject]`, so a failure names the step that broke.
+
+```bash
+pnpm exec jest src/integration/verification-review.smoke.test.tsx --runInBand --verbose
+```
+
+It runs in CI via `.github/workflows/frontend-verification-review-smoke.yml`.
+No backend, database or outbound network access is needed: the test backend
+binds an ephemeral loopback port and demo mode is forced off so every request
+really leaves the process. Tests that need `fetch` under jsdom must opt into the
+`./jest.jsdom-fetch.environment.js` environment, since jsdom 20 ships none.
 
 ## Contributing
 

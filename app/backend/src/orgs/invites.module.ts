@@ -7,11 +7,15 @@ import { BullModule, InjectQueue } from '@nestjs/bullmq';
 import { InvitesProcessor, INVITE_EXPIRY_QUEUE } from './invites.processor';
 import { Queue } from 'bullmq';
 
+const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
+
 @Module({
   imports: [
     PrismaModule,
     AuditModule,
-    BullModule.registerQueue({ name: INVITE_EXPIRY_QUEUE }),
+    ...(skipBackgroundJobs
+      ? []
+      : [BullModule.registerQueue({ name: INVITE_EXPIRY_QUEUE })]),
   ],
   providers: [InvitesService, InvitesProcessor],
   controllers: [InvitesController],
@@ -23,6 +27,9 @@ export class InvitesModule implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    if (process.env.SKIP_BACKGROUND_JOBS === 'true') {
+      return;
+    }
     // Schedule invite expiry check every hour
     await this.inviteExpiryQueue.add(
       'check-expiry',

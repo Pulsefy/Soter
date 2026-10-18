@@ -6,6 +6,7 @@ import {
   VerificationJobData,
   VerificationResult,
 } from './interfaces/verification-job.interface';
+import { VerificationPriority } from './dto/enqueue-verification.dto';
 
 import { DlqService } from '../jobs/dlq.service';
 
@@ -25,8 +26,13 @@ export class VerificationProcessor extends WorkerHost {
   async process(
     job: Job<VerificationJobData, VerificationResult, string>,
   ): Promise<VerificationResult> {
+    const priority = job.data.priority;
+    const priorityLabel = VerificationPriority[priority] ?? String(priority);
+
     this.logger.log(
-      `Processing job ${job.id} for claim ${job.data.claimId} (attempt ${job.attemptsMade + 1})${job.data.correlationId ? ` [correlationId=${job.data.correlationId}]` : ''}`,
+      `Processing job ${job.id} for claim ${job.data.claimId}` +
+        ` (attempt ${job.attemptsMade + 1}, priority=${priorityLabel}(${priority}))` +
+        `${job.data.correlationId ? ` [correlationId=${job.data.correlationId}]` : ''}`,
     );
 
     try {
@@ -35,13 +41,14 @@ export class VerificationProcessor extends WorkerHost {
       );
 
       this.logger.log(
-        `Job ${job.id} completed successfully with score ${result.score}`,
+        `Job ${job.id} completed successfully with score ${result.score}` +
+          ` [priority=${priorityLabel}]`,
       );
 
       return result;
     } catch (error) {
       this.logger.error(
-        `Job ${job.id} failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `Job ${job.id} failed [priority=${priorityLabel}]: ${error instanceof Error ? error.message : 'Unknown error'}`,
         error instanceof Error ? error.stack : undefined,
       );
       throw error;
@@ -50,16 +57,22 @@ export class VerificationProcessor extends WorkerHost {
 
   @OnWorkerEvent('completed')
   onCompleted(job: Job<VerificationJobData, VerificationResult>) {
+    const priorityLabel =
+      VerificationPriority[job.data.priority] ?? String(job.data.priority);
     this.logger.log(
-      `Job ${job.id} completed for claim ${job.data.claimId} after ${Date.now() - job.data.timestamp}ms`,
+      `Job ${job.id} completed for claim ${job.data.claimId}` +
+        ` after ${Date.now() - job.data.timestamp}ms [priority=${priorityLabel}]`,
     );
   }
 
   @OnWorkerEvent('failed')
   async onFailed(job: Job<VerificationJobData> | undefined, error: Error) {
     if (job) {
+      const priorityLabel =
+        VerificationPriority[job.data.priority] ?? String(job.data.priority);
       this.logger.error(
-        `Job ${job.id} failed for claim ${job.data.claimId}: ${error.message}`,
+        `Job ${job.id} failed for claim ${job.data.claimId}` +
+          ` [priority=${priorityLabel}]: ${error.message}`,
       );
       await this.dlqService.moveToDlq('verification', job, error);
     } else {
@@ -69,7 +82,11 @@ export class VerificationProcessor extends WorkerHost {
 
   @OnWorkerEvent('active')
   onActive(job: Job<VerificationJobData>) {
-    this.logger.debug(`Job ${job.id} started for claim ${job.data.claimId}`);
+    const priorityLabel =
+      VerificationPriority[job.data.priority] ?? String(job.data.priority);
+    this.logger.debug(
+      `Job ${job.id} started for claim ${job.data.claimId} [priority=${priorityLabel}]`,
+    );
   }
 
   @OnWorkerEvent('stalled')

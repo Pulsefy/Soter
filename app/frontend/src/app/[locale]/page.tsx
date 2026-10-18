@@ -10,7 +10,7 @@ export default async function Home({ params }: PageProps) {
   return (
     <main className="container mx-auto px-4 py-16 grow">
       <div className="max-w-4xl mx-auto text-center space-y-8">
-        <h1 className="text-5xl md:text-6xl font-bold tracking-tight text-blue-900 dark:text-white">
+        <h1 className="text-5xl md:text-6xl font-bold tracking-tight text-slate-950 dark:text-white">
           Soter
         </h1>
         <p className="text-xl md:text-2xl text-gray-900 dark:text-gray-400">
@@ -41,13 +41,13 @@ export default async function Home({ params }: PageProps) {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-16">
           <div className="p-6 rounded-lg border border-gray-200 dark:border-gray-800 text-left">
-            <h3 className="text-lg font-semibold mb-2 text-blue-900 dark:text-white">Direct Aid Claims</h3>
+            <h3 className="text-lg font-semibold mb-2 text-slate-950 dark:text-white">Direct Aid Claims</h3>
             <p className="text-gray-600 dark:text-gray-400 text-sm">
               Wallet-based, passwordless claiming—no accounts required.
             </p>
           </div>
           <div className="p-6 rounded-lg border border-gray-200 dark:border-gray-800 text-left">
-            <h3 className="text-lg font-semibold mb-2 text-blue-900 dark:text-white">
+            <h3 className="text-lg font-semibold mb-2 text-slate-950 dark:text-white">
               AI Need Verification
             </h3>
             <p className="text-gray-600 dark:text-gray-400 text-sm">
@@ -55,7 +55,7 @@ export default async function Home({ params }: PageProps) {
             </p>
           </div>
           <div className="p-6 rounded-lg border border-gray-200 dark:border-gray-800 text-left">
-            <h3 className="text-lg font-semibold mb-2 text-blue-900 dark:text-white">
+            <h3 className="text-lg font-semibold mb-2 text-slate-950 dark:text-white">
               Immutable Transparency
             </h3>
             <p className="text-gray-600 dark:text-gray-400 text-sm">

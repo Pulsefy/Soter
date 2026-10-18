@@ -11,6 +11,7 @@
  */
 
 import type { VerificationResult } from '@/types/verification';
+import { ApiError, extractApiError } from './error-utils';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -18,9 +19,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
  * Typed error thrown by startEvidenceVerification on all failure paths.
  * Consumers can catch this and display `.message` directly in the UI.
  */
-export class VerificationApiError extends Error {
-    constructor(message: string) {
-        super(message);
+export class VerificationApiError extends ApiError {
+    constructor(message: string, status?: number, correlationId?: string) {
+        super(message, status, correlationId);
         this.name = 'VerificationApiError';
     }
 }
@@ -55,21 +56,14 @@ export async function startEvidenceVerification(
         return body;
     }
 
-    if (response.status >= 400 && response.status < 500) {
-        let message = 'The verification request was rejected. Please review your evidence and try again.';
-        try {
-            const body = (await response.json()) as { message?: string };
-            if (typeof body.message === 'string' && body.message.trim().length > 0) {
-                message = body.message;
-            }
-        } catch {
-            // JSON parsing failed — use the default message
-        }
-        throw new VerificationApiError(message);
+    const apiError = await extractApiError(response);
+    let message = apiError.message;
+    if (response.status >= 500) {
+        message = 'The verification service is temporarily unavailable. Please try again in a moment.';
+    } else if (response.status >= 400 && response.status < 500 && apiError.message.startsWith('API request failed')) {
+        message = 'The verification request was rejected. Please review your evidence and try again.';
     }
 
-    // 5xx or unexpected status
-    throw new VerificationApiError(
-        'The verification service is temporarily unavailable. Please try again in a moment.',
-    );
+    throw new VerificationApiError(message, apiError.status, apiError.correlationId);
 }
+

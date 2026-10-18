@@ -1,14 +1,20 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { MetricsService } from '../observability/metrics/metrics.service';
+import type { EntityLink, Prisma, RegistryEntityType } from '@prisma/client';
+import { EntityLinkReviewStatus } from '@prisma/client';
+import {
+  ENTITY_LINK_CONFIDENCE_CONFIG,
+  getConfidenceBand,
+} from '../common/config/entity-link-confidence.config';
 import {
   CreateEntityLinkDto,
   LinkEntityResult,
   EntityLinkQueryDto,
+  EntityLinkReviewQueueQueryDto,
+  ReviewEntityLinkDto,
   RegistrySearchResult,
 } from './dto/entity-link.dto';
 
@@ -16,19 +22,166 @@ import {
 export class EntityLinkingService {
   private readonly logger = new Logger(EntityLinkingService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auditService: AuditService,
+    private metricsService: MetricsService,
+  ) {}
+
+  /**
+   * Verify that the given sourceId belongs to the caller's organisation.
+   * Throws 403 if ownership cannot be confirmed. Admin-role callers pass
+   * orgId = undefined to skip the check entirely.
+   */
+  private async assertSourceOwnership(
+    sourceType: string,
+    sourceId: string,
+    orgId: string,
+  ): Promise<void> {
+    switch (sourceType) {
+      case 'campaign': {
+        const campaign = await this.prisma.campaign.findFirst({
+          where: { id: sourceId, orgId },
+          select: { id: true },
+        });
+        if (!campaign) {
+          throw new AppException(
+            ERROR_CODES.FORBIDDEN,
+            403,
+            'Access denied: campaign does not belong to your organisation',
+          );
+        }
+        break;
+      }
+
+      case 'claim': {
+        const claim = await this.prisma.claim.findFirst({
+          where: { id: sourceId, campaign: { orgId } },
+          select: { id: true },
+        });
+        if (!claim) {
+          throw new AppException(
+            ERROR_CODES.FORBIDDEN,
+            403,
+            'Access denied: claim does not belong to your organisation',
+          );
+        }
+        break;
+      }
+
+      case 'verification': {
+        const verification = await this.prisma.verificationRequest.findFirst({
+          where: { id: sourceId, orgId },
+          select: { id: true },
+        });
+        if (!verification) {
+          throw new AppException(
+            ERROR_CODES.FORBIDDEN,
+            403,
+            'Access denied: verification does not belong to your organisation',
+          );
+        }
+        break;
+      }
+
+      default:
+        throw new AppException(
+          ERROR_CODES.FORBIDDEN,
+          403,
+          'Access denied: unsupported source type',
+        );
+    }
+  }
+
+  /**
+   * Resolve the owning orgId for a given entity link by tracing back through
+   * its source. Returns null when the source is unrecognised or orphaned.
+   */
+  private async resolveLinkOrgId(
+    sourceType: string,
+    sourceId: string,
+  ): Promise<string | null> {
+    switch (sourceType) {
+      case 'campaign': {
+        const campaign = await this.prisma.campaign.findFirst({
+          where: { id: sourceId },
+          select: { orgId: true },
+        });
+        return campaign?.orgId ?? null;
+      }
+
+      case 'claim': {
+        const claim = await this.prisma.claim.findFirst({
+          where: { id: sourceId },
+          select: { campaign: { select: { orgId: true } } },
+        });
+        return claim?.campaign?.orgId ?? null;
+      }
+
+      case 'verification': {
+        const verification = await this.prisma.verificationRequest.findFirst({
+          where: { id: sourceId },
+          select: { orgId: true },
+        });
+        return verification?.orgId ?? null;
+      }
+
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Collect all sourceIds owned by an org across all source types so list and
+   * queue queries can be scoped without an N+1 per row.
+   */
+  private async resolveOwnedSourceIds(orgId: string): Promise<string[]> {
+    const [campaigns, claims, verifications] = await Promise.all([
+      this.prisma.campaign.findMany({
+        where: { orgId },
+        select: { id: true },
+      }),
+      this.prisma.claim.findMany({
+        where: { campaign: { orgId } },
+        select: { id: true },
+      }),
+      this.prisma.verificationRequest.findMany({
+        where: { orgId },
+        select: { id: true },
+      }),
+    ]);
+
+    return [
+      ...campaigns.map(c => c.id),
+      ...claims.map(c => c.id),
+      ...verifications.map(v => v.id),
+    ];
+  }
 
   /**
    * Link an extracted entity to a canonical registry record
    */
-  async linkEntity(dto: CreateEntityLinkDto): Promise<LinkEntityResult> {
+  async linkEntity(
+    dto: CreateEntityLinkDto,
+    orgId?: string,
+  ): Promise<LinkEntityResult> {
     this.logger.log(
       `Linking entity "${dto.extractedName}" to ${dto.entityType} registry`,
     );
 
     // Validate confidence score
     if (dto.confidenceScore < 0 || dto.confidenceScore > 1) {
-      throw new BadRequestException('Confidence score must be between 0 and 1');
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Confidence score must be between 0 and 1',
+      );
+    }
+
+    // Enforce org-scope: a non-admin caller may only create links for sources
+    // belonging to their own organisation.
+    if (orgId) {
+      await this.assertSourceOwnership(dto.sourceType, dto.sourceId, orgId);
     }
 
     // Find or create registry record
@@ -56,8 +209,15 @@ export class EntityLinkingService {
       }
     }
 
+    // Confidence banding (issue #949): a link scoring below the
+    // configured threshold is not applied - it enters the review queue
+    // instead, so a human decides before it can corrupt registry data.
+    const band = getConfidenceBand(dto.confidenceScore);
+    const needsReview = band === 'needs_review';
+    const now = new Date();
+
     // Create entity link
-    const linkData: any = {
+    const linkData: Prisma.EntityLinkUncheckedCreateInput = {
       sourceType: dto.sourceType,
       sourceId: dto.sourceId,
       extractedName: dto.extractedName,
@@ -65,7 +225,12 @@ export class EntityLinkingService {
       entityType: dto.entityType,
       confidenceScore: dto.confidenceScore,
       matchMethod,
-      metadata: dto.metadata ? JSON.parse(JSON.stringify(dto.metadata)) : null,
+      metadata: (dto.metadata ?? null) as Prisma.InputJsonValue,
+      reviewStatus: needsReview
+        ? EntityLinkReviewStatus.pending_review
+        : EntityLinkReviewStatus.auto_accepted,
+      queuedAt: needsReview ? now : null,
+      isActive: !needsReview,
     };
 
     // Set the appropriate registry relation
@@ -90,17 +255,44 @@ export class EntityLinkingService {
       data: linkData,
     });
 
-    this.logger.log(
-      `Entity link created: ${link.id} with confidence ${link.confidenceScore}`,
-    );
+    if (needsReview) {
+      this.metricsService.adjustEntityLinkReviewQueueDepth(dto.entityType, 1);
+      this.logger.log(
+        `Entity link ${link.id} queued for review (confidence ${link.confidenceScore} < ${ENTITY_LINK_CONFIDENCE_CONFIG.AUTO_ACCEPT_THRESHOLD})`,
+      );
+    } else {
+      this.logger.log(
+        `Entity link created: ${link.id} with confidence ${link.confidenceScore}`,
+      );
+    }
+
+    await this.auditService.record({
+      actorId: 'system',
+      entity: 'EntityLink',
+      entityId: link.id,
+      action: needsReview ? 'queued_for_review' : 'auto_accepted',
+      metadata: {
+        sourceType: link.sourceType,
+        sourceId: link.sourceId,
+        entityType: link.entityType,
+        confidenceScore: link.confidenceScore,
+        matchMethod: link.matchMethod,
+        threshold: ENTITY_LINK_CONFIDENCE_CONFIG.AUTO_ACCEPT_THRESHOLD,
+      },
+    });
 
     return this.mapLinkResult(link);
   }
 
   /**
-   * Query entity links by various criteria
+   * List entity links currently awaiting review (confidence below the
+   * configured threshold). Oldest-queued first, so reviewers work through
+   * the backlog in order.
    */
-  async queryLinks(query: EntityLinkQueryDto): Promise<{
+  async getReviewQueue(
+    query: EntityLinkReviewQueueQueryDto,
+    orgId?: string,
+  ): Promise<{
     data: LinkEntityResult[];
     total: number;
     page: number;
@@ -110,7 +302,233 @@ export class EntityLinkingService {
     const limit = query.limit || 20;
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: Prisma.EntityLinkWhereInput = {
+      reviewStatus: EntityLinkReviewStatus.pending_review,
+    };
+
+    if (query.entityType) {
+      where.entityType = query.entityType;
+    }
+
+    if (query.sourceType) {
+      where.sourceType = query.sourceType;
+    }
+
+    // Scope to the caller's own sources so org B cannot see org A's queue items
+    if (orgId) {
+      const ownedSourceIds = await this.resolveOwnedSourceIds(orgId);
+      where.sourceId = { in: ownedSourceIds };
+    }
+
+    const [links, total] = await Promise.all([
+      this.prisma.entityLink.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { queuedAt: 'asc' },
+      }),
+      this.prisma.entityLink.count({ where }),
+    ]);
+
+    return {
+      data: links.map(link => this.mapLinkResult(link)),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  /**
+   * A reviewer's decision on a queued link: accept it as-is, reject it
+   * (deactivate, no registry data applied), or remap it to a different
+   * registry entity. Only links currently pending review can be decided -
+   * this is the queue's exit path.
+   *
+   * Every decision is audited (issue #949: "Review decisions are audited
+   * and can feed back into scoring" - the audit metadata below carries the
+   * original confidenceScore/matchMethod alongside the human verdict,
+   * which is exactly the labeled data a future scoring recalibration would
+   * need) and recorded as a metric (decision counter + queue-to-decision
+   * latency histogram).
+   */
+  async decideReview(
+    linkId: string,
+    dto: ReviewEntityLinkDto,
+    reviewerId: string,
+    orgId?: string,
+  ): Promise<LinkEntityResult> {
+    const link = await this.prisma.entityLink.findUnique({
+      where: { id: linkId },
+    });
+
+    if (!link) {
+      throw new AppException(
+        ERROR_CODES.NOT_FOUND,
+        404,
+        `Entity link ${linkId} not found`,
+      );
+    }
+
+    // Enforce org-scope: verify the link's source belongs to the caller's org
+    if (orgId) {
+      const linkOrgId = await this.resolveLinkOrgId(
+        link.sourceType,
+        link.sourceId,
+      );
+      if (linkOrgId !== orgId) {
+        throw new AppException(
+          ERROR_CODES.FORBIDDEN,
+          403,
+          'Access denied: entity link does not belong to your organisation',
+        );
+      }
+    }
+
+    if (link.reviewStatus !== EntityLinkReviewStatus.pending_review) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Entity link ${linkId} is not awaiting review (status: ${link.reviewStatus})`,
+      );
+    }
+
+    const now = new Date();
+    const updateData: Prisma.EntityLinkUncheckedUpdateInput = {
+      reviewedBy: reviewerId,
+      reviewedAt: now,
+      reviewNotes: dto.reviewNotes,
+    };
+
+    switch (dto.action) {
+      case 'accept':
+        updateData.reviewStatus = EntityLinkReviewStatus.accepted;
+        updateData.isActive = true;
+        break;
+
+      case 'reject':
+        updateData.reviewStatus = EntityLinkReviewStatus.rejected;
+        updateData.isActive = false;
+        break;
+
+      case 'remap': {
+        if (!dto.remapEntityType || !dto.remapRegistryId) {
+          throw new AppException(
+            ERROR_CODES.BAD_REQUEST,
+            400,
+            'remapEntityType and remapRegistryId are required for a remap decision',
+          );
+        }
+        const newRegistryRecordId = await this.findRegistryRecordById(
+          dto.remapEntityType,
+          dto.remapRegistryId,
+        );
+
+        // Clear every registry relation first so remapping across entity
+        // types (e.g. organization -> location) can't leave a stale FK.
+        updateData.organizationId = null;
+        updateData.locationId = null;
+        updateData.assetId = null;
+        updateData.projectId = null;
+
+        switch (dto.remapEntityType) {
+          case 'organization':
+            updateData.organizationId = newRegistryRecordId;
+            break;
+          case 'location':
+            updateData.locationId = newRegistryRecordId;
+            break;
+          case 'asset':
+            updateData.assetId = newRegistryRecordId;
+            break;
+          case 'project':
+            updateData.projectId = newRegistryRecordId;
+            break;
+        }
+
+        updateData.entityType = dto.remapEntityType;
+        updateData.matchMethod = 'manual';
+        updateData.confidenceScore = 1.0;
+        updateData.reviewStatus = EntityLinkReviewStatus.remapped;
+        updateData.isActive = true;
+        break;
+      }
+
+      default:
+        // dto arrives as an untyped HTTP body, so a client can send an
+        // action outside the EntityLinkReviewAction union at runtime even
+        // though the switch above is exhaustive at compile time.
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Unknown review action: ${String(dto.action)}`,
+        );
+    }
+
+    const updated = await this.prisma.entityLink.update({
+      where: { id: linkId },
+      data: updateData,
+    });
+
+    this.metricsService.adjustEntityLinkReviewQueueDepth(link.entityType, -1);
+    this.metricsService.incrementEntityLinkReviewDecision(dto.action);
+
+    const queuedAt = link.queuedAt ?? link.createdAt;
+    const decisionLatencySeconds = (now.getTime() - queuedAt.getTime()) / 1000;
+    this.metricsService.recordEntityLinkReviewDuration(
+      dto.action,
+      decisionLatencySeconds,
+    );
+
+    await this.auditService.record({
+      actorId: reviewerId,
+      entity: 'EntityLink',
+      entityId: linkId,
+      action: `review_${dto.action}`,
+      metadata: {
+        decision: dto.action,
+        reviewNotes: dto.reviewNotes ?? null,
+        decisionLatencySeconds,
+        previous: {
+          entityType: link.entityType,
+          organizationId: link.organizationId,
+          locationId: link.locationId,
+          assetId: link.assetId,
+          projectId: link.projectId,
+          confidenceScore: link.confidenceScore,
+          matchMethod: link.matchMethod,
+        },
+        current: {
+          entityType: updated.entityType,
+          organizationId: updated.organizationId,
+          locationId: updated.locationId,
+          assetId: updated.assetId,
+          projectId: updated.projectId,
+          confidenceScore: updated.confidenceScore,
+          matchMethod: updated.matchMethod,
+        },
+      },
+    });
+
+    return this.mapLinkResult(updated);
+  }
+
+  /**
+   * Query entity links by various criteria
+   */
+  async queryLinks(
+    query: EntityLinkQueryDto,
+    orgId?: string,
+  ): Promise<{
+    data: LinkEntityResult[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const page = query.page || 1;
+    const limit = query.limit || 20;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.EntityLinkWhereInput = {};
 
     if (query.sourceType) {
       where.sourceType = query.sourceType;
@@ -130,6 +548,16 @@ export class EntityLinkingService {
 
     if (query.isActive !== undefined) {
       where.isActive = query.isActive;
+    }
+
+    if (query.reviewStatus) {
+      where.reviewStatus = query.reviewStatus;
+    }
+
+    // Scope to the caller's own sources
+    if (orgId) {
+      const ownedSourceIds = await this.resolveOwnedSourceIds(orgId);
+      where.sourceId = { in: ownedSourceIds };
     }
 
     const [links, total] = await Promise.all([
@@ -156,14 +584,20 @@ export class EntityLinkingService {
   async getLinksByCampaign(
     campaignId: string,
     entityType?: string,
+    orgId?: string,
   ): Promise<LinkEntityResult[]> {
-    const where: any = {
+    // Verify the campaign belongs to the caller's organisation
+    if (orgId) {
+      await this.assertSourceOwnership('campaign', campaignId, orgId);
+    }
+
+    const where: Prisma.EntityLinkWhereInput = {
       sourceType: 'campaign',
       sourceId: campaignId,
     };
 
     if (entityType) {
-      where.entityType = entityType;
+      where.entityType = entityType as RegistryEntityType;
     }
 
     const links = await this.prisma.entityLink.findMany({
@@ -180,14 +614,20 @@ export class EntityLinkingService {
   async getLinksByClaim(
     claimId: string,
     entityType?: string,
+    orgId?: string,
   ): Promise<LinkEntityResult[]> {
-    const where: any = {
+    // Verify the claim (via its campaign) belongs to the caller's organisation
+    if (orgId) {
+      await this.assertSourceOwnership('claim', claimId, orgId);
+    }
+
+    const where: Prisma.EntityLinkWhereInput = {
       sourceType: 'claim',
       sourceId: claimId,
     };
 
     if (entityType) {
-      where.entityType = entityType;
+      where.entityType = entityType as RegistryEntityType;
     }
 
     const links = await this.prisma.entityLink.findMany({
@@ -204,14 +644,20 @@ export class EntityLinkingService {
   async getLinksByVerification(
     verificationId: string,
     entityType?: string,
+    orgId?: string,
   ): Promise<LinkEntityResult[]> {
-    const where: any = {
+    // Verify the verification request belongs to the caller's organisation
+    if (orgId) {
+      await this.assertSourceOwnership('verification', verificationId, orgId);
+    }
+
+    const where: Prisma.EntityLinkWhereInput = {
       sourceType: 'verification',
       sourceId: verificationId,
     };
 
     if (entityType) {
-      where.entityType = entityType;
+      where.entityType = entityType as RegistryEntityType;
     }
 
     const links = await this.prisma.entityLink.findMany({
@@ -220,30 +666,6 @@ export class EntityLinkingService {
     });
 
     return links.map(link => this.mapLinkResult(link));
-  }
-
-  /**
-   * Review and update an entity link (manual curation)
-   */
-  async reviewLink(
-    linkId: string,
-    reviewData: { reviewedBy: string; isActive: boolean; reviewNotes?: string },
-  ): Promise<LinkEntityResult> {
-    this.logger.log(
-      `Reviewing entity link ${linkId} by ${reviewData.reviewedBy}`,
-    );
-
-    const updated = await this.prisma.entityLink.update({
-      where: { id: linkId },
-      data: {
-        reviewedBy: reviewData.reviewedBy,
-        reviewedAt: new Date(),
-        isActive: reviewData.isActive,
-        reviewNotes: reviewData.reviewNotes,
-      },
-    });
-
-    return this.mapLinkResult(updated);
   }
 
   /**
@@ -393,7 +815,9 @@ export class EntityLinkingService {
           where: { registryId },
         });
         if (!org) {
-          throw new NotFoundException(
+          throw new AppException(
+            ERROR_CODES.NOT_FOUND,
+            404,
             `Organization with registry ID ${registryId} not found`,
           );
         }
@@ -405,7 +829,9 @@ export class EntityLinkingService {
           where: { registryId },
         });
         if (!loc) {
-          throw new NotFoundException(
+          throw new AppException(
+            ERROR_CODES.NOT_FOUND,
+            404,
             `Location with registry ID ${registryId} not found`,
           );
         }
@@ -417,7 +843,9 @@ export class EntityLinkingService {
           where: { registryId },
         });
         if (!asset) {
-          throw new NotFoundException(
+          throw new AppException(
+            ERROR_CODES.NOT_FOUND,
+            404,
             `Asset with registry ID ${registryId} not found`,
           );
         }
@@ -429,7 +857,9 @@ export class EntityLinkingService {
           where: { registryId },
         });
         if (!proj) {
-          throw new NotFoundException(
+          throw new AppException(
+            ERROR_CODES.NOT_FOUND,
+            404,
             `Project with registry ID ${registryId} not found`,
           );
         }
@@ -437,7 +867,11 @@ export class EntityLinkingService {
       }
 
       default:
-        throw new BadRequestException(`Invalid entity type: ${entityType}`);
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          `Invalid entity type: ${entityType}`,
+        );
     }
   }
 
@@ -529,7 +963,7 @@ export class EntityLinkingService {
   /**
    * Helper: Map Prisma entity link to result DTO
    */
-  private mapLinkResult(link: any): LinkEntityResult {
+  private mapLinkResult(link: EntityLink): LinkEntityResult {
     return {
       id: link.id,
       sourceType: link.sourceType,
@@ -543,6 +977,8 @@ export class EntityLinkingService {
       projectId: link.projectId,
       confidenceScore: link.confidenceScore,
       matchMethod: link.matchMethod,
+      reviewStatus: link.reviewStatus,
+      queuedAt: link.queuedAt,
       isActive: link.isActive,
       reviewedBy: link.reviewedBy,
       reviewedAt: link.reviewedAt,

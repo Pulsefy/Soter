@@ -86,6 +86,15 @@ export const CACHE_TTL = {
    * Default: 30 seconds (short TTL for responsive updates)
    */
   AI_TASK_STATUS: parseInt(process.env.CACHE_TTL_AI_TASK_STATUS || '30', 10),
+
+  /**
+   * Contract error catalog - static reference, only changes on contract upgrades
+   * Default: 1 hour (very long TTL for essentially static data)
+   */
+  CONTRACT_ERROR_CATALOG: parseInt(
+    process.env.CACHE_TTL_CONTRACT_ERROR_CATALOG || '3600',
+    10,
+  ),
 } as const;
 
 /**

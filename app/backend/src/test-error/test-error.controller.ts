@@ -1,14 +1,10 @@
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import {
   Controller,
   Get,
   Post,
   Body,
   ValidationPipe,
-  BadRequestException,
-  InternalServerErrorException,
-  UnauthorizedException,
-  ForbiddenException,
-  NotFoundException,
   UsePipes,
 } from '@nestjs/common';
 import { CreateVerificationDto } from '../verification/dto/create-verification.dto';
@@ -38,7 +34,11 @@ export class TestErrorController {
   @ApiBadRequestResponse({ description: 'Bad request triggered.' })
   @Get('bad-request')
   getBadRequest() {
-    throw new BadRequestException('This is a bad request error');
+    throw new AppException(
+      ERROR_CODES.BAD_REQUEST,
+      400,
+      'This is a bad request error',
+    );
   }
 
   @ApiOperation({ summary: 'Trigger an InternalServerErrorException' })
@@ -47,28 +47,36 @@ export class TestErrorController {
   })
   @Get('internal-server-error')
   getInternalServerError() {
-    throw new InternalServerErrorException('This is an internal server error');
+    throw new AppException(
+      ERROR_CODES.INTERNAL_SERVER_ERROR,
+      500,
+      'This is an internal server error',
+    );
   }
 
   @ApiOperation({ summary: 'Trigger an UnauthorizedException' })
   @ApiUnauthorizedResponse({ description: 'Unauthorized error triggered.' })
   @Get('unauthorized')
   getUnauthorized() {
-    throw new UnauthorizedException('Authentication required');
+    throw new AppException(
+      ERROR_CODES.UNAUTHORIZED,
+      401,
+      'Authentication required',
+    );
   }
 
   @ApiOperation({ summary: 'Trigger a ForbiddenException' })
   @ApiForbiddenResponse({ description: 'Forbidden error triggered.' })
   @Get('forbidden')
   getForbidden() {
-    throw new ForbiddenException('Access denied');
+    throw new AppException(ERROR_CODES.FORBIDDEN, 403, 'Access denied');
   }
 
   @ApiOperation({ summary: 'Trigger a NotFoundException' })
   @ApiNotFoundResponse({ description: 'Not found error triggered.' })
   @Get('not-found')
   getNotFound() {
-    throw new NotFoundException('Resource not found');
+    throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Resource not found');
   }
 
   @ApiOperation({ summary: 'Trigger a validation error via Post body' })

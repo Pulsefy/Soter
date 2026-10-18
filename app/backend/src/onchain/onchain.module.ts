@@ -1,6 +1,7 @@
 import { Module, Provider } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { ScheduleModule } from '@nestjs/schedule';
 import { OnchainAdapter, ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
 export { ONCHAIN_ADAPTER_TOKEN };
 import { MockOnchainAdapter } from './onchain.adapter.mock';
@@ -10,13 +11,24 @@ import { OnchainService } from './onchain.service';
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { LedgerAdminController } from './ledger-admin.controller';
+import { AdminTransferController } from './admin-transfer.controller';
+import { AdminTransferService } from './admin-transfer.service';
+import { StellarLedgerSource } from './stellar-ledger-source';
+import { SurplusWithdrawalController } from './surplus-withdrawal.controller';
+import { SurplusWithdrawalService } from './surplus-withdrawal.service';
 import { JobsModule } from '../jobs/jobs.module';
 import { LoggerModule } from '../logger/logger.module';
 import { MetricsModule } from '../observability/metrics/metrics.module';
 import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecycle.service';
 import { SorobanTransactionScheduler } from './soroban-transaction.scheduler';
 import { SorobanTransactionProcessor } from './soroban-transaction.processor';
+import { SorobanEventCorrelationService } from './soroban-event-correlation.service';
+import { SorobanEventCorrelationScheduler } from './soroban-event-correlation.scheduler';
+import { SorobanCorrelationTraceService } from './soroban-correlation-trace.service';
 import { PrismaModule } from '../prisma/prisma.module';
+import { CommonServicesModule } from '../common/services/common-services.module';
+
+const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
 
 /**
  * Factory function to create the appropriate adapter based on configuration
@@ -49,52 +61,76 @@ const onchainAdapterProvider: Provider = {
   imports: [
     ConfigModule,
     PrismaModule,
-    BullModule.registerQueueAsync({
-      name: 'onchain',
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST') || 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
-    BullModule.registerQueueAsync({
-      name: 'soroban-transactions',
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST') || 'localhost',
-          port: parseInt(configService.get<string>('REDIS_PORT') || '6379'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
+    ...(skipBackgroundJobs
+      ? []
+      : [
+          BullModule.registerQueueAsync({
+            name: 'onchain',
+            imports: [ConfigModule],
+            useFactory: (configService: ConfigService) => ({
+              connection: {
+                host: configService.get<string>('REDIS_HOST') || 'localhost',
+                port: parseInt(
+                  configService.get<string>('REDIS_PORT') || '6379',
+                ),
+              },
+            }),
+            inject: [ConfigService],
+          }),
+          BullModule.registerQueueAsync({
+            name: 'soroban-transactions',
+            imports: [ConfigModule],
+            useFactory: (configService: ConfigService) => ({
+              connection: {
+                host: configService.get<string>('REDIS_HOST') || 'localhost',
+                port: parseInt(
+                  configService.get<string>('REDIS_PORT') || '6379',
+                ),
+              },
+            }),
+            inject: [ConfigService],
+          }),
+        ]),
+    ScheduleModule.forRoot(),
     JobsModule,
     LoggerModule,
     MetricsModule,
+    CommonServicesModule,
   ],
-  controllers: [LedgerAdminController],
+  controllers: [
+    LedgerAdminController,
+    AdminTransferController,
+    SurplusWithdrawalController,
+  ],
   providers: [
     MockOnchainAdapter,
     SorobanAdapter,
     onchainAdapterProvider,
     OnchainProcessor,
     OnchainService,
+    StellarLedgerSource,
     LedgerBackfillService,
     LedgerReconciliationService,
+    SurplusWithdrawalService,
+    AdminTransferService,
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
     SorobanTransactionProcessor,
+    SorobanEventCorrelationService,
+    SorobanEventCorrelationScheduler,
+    SorobanCorrelationTraceService,
   ],
   exports: [
     ONCHAIN_ADAPTER_TOKEN,
     OnchainService,
+    StellarLedgerSource,
     LedgerBackfillService,
     LedgerReconciliationService,
+    SurplusWithdrawalService,
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
+    SorobanEventCorrelationService,
+    SorobanCorrelationTraceService,
   ],
 })
 export class OnchainModule {}

@@ -3,6 +3,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
+
 @dataclass
 class BoundingBox:
     x: int
@@ -17,6 +18,7 @@ class BoundingBox:
     def from_dict(cls, data: dict):
         return cls(**data)
 
+
 @dataclass
 class EvaluationSample:
     id: str
@@ -25,14 +27,18 @@ class EvaluationSample:
     expected_bboxes: Dict[str, BoundingBox] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+
 @dataclass
 class FieldEvaluation:
     field_name: str
     expected_value: Optional[str]
     actual_value: Optional[str]
     is_match: bool
-    error_type: Optional[str] = None # 'missing_field', 'incorrect_value', 'unexpected_field'
+    error_type: Optional[str] = (
+        None  # 'missing_field', 'incorrect_value', 'unexpected_field'
+    )
     confidence: float = 0.0
+
 
 @dataclass
 class SampleResult:
@@ -41,6 +47,7 @@ class SampleResult:
     passed: bool
     raw_text: str
     processing_time_ms: int
+
 
 @dataclass
 class RegressionReport:
@@ -58,7 +65,7 @@ class RegressionReport:
                 "passed": self.passed_samples,
                 "failed": self.failed_samples,
                 "accuracy": self.accuracy_percentage,
-                "error_breakdown": self.error_counts
+                "error_breakdown": self.error_counts,
             },
             "details": [
                 {
@@ -71,9 +78,11 @@ class RegressionReport:
                             "actual": f.actual_value,
                             "match": f.is_match,
                             "error": f.error_type,
-                            "confidence": f.confidence
-                        } for f in r.field_evaluations
-                    ]
-                } for r in self.sample_results
-            ]
+                            "confidence": f.confidence,
+                        }
+                        for f in r.field_evaluations
+                    ],
+                }
+                for r in self.sample_results
+            ],
         }

@@ -39,7 +39,7 @@ describe('AllExceptionsFilter', () => {
       switchToRpc: jest.fn(),
       switchToWs: jest.fn(),
       getType: jest.fn(),
-    } as any;
+    };
 
     filter = new AllExceptionsFilter(mockLogger);
   });

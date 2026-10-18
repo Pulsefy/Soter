@@ -70,6 +70,16 @@ export function resolveDeepLink(
       const claimId = data.claimId as string | undefined;
       return claimId ? { screen: 'ClaimReceipt', params: { claimId } } : null;
     }
+    case 'EvidenceUpload': {
+      const aidId = data.aidId as string | undefined;
+      return aidId ? { screen: 'EvidenceUpload', params: { aidId } } : null;
+    }
+    case 'TaskList':
+      return { screen: 'TaskList' };
+    case 'SubmissionQueue':
+      return { screen: 'SubmissionQueue' };
+    case 'Health':
+      return { screen: 'Health' };
     case 'Settings':
       return { screen: 'Settings' };
     case 'AidOverview':
@@ -83,9 +93,11 @@ export function resolveDeepLink(
 // Permission helpers
 // ---------------------------------------------------------------------------
 
+import { structuredLogger } from './logger';
+
 export async function requestNotificationPermission(): Promise<boolean> {
   if (!Device.isDevice) {
-    console.warn('[Notifications] Push notifications require a physical device.');
+    structuredLogger.warn('notifications.permission.device_required', { platform: Platform.OS }, 'notifications');
     return false;
   }
 
@@ -98,7 +110,7 @@ export async function requestNotificationPermission(): Promise<boolean> {
   }
 
   if (finalStatus !== 'granted') {
-    console.warn('[Notifications] Permission not granted for push notifications.');
+    structuredLogger.warn('notifications.permission.denied', { finalStatus }, 'notifications');
     return false;
   }
 
@@ -118,7 +130,7 @@ export async function getExpoPushToken(): Promise<string | null> {
     });
     return data;
   } catch (error) {
-    console.error('[Notifications] Failed to get Expo push token:', error);
+    structuredLogger.error('notifications.push_token.failed', { error: error instanceof Error ? error.message : String(error) }, 'notifications');
     return null;
   }
 }

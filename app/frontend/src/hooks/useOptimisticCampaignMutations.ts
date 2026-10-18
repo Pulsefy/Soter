@@ -1,11 +1,9 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchClient } from '@/lib/mock-api/client';
+import { fetchClient, resolveApiUrl } from '@/lib/api-client';
 import type { Campaign, CampaignStatus, CampaignUpdatePayload } from '@/types/campaign';
 import { useToast } from '@/components/ToastProvider';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -33,7 +31,7 @@ async function updateCampaignStatus(
   id: string, 
   status: CampaignStatus
 ): Promise<Campaign> {
-  const res = await fetchClient(`${API_URL}/campaigns/${id}`, {
+  const res = await fetchClient(`${resolveApiUrl()}/campaigns/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status } as CampaignUpdatePayload),

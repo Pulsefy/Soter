@@ -1,7 +1,8 @@
-# Dependencies
+# Dependencies 
 node_modules/
 .pnp
 .pnp.js
+
 
 # Python
 __pycache__/
@@ -146,6 +147,8 @@ CLAUDE.local.md
 # Google Gemini CLI
 .gemini/
 GEMINI.md
+# OpenCode
+AGENTS.md
 # Sourcegraph Cody
 .cody/
 # SpecStory

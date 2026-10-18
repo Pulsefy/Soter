@@ -1,0 +1,88 @@
+name: Frontend CI
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'app/frontend/**'
+      - '.github/workflows/frontend-ci.yml'
+
+# Source-size proxy for the shipped JS bundle. The budget documents today's
+# baseline (largest route is ~41KB); ratchet down when this can measure real
+# compiled chunk sizes instead.
+env:
+  ROUTE_BUDGET_BYTES: 65536
+
+jobs:
+  bundle-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check per-route source size budget
+        working-directory: app/frontend/src/app
+        run: |
+          FAILED=0
+          for dir in $(find . -name 'page.tsx' -exec dirname {} \;); do
+            SIZE=$(find "$dir" -maxdepth 1 -name '*.tsx' -exec stat -c%s {} \; | awk '{s+=$1} END {print s+0}')
+            echo "$dir: ${SIZE} bytes"
+            if [ "$SIZE" -gt "$ROUTE_BUDGET_BYTES" ]; then
+              echo "::error::Route $dir exceeds the ${ROUTE_BUDGET_BYTES}-byte source budget ($SIZE bytes)"
+              FAILED=1
+            fi
+          done
+          exit $FAILED
+
+  # Contract tests: every mock handler in app/frontend/src/lib/mock-api/handlers.ts
+  # is validated against the shared API contract (src/lib/api-contract.ts) and,
+  # when the committed backend OpenAPI document covers an endpoint, against that
+  # schema too. Fails when a handler's response shape drifts (issue #1143).
+  contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile --engine-strict=false
+
+      - name: Mock handler contract tests
+        working-directory: app/frontend
+        run: pnpm exec jest src/lib/mock-api/contract.test.ts --runInBand
+
+  visual-regression:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile --engine-strict=false
+
+      - name: Install Chromium
+        working-directory: app/frontend
+        run: pnpm exec playwright install chromium
+
+      - name: Compare dashboard screenshots
+        working-directory: app/frontend
+        run: pnpm run test:visual

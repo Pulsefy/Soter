@@ -1,0 +1,633 @@
+{
+  "$schema": "https://soter.dev/schemas/contract-interface/v1.json",
+  "_comment": "Auto-generated contract interface artifact for AidEscrow. Do NOT edit by hand. Regenerate with: pnpm --filter backend run contract:export",
+  "name": "aid_escrow",
+  "version": "1",
+  "types": {
+    "PackageStatus": {
+      "kind": "enum",
+      "variants": ["Created", "Claimed", "Expired", "Cancelled", "Refunded"]
+    },
+    "ClaimStatus": {
+      "kind": "enum",
+      "variants": [
+        "Success",
+        "NotFound",
+        "NotActive",
+        "ClaimTooEarly",
+        "Expired",
+        "RequiresProof",
+        "Unauthorized",
+        "CampaignPaused",
+        "TransferFailed",
+        "CooldownActive"
+      ]
+    },
+    "BatchAdminActionStatus": {
+      "kind": "enum",
+      "variants": [
+        "Success",
+        "NotFound",
+        "InvalidState",
+        "Expired",
+        "NotExpired",
+        "CampaignPaused",
+        "TransferFailed"
+      ]
+    },
+    "Error": {
+      "kind": "error",
+      "variants": [
+        "NotInitialized",
+        "AlreadyInitialized",
+        "NotAuthorized",
+        "InvalidAmount",
+        "PackageNotFound",
+        "PackageExpired",
+        "PackageNotActive",
+        "InsufficientFunds",
+        "InsufficientSurplus",
+        "ContractPaused",
+        "ActionPaused",
+        "InvalidToken",
+        "TokenTransferFailed",
+        "TokenNotAllowed",
+        "InvalidConfig",
+        "CampaignPaused",
+        "InvalidPackageId",
+        "DelegateNotSet",
+        "DelegateExpired",
+        "PackageAlreadyClaimed",
+        "ClaimNotStarted",
+        "MerkleProofRequired",
+        "InvalidMerkleProof",
+        "CooldownActive",
+        "AdminTransferPending",
+        "AdminTransferNotPending",
+        "MaxDistributorsReached",
+        "NotADistributor",
+        "SurplusWithdrawalPending",
+        "SurplusWithdrawalNotPending",
+        "SurplusWithdrawalTimelockActive"
+      ]
+    },
+    "Package": {
+      "kind": "struct",
+      "fields": {
+        "id": "u64",
+        "recipient": "Address",
+        "amount": "i128",
+        "token": "Address",
+        "status": "PackageStatus",
+        "created_at": "u64",
+        "expires_at": "u64",
+        "claim_starts_at": "u64",
+        "metadata": "Map<Symbol, String>",
+        "evidence_hash": "String"
+      }
+    },
+    "Config": {
+      "kind": "struct",
+      "fields": {
+        "min_amount": "i128",
+        "max_expires_in": "u64",
+        "allowed_tokens": "Vec<Address>",
+        "claim_cooldown": "u64"
+      }
+    },
+    "Aggregates": {
+      "kind": "struct",
+      "fields": {
+        "total_committed": "i128",
+        "total_claimed": "i128",
+        "total_expired_cancelled": "i128"
+      }
+    },
+    "PendingWithdrawal": {
+      "kind": "struct",
+      "fields": {
+        "to": "Address",
+        "token": "Address",
+        "amount": "i128",
+        "executable_at": "u64"
+      }
+    },
+    "BatchClaimResult": {
+      "kind": "struct",
+      "fields": {
+        "package_id": "u64",
+        "status": "ClaimStatus",
+        "amount": "i128"
+      }
+    },
+    "BatchAdminActionResult": {
+      "kind": "struct",
+      "fields": {
+        "package_id": "u64",
+        "status": "BatchAdminActionStatus",
+        "amount": "i128"
+      }
+    }
+  },
+  "functions": {
+    "init": {
+      "doc": "Initialise the contract with an admin address.",
+      "args": [{ "name": "admin", "type": "Address" }],
+      "returns": "Result<(), Error>",
+      "auth": []
+    },
+    "get_admin": {
+      "doc": "Returns the current admin address.",
+      "args": [],
+      "returns": "Result<Address, Error>",
+      "auth": []
+    },
+    "get_pending_admin": {
+      "doc": "Returns the pending admin address if a transfer is in progress.",
+      "args": [],
+      "returns": "Option<Address>",
+      "auth": []
+    },
+    "transfer_admin": {
+      "doc": "Initiates a two-step admin transfer.",
+      "args": [{ "name": "new_admin", "type": "Address" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "accept_admin": {
+      "doc": "Accepts a pending admin transfer.",
+      "args": [],
+      "returns": "Result<(), Error>",
+      "auth": ["pending_admin"]
+    },
+    "cancel_admin_transfer": {
+      "doc": "Cancels a pending admin transfer.",
+      "args": [],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "get_version": {
+      "doc": "Returns the current contract version as a u32.",
+      "args": [],
+      "returns": "u32",
+      "auth": []
+    },
+    "contract_version": {
+      "doc": "Returns the contract version as a semver string.",
+      "args": [],
+      "returns": "String",
+      "auth": []
+    },
+    "migrate": {
+      "doc": "Migrates the contract to a new version.",
+      "args": [{ "name": "new_version", "type": "u32" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "add_distributor": {
+      "doc": "Grants distributor privileges to an address.",
+      "args": [{ "name": "addr", "type": "Address" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "remove_distributor": {
+      "doc": "Revokes distributor privileges from an address.",
+      "args": [{ "name": "addr", "type": "Address" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "get_distributor_count": {
+      "doc": "Returns the current number of distributors.",
+      "args": [],
+      "returns": "u32",
+      "auth": []
+    },
+    "is_distributor": {
+      "doc": "Returns true if the given address has distributor privileges.",
+      "args": [{ "name": "addr", "type": "Address" }],
+      "returns": "bool",
+      "auth": []
+    },
+    "list_distributors": {
+      "doc": "Returns a paginated list of distributor addresses.",
+      "args": [
+        { "name": "cursor", "type": "u32" },
+        { "name": "limit", "type": "u32" }
+      ],
+      "returns": "Vec<Address>",
+      "auth": []
+    },
+    "get_max_distributors": {
+      "doc": "Returns the maximum number of distributors allowed.",
+      "args": [],
+      "returns": "u32",
+      "auth": []
+    },
+    "set_max_distributors": {
+      "doc": "Sets the maximum number of distributors.",
+      "args": [{ "name": "max", "type": "u32" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "set_config": {
+      "doc": "Sets the contract configuration.",
+      "args": [{ "name": "config", "type": "Config" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "pause": {
+      "doc": "Pauses the contract globally.",
+      "args": [],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "unpause": {
+      "doc": "Unpauses the contract globally.",
+      "args": [],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "pause_action": {
+      "doc": "Pauses a specific action.",
+      "args": [{ "name": "action", "type": "Symbol" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "unpause_action": {
+      "doc": "Unpauses a specific action.",
+      "args": [{ "name": "action", "type": "Symbol" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "is_action_paused": {
+      "doc": "Returns true if the given action is paused.",
+      "args": [{ "name": "action", "type": "Symbol" }],
+      "returns": "bool",
+      "auth": []
+    },
+    "is_paused": {
+      "doc": "Returns true if the contract is globally paused.",
+      "args": [],
+      "returns": "bool",
+      "auth": []
+    },
+    "pause_campaign": {
+      "doc": "Pauses all operations for a specific campaign.",
+      "args": [{ "name": "campaign_ref", "type": "String" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "unpause_campaign": {
+      "doc": "Unpauses operations for a specific campaign.",
+      "args": [{ "name": "campaign_ref", "type": "String" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "is_campaign_paused": {
+      "doc": "Returns true if the given campaign is paused.",
+      "args": [{ "name": "campaign_ref", "type": "String" }],
+      "returns": "bool",
+      "auth": []
+    },
+    "get_config": {
+      "doc": "Returns the current contract configuration.",
+      "args": [],
+      "returns": "Config",
+      "auth": []
+    },
+    "fund": {
+      "doc": "Funds the escrow with tokens.",
+      "args": [
+        { "name": "token", "type": "Address" },
+        { "name": "from", "type": "Address" },
+        { "name": "amount", "type": "i128" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["from"]
+    },
+    "create_package": {
+      "doc": "Creates an aid package.",
+      "args": [
+        { "name": "id", "type": "u64" },
+        { "name": "recipient", "type": "Address" },
+        { "name": "amount", "type": "i128" },
+        { "name": "token", "type": "Address" },
+        { "name": "expires_at", "type": "u64" },
+        { "name": "claim_starts_at", "type": "u64" },
+        { "name": "metadata", "type": "Map<Symbol, String>" },
+        { "name": "merkle_root", "type": "Option<Bytes>" },
+        { "name": "campaign_ref", "type": "Option<String>" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["admin_or_distributor"]
+    },
+    "batch_create_packages": {
+      "doc": "Creates multiple aid packages in a batch.",
+      "args": [
+        { "name": "ids", "type": "Vec<u64>" },
+        { "name": "recipients", "type": "Vec<Address>" },
+        { "name": "amounts", "type": "Vec<i128>" },
+        { "name": "token", "type": "Address" },
+        { "name": "expires_at", "type": "Vec<u64>" },
+        { "name": "claim_starts_at", "type": "Vec<u64>" },
+        { "name": "metadata", "type": "Vec<Map<Symbol, String>>" },
+        { "name": "merkle_roots", "type": "Vec<Option<Bytes>>" },
+        { "name": "campaign_refs", "type": "Vec<Option<String>>" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["admin_or_distributor"]
+    },
+    "claim": {
+      "doc": "Claims an aid package as the recipient.",
+      "args": [{ "name": "id", "type": "u64" }],
+      "returns": "Result<(), Error>",
+      "auth": ["recipient_or_delegate"]
+    },
+    "claim_with_proof": {
+      "doc": "Claims a Merkle-protected aid package with a proof.",
+      "args": [
+        { "name": "id", "type": "u64" },
+        { "name": "proof", "type": "Vec<Bytes>" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["recipient_or_delegate"]
+    },
+    "claim_with_relayer": {
+      "doc": "Claims an aid package via an authorised relayer.",
+      "args": [
+        { "name": "id", "type": "u64" },
+        { "name": "relayer", "type": "Address" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["relayer"]
+    },
+    "batch_claim": {
+      "doc": "Claims multiple aid packages in a batch.",
+      "args": [{ "name": "ids", "type": "Vec<u64>" }],
+      "returns": "Result<Vec<BatchClaimResult>, Error>",
+      "auth": ["recipient_or_delegate"]
+    },
+    "disburse": {
+      "doc": "Disburses an aid package (admin-initiated payout).",
+      "args": [{ "name": "id", "type": "u64" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "reassign_package": {
+      "doc": "Reassigns a package to a new recipient.",
+      "args": [
+        { "name": "id", "type": "u64" },
+        { "name": "new_recipient", "type": "Address" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "batch_revoke": {
+      "doc": "Revokes multiple packages in a batch.",
+      "args": [{ "name": "ids", "type": "Vec<u64>" }],
+      "returns": "Result<Vec<BatchAdminActionResult>, Error>",
+      "auth": ["admin"]
+    },
+    "batch_refund": {
+      "doc": "Refunds multiple packages in a batch.",
+      "args": [{ "name": "ids", "type": "Vec<u64>" }],
+      "returns": "Result<Vec<BatchAdminActionResult>, Error>",
+      "auth": ["admin"]
+    },
+    "revoke": {
+      "doc": "Revokes an aid package.",
+      "args": [{ "name": "id", "type": "u64" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "refund": {
+      "doc": "Refunds an expired aid package.",
+      "args": [{ "name": "id", "type": "u64" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "cancel_package": {
+      "doc": "Cancels a package.",
+      "args": [{ "name": "package_id", "type": "u64" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "attach_evidence_hash": {
+      "doc": "Attaches an evidence hash to a package.",
+      "args": [
+        { "name": "id", "type": "u64" },
+        { "name": "hash", "type": "String" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["admin_or_distributor"]
+    },
+    "extend_expiration": {
+      "doc": "Extends a package's expiration by an additional time period.",
+      "args": [
+        { "name": "package_id", "type": "u64" },
+        { "name": "additional_time", "type": "u64" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "extend_expiry": {
+      "doc": "Extends a package's expiration to an absolute timestamp.",
+      "args": [
+        { "name": "id", "type": "u64" },
+        { "name": "new_expires_at", "type": "u64" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "propose_surplus_withdrawal": {
+      "doc": "Proposes a surplus withdrawal, initiating the timelock. The withdrawal cannot be executed until SURPLUS_WITHDRAWAL_DELAY_SECS (86400s) have elapsed.",
+      "args": [
+        { "name": "to", "type": "Address" },
+        { "name": "amount", "type": "i128" },
+        { "name": "token", "type": "Address" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "cancel_surplus_withdrawal": {
+      "doc": "Cancels a pending surplus withdrawal proposal.",
+      "args": [],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "execute_surplus_withdrawal": {
+      "doc": "Executes a pending surplus withdrawal after the timelock delay has elapsed.",
+      "args": [],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "get_pending_withdrawal": {
+      "doc": "Returns the pending surplus withdrawal proposal, if one exists.",
+      "args": [],
+      "returns": "Option<PendingWithdrawal>",
+      "auth": []
+    },
+    "get_total_locked": {
+      "doc": "Returns the total locked amount for a token.",
+      "args": [{ "name": "token", "type": "Address" }],
+      "returns": "i128",
+      "auth": []
+    },
+    "get_total_claimed": {
+      "doc": "Returns the total claimed amount for a token.",
+      "args": [{ "name": "token", "type": "Address" }],
+      "returns": "i128",
+      "auth": []
+    },
+    "get_campaign_token_locked": {
+      "doc": "Returns the locked amount for a campaign/token pair.",
+      "args": [
+        { "name": "campaign_ref", "type": "String" },
+        { "name": "token", "type": "Address" }
+      ],
+      "returns": "i128",
+      "auth": []
+    },
+    "get_campaign_token_claimed": {
+      "doc": "Returns the claimed amount for a campaign/token pair.",
+      "args": [
+        { "name": "campaign_ref", "type": "String" },
+        { "name": "token", "type": "Address" }
+      ],
+      "returns": "i128",
+      "auth": []
+    },
+    "get_package": {
+      "doc": "Returns the package with the given ID.",
+      "args": [{ "name": "id", "type": "u64" }],
+      "returns": "Result<Package, Error>",
+      "auth": []
+    },
+    "view_package_status": {
+      "doc": "Returns the status of a package without fetching the full struct.",
+      "args": [{ "name": "id", "type": "u64" }],
+      "returns": "Result<PackageStatus, Error>",
+      "auth": []
+    },
+    "get_evidence_hash": {
+      "doc": "Returns the evidence hash attached to a package.",
+      "args": [{ "name": "id", "type": "u64" }],
+      "returns": "Result<String, Error>",
+      "auth": []
+    },
+    "get_aggregates": {
+      "doc": "Returns aggregate statistics for a token.",
+      "args": [{ "name": "token", "type": "Address" }],
+      "returns": "Aggregates",
+      "auth": []
+    },
+    "get_campaign_package_count": {
+      "doc": "Returns the total number of packages created in a campaign.",
+      "args": [{ "name": "campaign_ref", "type": "String" }],
+      "returns": "u64",
+      "auth": []
+    },
+    "get_campaign_claim_count": {
+      "doc": "Returns the number of claimed packages in a campaign.",
+      "args": [{ "name": "campaign_ref", "type": "String" }],
+      "returns": "u64",
+      "auth": []
+    },
+    "get_recipient_package_count": {
+      "doc": "Returns the number of packages assigned to a recipient.",
+      "args": [{ "name": "recipient", "type": "Address" }],
+      "returns": "u64",
+      "auth": []
+    },
+    "list_recipient_packages": {
+      "doc": "Returns a paginated list of package IDs for a recipient.",
+      "args": [
+        { "name": "recipient", "type": "Address" },
+        { "name": "cursor", "type": "u64" },
+        { "name": "limit", "type": "u32" }
+      ],
+      "returns": "Vec<u64>",
+      "auth": []
+    },
+    "set_delegate": {
+      "doc": "Sets a delegate for a package.",
+      "args": [
+        { "name": "package_id", "type": "u64" },
+        { "name": "delegate", "type": "Address" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["recipient"]
+    },
+    "set_delegate_with_expiry": {
+      "doc": "Sets a delegate with an expiry timestamp for a package.",
+      "args": [
+        { "name": "package_id", "type": "u64" },
+        { "name": "delegate", "type": "Address" },
+        { "name": "expires_at", "type": "u64" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["recipient"]
+    },
+    "revoke_delegate": {
+      "doc": "Revokes the delegate for a package.",
+      "args": [
+        { "name": "admin", "type": "Address" },
+        { "name": "package_id", "type": "u64" }
+      ],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "get_delegate": {
+      "doc": "Returns the current delegate for a package.",
+      "args": [{ "name": "package_id", "type": "u64" }],
+      "returns": "Option<Address>",
+      "auth": []
+    },
+    "get_delegate_info": {
+      "doc": "Returns the delegate and expiry for a package.",
+      "args": [{ "name": "package_id", "type": "u64" }],
+      "returns": "Option<(Address, Option<u64>)>",
+      "auth": []
+    },
+    "get_delegate_history": {
+      "doc": "Returns the delegate history for a package.",
+      "args": [
+        { "name": "package_id", "type": "u64" },
+        { "name": "cursor", "type": "u32" },
+        { "name": "limit", "type": "u32" }
+      ],
+      "returns": "Vec<Address>",
+      "auth": []
+    },
+    "add_allowed_token": {
+      "doc": "Adds a token to the allowed token list.",
+      "args": [{ "name": "token", "type": "Address" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "remove_allowed_token": {
+      "doc": "Removes a token from the allowed token list.",
+      "args": [{ "name": "token", "type": "Address" }],
+      "returns": "Result<(), Error>",
+      "auth": ["admin"]
+    },
+    "cleanup_expired_delegates": {
+      "doc": "Admin-triggered cleanup of expired delegates.",
+      "args": [{ "name": "admin", "type": "Address" }],
+      "returns": "Result<u32, Error>",
+      "auth": ["admin"]
+    },
+    "sweep_expired_delegates": {
+      "doc": "Permissionless sweep of expired delegates.",
+      "args": [{ "name": "limit", "type": "u32" }],
+      "returns": "Result<u32, Error>",
+      "auth": []
+    },
+    "sweep_expired_packages": {
+      "doc": "Permissionless sweep of expired packages.",
+      "args": [{ "name": "limit", "type": "u32" }],
+      "returns": "Result<u32, Error>",
+      "auth": []
+    }
+  }
+}

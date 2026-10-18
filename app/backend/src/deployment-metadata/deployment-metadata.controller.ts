@@ -1,3 +1,4 @@
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import {
   Controller,
   Get,
@@ -8,7 +9,6 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
-  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import {
@@ -26,9 +26,17 @@ import {
   CreateDeploymentMetadataDto,
   UpdateDeploymentMetadataDto,
   DeploymentMetadataResponseDto,
+  MigrateDeploymentResponseDto,
 } from './dto/deployment-metadata.dto';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
+import { IsInt, IsPositive } from 'class-validator';
+
+class MigrateDeploymentDto {
+  @IsInt()
+  @IsPositive()
+  newVersion: number;
+}
 
 /**
  * DeploymentMetadataController
@@ -74,10 +82,12 @@ export class DeploymentMetadataController {
     );
     try {
       return await this.deploymentMetadataService.create(dto);
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to create deployment metadata:', error);
-      if (error.code === 'P2002') {
-        throw new BadRequestException(
+      if ((error as { code?: string }).code === 'P2002') {
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
           `Deployment metadata already exists for ${dto.network}/${dto.contractName}`,
         );
       }
@@ -208,6 +218,44 @@ export class DeploymentMetadataController {
   }
 
   /**
+   * Refresh the contract-config cache (admin only)
+   * POST /deployment-metadata/cache/refresh
+   *
+   * Drops all cached contract ID / config snapshots and re-warms them from
+   * the database immediately. Useful after an out-of-band deployment or any
+   * time the cache needs to reflect the current DB state without waiting for
+   * the TTL to expire.
+   */
+  @Post('cache/refresh')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Refresh contract-config cache (admin only)',
+    description:
+      'Invalidates and re-warms all cached contract ID / deployment-config snapshots from the database.',
+  })
+  @ApiOkResponse({
+    description: 'Cache refreshed successfully.',
+    schema: {
+      type: 'object',
+      properties: {
+        refreshedAt: { type: 'string', format: 'date-time' },
+        contractCount: { type: 'integer' },
+        networkCount: { type: 'integer' },
+      },
+    },
+  })
+  @ApiInternalServerErrorResponse({ description: 'Cache refresh failed.' })
+  async refreshCache(): Promise<{
+    refreshedAt: Date;
+    contractCount: number;
+    networkCount: number;
+  }> {
+    this.logger.log('Admin-triggered contract-config cache refresh');
+    return this.deploymentMetadataService.refreshCache();
+  }
+
+  /**
    * Update deployment metadata
    * PUT /deployment-metadata/:id
    * @protected admin only
@@ -231,6 +279,32 @@ export class DeploymentMetadataController {
   ): Promise<DeploymentMetadataResponseDto> {
     this.logger.log(`Updating deployment metadata ${id}`);
     return this.deploymentMetadataService.update(id, dto);
+  }
+
+  /**
+   * Migrate the contract for a deployment and persist the verified version.
+   * POST /deployment-metadata/:id/migrate
+   */
+  @Post(':id/migrate')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Migrate a deployed contract (admin only)',
+    description:
+      'Invokes the contract migration, verifies get_version reports the requested version, and only then updates deployment metadata.',
+  })
+  @ApiOkResponse({
+    description: 'Contract migrated and deployment metadata updated.',
+    type: MigrateDeploymentResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'Invalid migration target version.' })
+  @ApiNotFoundResponse({ description: 'Deployment metadata not found.' })
+  async migrate(
+    @Param('id') id: string,
+    @Body() dto: MigrateDeploymentDto,
+  ): Promise<MigrateDeploymentResponseDto> {
+    this.logger.log(`Migrating deployment ${id} to version ${dto.newVersion}`);
+    return this.deploymentMetadataService.migrate(id, dto.newVersion);
   }
 
   /**
