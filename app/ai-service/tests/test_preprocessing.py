@@ -86,12 +86,21 @@ class TestImagePreprocessor:
         assert img.size == (50, 50)
 
     def test_resize_image(self):
-        img = Image.new("RGB", (3000, 3000), color="blue")
-        resized = self.preprocessor.resize_image(img, max_dim=2000)
-        assert resized.size[0] <= 2000
-        assert resized.size[1] <= 2000
+        img = Image.new("RGB", (4000, 2000), color="blue")
+        resized = ImagePreprocessor(max_dim=1000).resize_image(img)
+        assert resized.size == (1000, 500)
 
     def test_resize_image_already_small(self):
         img = Image.new("RGB", (100, 100), color="blue")
         resized = self.preprocessor.resize_image(img, max_dim=2000)
+        assert resized is img
         assert resized.size == (100, 100)
+
+    def test_preprocess_downscales_oversized_image(self):
+        img = Image.new("RGB", (2000, 1000), color="white")
+        result = ImagePreprocessor(max_dim=500).preprocess(img, denoise=False)
+        assert result.size == (500, 250)
+
+    def test_resize_image_rejects_non_positive_limit(self):
+        with pytest.raises(ValueError, match="greater than zero"):
+            ImagePreprocessor(max_dim=0)

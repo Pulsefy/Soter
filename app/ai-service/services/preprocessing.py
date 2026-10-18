@@ -12,6 +12,9 @@ class ImageQualityError(ValueError):
 
 
 class ImagePreprocessor:
+    def __init__(self, max_dim: int = 2000):
+        if max_dim <= 0:
+            raise ValueError("max_dim must be greater than zero")
     def __init__(
         self,
         max_dim: int = 2000,
@@ -57,12 +60,17 @@ class ImagePreprocessor:
     def resize_image(
         self, image: Image.Image, max_dim: int | None = None
     ) -> Image.Image:
-        target = max_dim or self.max_dim
+        target = self.max_dim if max_dim is None else max_dim
+        if target <= 0:
+            raise ValueError("max_dim must be greater than zero")
         if image.size[0] <= target and image.size[1] <= target:
             return image
 
         ratio = min(target / image.size[0], target / image.size[1])
-        new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
+        new_size = (
+            max(1, int(image.size[0] * ratio)),
+            max(1, int(image.size[1] * ratio)),
+        )
         return image.resize(new_size, Image.LANCZOS)
 
     def check_quality_gates(self, image: Image.Image) -> None:

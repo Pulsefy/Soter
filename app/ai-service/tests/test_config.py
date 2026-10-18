@@ -55,6 +55,14 @@ def test_test_provider_mode_defaults_to_false():
     assert settings.test_provider_mode is False
 
 
+def test_ocr_max_image_dimension_can_be_configured_from_environment(monkeypatch):
+    monkeypatch.setenv("OCR_MAX_IMAGE_DIMENSION", "1350")
+
+    settings = Settings()
+
+    assert settings.ocr_max_image_dimension == 1350
+
+
 def test_active_provider_returns_test_when_test_provider_mode_enabled(monkeypatch):
     monkeypatch.setenv("TEST_PROVIDER_MODE", "true")
 

@@ -63,6 +63,13 @@ def main():
         help="Path to ground truth JSON",
     )
     parser.add_argument("--output", help="Path to save JSON report")
+    parser.add_argument("--threshold", type=float, default=0.8, help="Confidence threshold")
+    parser.add_argument(
+        "--verify-downscaling",
+        action="store_true",
+        help="Fail if downscaling changes extracted OCR field values",
+    )
+    
     parser.add_argument(
         "--threshold", type=float, default=0.8, help="Confidence threshold"
     )
@@ -88,6 +95,17 @@ def main():
 
     print_summary(report)
 
+    if args.verify_downscaling:
+        comparison_failures = evaluator.verify_downscaling(
+            samples, os.path.dirname(gt_path)
+        )
+        if comparison_failures:
+            print("Downscaling comparison failed:")
+            for failure in comparison_failures:
+                print(f"  - {failure}")
+            exit(1)
+        print("Downscaling comparison: all extracted fields match the uncapped run.")
+    
     if args.output:
         with open(args.output, "w") as f:
             json.dump(report.to_dict(), f, indent=2)

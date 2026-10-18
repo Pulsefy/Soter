@@ -81,6 +81,10 @@ Response body:
 ### OCR Processing
 - **POST** `/ai/ocr` - Identity document OCR with field extraction
 
+OCR inputs are downscaled before preprocessing when either dimension exceeds
+`OCR_MAX_IMAGE_DIMENSION` (default: `2000`). Set this environment variable to
+change the maximum width or height.
+
 ### Humanitarian Verification
 - **POST** `/ai/humanitarian/verify` - Standardized humanitarian claim verification (Sphere criteria + context factors + provider fallback)
 

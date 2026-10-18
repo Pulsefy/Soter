@@ -167,3 +167,52 @@ class OCREvaluator:
             error_counts=error_counts,
             sample_results=results,
         )
+
+    def verify_downscaling(
+        self, samples: List[EvaluationSample], base_dir: str
+    ) -> List[str]:
+        """Compare OCR fields before and after applying the configured dimension cap."""
+        max_dim = self.ocr_service.preprocessor.max_dim
+        failures = []
+
+        for sample in samples:
+            image_path = os.path.join(base_dir, sample.image_path)
+            if not os.path.exists(image_path):
+                failures.append(f"{sample.id}: image not found at {image_path}")
+                continue
+
+            with Image.open(image_path) as source:
+                image = source.copy()
+
+            # Ensure small golden images exercise a meaningful downscaling path in CI.
+            longest_side = max(image.size)
+            if longest_side <= max_dim:
+                comparison_max_dim = max(max_dim + 1, round(max_dim * 1.25))
+                scale = comparison_max_dim / longest_side
+                comparison_size = (
+                    max(1, round(image.width * scale)),
+                    max(1, round(image.height * scale)),
+                )
+                image = image.resize(comparison_size, Image.Resampling.LANCZOS)
+
+            try:
+                self.ocr_service.preprocessor.max_dim = max(image.size)
+                original_result = self.ocr_service.process_image(image)
+                self.ocr_service.preprocessor.max_dim = max_dim
+                downscaled_result = self.ocr_service.process_image(image)
+            finally:
+                self.ocr_service.preprocessor.max_dim = max_dim
+
+            original_fields = {
+                name: match.value for name, match in original_result.fields.items()
+            }
+            downscaled_fields = {
+                name: match.value for name, match in downscaled_result.fields.items()
+            }
+            if original_fields != downscaled_fields:
+                failures.append(
+                    f"{sample.id}: fields differ; uncapped={original_fields!r}, "
+                    f"downscaled={downscaled_fields!r}"
+                )
+
+        return failures

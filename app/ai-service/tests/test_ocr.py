@@ -99,6 +99,14 @@ class TestOCRService:
     def setup_method(self):
         self.ocr = OCRService()
 
+    def test_preprocessor_uses_configured_max_dimension(self, monkeypatch):
+        monkeypatch.setattr("services.ocr.settings.ocr_max_image_dimension", 1350)
+
+        ocr = OCRService()
+
+        assert ocr.preprocessor.max_dim == 1350
+
+    @patch('metrics.PIPELINE_STEP_LATENCY.labels')
     @patch("metrics.PIPELINE_STEP_LATENCY.labels")
     def test_process_image_returns_result(self, mock_labels, monkeypatch):
         mock_observe = MagicMock()
