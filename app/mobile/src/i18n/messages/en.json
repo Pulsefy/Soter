@@ -286,7 +286,12 @@
     "contractId": "contract ID"
   },
   "forceUpgrade": {
-    "updateNow": "Update Now"
+    "updateNow": "Update Now",
+    "warningTitle": "Update Required Soon",
+    "warningMessage": "A mandatory update will be required soon. Please complete and sync your current tasks, then update to continue using Soter.",
+    "gracePeriodCountdown": "Grace period remaining: {time}",
+    "gracePeriodExpired": "Grace period has expired. Update required to continue.",
+    "dismiss": "Dismiss"
   },
   "submissionQueue": {
     "retries": "Retries",

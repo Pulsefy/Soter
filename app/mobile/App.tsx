@@ -30,6 +30,7 @@ import {
 } from './src/contexts/CrashReportingContext';
 import { ReleaseNotesModal } from './src/components/ReleaseNotesModal';
 import { ForceUpgradeScreen } from './src/screens/ForceUpgradeScreen';
+import { ForceUpgradeBanner } from './src/components/ForceUpgradeBanner';
 import { NetworkGuardBanner } from './src/components/NetworkGuardBanner';
 import { markColdStartPhase } from './src/startup/coldStartTracker';
 
@@ -106,11 +107,13 @@ const AppInner = () => {
         <SyncDeferralProvider>
           <SyncProvider>
             {/*
-              NetworkGuardBanner sits outside NavigationContainer so it renders
-              on every screen — including HomeScreen on cold start — without
-              needing to be wired into each individual screen.
+              NetworkGuardBanner and ForceUpgradeBanner sit outside
+              NavigationContainer so they render on every screen — including
+              HomeScreen on cold start — without needing to be wired into each
+              individual screen.
             */}
             <NetworkGuardBanner />
+            <ForceUpgradeBanner />
             <NavigationContainer
               linking={linking}
               theme={navTheme}

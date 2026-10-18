@@ -8,7 +8,15 @@ import React, {
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UpdateState } from '../types/update';
-import { resolveVersionInfo, compareVersions } from '../services/updateService';
+import {
+  resolveVersionInfo,
+  compareVersions,
+  resolveGraceDeadline,
+  determineUpgradeState,
+  clearStoredGraceDeadline,
+  UpgradeEvaluation,
+} from '../services/updateService';
+import { config } from '../config';
 import { structuredLogger } from '../services/logger';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 
@@ -16,20 +24,30 @@ interface UpdateContextType extends UpdateState {
   markReleaseNotesSeen: () => Promise<void>;
   checkUpdates: () => Promise<void>;
   isLoading: boolean;
+  isGracePeriodActive: boolean;
 }
 
 const UpdateContext = createContext<UpdateContextType | undefined>(undefined);
 
 const SEEN_RELEASE_NOTES_KEY = '@Soter:SeenReleaseNotes';
 
-export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
+interface UpdateProviderProps {
+  children: React.ReactNode;
+  defaultGracePeriodMs?: number;
+}
+
+export const UpdateProvider: React.FC<UpdateProviderProps> = ({
   children,
+  defaultGracePeriodMs,
 }) => {
   const [state, setState] = useState<UpdateState>({
     isUpdateAvailable: false,
     isForceUpgrade: false,
+    upgradeState: 'none',
     versionInfo: null,
     hasSeenReleaseNotes: true,
+    graceDeadline: null,
+    remainingGraceMs: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -51,6 +69,9 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
           ...prev,
           isUpdateAvailable: false,
           isForceUpgrade: false,
+          upgradeState: 'none',
+          graceDeadline: null,
+          remainingGraceMs: 0,
         }));
         return;
       }
@@ -65,8 +86,33 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const updateAvailable =
         compareVersions(versionInfo.latestVersion, currentVersion) > 0;
-      const forceUpgrade =
+      const requiresUpgrade =
         compareVersions(versionInfo.minRequiredVersion, currentVersion) > 0;
+
+      let upgradeEvaluation: UpgradeEvaluation;
+      if (requiresUpgrade) {
+        const configuredGrace =
+          defaultGracePeriodMs !== undefined
+            ? defaultGracePeriodMs
+            : config.forceUpgradeGracePeriodMs;
+        const deadline = await resolveGraceDeadline(
+          versionInfo,
+          configuredGrace,
+        );
+        upgradeEvaluation = determineUpgradeState(
+          currentVersion,
+          versionInfo.minRequiredVersion,
+          deadline,
+        );
+      } else {
+        await clearStoredGraceDeadline();
+        upgradeEvaluation = {
+          upgradeState: 'none',
+          graceDeadline: null,
+          remainingGraceMs: 0,
+          isForceUpgrade: false,
+        };
+      }
 
       let hasSeen = true;
       if (updateAvailable) {
@@ -78,7 +124,10 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
 
       setState({
         isUpdateAvailable: updateAvailable,
-        isForceUpgrade: forceUpgrade,
+        isForceUpgrade: upgradeEvaluation.isForceUpgrade,
+        upgradeState: upgradeEvaluation.upgradeState,
+        graceDeadline: upgradeEvaluation.graceDeadline,
+        remainingGraceMs: upgradeEvaluation.remainingGraceMs,
         versionInfo,
         hasSeenReleaseNotes: hasSeen,
       });
@@ -91,7 +140,42 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [currentVersion]);
+  }, [currentVersion, defaultGracePeriodMs]);
+
+  // Active countdown timer when in 'warn' state
+  useEffect(() => {
+    if (state.upgradeState !== 'warn' || !state.graceDeadline) return;
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const remaining = Math.max(0, state.graceDeadline! - now);
+      if (remaining <= 0) {
+        clearInterval(interval);
+        structuredLogger.info(
+          'updates.grace_period_expired',
+          { minRequiredVersion: state.versionInfo?.minRequiredVersion },
+          'updates',
+        );
+        setState(prev => ({
+          ...prev,
+          upgradeState: 'block',
+          isForceUpgrade: true,
+          remainingGraceMs: 0,
+        }));
+      } else {
+        setState(prev => ({
+          ...prev,
+          remainingGraceMs: remaining,
+        }));
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [
+    state.upgradeState,
+    state.graceDeadline,
+    state.versionInfo?.minRequiredVersion,
+  ]);
 
   // Re-run the check as soon as connectivity is restored.
   useNetworkStatus(checkUpdates);
@@ -114,6 +198,7 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
     <UpdateContext.Provider
       value={{
         ...state,
+        isGracePeriodActive: state.upgradeState === 'warn',
         markReleaseNotesSeen,
         checkUpdates,
         isLoading,
@@ -131,3 +216,4 @@ export const useUpdate = () => {
   }
   return context;
 };
+
