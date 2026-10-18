@@ -236,7 +236,7 @@ describe('ClaimsService', () => {
 
     it('invalidates the dashboard cache after creating a claim', async () => {
       prismaService.campaign.findUnique.mockResolvedValue({ id: 'campaign-1' });
-      prismaService.$transaction.mockImplementation(async callback => {
+      prismaService.$transaction.mockImplementation(callback => {
         const tx = {
           claim: {
             create: jest.fn().mockResolvedValue({
@@ -300,7 +300,7 @@ describe('ClaimsService', () => {
       };
       jest
         .spyOn(prismaService, '$transaction')
-        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) =>
+        .mockImplementation((callback: (tx: any) => Promise<unknown>) =>
           callback(tx),
         );
       return tx;
