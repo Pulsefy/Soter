@@ -31,6 +31,11 @@ The OCR Regression Harness is a tool designed to prevent extraction accuracy reg
 - `--dataset`: Path to ground truth JSON (default: `regression_harness/dataset/ground_truth.json`).
 - `--output`: Path to save a machine-readable JSON report.
 - `--threshold`: Minimum confidence threshold for fields (default: 0.8).
+- `--verify-downscaling`: Compare extracted fields on uncapped and capped inputs.
+
+The comparison enlarges golden samples that are below the configured cap so it
+can exercise the resize path. The cap is configured with
+`OCR_MAX_IMAGE_DIMENSION` (default: `2000`).
 
 ## Adding New Golden Samples
 

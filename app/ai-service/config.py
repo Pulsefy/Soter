@@ -4,7 +4,7 @@ Handles environment variables and API key management
 """
 
 from typing import Literal, Optional
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import logging
 import os
@@ -25,6 +25,7 @@ class Settings(BaseSettings):
         AI_DETERMINISTIC_MODE: Enable deterministic AI results for verification and classification during tests/CI
         TEST_PROVIDER_MODE: Enable test provider mode that returns fixture-driven results (no API keys required)
         LLM_TIMEOUT_SECONDS: Timeout for LLM API requests
+        OCR_MAX_IMAGE_DIMENSION: Maximum width or height for OCR input images
         APP_ENV: Application environment (development, staging, production, test)
         LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         HOST: Server host (default: 0.0.0.0)
@@ -43,6 +44,7 @@ class Settings(BaseSettings):
     ai_deterministic_mode: bool = False
     test_provider_mode: bool = False
     llm_timeout_seconds: int = 30
+    ocr_max_image_dimension: int = Field(default=2000, gt=0)
 
     # Request throttling
     request_rate_limit: str = "10/minute"

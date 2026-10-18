@@ -79,7 +79,9 @@ class FieldDetector:
 
 class OCRService:
     def __init__(self):
-        self.preprocessor = ImagePreprocessor()
+        self.preprocessor = ImagePreprocessor(
+            max_dim=settings.ocr_max_image_dimension
+        )
         self.field_detector = FieldDetector()
         self.test_provider = TestProvider()
 

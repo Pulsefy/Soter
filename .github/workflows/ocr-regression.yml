@@ -45,7 +45,7 @@ jobs:
       working-directory: ./app/ai-service
       run: |
         export PYTHONPATH=$PYTHONPATH:.
-        python regression_harness/cli.py --output ocr_report.json
+        python regression_harness/cli.py --output ocr_report.json --verify-downscaling
         
     - name: Upload Regression Report
       if: always()
