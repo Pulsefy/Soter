@@ -158,7 +158,13 @@ def handle_task_retries_exhausted(
     replay it later without waiting on another transient-failure window.
     """
     update_task_status(task_id, "failed", error=error_msg)
-    send_webhook_notification(task_id, "failed", error=error_msg)
+    send_webhook_notification(
+        task_id,
+        "failed",
+        error=error_msg,
+        webhook_url=payload.get("webhook_url"),
+        task_type=payload.get("type"),
+    )
     dead_letter_queue.add(
         kind="async_job",
         task_id=task_id,
@@ -202,11 +208,16 @@ def update_task_status(
 
 
 def send_webhook_notification(
-    task_id: str, status: str, result: Any = None, error: str = None
+    task_id: str,
+    status: str,
+    result: Any = None,
+    error: str = None,
+    webhook_url: Optional[str] = None,
+    task_type: Optional[str] = None,
 ) -> None:
     """
-    Send a signed webhook notification to the NestJS backend when a task
-    transitions to a terminal state.
+    Send a signed webhook notification to the configured backend or a
+    task-specific callback URL.
 
     The payload is serialised using :class:`~schemas.callback.AiCallbackPayload`
     (the canonical contract) and signed with HMAC-SHA256 if ``AI_WEBHOOK_SECRET``
@@ -216,11 +227,15 @@ def send_webhook_notification(
 
     Args:
         task_id: Unique identifier of the completed/failed task.
-        status:  Terminal status string ("completed" or "failed").
+        status:  Callback lifecycle status ("processing", "completed", or "failed").
         result:  Task output dict (required when status="completed").
         error:   Error message string (required when status="failed").
+        webhook_url: Optional task-specific URL; otherwise use the configured
+            backend webhook URL.
+        task_type: Optional task type included in the callback contract.
     """
-    if not settings.backend_webhook_url:
+    destination = webhook_url or settings.backend_webhook_url
+    if not destination:
         logger.warning("Backend webhook URL not configured, skipping notification")
         return
 
@@ -230,6 +245,7 @@ def send_webhook_notification(
             status=CallbackStatus(status),
             result=result,
             error=error,
+            task_type=task_type,
         )
     except Exception as exc:
         logger.error(f"Failed to build callback payload for task {task_id}: {exc}")
@@ -252,15 +268,22 @@ def send_webhook_notification(
 
         def send_notification() -> None:
             try:
-                deliver_webhook(body_bytes, headers)
+                deliver_webhook(body_bytes, headers, webhook_url=str(destination))
                 logger.info(f"Webhook notification sent for task {task_id}")
             except Exception as exc:
                 logger.error(f"Failed to send webhook notification: {exc}")
                 dead_letter_queue.add(
                     kind="callback",
                     task_id=task_id,
-                    payload={"status": status, "result": result, "error": error},
+                    payload={
+                        "status": status,
+                        "result": result,
+                        "error": error,
+                        "task_type": task_type,
+                        "webhook_url": str(destination),
+                    },
                     error=str(exc),
+                    event_id=status if status == "processing" else None,
                 )
                 metrics.DEAD_LETTER_ITEMS_TOTAL.labels(kind="callback").inc()
 
@@ -270,17 +293,26 @@ def send_webhook_notification(
         logger.error(f"Error setting up webhook notification thread: {exc}")
 
 
-def deliver_webhook(body_bytes: bytes, headers: Dict[str, str]) -> None:
+def deliver_webhook(
+    body_bytes: bytes,
+    headers: Dict[str, str],
+    webhook_url: Optional[str] = None,
+) -> None:
     """
-    Synchronously POST a webhook body to the configured backend URL.
+    Synchronously POST a webhook body to the supplied URL or configured
+    backend URL.
 
     Raises on any non-2xx response or connection failure. Shared by the
     fire-and-forget notification path and dead-letter replay so both
     paths agree on what counts as a delivery failure.
     """
+    destination = webhook_url or settings.backend_webhook_url
+    if not destination:
+        raise RuntimeError("Webhook URL is not configured")
+
     with httpx.Client(timeout=10.0) as client:
         response = client.post(
-            str(settings.backend_webhook_url),
+            str(destination),
             content=body_bytes,
             headers=headers,
         )
@@ -302,7 +334,8 @@ def replay_callback_delivery(task_id: str, payload: Dict[str, Any]) -> None:
     Raises:
         RuntimeError: If the webhook URL is not configured or delivery fails.
     """
-    if not settings.backend_webhook_url:
+    webhook_url = payload.get("webhook_url")
+    if not webhook_url and not settings.backend_webhook_url:
         raise RuntimeError("Backend webhook URL not configured, cannot replay callback")
 
     callback_payload = AiCallbackPayload.build(
@@ -310,6 +343,7 @@ def replay_callback_delivery(task_id: str, payload: Dict[str, Any]) -> None:
         status=CallbackStatus(payload.get("status")),
         result=payload.get("result"),
         error=payload.get("error"),
+        task_type=payload.get("task_type"),
     )
 
     body_bytes = callback_payload.to_json_bytes()
@@ -317,7 +351,7 @@ def replay_callback_delivery(task_id: str, payload: Dict[str, Any]) -> None:
     if settings.ai_webhook_secret:
         headers["X-Signature-256"] = callback_payload.sign(settings.ai_webhook_secret)
 
-    deliver_webhook(body_bytes, headers)
+    deliver_webhook(body_bytes, headers, webhook_url=webhook_url)
 
 
 def replay_async_job(task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -356,6 +390,14 @@ def process_heavy_inference_impl(
 
         # Extract task type from payload
         task_type = payload.get("type", "inference")
+        webhook_url = payload.get("webhook_url")
+        if webhook_url:
+            send_webhook_notification(
+                task_id,
+                "processing",
+                webhook_url=webhook_url,
+                task_type=task_type,
+            )
 
         start_inference = time.time()
 
@@ -382,7 +424,13 @@ def process_heavy_inference_impl(
         update_task_status(task_id, "completed", result)
 
         # Send webhook notification to backend
-        send_webhook_notification(task_id, "completed", result)
+        send_webhook_notification(
+            task_id,
+            "completed",
+            result,
+            webhook_url=webhook_url,
+            task_type=task_type,
+        )
 
         inference_latency = time.time() - start_inference
         # task_type originates from the client-supplied payload["type"]; bound

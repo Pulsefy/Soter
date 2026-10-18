@@ -1,0 +1,6 @@
+{
+  "_comment": "Committed WASM binary size budget for aid_escrow contract. Soroban enforces a maximum contract size for deployment (currently 128KB on mainnet, configurable per network). This budget includes headroom below the actual deployment ceiling to catch size regressions during development. To update the budget deliberately after an intentional size change, run the size check with SOTER_UPDATE_WASM_SIZE_BUDGET=1 (locally) and commit the resulting file in a reviewed PR.",
+  "tolerance_pct": 5,
+  "max_size_bytes": 126062,
+  "soroban_limit_bytes": 131072
+}

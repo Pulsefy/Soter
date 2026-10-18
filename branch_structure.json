@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1419-add-request-deduplication-for-near-simultaneous",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-1419-add-request-deduplication-for-near-simultaneous": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1419-add-request-deduplication-for-near-simultaneous",
+    "origin"
+  ]
+}

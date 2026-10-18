@@ -34,6 +34,15 @@ def client():
     return TestClient(main.app, follow_redirects=True)
 
 
+@pytest.fixture
+def test_provider_mode(monkeypatch):
+    from config import settings
+
+    monkeypatch.setattr(settings, "test_provider_mode", True)
+    monkeypatch.setattr(settings, "openai_api_key", None)
+    monkeypatch.setattr(settings, "groq_api_key", None)
+
+
 # ---------------------------------------------------------------------------
 # Unit: HumanitarianVerificationService helpers
 # ---------------------------------------------------------------------------
@@ -304,7 +313,9 @@ class TestFullOutagePathE2E:
             )
         assert response.status_code == 503
 
-    def test_normal_request_succeeds_when_providers_available(self, client):
+    def test_normal_request_succeeds_when_providers_available(
+        self, client, test_provider_mode
+    ):
         """When providers are up, requests flow through as normal (no manual-review
         flag in a successful AI response)."""
         with patch("services.load_shedder.check_provider_pressure", return_value=None):
@@ -345,7 +356,7 @@ class TestRecoveryPathE2E:
 
         # Trip the breaker into OPEN with a very short recovery timeout.
         breaker = CircuitBreaker(
-            name="test_recovery_e2e", failure_threshold=1, recovery_timeout=0.001
+            name="test_recovery_e2e", failure_threshold=1, recovery_timeout=0.05
         )
         breaker.record_failure()
         assert breaker.state == OPEN
@@ -355,17 +366,19 @@ class TestRecoveryPathE2E:
         assert service.all_providers_unavailable() is True
         assert service.check_recovery() is False
 
-        # Let the recovery_timeout elapse (1 ms).
+        # Let the recovery_timeout elapse.
         import time
 
-        time.sleep(0.01)
+        time.sleep(0.06)
 
         # Now allow_request() triggers OPEN -> HALF_OPEN automatically.
         assert service.check_recovery() is True
         # And all_providers_unavailable() should now be False.
         assert service.all_providers_unavailable() is False
 
-    def test_normal_routing_resumes_after_provider_recovers(self, client):
+    def test_normal_routing_resumes_after_provider_recovers(
+        self, client, test_provider_mode
+    ):
         """After a provider comes back up, the middleware no longer intercepts
         humanitarian verify requests for manual review."""
         with patch("services.load_shedder.check_provider_pressure", return_value=None):

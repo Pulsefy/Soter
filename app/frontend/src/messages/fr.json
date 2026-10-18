@@ -127,7 +127,12 @@
     "transactionHistory": "Historique des Transactions",
     "networkMismatch": "Incompatibilité de réseau — votre portefeuille est sur {walletNetwork} mais cette application nécessite {expectedNetwork}. Ouvrez Freighter et passez au réseau correct pour continuer.",
     "networkMismatchShort": "Mauvais réseau — passez à {expectedNetwork} dans Freighter.",
-    "submitBlocked": "Impossible de soumettre : le portefeuille est sur le mauvais réseau."
+    "submitBlocked": "Impossible de soumettre : le portefeuille est sur le mauvais réseau.",
+    "refreshSession": "J'ai changé — actualiser",
+    "refreshingSession": "Actualisation…",
+    "refreshSessionLabel": "Relire le réseau depuis Freighter après avoir changé",
+    "disconnectAndReconnect": "Déconnecter et reconnecter",
+    "disconnectToReconnectLabel": "Déconnecter le portefeuille pour se reconnecter sur le bon réseau"
   },
   "errors": {
     "generic": "Une erreur inattendue s'est produite. Veuillez réessayer.",

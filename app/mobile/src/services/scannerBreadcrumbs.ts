@@ -21,6 +21,7 @@ export type ScannerBreadcrumbEvent =
   | 'scan_started'
   | 'scan_received'
   | 'item_deduped'
+  | 'item_deduped_cross_session'
   | 'item_queued'
   | 'item_failed';
 
@@ -103,6 +104,14 @@ export function recordItemDeduped(
   counts?: Record<string, unknown>,
 ): void {
   recordScannerBreadcrumb('item_deduped', mode, counts);
+}
+
+/** A decoded QR code was dropped as a cross-session duplicate. */
+export function recordItemDedupedCrossSession(
+  mode: ScannerMode,
+  counts?: Record<string, unknown>,
+): void {
+  recordScannerBreadcrumb('item_deduped_cross_session', mode, counts);
 }
 
 /** A valid package was accepted and handed to the verification flow. */

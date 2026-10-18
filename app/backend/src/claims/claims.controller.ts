@@ -34,6 +34,7 @@ import {
   ClaimShareResponseDto,
   SendReceiptShareDto,
 } from './dto/claim-receipt.dto';
+import { ClaimStatusHistoryDto } from './dto/claim-status-history.dto';
 import { CancelClaimDto } from './dto/cancel-claim.dto';
 import { ReissueClaimDto } from './dto/reissue-claim.dto';
 import { CancellationReportQueryDto } from './dto/cancellation-report-query.dto';
@@ -153,6 +154,37 @@ export class ClaimsController {
   })
   getCancellationReport(@Query() query: CancellationReportQueryDto) {
     return this.cancelAndReissueService.getCancellationReport(query);
+  }
+
+  /**
+   * Declared before `@Get(':id')` so Express does not bind the literal path
+   * segment `status-history` to the `:id` param and shadow this route.
+   */
+  @Get(':id/status-history')
+  @ApiOperation({
+    summary: 'Get claim status history',
+    description:
+      'Retrieves the chronological status transition history for a claim, ' +
+      'including timestamps, previous/new status, and the actor or trigger responsible for each transition.',
+  })
+  @ApiOkResponse({
+    description: 'Claim status history retrieved successfully.',
+    type: ClaimStatusHistoryDto,
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Access denied - resource belongs to a different organization.',
+  })
+  @ApiNotFoundResponse({
+    description: 'The specified claim was not found.',
+  })
+  async getStatusHistory(
+    @Param('id') id: string,
+    @Request() req: ExpressRequest,
+  ): Promise<ClaimStatusHistoryDto> {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
+    return this.claimsService.getStatusHistory(id);
   }
 
   @Get(':id')

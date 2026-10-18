@@ -1,6 +1,7 @@
 """Abstract provider interface and concrete implementations for LLM and OCR.
 
 Issue #615 — Provider Interface for LLM + OCR
+Issue #1411 — Add Provider API Key Rotation Support
 
 Defines a uniform ``ModelProvider`` abstraction with two capability methods:
 
@@ -10,6 +11,10 @@ Defines a uniform ``ModelProvider`` abstraction with two capability methods:
 Concrete providers implement only the capabilities they support; unsupported
 operations raise ``NotImplementedError``.  A thin ``ProviderRegistry`` resolves
 the right provider for a given capability and provider name.
+
+Authentication failures (401 Unauthorized, 403 Forbidden) trigger a fallback
+key retry: if a primary key fails with an auth error and a fallback key is
+configured, the request is retried once using the fallback key.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import httpx
 
@@ -40,6 +45,18 @@ KNOWN_CAPABILITIES = frozenset({"llm", "ocr"})
 # result before giving up and retrying independently. Keeps a failed/slow
 # leader from blocking a waiting request indefinitely (issue #615).
 DEDUP_WAIT_TIMEOUT_SECONDS = 30.0
+
+
+def is_authentication_error(status_code: int) -> bool:
+    """Determine if an HTTP error is an authentication failure (issue #1411).
+
+    Args:
+        status_code: HTTP status code from the provider response.
+
+    Returns:
+        True if the status code indicates authentication failure (401 or 403).
+    """
+    return status_code in (401, 403)
 
 
 def validate_fallback_order(setting_name: str, order: "List[str]") -> None:
@@ -160,6 +177,26 @@ class ModelProvider(ABC):
         Raises ``NotImplementedError`` if this provider does not support LLM.
         """
         raise NotImplementedError(f"{self.name} does not support llm_chat")
+
+    def llm_chat_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: Optional[str] = None,
+        timeout: Optional[float] = None,
+        on_usage: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
+    ) -> Iterator[str]:
+        """Yield response text chunks, falling back to one complete response."""
+        response = self.llm_chat(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            timeout=timeout,
+        )
+        if on_usage is not None:
+            on_usage(response.prompt_tokens, response.completion_tokens)
+        yield response.content
 
     def ocr_extract(
         self,
@@ -291,12 +328,112 @@ class OpenAIProvider(ModelProvider):
             lambda: self._call_chat_completion(
                 base_url="https://api.openai.com/v1/chat/completions",
                 api_key=settings.openai_api_key,
+                fallback_api_key=settings.openai_fallback_api_key,
                 model=resolved_model,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 timeout=timeout,
             ),
         )
+
+    def llm_chat_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: Optional[str] = None,
+        timeout: Optional[float] = None,
+        on_usage: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
+    ) -> Iterator[str]:
+        if not settings.openai_api_key:
+            raise RuntimeError("OpenAI API key is not configured")
+        yield from self._stream_chat_completion(
+            base_url="https://api.openai.com/v1/chat/completions",
+            api_key=settings.openai_api_key,
+            model=model or settings.openai_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            timeout=timeout,
+            on_usage=on_usage,
+        )
+
+    @staticmethod
+    def _stream_chat_completion(
+        base_url: str,
+        api_key: str,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        timeout: Optional[float] = None,
+        on_usage: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
+    ) -> Iterator[str]:
+        provider_name = "openai" if "openai" in base_url else "groq"
+        payload = {
+            "model": model,
+            "temperature": 0.1,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        req_timeout = (
+            timeout if timeout is not None else float(settings.llm_timeout_seconds)
+        )
+
+        try:
+            with httpx.Client(timeout=req_timeout) as client:
+                with client.stream(
+                    "POST", base_url, json=payload, headers=headers
+                ) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+                        chunk = json.loads(data)
+                        usage = chunk.get("usage")
+                        if isinstance(usage, dict) and on_usage is not None:
+                            on_usage(
+                                usage.get("prompt_tokens"),
+                                usage.get("completion_tokens"),
+                            )
+                        choices = chunk.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {})
+                            content = delta.get("content")
+                            if content:
+                                yield str(content)
+        except httpx.TimeoutException as exc:
+            raise AIServiceError(
+                message=f"LLM request timed out after {req_timeout}s",
+                code="AI_TIMEOUT",
+                details={"provider": provider_name, "timeout_seconds": req_timeout},
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise AIServiceError(
+                message=f"LLM request failed with status {exc.response.status_code}",
+                code="AI_PROVIDER_ERROR",
+                details={
+                    "provider": provider_name,
+                    "status_code": exc.response.status_code,
+                },
+            ) from exc
+        except Exception as exc:
+            if isinstance(exc, AIServiceError):
+                raise
+            raise AIServiceError(
+                message=f"LLM connection error: {exc}",
+                code="AI_CONNECTION_ERROR",
+                details={"provider": provider_name},
+            ) from exc
 
     @staticmethod
     def _call_chat_completion(
@@ -306,8 +443,9 @@ class OpenAIProvider(ModelProvider):
         system_prompt: str,
         user_prompt: str,
         timeout: Optional[float] = None,
+        fallback_api_key: Optional[str] = None,
     ) -> LLMResponse:
-        provider_name = "openai" if "openai" in base_url else "groq"
+        provider_name = "openai" if "api.openai.com" in base_url else "groq"
         if settings.ai_deterministic_mode:
             logger.info("Deterministic AI mode enabled: returning stable response")
             stable = json.dumps(
@@ -329,16 +467,18 @@ class OpenAIProvider(ModelProvider):
                 {"role": "user", "content": user_prompt},
             ],
         }
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
         req_timeout = (
             timeout if timeout is not None else float(settings.llm_timeout_seconds)
         )
         start = time.time()
 
+        # Attempt with primary key
+        auth_error: Optional[int] = None
         try:
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
             with httpx.Client(timeout=req_timeout) as client:
                 response = client.post(base_url, json=payload, headers=headers)
                 response.raise_for_status()
@@ -350,20 +490,70 @@ class OpenAIProvider(ModelProvider):
                 details={"provider": provider_name, "timeout_seconds": req_timeout},
             ) from exc
         except httpx.HTTPStatusError as exc:
-            raise AIServiceError(
-                message=f"LLM request failed with status {exc.response.status_code}",
-                code="AI_PROVIDER_ERROR",
-                details={
-                    "provider": provider_name,
-                    "status_code": exc.response.status_code,
-                },
-            ) from exc
+            # Check if this is an authentication failure and a fallback key is available
+            status_code = exc.response.status_code
+            if is_authentication_error(status_code) and fallback_api_key:
+                auth_error = status_code
+                logger.info(
+                    "Primary key authentication failed with %d for %s; attempting fallback",
+                    status_code,
+                    provider_name,
+                )
+                # Will retry with fallback key below
+            else:
+                raise AIServiceError(
+                    message=f"LLM request failed with status {status_code}",
+                    code="AI_PROVIDER_ERROR",
+                    details={
+                        "provider": provider_name,
+                        "status_code": status_code,
+                    },
+                ) from exc
         except Exception as exc:
             raise AIServiceError(
                 message=f"LLM connection error: {exc}",
                 code="AI_CONNECTION_ERROR",
                 details={"provider": provider_name},
             ) from exc
+
+        # If primary key failed with auth error and fallback is configured, retry with fallback
+        if auth_error is not None:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {fallback_api_key}",
+                    "Content-Type": "application/json",
+                }
+                with httpx.Client(timeout=req_timeout) as client:
+                    response = client.post(base_url, json=payload, headers=headers)
+                    response.raise_for_status()
+                    data = response.json()
+                logger.info(
+                    "Fallback key succeeded for %s after primary key failed with %d",
+                    provider_name,
+                    auth_error,
+                )
+            except httpx.TimeoutException as exc:
+                raise AIServiceError(
+                    message=f"LLM request timed out after {req_timeout}s",
+                    code="AI_TIMEOUT",
+                    details={"provider": provider_name, "timeout_seconds": req_timeout},
+                ) from exc
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                raise AIServiceError(
+                    message=f"LLM request failed with status {status_code}",
+                    code="AI_PROVIDER_ERROR",
+                    details={
+                        "provider": provider_name,
+                        "status_code": status_code,
+                    },
+                ) from exc
+            except Exception as exc:
+                raise AIServiceError(
+                    message=f"LLM connection error: {exc}",
+                    code="AI_CONNECTION_ERROR",
+                    details={"provider": provider_name},
+                ) from exc
 
         try:
             content = data["choices"][0]["message"]["content"]
@@ -427,11 +617,33 @@ class GroqProvider(ModelProvider):
             lambda: OpenAIProvider._call_chat_completion(
                 base_url="https://api.groq.com/openai/v1/chat/completions",
                 api_key=settings.groq_api_key,
+                fallback_api_key=settings.groq_fallback_api_key,
                 model=resolved_model,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 timeout=timeout,
             ),
+        )
+
+    def llm_chat_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: Optional[str] = None,
+        timeout: Optional[float] = None,
+        on_usage: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
+    ) -> Iterator[str]:
+        if not settings.groq_api_key:
+            raise RuntimeError("Groq API key is not configured")
+        yield from OpenAIProvider._stream_chat_completion(
+            base_url="https://api.groq.com/openai/v1/chat/completions",
+            api_key=settings.groq_api_key,
+            model=model or settings.groq_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            timeout=timeout,
+            on_usage=on_usage,
         )
 
 
@@ -471,6 +683,28 @@ class FixtureProvider(ModelProvider):
         return LLMResponse(
             content=content, provider="test", model="test-provider/fixture"
         )
+
+    def llm_chat_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: Optional[str] = None,
+        timeout: Optional[float] = None,
+        on_usage: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
+    ) -> Iterator[str]:
+        response = self.llm_chat(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            timeout=timeout,
+        )
+        if on_usage is not None:
+            on_usage(response.prompt_tokens, response.completion_tokens)
+        content = response.content
+        chunk_size = max(1, len(content) // 4)
+        for offset in range(0, len(content), chunk_size):
+            yield content[offset : offset + chunk_size]
 
     def ocr_extract(
         self,

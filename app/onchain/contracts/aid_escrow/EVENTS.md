@@ -70,6 +70,7 @@ When making event schema changes:
 | `extended_event` | `extend_expiry` (also deprecated `extend_expiration`) | Admin extends a package expiry. |
 | `surplus_withdrawal_proposed` | `propose_surplus_withdrawal` | Admin proposes a withdrawal and starts the timelock. |
 | `surplus_withdrawal_cancelled` | `cancel_surplus_withdrawal` | Admin cancels a pending withdrawal proposal. |
+| `surplus_withdrawal_swept` | `sweep_stale_surplus_withdrawal` | A stale pending proposal is cleared without transferring funds. |
 | `surplus_withdrawn_event` | `execute_surplus_withdrawal` | Timelocked surplus is transferred to its destination. |
 | `contract_paused_event` | `pause` | Admin pauses the whole contract. |
 | `contract_unpaused_event` | `unpause` | Admin unpauses the whole contract. |
@@ -121,6 +122,7 @@ Pool / administrative events:
 | `BatchCreatedEvent`     | `schema_version: u32`, `ids: Vec<u64>`, `admin: Address`, `total_amount: i128`                     |
 | `ExtendedEvent`         | `schema_version: u32`, `package_id: u64`, `admin: Address`, `old_expires_at: u64`, `new_expires_at: u64` |
 | `SurplusWithdrawnEvent` | `schema_version: u32`, `to: Address`, `token: Address`, `amount: i128`                             |
+| `SurplusWithdrawalSwept` | `schema_version: u32`, `to: Address`, `token: Address`, `amount: i128`, `proposed_at: u64`, `timestamp: u64` |
 | `ContractPausedEvent`   | `schema_version: u32`, `admin: Address`                                                            |
 | `ContractUnpausedEvent` | `schema_version: u32`, `admin: Address`                                                            |
 | `ActionPausedEvent`     | `schema_version: u32`, `admin: Address`, `action: Symbol`                                          |

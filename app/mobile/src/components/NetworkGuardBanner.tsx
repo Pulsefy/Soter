@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native
 import { useNetworkGuard } from '../hooks/useNetworkGuard';
 import { useWallet } from '../contexts/WalletContext';
 import { useAppTheme } from '../theme/useAppTheme';
+import { useTranslation } from '../i18n/useTranslation';
 import { NetworkMismatchErrorCode } from '../services/networkGuard';
 
 interface NetworkGuardBannerProps {
@@ -25,6 +26,10 @@ interface NetworkGuardBannerProps {
  *   wallet on the correct network. Also shows "Switch Network" if provided.
  * - No internet / unreachable: shows network connectivity instructions only.
  * - No mismatch: renders nothing.
+ *
+ * This banner is mounted globally in App.tsx (inside WalletProvider) so it
+ * appears on every screen — including cold starts and in-app navigation —
+ * without needing to be wired into each individual screen.
  */
 export const NetworkGuardBanner: React.FC<NetworkGuardBannerProps> = ({
   onDismiss,
@@ -33,6 +38,7 @@ export const NetworkGuardBanner: React.FC<NetworkGuardBannerProps> = ({
   const { isMismatch, errorMessage, remediationMessage, mismatchResult } = useNetworkGuard();
   const { recoverSession, connectWallet } = useWallet();
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
 
   if (!isMismatch) {
     return null;
@@ -49,14 +55,16 @@ export const NetworkGuardBanner: React.FC<NetworkGuardBannerProps> = ({
 
   const bannerColor = isMainnetIssue ? colors.error : colors.warning;
   const textColor = colors.background;
-  const buttonColor = colors.card;
+  const buttonColor = colors.surface;
 
   const handleReconnect = async () => {
     recoverSession();
     await connectWallet();
   };
 
-  const bannerTitle = isMainnetIssue ? '⚠️ Mainnet Detected' : '⚠️ Network Issue';
+  const bannerTitle = isMainnetIssue
+    ? t('networkGuard.mainnetTitle')
+    : t('networkGuard.networkIssueTitle');
 
   return (
     <View
@@ -96,14 +104,14 @@ export const NetworkGuardBanner: React.FC<NetworkGuardBannerProps> = ({
               style={[styles.primaryButton, { backgroundColor: buttonColor }]}
               onPress={handleReconnect}
               accessibilityRole="button"
-              accessibilityLabel="Reconnect Wallet"
-              accessibilityHint="Disconnects the current session and opens WalletConnect so you can re-pair on the correct network"
+              accessibilityLabel={t('networkGuard.reconnectWallet')}
+              accessibilityHint={t('networkGuard.reconnectWalletHint')}
             >
               <Text
                 style={[styles.buttonText, { color: bannerColor }]}
                 maxFontSizeMultiplier={2}
               >
-                Reconnect Wallet
+                {t('networkGuard.reconnectWallet')}
               </Text>
             </TouchableOpacity>
           ) : null}
@@ -114,14 +122,14 @@ export const NetworkGuardBanner: React.FC<NetworkGuardBannerProps> = ({
               style={[styles.primaryButton, { backgroundColor: buttonColor }]}
               onPress={onSwitchNetwork}
               accessibilityRole="button"
-              accessibilityLabel="Switch Network"
-              accessibilityHint="Opens your wallet to change the network setting"
+              accessibilityLabel={t('networkGuard.switchNetwork')}
+              accessibilityHint={t('networkGuard.switchNetworkHint')}
             >
               <Text
                 style={[styles.buttonText, { color: bannerColor }]}
                 maxFontSizeMultiplier={2}
               >
-                Switch Network
+                {t('networkGuard.switchNetwork')}
               </Text>
             </TouchableOpacity>
           ) : null}
@@ -131,13 +139,14 @@ export const NetworkGuardBanner: React.FC<NetworkGuardBannerProps> = ({
               style={styles.secondaryButton}
               onPress={onDismiss}
               accessibilityRole="button"
-              accessibilityLabel="Dismiss alert"
+              accessibilityLabel={t('networkGuard.dismiss')}
+              accessibilityHint={t('networkGuard.dismissHint')}
             >
               <Text
                 style={[styles.secondaryButtonText, { color: textColor }]}
                 maxFontSizeMultiplier={2}
               >
-                Dismiss
+                {t('networkGuard.dismiss')}
               </Text>
             </TouchableOpacity>
           ) : null}

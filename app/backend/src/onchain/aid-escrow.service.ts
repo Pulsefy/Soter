@@ -18,10 +18,17 @@ import {
   GetAidPackageStatsDto,
   DryRunAidPackageResultDto,
   DryRunValidationErrorDto,
+  SetDelegateDto,
 } from './dto/aid-escrow.dto';
 import { BudgetService } from '../common/budget/budget.service';
 import { AuditService } from '../audit/audit.service';
-import { GetTransactionStatusResult } from './onchain.adapter';
+import {
+  GetTransactionStatusResult,
+  SetDelegateResult,
+  RevokeDelegateResult,
+  GetDelegateResult,
+  GetDelegateHistoryResult,
+} from './onchain.adapter';
 import { explorerTxUrl } from '../common/utils/explorer-url.util';
 
 /**
@@ -536,5 +543,90 @@ export class AidEscrowService {
     });
 
     return { ...result, explorerUrl: explorerTxUrl(result.hash, this.network) };
+  }
+
+  /**
+   * Assign or update a delegate for a package (admin only).
+   * If expiresAt is provided, the delegation is time-limited.
+   */
+  async setDelegate(
+    packageId: string,
+    dto: SetDelegateDto,
+    adminAddress: string,
+  ): Promise<SetDelegateResult & { explorerUrl?: string }> {
+    this.logger.debug('Setting delegate:', {
+      packageId,
+      delegate: dto.delegateAddress,
+      expiresAt: dto.expiresAt,
+      admin: adminAddress,
+    });
+
+    const result = await this.onchainAdapter.setDelegate({
+      adminAddress,
+      packageId,
+      delegateAddress: dto.delegateAddress,
+      expiresAt: dto.expiresAt,
+    });
+
+    if (this.auditService) {
+      await this.auditService.record({
+        actorId: adminAddress,
+        entity: 'aid_package',
+        entityId: packageId,
+        action: 'set_delegate',
+        metadata: {
+          delegateAddress: dto.delegateAddress,
+          expiresAt: dto.expiresAt,
+          transactionHash: result.transactionHash,
+        },
+      });
+    }
+
+    return this.withTxExplorerUrl(result);
+  }
+
+  /**
+   * Revoke the current delegate for a package (admin only).
+   */
+  async revokeDelegate(
+    packageId: string,
+    adminAddress: string,
+  ): Promise<RevokeDelegateResult & { explorerUrl?: string }> {
+    this.logger.debug('Revoking delegate:', { packageId, admin: adminAddress });
+
+    const result = await this.onchainAdapter.revokeDelegate({
+      adminAddress,
+      packageId,
+    });
+
+    if (this.auditService) {
+      await this.auditService.record({
+        actorId: adminAddress,
+        entity: 'aid_package',
+        entityId: packageId,
+        action: 'revoke_delegate',
+        metadata: { transactionHash: result.transactionHash },
+      });
+    }
+
+    return this.withTxExplorerUrl(result);
+  }
+
+  /**
+   * Get the current active delegate for a package.
+   */
+  async getDelegate(packageId: string): Promise<GetDelegateResult> {
+    this.logger.debug('Getting delegate:', { packageId });
+    return this.onchainAdapter.getDelegate({ packageId });
+  }
+
+  /**
+   * Get the full delegate change history for a package.
+   */
+  async getDelegateHistory(
+    packageId: string,
+  ): Promise<GetDelegateHistoryResult> {
+    this.logger.debug('Getting delegate history:', { packageId });
+    return this.onchainAdapter.getDelegateHistory({ packageId });
   }
 }

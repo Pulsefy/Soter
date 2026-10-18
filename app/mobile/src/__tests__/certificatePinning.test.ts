@@ -30,6 +30,11 @@ const baseConfig: AppConfig = {
   certPinIncludeSubdomains: false,
   isValid: true,
   errors: [],
+  aidCacheMaxBytes: 512 * 1024,
+  taskCacheMaxBytes: 256 * 1024,
+  localCacheWarningRatio: 0.8,
+  crossSessionDedupeWindowMs: 24 * 60 * 60 * 1000,
+  logLevel: 'warn',
 };
 
 describe('certificatePinning', () => {

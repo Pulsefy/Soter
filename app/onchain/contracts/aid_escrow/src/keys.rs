@@ -35,9 +35,11 @@ pub const KEY_ADMIN: Symbol = symbol_short!("admin");
 /// Present only while a transfer is pending; removed on accept/cancel.
 pub const KEY_PENDING_ADMIN: Symbol = symbol_short!("pend_adm");
 /// Pending surplus withdrawal proposal (`PendingWithdrawal`).
-/// Present only while a withdrawal is in the timelock window; removed on
-/// execution or cancellation.
+/// Present until a withdrawal is executed, cancelled, or swept as stale.
 pub const KEY_PENDING_WITHDRAWAL: Symbol = symbol_short!("pend_wdr");
+/// Configurable maximum age in seconds for a pending surplus withdrawal.
+/// Defaults to `DEFAULT_SURPLUS_WITHDRAWAL_STALENESS_SECS` when absent.
+pub const KEY_SURPLUS_WITHDRAWAL_STALENESS: Symbol = symbol_short!("wdr_stale");
 /// Storage-schema version number (`u32`). Bumped by `migrate`.
 pub const KEY_VERSION: Symbol = symbol_short!("version");
 /// Global configuration struct (`Config`: min_amount, max_expires_in,
@@ -150,11 +152,12 @@ mod tests {
     use super::*;
 
     /// Every singleton key, both storage families.
-    fn singleton_keys() -> [Symbol; 23] {
+    fn singleton_keys() -> [Symbol; 24] {
         [
             KEY_ADMIN,
             KEY_PENDING_ADMIN,
             KEY_PENDING_WITHDRAWAL,
+            KEY_SURPLUS_WITHDRAWAL_STALENESS,
             KEY_VERSION,
             KEY_CONFIG,
             KEY_DISTRIBUTORS,
