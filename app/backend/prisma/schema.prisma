@@ -38,6 +38,17 @@ enum CancelReasonCode {
   reissued
 }
 
+enum RecipientRemovalReasonCode {
+  duplicate
+  deceased
+  relocated
+  ineligible
+  consent_withdrawn
+  fraud_flag
+  data_correction
+  other
+}
+
 model AidPackage {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -279,6 +290,23 @@ model Claim {
   @@index([expiresAt])
   @@index([cancelReasonCode])
   @@unique([importJobId, importRowNumber])
+}
+
+/// Append-only record of recipient removals. Claims keep their original
+/// recipientRef and are intentionally not related to this operational record.
+model RecipientRemoval {
+  id            String                     @id @default(cuid())
+  recipientRef  String
+  ngoId         String?
+  reasonCode    RecipientRemovalReasonCode
+  reason        String?
+  removedBy     String
+  removedAt     DateTime                   @default(now())
+
+  @@index([recipientRef, removedAt])
+  @@index([ngoId, removedAt])
+  @@index([removedAt])
+  @@index([reasonCode])
 }
 
 enum SorobanTransactionStatus {

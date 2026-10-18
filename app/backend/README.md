@@ -132,6 +132,16 @@ pnpm --filter backend prisma:migrate
 ## Routes
 
 - `GET /health`
+- `DELETE /recipients/:recipientRef` records recipient removal with a required
+  `reasonCode` (`duplicate`, `deceased`, `relocated`, `ineligible`,
+  `consent_withdrawn`, `fraud_flag`, `data_correction`, or `other`). The
+  authenticated actor and database timestamp are recorded independently of
+  the general audit log.
+- `GET /recipients/removals` queries removal records; optional
+  `recipientRef`, `page` (default `1`), and `limit` (default `50`, max `200`)
+  filters are supported. NGO actors are scoped to their own organization;
+  admins can query across organizations. Historical claims are not deleted or
+  modified.
 
 Example:
 
