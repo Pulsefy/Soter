@@ -16,6 +16,9 @@ import { DlqService } from './dlq.service';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 import { Request } from 'express';
+import { Public } from '../common/decorators/public.decorator';
+import { SkipThrottle } from '../common/decorators/skip-throttle.decorator';
+import { QueueBackpressureService } from './services/queue-backpressure.service';
 
 @ApiTags('Jobs')
 @Controller('jobs')
@@ -27,6 +30,7 @@ export class JobsController {
     @InjectQueue(RETENTION_PURGE_QUEUE) private retentionPurgeQueue: Queue,
     @InjectQueue('dead-letter') private deadLetterQueue: Queue,
     private readonly dlqService: DlqService,
+    private readonly backpressureService: QueueBackpressureService,
   ) {}
 
   @ApiOperation({
@@ -124,6 +128,28 @@ export class JobsController {
       failed,
       delayed,
     };
+  }
+
+  @ApiOperation({
+    summary: 'Current job-queue backpressure state',
+    description:
+      'Tells clients whether the verification, notification or onchain queues are under heavy load so they can warn that actions may be slower than usual. Exposes levels only, never queue depths.',
+  })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        active: true,
+        level: 'elevated',
+        queues: [{ name: 'verification', level: 'elevated' }],
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      },
+    },
+  })
+  @Public()
+  @SkipThrottle()
+  @Get('backpressure')
+  getBackpressure() {
+    return this.backpressureService.getState();
   }
 
   @ApiOperation({ summary: 'List queues and their current depth (Admin only)' })

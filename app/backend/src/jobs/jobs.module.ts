@@ -9,6 +9,7 @@ import { RETENTION_PURGE_QUEUE } from '../retention-policy/retention-purge.proce
 import { DlqService } from './dlq.service';
 import { JobStatusBroadcaster } from './services/job-status-broadcaster.service';
 import { JobStatusTracker } from './services/job-status-tracker.service';
+import { QueueBackpressureService } from './services/queue-backpressure.service';
 import { JobStatusGateway } from './gateways/job-status.gateway';
 
 @Module({
@@ -24,6 +25,7 @@ import { JobStatusGateway } from './gateways/job-status.gateway';
   controllers: [JobsController, JobStatusStreamingController],
   providers: [
     DlqService,
+    QueueBackpressureService,
     JobStatusBroadcaster,
     JobStatusTracker,
     JobStatusGateway,
