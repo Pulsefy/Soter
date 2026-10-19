@@ -235,6 +235,34 @@ fn profile_single_create_package() {
 }
 
 #[test]
+fn profile_single_reassign_package() {
+    let t = TestSetup::new();
+    let old_recipient = Address::generate(&t.env);
+    let new_recipient = Address::generate(&t.env);
+
+    t.fund_contract(ONE_TOKEN);
+
+    let expires_at = t.now() + 3_600;
+    let package_id = t.client.create_package(
+        &t.admin,
+        &1u64,
+        &old_recipient,
+        &ONE_TOKEN,
+        &t.token,
+        &expires_at,
+        &new_metadata(&t.env),
+    );
+
+    let before = capture_budget(&t.env);
+    t.client.reassign_package(&package_id, &new_recipient);
+    let after = capture_budget(&t.env);
+    let metrics = diff_budget(&before, &after);
+
+    print_budget_metrics("Single reassign_package", &metrics);
+    record_metrics("reassign_package", 1, &metrics);
+}
+
+#[test]
 fn profile_single_claim() {
     let t = TestSetup::new();
     let recipient = Address::generate(&t.env);
