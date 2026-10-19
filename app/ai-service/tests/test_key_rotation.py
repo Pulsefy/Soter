@@ -4,12 +4,20 @@ import pytest
 from unittest.mock import MagicMock, patch
 import httpx
 
+from services import providers as provider_module
 from services.providers import (
     OpenAIProvider,
     GroqProvider,
     is_authentication_error,
 )
 from exceptions import AIServiceError
+
+
+@pytest.fixture(autouse=True)
+def reset_provider_http_clients():
+    provider_module.close_provider_http_clients()
+    yield
+    provider_module.close_provider_http_clients()
 
 
 class TestAuthenticationErrorDetection:
@@ -60,11 +68,7 @@ class TestOpenAIProviderKeyRotation:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            with patch("httpx.Client") as MockClient:
-                MockClient.return_value.__enter__ = MagicMock(
-                    return_value=mock_client_instance
-                )
-                MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("httpx.Client", return_value=mock_client_instance):
 
                 resp = OpenAIProvider().llm_chat("sys", "usr")
                 assert resp.content == "success"
@@ -107,11 +111,7 @@ class TestOpenAIProviderKeyRotation:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            with patch("httpx.Client") as MockClient:
-                MockClient.return_value.__enter__ = MagicMock(
-                    return_value=mock_client_instance
-                )
-                MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("httpx.Client", return_value=mock_client_instance):
 
                 resp = OpenAIProvider().llm_chat("sys", "usr")
                 assert resp.content == "fallback success"
@@ -151,11 +151,7 @@ class TestOpenAIProviderKeyRotation:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            with patch("httpx.Client") as MockClient:
-                MockClient.return_value.__enter__ = MagicMock(
-                    return_value=mock_client_instance
-                )
-                MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("httpx.Client", return_value=mock_client_instance):
 
                 with pytest.raises(AIServiceError) as exc_info:
                     OpenAIProvider().llm_chat("sys", "usr")
@@ -183,11 +179,7 @@ class TestOpenAIProviderKeyRotation:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            with patch("httpx.Client") as MockClient:
-                MockClient.return_value.__enter__ = MagicMock(
-                    return_value=mock_client_instance
-                )
-                MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("httpx.Client", return_value=mock_client_instance):
 
                 with pytest.raises(AIServiceError) as exc_info:
                     OpenAIProvider().llm_chat("sys", "usr")
@@ -222,11 +214,7 @@ class TestOpenAIProviderKeyRotation:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            with patch("httpx.Client") as MockClient:
-                MockClient.return_value.__enter__ = MagicMock(
-                    return_value=mock_client_instance
-                )
-                MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("httpx.Client", return_value=mock_client_instance):
 
                 resp = OpenAIProvider().llm_chat("sys", "usr")
                 assert resp.content == "fallback success"
@@ -251,11 +239,7 @@ class TestOpenAIProviderKeyRotation:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            with patch("httpx.Client") as MockClient:
-                MockClient.return_value.__enter__ = MagicMock(
-                    return_value=mock_client_instance
-                )
-                MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("httpx.Client", return_value=mock_client_instance):
 
                 with pytest.raises(AIServiceError) as exc_info:
                     OpenAIProvider().llm_chat("sys", "usr")
@@ -277,11 +261,7 @@ class TestOpenAIProviderKeyRotation:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            with patch("httpx.Client") as MockClient:
-                MockClient.return_value.__enter__ = MagicMock(
-                    return_value=mock_client_instance
-                )
-                MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("httpx.Client", return_value=mock_client_instance):
 
                 with pytest.raises(AIServiceError) as exc_info:
                     OpenAIProvider().llm_chat("sys", "usr")
@@ -314,11 +294,7 @@ class TestGroqProviderKeyRotation:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            with patch("httpx.Client") as MockClient:
-                MockClient.return_value.__enter__ = MagicMock(
-                    return_value=mock_client_instance
-                )
-                MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("httpx.Client", return_value=mock_client_instance):
 
                 resp = GroqProvider().llm_chat("sys", "usr")
                 assert resp.content == "groq success"
@@ -352,11 +328,7 @@ class TestGroqProviderKeyRotation:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            with patch("httpx.Client") as MockClient:
-                MockClient.return_value.__enter__ = MagicMock(
-                    return_value=mock_client_instance
-                )
-                MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("httpx.Client", return_value=mock_client_instance):
 
                 resp = GroqProvider().llm_chat("sys", "usr")
                 assert resp.content == "groq fallback success"
@@ -477,11 +449,7 @@ class TestSettingsKeyReload:
                 # Simulate reload by updating the mock
                 mock_settings.openai_api_key = "updated-key"
 
-                with patch("httpx.Client") as MockClient:
-                    MockClient.return_value.__enter__ = MagicMock(
-                        return_value=mock_client_instance
-                    )
-                    MockClient.return_value.__exit__ = MagicMock(return_value=False)
+                with patch("httpx.Client", return_value=mock_client_instance):
 
                     resp = OpenAIProvider().llm_chat("sys", "usr")
 

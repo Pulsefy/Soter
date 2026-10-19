@@ -1,12 +1,117 @@
 import { AppException } from '../common/dto/error-response.dto';
-
+import { RecipientRemovalReasonCode } from '@prisma/client';
+import { DeepMockProxy, mockDeep } from 'jest-mock-extended';
+import { PrismaService } from '../prisma/prisma.service';
+import { validateSync } from 'class-validator';
+import { RecipientRemovalDto } from './dto/recipient-removal.dto';
 import { RecipientsService } from './recipients.service';
 
 describe('RecipientsService', () => {
   let service: RecipientsService;
+  let prisma: DeepMockProxy<PrismaService>;
 
   beforeEach(() => {
-    service = new RecipientsService();
+    prisma = mockDeep<PrismaService>();
+    service = new RecipientsService(prisma);
+  });
+
+  describe('remove', () => {
+    it('requires a reason code in the request DTO', () => {
+      const dto = new RecipientRemovalDto();
+      expect(
+        validateSync(dto).some(error => error.property === 'reasonCode'),
+      ).toBe(true);
+    });
+
+    it('records the actor, reason and recipient reference without mutating claims', async () => {
+      const removal = {
+        id: 'removal-1',
+        recipientRef: 'recipient-123',
+        ngoId: 'ngo-1',
+        reasonCode: RecipientRemovalReasonCode.ineligible,
+        reason: 'Eligibility ended',
+        removedBy: 'operator-1',
+        removedAt: new Date('2026-10-18T10:00:00.000Z'),
+      };
+      prisma.recipientRemoval.create.mockResolvedValue(removal);
+
+      const result = await service.remove(
+        ' recipient-123 ',
+        RecipientRemovalReasonCode.ineligible,
+        ' Eligibility ended ',
+        ' operator-1 ',
+        'ngo-1',
+      );
+
+      expect(result).toEqual(removal);
+      expect(prisma.recipientRemoval.create).toHaveBeenCalledWith({
+        data: {
+          recipientRef: 'recipient-123',
+          ngoId: 'ngo-1',
+          reasonCode: RecipientRemovalReasonCode.ineligible,
+          reason: 'Eligibility ended',
+          removedBy: 'operator-1',
+        },
+      });
+      expect(prisma.claim.update).not.toHaveBeenCalled();
+      expect(prisma.claim.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects a missing recipient reference or actor', async () => {
+      await expect(
+        service.remove(
+          '  ',
+          RecipientRemovalReasonCode.other,
+          undefined,
+          'actor',
+        ),
+      ).rejects.toThrow(AppException);
+      await expect(
+        service.remove(
+          'recipient-123',
+          RecipientRemovalReasonCode.other,
+          undefined,
+          '  ',
+        ),
+      ).rejects.toThrow(AppException);
+      expect(prisma.recipientRemoval.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findRemovals', () => {
+    it('returns independently queryable records with pagination and recipient filtering', async () => {
+      const removal = {
+        id: 'removal-1',
+        recipientRef: 'recipient-123',
+        ngoId: 'ngo-1',
+        reasonCode: RecipientRemovalReasonCode.ineligible,
+        reason: null,
+        removedBy: 'operator-1',
+        removedAt: new Date('2026-10-18T10:00:00.000Z'),
+      };
+      prisma.recipientRemoval.findMany.mockResolvedValue([removal]);
+      prisma.recipientRemoval.count.mockResolvedValue(1);
+
+      await expect(
+        service.findRemovals(
+          {
+            recipientRef: ' recipient-123 ',
+            page: 2,
+            limit: 10,
+          },
+          'ngo-1',
+        ),
+      ).resolves.toEqual({ data: [removal], total: 1, page: 2, limit: 10 });
+      expect(prisma.recipientRemoval.findMany).toHaveBeenCalledWith({
+        where: { recipientRef: 'recipient-123', ngoId: 'ngo-1' },
+        orderBy: [{ removedAt: 'desc' }, { id: 'desc' }],
+        skip: 10,
+        take: 10,
+      });
+      expect(prisma.recipientRemoval.count).toHaveBeenCalledWith({
+        where: { recipientRef: 'recipient-123', ngoId: 'ngo-1' },
+      });
+    });
   });
 
   describe('validateImport', () => {

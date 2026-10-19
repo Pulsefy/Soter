@@ -15,6 +15,9 @@ import type { CacheWriteResult } from './localCache';
 const CACHE_DETAILS_PREFIX = '@soter/aid_details_';
 const CACHE_DETAILS_TIMESTAMP_PREFIX = '@soter/aid_details_timestamp_';
 
+/** Verification status cached on device is considered potentially outdated after 24 hours. */
+export const VERIFICATION_STATUS_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
 const aidCacheOptions = {
   cacheKey: AID_CACHE_KEY,
   timestampKey: AID_CACHE_TIMESTAMP_KEY,

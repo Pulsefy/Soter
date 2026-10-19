@@ -1,4 +1,5 @@
 import { getMockHealthData } from '../services/mockData';
+import { getMockTaskList } from '../services/taskApi';
 
 describe('mockData', () => {
   const originalEnv = process.env.NODE_ENV;
@@ -23,4 +24,22 @@ describe('mockData', () => {
       'mockData.ts cannot be used in production builds',
     );
   });
+
+  it('returns mock task list in non-production environments', () => {
+    process.env.NODE_ENV = 'development';
+    const tasks = getMockTaskList();
+    expect(Array.isArray(tasks)).toBe(true);
+    expect(tasks.length).toBeGreaterThan(0);
+    expect(tasks[0]).toHaveProperty('id');
+    expect(tasks[0]).toHaveProperty('title');
+  });
+
+  it('throws an error when getMockTaskList is accessed in a production environment', () => {
+    process.env.NODE_ENV = 'production';
+    expect(() => getMockTaskList()).toThrow(
+      'getMockTaskList cannot be used in production builds',
+    );
+  });
 });
+
+

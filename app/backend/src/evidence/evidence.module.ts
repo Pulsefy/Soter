@@ -13,6 +13,9 @@ import { CacheModule } from '../common/cache/cache.module';
 import { FingerprintService } from './fingerprint.service';
 import { MetricsModule } from '../observability/metrics/metrics.module';
 import { EvidenceMetricsScheduler } from './evidence-metrics.scheduler';
+import { OrphanedArtifactsService } from './orphaned-artifacts.service';
+import { OrphanedArtifactsScheduler } from './orphaned-artifacts.scheduler';
+import { OrphanedArtifactsController } from './orphaned-artifacts.controller';
 
 @Module({
   imports: [
@@ -22,7 +25,11 @@ import { EvidenceMetricsScheduler } from './evidence-metrics.scheduler';
     CacheModule,
     MetricsModule,
   ],
-  controllers: [EvidenceController, UploadSessionController],
+  controllers: [
+    EvidenceController,
+    UploadSessionController,
+    OrphanedArtifactsController,
+  ],
   providers: [
     EvidenceService,
     FingerprintService,
@@ -31,7 +38,13 @@ import { EvidenceMetricsScheduler } from './evidence-metrics.scheduler';
     UploadSessionService,
     UploadSessionStore,
     EvidenceMetricsScheduler,
+    OrphanedArtifactsService,
+    OrphanedArtifactsScheduler,
   ],
-  exports: [FingerprintService, ArtifactOwnershipTokenService],
+  exports: [
+    FingerprintService,
+    ArtifactOwnershipTokenService,
+    OrphanedArtifactsService,
+  ],
 })
 export class EvidenceModule {}

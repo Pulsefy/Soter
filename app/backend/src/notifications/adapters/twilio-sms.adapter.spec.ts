@@ -98,6 +98,57 @@ describe('TwilioSmsAdapter', () => {
     expect(body.get('Body')).toBe('Your code is 1234');
   });
 
+  it('reports the provider reachable when Twilio accepts the credentials', async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200 });
+
+    const result = await adapter.checkReachability(1000);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: 'twilio',
+        reachable: true,
+        latencyMs: expect.any(Number),
+      }),
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://api.twilio.com/2010-04-01/Accounts/AC_test_sid.json',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Basic /),
+        }),
+      }),
+    );
+  });
+
+  it('reports the provider unreachable on a non-ok response', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401 });
+
+    const result = await adapter.checkReachability(1000);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: 'twilio',
+        reachable: false,
+        error: 'Twilio health check failed: HTTP 401',
+      }),
+    );
+  });
+
+  it('reports the provider unreachable on a network error', async () => {
+    mockFetch.mockRejectedValue(new Error('Connection refused'));
+
+    const result = await adapter.checkReachability(1000);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: 'twilio',
+        reachable: false,
+        error: 'Twilio health check failed: Connection refused',
+      }),
+    );
+  });
+
   it('should return failure on non-ok response', async () => {
     mockFetch.mockResolvedValue({
       ok: false,

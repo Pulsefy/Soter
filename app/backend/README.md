@@ -6,6 +6,10 @@ This module powers:
 - Verification APIs
 - On-chain anchoring integrations
 
+## Dashboard summary cache policy
+
+The global dashboard summary endpoint uses the Redis-backed analytics aggregate at `analytics:global-stats-v2` with a bounded staleness policy of 300 seconds (5 minutes). Reads hit the cached aggregate first; a cache miss recomputes the totals from Prisma, and any campaign or claim mutation invalidates the analytics cache so the next read refreshes promptly. The cache is safe to miss on startup or startup with a cold Redis instance and gracefully falls back to a live database aggregation without breaking the API response shape.
+
 ## Local development
 
 From the repo root:
@@ -132,6 +136,16 @@ pnpm --filter backend prisma:migrate
 ## Routes
 
 - `GET /health`
+- `DELETE /recipients/:recipientRef` records recipient removal with a required
+  `reasonCode` (`duplicate`, `deceased`, `relocated`, `ineligible`,
+  `consent_withdrawn`, `fraud_flag`, `data_correction`, or `other`). The
+  authenticated actor and database timestamp are recorded independently of
+  the general audit log.
+- `GET /recipients/removals` queries removal records; optional
+  `recipientRef`, `page` (default `1`), and `limit` (default `50`, max `200`)
+  filters are supported. NGO actors are scoped to their own organization;
+  admins can query across organizations. Historical claims are not deleted or
+  modified.
 
 Example:
 

@@ -1215,10 +1215,11 @@
         ],
         "properties": {
           "aid_claim": {
-            "description": "Aid claim to verify",
+            "description": "Aid claim to verify (10 to 5000 characters)",
             "examples": [
               "Family of 5 displaced by flood needs food and shelter"
             ],
+            "maxLength": 5000,
             "minLength": 10,
             "title": "Aid Claim",
             "type": "string"

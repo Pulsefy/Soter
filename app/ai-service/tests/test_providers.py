@@ -1,8 +1,10 @@
 """Tests for the provider interface (Issue #615)."""
 
+import httpx
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 
+from services import providers as provider_module
 from services.providers import (
     ModelProvider,
     ProviderRegistry,
@@ -333,20 +335,17 @@ class TestOpenAIProvider:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            with patch("httpx.Client") as MockClient:
-                MockClient.return_value.__enter__ = MagicMock(
-                    return_value=mock_client_instance
-                )
-                MockClient.return_value.__exit__ = MagicMock(return_value=False)
-
+            provider_module.close_provider_http_clients()
+            with patch("httpx.Client", return_value=mock_client_instance):
                 resp = OpenAIProvider().llm_chat("sys", "usr", model="gpt-4")
-                assert resp.content == "test content"
-                assert resp.provider == "openai"
-                # No "usage" key in the mocked response: unavailable, not 0
-                # (issue #981).
-                assert resp.prompt_tokens is None
-                assert resp.completion_tokens is None
-                assert resp.total_tokens is None
+            provider_module.close_provider_http_clients()
+            assert resp.content == "test content"
+            assert resp.provider == "openai"
+            # No "usage" key in the mocked response: unavailable, not 0
+            # (issue #981).
+            assert resp.prompt_tokens is None
+            assert resp.completion_tokens is None
+            assert resp.total_tokens is None
 
     def test_llm_chat_success_extracts_usage(self):
         mock_response = MagicMock()
@@ -369,16 +368,42 @@ class TestOpenAIProvider:
             mock_settings.ai_deterministic_mode = False
             mock_settings.llm_timeout_seconds = 30
 
-            with patch("httpx.Client") as MockClient:
-                MockClient.return_value.__enter__ = MagicMock(
-                    return_value=mock_client_instance
-                )
-                MockClient.return_value.__exit__ = MagicMock(return_value=False)
-
+            provider_module.close_provider_http_clients()
+            with patch("httpx.Client", return_value=mock_client_instance):
                 resp = OpenAIProvider().llm_chat("sys", "usr", model="gpt-4")
-                assert resp.prompt_tokens == 42
-                assert resp.completion_tokens == 17
-                assert resp.total_tokens == 59
+            provider_module.close_provider_http_clients()
+            assert resp.prompt_tokens == 42
+            assert resp.completion_tokens == 17
+            assert resp.total_tokens == 59
+
+    def test_retries_when_server_closed_idle_connection(self):
+        stale_client = MagicMock()
+        stale_client.post.side_effect = httpx.RemoteProtocolError(
+            "server closed the idle connection"
+        )
+        fresh_response = MagicMock()
+        fresh_response.raise_for_status = MagicMock()
+        fresh_response.json.return_value = {
+            "choices": [{"message": {"content": "recovered"}}]
+        }
+        fresh_client = MagicMock()
+        fresh_client.post.return_value = fresh_response
+
+        with patch("services.providers.settings") as mock_settings:
+            mock_settings.openai_api_key = "test-key"
+            mock_settings.ai_deterministic_mode = False
+            mock_settings.llm_timeout_seconds = 30
+            mock_settings.provider_http_idle_timeout_seconds = 300
+            provider_module.close_provider_http_clients()
+            with patch(
+                "httpx.Client", side_effect=[stale_client, fresh_client]
+            ) as MockClient:
+                response = OpenAIProvider().llm_chat("sys", "usr", model="gpt-4")
+
+            assert response.content == "recovered"
+            assert MockClient.call_count == 2
+            stale_client.close.assert_called_once_with()
+            provider_module.close_provider_http_clients()
 
 
 class TestGroqProvider:

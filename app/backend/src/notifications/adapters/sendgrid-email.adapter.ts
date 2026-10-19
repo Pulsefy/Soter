@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DeliveryAdapter, DeliveryResult } from './delivery-adapter.interface';
+import {
+  DeliveryAdapter,
+  DeliveryResult,
+  ProviderReachabilityResult,
+} from './delivery-adapter.interface';
 
 /**
  * Email delivery adapter using the SendGrid v3 Mail Send API (issue #941).
@@ -11,11 +15,13 @@ import { DeliveryAdapter, DeliveryResult } from './delivery-adapter.interface';
 @Injectable()
 export class SendGridEmailAdapter implements DeliveryAdapter {
   readonly channel = 'email' as const;
+  readonly provider = 'sendgrid';
   private readonly logger = new Logger(SendGridEmailAdapter.name);
 
   private readonly apiKey: string;
   private readonly fromEmail: string;
   private readonly apiUrl = 'https://api.sendgrid.com/v3/mail/send';
+  private readonly reachabilityUrl = 'https://api.sendgrid.com/v3/scopes';
 
   constructor(config: ConfigService) {
     const apiKey = config.get<string>('SENDGRID_API_KEY');
@@ -35,6 +41,51 @@ export class SendGridEmailAdapter implements DeliveryAdapter {
 
     this.apiKey = apiKey;
     this.fromEmail = fromEmail;
+  }
+
+  /**
+   * Validate the API key against a cheap read-only endpoint without sending
+   * an email.
+   */
+  async checkReachability(
+    timeoutMs: number,
+  ): Promise<ProviderReachabilityResult> {
+    const start = Date.now();
+
+    try {
+      const response = await fetch(this.reachabilityUrl, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (response.ok) {
+        return {
+          provider: this.provider,
+          reachable: true,
+          latencyMs: Date.now() - start,
+        };
+      }
+
+      return {
+        provider: this.provider,
+        reachable: false,
+        latencyMs: Date.now() - start,
+        error: `SendGrid health check failed: HTTP ${response.status}`,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`SendGrid health check failed: ${message}`);
+
+      return {
+        provider: this.provider,
+        reachable: false,
+        latencyMs: Date.now() - start,
+        error: `SendGrid health check failed: ${message}`,
+      };
+    }
   }
 
   async send(params: {

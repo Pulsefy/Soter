@@ -306,6 +306,46 @@ describe('RetentionPolicyService', () => {
       expect(prisma.verificationSession.deleteMany).not.toHaveBeenCalled();
     });
 
+    it('generateDryRunReport covers multiple entities with samples and no mutation', async () => {
+      prisma.retentionPolicy.findMany.mockResolvedValue([
+        {
+          id: 'p1',
+          entity: 'AuditLog',
+          retentionDays: 90,
+          strategy: 'soft_delete',
+        },
+        {
+          id: 'p2',
+          entity: 'VerificationSession',
+          retentionDays: 30,
+          strategy: 'hard_delete',
+        },
+      ]);
+      prisma.auditLog.count.mockResolvedValue(2);
+      prisma.verificationSession.count.mockResolvedValue(1);
+      prisma.auditLog.findMany.mockResolvedValue([{ id: 'a1' }, { id: 'a2' }]);
+      prisma.verificationSession.findMany.mockResolvedValue([{ id: 'v1' }]);
+
+      const report = await service.generateDryRunReport(5);
+
+      expect(report.dryRun).toBe(true);
+      expect(report.totalAffected).toBe(3);
+      expect(report.entries).toEqual([
+        expect.objectContaining({
+          entity: 'AuditLog',
+          affected: 2,
+          sampleIds: ['a1', 'a2'],
+        }),
+        expect.objectContaining({
+          entity: 'VerificationSession',
+          affected: 1,
+          sampleIds: ['v1'],
+        }),
+      ]);
+      expect(prisma.auditLog.updateMany).not.toHaveBeenCalled();
+      expect(prisma.verificationSession.deleteMany).not.toHaveBeenCalled();
+    });
+
     it('batching should process in chunks when batchSize provided', async () => {
       const policies = [
         {

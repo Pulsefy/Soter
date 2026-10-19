@@ -32,6 +32,8 @@ import {
   DisburseResult,
   ContractMetadata,
   PauseState,
+  PausableAction,
+  ActionPauseResult,
   FeeConfig,
   PackageSummary,
   GetTransactionStatusParams,
@@ -427,6 +429,33 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       isPaused: typeof result === 'boolean' ? result : false,
       timestamp: new Date(),
     };
+  }
+
+  async pauseAction(action: PausableAction): Promise<ActionPauseResult> {
+    this.logger.log('pauseAction action=' + action);
+    await this.invokeContract('pause_action', [action]);
+    return {
+      action,
+      transactionHash: '',
+      isPaused: await this.isActionPaused(action),
+      timestamp: new Date(),
+    };
+  }
+
+  async unpauseAction(action: PausableAction): Promise<ActionPauseResult> {
+    this.logger.log('unpauseAction action=' + action);
+    await this.invokeContract('unpause_action', [action]);
+    return {
+      action,
+      transactionHash: '',
+      isPaused: await this.isActionPaused(action),
+      timestamp: new Date(),
+    };
+  }
+
+  async isActionPaused(action: PausableAction): Promise<boolean> {
+    const result = await this.invokeContract('is_action_paused', [action]);
+    return result === true;
   }
 
   async getAdminState(params: AdminTransferParams = {}): Promise<AdminState> {
