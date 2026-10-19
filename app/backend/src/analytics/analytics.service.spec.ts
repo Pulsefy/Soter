@@ -157,6 +157,7 @@ describe('AnalyticsService', () => {
 
     it('computes and caches on miss, records cache miss', async () => {
       redisMock.get.mockResolvedValue(null);
+      prismaMock.aidPackage.findMany.mockResolvedValue([]);
       onchainAdapterMock.getAidPackageCount.mockResolvedValue({
         aggregates: {
           totalCommitted: '5000000000',
@@ -178,6 +179,7 @@ describe('AnalyticsService', () => {
 
     it('uses provided token parameter', async () => {
       redisMock.get.mockResolvedValue(null);
+      prismaMock.aidPackage.findMany.mockResolvedValue([]);
       onchainAdapterMock.getAidPackageCount.mockResolvedValue({
         aggregates: {
           totalCommitted: '5000000000',
@@ -193,6 +195,55 @@ describe('AnalyticsService', () => {
       expect(onchainAdapterMock.getAidPackageCount).toHaveBeenCalledWith({
         token,
       });
+    });
+
+    it('returns database totals and flags per-metric divergence', async () => {
+      redisMock.get.mockResolvedValue(null);
+      const token = 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
+      onchainAdapterMock.getAidPackageCount.mockResolvedValue({
+        aggregates: {
+          totalCommitted: '1200',
+          totalClaimed: '300',
+          totalExpiredCancelled: '40',
+        },
+        timestamp: new Date('2026-01-01T00:00:00.000Z'),
+      });
+      prismaMock.aidPackage.findMany.mockResolvedValue([
+        {
+          status: 'Active',
+          totalAmount: 1200,
+          campaign: { metadata: { tokenAddress: token } },
+        },
+        {
+          status: 'Claimed',
+          totalAmount: 250,
+          campaign: { metadata: { token } },
+        },
+        {
+          status: 'Cancelled',
+          totalAmount: 40,
+          campaign: { metadata: { token } },
+        },
+        {
+          status: 'Claimed',
+          totalAmount: 900,
+          campaign: { metadata: { token: 'OTHER_TOKEN' } },
+        },
+      ] as any);
+
+      const result = await service.getContractAggregates({ token });
+
+      expect(result.databaseAggregates).toEqual({
+        totalCommitted: '1200',
+        totalClaimed: '250',
+        totalExpiredCancelled: '40',
+      });
+      expect(result.databaseMatches).toEqual({
+        totalCommitted: true,
+        totalClaimed: false,
+        totalExpiredCancelled: true,
+      });
+      expect(result.matchesDatabase).toBe(false);
     });
   });
 });

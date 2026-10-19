@@ -165,8 +165,28 @@ export class TokenAggregatesDto {
 }
 
 export class ContractAggregatesDto {
+  @ApiProperty({
+    example: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+  })
+  tokenAddress: string;
+
   @ApiProperty({ type: AidPackageAggregatesDto })
   aggregates: AidPackageAggregatesDto;
+
+  @ApiProperty({ type: AidPackageAggregatesDto })
+  databaseAggregates: AidPackageAggregatesDto;
+
+  @ApiProperty({
+    description: 'True when the dashboard database totals match the contract for every metric.',
+    example: false,
+  })
+  matchesDatabase: boolean;
+
+  @ApiProperty({
+    description: 'Per-metric contract/database equality flags.',
+    example: { totalCommitted: true, totalClaimed: false, totalExpiredCancelled: true },
+  })
+  databaseMatches: Record<keyof AidPackageAggregatesDto, boolean>;
 
   @ApiProperty({ type: [TokenAggregatesDto], required: false })
   tokenAggregates?: TokenAggregatesDto[];

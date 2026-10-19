@@ -447,15 +447,86 @@ export class AnalyticsService {
       token: tokenAddress,
     });
 
+    const databaseAggregates = await this.computeDatabaseContractAggregates(
+      tokenAddress,
+    );
+    const databaseMatches = {
+      totalCommitted:
+        result.aggregates.totalCommitted === databaseAggregates.totalCommitted,
+      totalClaimed:
+        result.aggregates.totalClaimed === databaseAggregates.totalClaimed,
+      totalExpiredCancelled:
+        result.aggregates.totalExpiredCancelled ===
+        databaseAggregates.totalExpiredCancelled,
+    };
+
     this.logger.debug('Contract aggregates retrieved:', {
       totalCommitted: result.aggregates.totalCommitted,
       totalClaimed: result.aggregates.totalClaimed,
+      matchesDatabase: Object.values(databaseMatches).every(Boolean),
     });
 
     return {
+      tokenAddress,
       aggregates: result.aggregates,
+      databaseAggregates,
+      databaseMatches,
+      matchesDatabase: Object.values(databaseMatches).every(Boolean),
       tokenAggregates: result.tokenAggregates,
       timestamp: result.timestamp.toISOString(),
+    };
+  }
+
+  private async computeDatabaseContractAggregates(
+    tokenAddress: string,
+  ): Promise<ContractAggregatesDto['databaseAggregates']> {
+    const packages = await this.prisma.aidPackage.findMany({
+      where: { campaignId: { not: null } },
+      select: {
+        status: true,
+        totalAmount: true,
+        campaign: { select: { metadata: true } },
+      },
+    });
+
+    const totals = {
+      totalCommitted: 0,
+      totalClaimed: 0,
+      totalExpiredCancelled: 0,
+    };
+
+    for (const aidPackage of packages) {
+      const metadata = (aidPackage.campaign?.metadata ?? {}) as CampaignMetadata & {
+        tokenAddress?: string;
+      };
+      const packageToken = metadata.tokenAddress ?? metadata.token;
+      if (packageToken !== tokenAddress) continue;
+
+      const amount = Number(aidPackage.totalAmount);
+      if (!Number.isFinite(amount)) continue;
+
+      switch (aidPackage.status.toLowerCase()) {
+        case 'created':
+        case 'active':
+          totals.totalCommitted += amount;
+          break;
+        case 'claimed':
+        case 'disbursed':
+          totals.totalClaimed += amount;
+          break;
+        case 'expired':
+        case 'cancelled':
+        case 'canceled':
+        case 'refunded':
+          totals.totalExpiredCancelled += amount;
+          break;
+      }
+    }
+
+    return {
+      totalCommitted: String(Math.round(totals.totalCommitted)),
+      totalClaimed: String(Math.round(totals.totalClaimed)),
+      totalExpiredCancelled: String(Math.round(totals.totalExpiredCancelled)),
     };
   }
 
