@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1418-add-a-dry-run-mode-for-prompt-changes",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-1418-add-a-dry-run-mode-for-prompt-changes": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1418-add-a-dry-run-mode-for-prompt-changes",
+    "origin"
+  ]
+}

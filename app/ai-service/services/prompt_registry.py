@@ -3,10 +3,13 @@ Prompt Registry module for versioning and resolving AI verification prompts.
 
 Enforces prompt immutability and runtime observable versioning so results
 can be deterministically traced to the exact prompt template that produced them.
+
+Also provides a dry-run comparison helper for iterating on draft prompt
+versions against a small representative subset of fixtures.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -191,3 +194,114 @@ class PromptRegistry:
         if version is not None:
             return version in self._prompts[name]
         return True
+
+    def dry_run_compare(
+        self,
+        name: str,
+        draft_version: str,
+        fixtures: List[Dict[str, Any]],
+        run_prompt: Callable[[VerificationPrompt, Dict[str, Any]], Dict[str, Any]],
+        active_version: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Compare a draft prompt version against the active version on fixtures.
+
+        Runs both the draft (not-yet-active) prompt version and the currently
+        active version against a small representative subset of fixtures, then
+        diffs the results. Cases where the verdict (pass/review/reject) itself
+        changed are highlighted separately from minor score drift.
+
+        Args:
+            name: The prompt name.
+            draft_version: The draft version to evaluate (must be registered).
+            fixtures: A small representative subset of fixture dicts. Each fixture
+                is passed to ``run_prompt`` alongside the resolved prompt.
+            run_prompt: Callable that executes a prompt against a fixture and
+                returns a result dict containing at least a ``verdict`` key and
+                optionally a ``score`` key.
+            active_version: Override for the baseline version. Defaults to the
+                currently-active version for ``name``.
+
+        Returns:
+            A dict with keys:
+                - ``name``: prompt name
+                - ``draft_version``: draft version evaluated
+                - ``active_version``: baseline version evaluated
+                - ``total``: number of fixtures evaluated
+                - ``verdict_changes``: list of cases where verdict changed
+                - ``score_drift``: list of cases where only score changed
+                - ``unchanged``: list of case ids with no change
+
+        Raises:
+            ValueError: If the prompt name, draft version, or baseline version
+                is not registered.
+        """
+        if name not in self._prompts:
+            raise ValueError(f"Unknown prompt name: '{name}'")
+
+        baseline_version = active_version or self.get_active_version(name)
+
+        if draft_version not in self._prompts[name]:
+            available = sorted(list(self._prompts[name].keys()))
+            raise ValueError(
+                f"Prompt '{name}' has no draft version '{draft_version}'. "
+                f"Available versions: {available}"
+            )
+        if baseline_version not in self._prompts[name]:
+            available = sorted(list(self._prompts[name].keys()))
+            raise ValueError(
+                f"Prompt '{name}' has no baseline version '{baseline_version}'. "
+                f"Available versions: {available}"
+            )
+
+        draft_prompt = self._prompts[name][draft_version]
+        baseline_prompt = self._prompts[name][baseline_version]
+
+        verdict_changes: List[Dict[str, Any]] = []
+        score_drift: List[Dict[str, Any]] = []
+        unchanged: List[Any] = []
+
+        for index, fixture in enumerate(fixtures):
+            case_id = fixture.get("id", index)
+            draft_result = run_prompt(draft_prompt, fixture)
+            baseline_result = run_prompt(baseline_prompt, fixture)
+
+            draft_verdict = draft_result.get("verdict")
+            baseline_verdict = baseline_result.get("verdict")
+            draft_score = draft_result.get("score")
+            baseline_score = baseline_result.get("score")
+
+            entry = {
+                "case_id": case_id,
+                "draft_verdict": draft_verdict,
+                "baseline_verdict": baseline_verdict,
+                "draft_score": draft_score,
+                "baseline_score": baseline_score,
+            }
+
+            if draft_verdict != baseline_verdict:
+                verdict_changes.append(entry)
+            elif draft_score != baseline_score:
+                score_drift.append(entry)
+            else:
+                unchanged.append(case_id)
+
+        logger.info(
+            "Dry-run compare name='%s' draft='%s' baseline='%s': "
+            "%d verdict changes, %d score drifts, %d unchanged",
+            name,
+            draft_version,
+            baseline_version,
+            len(verdict_changes),
+            len(score_drift),
+            len(unchanged),
+        )
+
+        return {
+            "name": name,
+            "draft_version": draft_version,
+            "active_version": baseline_version,
+            "total": len(fixtures),
+            "verdict_changes": verdict_changes,
+            "score_drift": score_drift,
+            "unchanged": unchanged,
+        }

@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import argparse
 from PIL import Image
 from typing import List, Dict, Any, Optional
 
@@ -16,6 +17,8 @@ from regression_harness.models import (
     RegressionReport,
     BoundingBox,
 )
+
+VERDICT_ORDER = {"pass": 0, "review": 1, "reject": 2}
 
 
 class OCREvaluator:
@@ -167,3 +170,146 @@ class OCREvaluator:
             error_counts=error_counts,
             sample_results=results,
         )
+
+    def _derive_verdict(self, result: SampleResult) -> str:
+        if result.passed:
+            return "pass"
+        if any(
+            e.error_type in ("missing_field", "image_not_found")
+            for e in result.field_evaluations
+        ):
+            return "reject"
+        return "review"
+
+    def dry_run(
+        self,
+        samples: List[EvaluationSample],
+        base_dir: str,
+        active_results: Dict[str, SampleResult],
+    ) -> Dict[str, Any]:
+        """Run draft prompt against samples and diff verdicts vs active results."""
+        draft_results: Dict[str, SampleResult] = {}
+        verdict_changes = []
+        score_drift = []
+
+        for sample in samples:
+            res = self.evaluate_sample(sample, base_dir)
+            draft_results[sample.id] = res
+            draft_verdict = self._derive_verdict(res)
+
+            active = active_results.get(sample.id)
+            if active is None:
+                verdict_changes.append(
+                    {
+                        "sample_id": sample.id,
+                        "active_verdict": None,
+                        "draft_verdict": draft_verdict,
+                        "reason": "no_active_result",
+                    }
+                )
+                continue
+
+            active_verdict = self._derive_verdict(active)
+            if active_verdict != draft_verdict:
+                verdict_changes.append(
+                    {
+                        "sample_id": sample.id,
+                        "active_verdict": active_verdict,
+                        "draft_verdict": draft_verdict,
+                        "reason": "verdict_changed",
+                    }
+                )
+            else:
+                active_matches = sum(
+                    1 for e in active.field_evaluations if e.is_match
+                )
+                draft_matches = sum(
+                    1 for e in res.field_evaluations if e.is_match
+                )
+                if active_matches != draft_matches:
+                    score_drift.append(
+                        {
+                            "sample_id": sample.id,
+                            "active_matches": active_matches,
+                            "draft_matches": draft_matches,
+                        }
+                    )
+
+        return {
+            "total_samples": len(samples),
+            "verdict_changes": verdict_changes,
+            "score_drift": score_drift,
+            "draft_results": draft_results,
+        }
+
+    def format_dry_run_report(self, diff: Dict[str, Any]) -> str:
+        lines = []
+        lines.append("=" * 60)
+        lines.append("DRY-RUN PROMPT DIFF REPORT")
+        lines.append("=" * 60)
+        lines.append(f"Total samples: {diff['total_samples']}")
+        lines.append(f"Verdict changes: {len(diff['verdict_changes'])}")
+        lines.append(f"Score drift (same verdict): {len(diff['score_drift'])}")
+        lines.append("")
+
+        if diff["verdict_changes"]:
+            lines.append("!! VERDICT CHANGES (high priority) !!")
+            for change in diff["verdict_changes"]:
+                lines.append(
+                    f"  {change['sample_id']}: "
+                    f"{change['active_verdict']} -> {change['draft_verdict']} "
+                    f"({change['reason']})"
+                )
+            lines.append("")
+
+        if diff["score_drift"]:
+            lines.append("Minor score drift (verdict unchanged):")
+            for drift in diff["score_drift"]:
+                lines.append(
+                    f"  {drift['sample_id']}: "
+                    f"{drift['active_matches']} -> {drift['draft_matches']} matches"
+                )
+            lines.append("")
+
+        return "\n".join(lines)
+
+
+def _load_active_results(path: str) -> Dict[str, SampleResult]:
+    with open(path, "r") as f:
+        data = json.load(f)
+    results: Dict[str, SampleResult] = {}
+    for item in data.get("sample_results", []):
+        results[item["sample_id"]] = SampleResult(**item)
+    return results
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Dry-run a draft prompt against a fixture subset and diff "
+        "verdicts against the active prompt's results."
+    )
+    parser.add_argument("--samples", required=True, help="Path to samples JSON")
+    parser.add_argument("--base-dir", required=True, help="Fixture base directory")
+    parser.add_argument(
+        "--active-results",
+        required=True,
+        help="Path to active prompt's RegressionReport JSON",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=10, help="Max representative samples to run"
+    )
+    args = parser.parse_args(argv)
+
+    with open(args.samples, "r") as f:
+        samples_data = json.load(f)
+    samples = [EvaluationSample(**s) for s in samples_data][: args.limit]
+
+    active_results = _load_active_results(args.active_results)
+    evaluator = OCREvaluator()
+    diff = evaluator.dry_run(samples, args.base_dir, active_results)
+    print(evaluator.format_dry_run_report(diff))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
