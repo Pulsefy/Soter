@@ -1257,6 +1257,21 @@
             "title": "Context Factors",
             "type": "object"
           },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional language hint for the claim (e.g. 'es', 'fr', 'pt', 'ar', 'en'). When omitted or unsupported, the language is detected from the claim text.",
+            "examples": [
+              "es"
+            ],
+            "title": "Language"
+          },
           "prompt_version": {
             "anyOf": [
               {
