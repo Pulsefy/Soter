@@ -77,6 +77,10 @@ class _ProviderHTTPClientPool:
                 )
                 response.raise_for_status()
                 return response
+            except httpx.TimeoutException:
+                # Timeouts are surfaced to the provider error mapping and are
+                # not retried as stale-connection failures.
+                raise
             except httpx.TransportError:
                 self._discard(base_url, client)
                 if attempt == 0:
