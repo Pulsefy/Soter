@@ -474,10 +474,13 @@ class OpenAIProvider(ModelProvider):
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             }
-            with httpx.Client(timeout=req_timeout) as client:
-                response = client.post(base_url, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
+            response = _provider_http_clients.request(
+                base_url,
+                timeout=req_timeout,
+                json_payload=payload,
+                headers=headers,
+            )
+            data = response.json()
         except httpx.TimeoutException as exc:
             raise AIServiceError(
                 message=f"LLM request timed out after {req_timeout}s",
@@ -518,10 +521,13 @@ class OpenAIProvider(ModelProvider):
                     "Authorization": f"Bearer {fallback_api_key}",
                     "Content-Type": "application/json",
                 }
-                with httpx.Client(timeout=req_timeout) as client:
-                    response = client.post(base_url, json=payload, headers=headers)
-                    response.raise_for_status()
-                    data = response.json()
+                response = _provider_http_clients.request(
+                    base_url,
+                    timeout=req_timeout,
+                    json_payload=payload,
+                    headers=headers,
+                )
+                data = response.json()
                 logger.info(
                     "Fallback key succeeded for %s after primary key failed with %d",
                     provider_name,
