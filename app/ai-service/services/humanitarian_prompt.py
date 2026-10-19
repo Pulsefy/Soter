@@ -8,6 +8,15 @@ All prompts are versioned and managed through a PromptRegistry.
 
 from typing import Any, Dict, List, Optional
 from services.prompt_registry import VerificationPrompt, PromptRegistry
+from services.humanitarian_prompt_languages import (
+    DEFAULT_LANGUAGE,
+    LOCALIZED_TEXT,
+    SUPPORTED_LANGUAGES,
+    fallback_prompt_name,
+    localized_criteria,
+    primary_prompt_name,
+    resolve_language,
+)
 
 #: Version of the prompt templates below. Bump this whenever the system or
 #: user prompt text changes so decision audit records (issue #990) can tie a
@@ -302,6 +311,137 @@ class HumanitarianFallbackPromptV2(VerificationPrompt):
 
 
 # ---------------------------------------------------------------------------
+# Localized Prompt Implementations (non-English)
+# ---------------------------------------------------------------------------
+
+#: Version of the localized prompt templates. Bump when any localized text changes.
+LOCALIZED_PROMPT_VERSION = "v1"
+
+_OUTPUT_SCHEMA = (
+    "{\n"
+    '  "verdict": "credible|partially_credible|inconclusive|not_credible",\n'
+    '  "confidence": 0.0,\n'
+    '  "summary": "short neutral summary",\n'
+    '  "criteria_assessment": [\n'
+    '    {"criterion": "string", "status": "met|partially_met|not_met|unknown", "reason": "string"}\n'
+    "  ],\n"
+    '  "risk_flags": ["string"],\n'
+    '  "missing_information": ["string"],\n'
+    '  "recommended_next_steps": ["string"]\n'
+    "}"
+)
+
+_COMPACT_SCHEMA = (
+    '{"verdict":"credible|partially_credible|inconclusive|not_credible",'
+    '"confidence":0.0,"summary":"",'
+    '"risk_flags":[],"missing_information":[],"recommended_next_steps":[]}'
+)
+
+
+class LocalizedPrimaryPrompt(VerificationPrompt):
+    """Primary verification prompt for a single non-English language."""
+
+    def __init__(self, language: str, version: str = LOCALIZED_PROMPT_VERSION):
+        if language not in LOCALIZED_TEXT:
+            raise ValueError(f"No localized prompt text for language '{language}'")
+        self.language = language
+        self._version = version
+        self._text = LOCALIZED_TEXT[language]
+
+    @property
+    def name(self) -> str:
+        return primary_prompt_name(self.language)
+
+    @property
+    def version(self) -> str:
+        return self._version
+
+    @property
+    def description(self) -> str:
+        return (
+            f"Primary humanitarian verification prompt for language '{self.language}'."
+        )
+
+    def build_prompt(
+        self,
+        aid_claim: str,
+        supporting_evidence: List[str],
+        context_factors: Dict[str, Any],
+    ) -> Dict[str, str]:
+        t = self._text
+        evidence_text = (
+            format_evidence(supporting_evidence)
+            if supporting_evidence
+            else t["no_evidence"]
+        )
+        context_text = (
+            format_context_factors(context_factors)
+            if context_factors
+            else t["no_context"]
+        )
+        user_prompt = (
+            f"{t['primary_intro']}\n\n"
+            f"{t['lang_note']}\n\n"
+            f"{t['criteria']}:\n{format_sphere_criteria(localized_criteria(self.language))}\n\n"
+            f"{t['claim']}:\n{aid_claim}\n\n"
+            f"{t['evidence']}:\n{evidence_text}\n\n"
+            f"{t['context']}:\n{context_text}\n\n"
+            f"{t['schema_intro']}:\n{_OUTPUT_SCHEMA}"
+        )
+        return {"system": t["primary_system"], "user": user_prompt}
+
+
+class LocalizedFallbackPrompt(VerificationPrompt):
+    """Compact fallback verification prompt for a single non-English language."""
+
+    def __init__(self, language: str, version: str = LOCALIZED_PROMPT_VERSION):
+        if language not in LOCALIZED_TEXT:
+            raise ValueError(f"No localized prompt text for language '{language}'")
+        self.language = language
+        self._version = version
+        self._text = LOCALIZED_TEXT[language]
+
+    @property
+    def name(self) -> str:
+        return fallback_prompt_name(self.language)
+
+    @property
+    def version(self) -> str:
+        return self._version
+
+    @property
+    def description(self) -> str:
+        return f"Compact fallback verification prompt for language '{self.language}'."
+
+    def build_prompt(
+        self,
+        aid_claim: str,
+        supporting_evidence: List[str],
+        context_factors: Dict[str, Any],
+    ) -> Dict[str, str]:
+        t = self._text
+        evidence_text = (
+            format_evidence(supporting_evidence)
+            if supporting_evidence
+            else t["no_evidence"]
+        )
+        context_text = (
+            format_context_factors(context_factors)
+            if context_factors
+            else t["no_context"]
+        )
+        user_prompt = (
+            f"{t['fallback_title']}\n\n"
+            f"{t['lang_note']}\n\n"
+            f"{t['fallback_claim']}: {aid_claim}\n"
+            f"{t['fallback_evidence']}: {evidence_text}\n"
+            f"{t['fallback_context']}: {context_text}\n\n"
+            f"{t['fallback_respond']}:\n{_COMPACT_SCHEMA}"
+        )
+        return {"system": t["fallback_system"], "user": user_prompt}
+
+
+# ---------------------------------------------------------------------------
 # Default Registry Initializer
 # ---------------------------------------------------------------------------
 
@@ -317,6 +457,13 @@ def create_default_prompt_registry() -> PromptRegistry:
     # Register V2 prompts (available for version switching)
     registry.register(HumanitarianPrimaryPromptV2(), set_active=False)
     registry.register(HumanitarianFallbackPromptV2(), set_active=False)
+
+    # Register localized prompts (one named, versioned pair per language)
+    for language in SUPPORTED_LANGUAGES:
+        if language == DEFAULT_LANGUAGE:
+            continue
+        registry.register(LocalizedPrimaryPrompt(language), set_active=True)
+        registry.register(LocalizedFallbackPrompt(language), set_active=True)
 
     return registry
 
@@ -336,14 +483,41 @@ class HumanitarianPromptEngine:
     def __init__(self, registry: Optional[PromptRegistry] = None):
         self.registry = registry or default_prompt_registry
 
+    def resolve_prompt(
+        self,
+        kind: str,
+        aid_claim: str,
+        language: Optional[str] = None,
+        version: Optional[str] = None,
+    ) -> VerificationPrompt:
+        """Resolve the registered prompt for a claim's language.
+
+        `kind` is "primary" or "fallback". `language` is an optional caller
+        hint; when absent the language is detected from `aid_claim`. An
+        explicit `version` that does not exist for the localized prompt (for
+        example the English-only 'v2') falls back to that language's active
+        version; a language with no registered prompt falls back to English.
+        """
+        namer = primary_prompt_name if kind == "primary" else fallback_prompt_name
+        resolved = resolve_language(aid_claim, language)
+        name = namer(resolved)
+        if not self.registry.has(name):
+            name = namer(DEFAULT_LANGUAGE)
+            resolved = DEFAULT_LANGUAGE
+        if resolved != DEFAULT_LANGUAGE and version is not None:
+            if not self.registry.has(name, version):
+                version = None
+        return self.registry.get(name, version=version)
+
     def build_primary_prompt(
         self,
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
         version: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
-        prompt = self.registry.get("humanitarian_primary", version=version)
+        prompt = self.resolve_prompt("primary", aid_claim, language, version)
         return prompt.build_prompt(
             aid_claim=aid_claim,
             supporting_evidence=supporting_evidence,
@@ -356,8 +530,9 @@ class HumanitarianPromptEngine:
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
         version: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
-        prompt = self.registry.get("humanitarian_fallback", version=version)
+        prompt = self.resolve_prompt("fallback", aid_claim, language, version)
         return prompt.build_prompt(
             aid_claim=aid_claim,
             supporting_evidence=supporting_evidence,

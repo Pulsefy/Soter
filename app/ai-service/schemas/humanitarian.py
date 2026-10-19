@@ -61,6 +61,12 @@ class HumanitarianVerificationRequest(BaseModel):
         description="Explicit prompt version to use from registry (defaults to configured active version)",
         examples=["v1"],
     )
+    language: Optional[str] = Field(
+        default=None,
+        description="Optional language hint for the claim (e.g. 'es', 'fr', 'pt', 'ar', 'en'). "
+        "When omitted or unsupported, the language is detected from the claim text.",
+        examples=["es"],
+    )
     anchor_metadata: Optional[AnchorMetadata] = None
 
     model_config = {

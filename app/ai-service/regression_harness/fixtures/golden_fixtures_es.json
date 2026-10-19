@@ -1,0 +1,142 @@
+[
+  {
+    "id": "es_approve_001",
+    "language": "es",
+    "input": {
+      "aid_claim": "Los equipos de socorro entregaron 2.000 kits de higiene a todos los hogares registrados en el Sector B la semana pasada.",
+      "supporting_evidence": [
+        "Lista de distribución #B-17 firmada por dos monitores de campo",
+        "Manifiesto de despacho del almacén #WM-221",
+        "Hojas de conformidad de beneficiarios, 196 de 200 devueltas"
+      ],
+      "context_factors": {
+        "security_status": "stable",
+        "weather": "clear"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "es_approve_002",
+    "language": "es",
+    "input": {
+      "aid_claim": "Una clínica móvil atendió a 340 pacientes en comunidades afectadas por las inundaciones durante tres semanas.",
+      "supporting_evidence": [
+        "Registro de pacientes firmado por la supervisora de enfermería",
+        "Informe de conciliación del inventario de medicamentos",
+        "Formulario semanal enviado a la oficina distrital de salud"
+      ],
+      "context_factors": {
+        "disaster_type": "flood",
+        "health_access": "limited"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "es_approve_003",
+    "language": "es",
+    "input": {
+      "aid_claim": "La asistencia alimentaria mensual llegó a 1.500 familias con canastas de raciones en el campamento de desplazados.",
+      "supporting_evidence": [
+        "Manifiesto de distribución firmado por la administración del campamento",
+        "Tarjetas de ración verificadas contra el registro del campamento",
+        "Acuse de recibo de la agencia alimentaria cooperante"
+      ],
+      "context_factors": {
+        "displacement_level": "high"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "es_reject_001",
+    "language": "es",
+    "input": {
+      "aid_claim": "Se afirma que se distribuyeron 5.000 kits de refugio, pero no existe ningún registro de compra ni lista de beneficiarios.",
+      "supporting_evidence": [
+        "Mensaje de texto anónimo que menciona la distribución",
+        "Ninguna factura de compra disponible"
+      ],
+      "context_factors": {
+        "security_status": "unstable"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "es_reject_002",
+    "language": "es",
+    "input": {
+      "aid_claim": "El reporte dice que se repartieron alimentos a 10.000 personas en una aldea cuyo censo es de 800 habitantes.",
+      "supporting_evidence": [
+        "Fotografía sin fecha ni ubicación",
+        "El censo local contradice la cifra declarada"
+      ],
+      "context_factors": {
+        "displacement_level": "low"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "es_reject_003",
+    "language": "es",
+    "input": {
+      "aid_claim": "Una organización asegura haber construido 50 letrinas, pero la inspección del sitio no encontró ninguna estructura.",
+      "supporting_evidence": [
+        "Informe de inspección sin estructuras observadas",
+        "Facturas con firmas duplicadas"
+      ],
+      "context_factors": {
+        "season": "dry"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "es_ambiguous_001",
+    "language": "es",
+    "input": {
+      "aid_claim": "Se informa que se entregó agua potable a varias comunidades, aunque no se indican cifras ni fechas.",
+      "supporting_evidence": [
+        "Una nota breve del coordinador local",
+        "Sin registros de entrega adjuntos"
+      ],
+      "context_factors": {
+        "water_access": "limited"
+      }
+    },
+    "expected": "ambiguous"
+  },
+  {
+    "id": "es_ambiguous_002",
+    "language": "es",
+    "input": {
+      "aid_claim": "Un socio local indica que se atendió a pacientes en una clínica temporal, pero el registro está incompleto.",
+      "supporting_evidence": [
+        "Registro parcial con páginas faltantes",
+        "Declaración verbal de un trabajador de salud"
+      ],
+      "context_factors": {
+        "health_access": "limited"
+      }
+    },
+    "expected": "ambiguous"
+  },
+  {
+    "id": "es_ambiguous_003",
+    "language": "es",
+    "input": {
+      "aid_claim": "Se afirma que algunas familias recibieron mantas, pero la lista de beneficiarios solo cubre una parte de los hogares.",
+      "supporting_evidence": [
+        "Lista de beneficiarios parcial",
+        "Fotografías de mantas sin referencia de ubicación"
+      ],
+      "context_factors": {
+        "weather": "cold"
+      }
+    },
+    "expected": "ambiguous"
+  }
+]

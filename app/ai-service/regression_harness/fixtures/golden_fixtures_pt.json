@@ -1,0 +1,142 @@
+[
+  {
+    "id": "pt_approve_001",
+    "language": "pt",
+    "input": {
+      "aid_claim": "As equipes de socorro entregaram 2.000 kits de higiene a todas as famílias registradas no Setor B na semana passada.",
+      "supporting_evidence": [
+        "Lista de distribuição #B-17 assinada por dois monitores de campo",
+        "Manifesto de despacho do armazém #WM-221",
+        "Fichas de confirmação dos beneficiários, 196 de 200 devolvidas"
+      ],
+      "context_factors": {
+        "security_status": "stable",
+        "weather": "clear"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "pt_approve_002",
+    "language": "pt",
+    "input": {
+      "aid_claim": "Uma clínica móvel atendeu 340 pacientes em comunidades afetadas pelas enchentes ao longo de três semanas.",
+      "supporting_evidence": [
+        "Registro de pacientes assinado pela enfermeira supervisora",
+        "Relatório de conciliação do estoque de medicamentos",
+        "Formulário semanal enviado ao escritório distrital de saúde"
+      ],
+      "context_factors": {
+        "disaster_type": "flood",
+        "health_access": "limited"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "pt_approve_003",
+    "language": "pt",
+    "input": {
+      "aid_claim": "A assistência alimentar mensal alcançou 1.500 famílias com cestas de rações no campo de deslocados.",
+      "supporting_evidence": [
+        "Manifesto de distribuição contra-assinado pela administração do campo",
+        "Cartões de ração verificados com o registro do campo",
+        "Recibo de confirmação da agência de alimentos parceira"
+      ],
+      "context_factors": {
+        "displacement_level": "high"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "pt_reject_001",
+    "language": "pt",
+    "input": {
+      "aid_claim": "Afirma-se que 5.000 kits de abrigo foram distribuídos, mas não existe registro de compra nem lista de beneficiários.",
+      "supporting_evidence": [
+        "Mensagem de texto anônima que menciona a distribuição",
+        "Nenhuma nota fiscal de compra disponível"
+      ],
+      "context_factors": {
+        "security_status": "unstable"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "pt_reject_002",
+    "language": "pt",
+    "input": {
+      "aid_claim": "O relatório diz que alimentos foram entregues a 10.000 pessoas em uma aldeia com 800 habitantes no censo.",
+      "supporting_evidence": [
+        "Fotografia sem data nem local",
+        "O censo local contradiz o número declarado"
+      ],
+      "context_factors": {
+        "displacement_level": "low"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "pt_reject_003",
+    "language": "pt",
+    "input": {
+      "aid_claim": "Uma organização afirma ter construído 50 latrinas, mas a inspeção do local não encontrou nenhuma estrutura.",
+      "supporting_evidence": [
+        "Relatório de inspeção sem estruturas observadas",
+        "Notas fiscais com assinaturas duplicadas"
+      ],
+      "context_factors": {
+        "season": "dry"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "pt_ambiguous_001",
+    "language": "pt",
+    "input": {
+      "aid_claim": "Informa-se que água potável foi entregue a várias comunidades, mas sem números nem datas precisos.",
+      "supporting_evidence": [
+        "Uma nota breve do coordenador local",
+        "Nenhum registro de entrega anexado"
+      ],
+      "context_factors": {
+        "water_access": "limited"
+      }
+    },
+    "expected": "ambiguous"
+  },
+  {
+    "id": "pt_ambiguous_002",
+    "language": "pt",
+    "input": {
+      "aid_claim": "Um parceiro local diz que pacientes foram atendidos em uma clínica temporária, mas o registro está incompleto.",
+      "supporting_evidence": [
+        "Registro parcial com páginas faltando",
+        "Declaração verbal de um agente de saúde"
+      ],
+      "context_factors": {
+        "health_access": "limited"
+      }
+    },
+    "expected": "ambiguous"
+  },
+  {
+    "id": "pt_ambiguous_003",
+    "language": "pt",
+    "input": {
+      "aid_claim": "Algumas famílias teriam recebido cobertores, mas a lista de beneficiários cobre apenas parte dos domicílios.",
+      "supporting_evidence": [
+        "Lista de beneficiários parcial",
+        "Fotos de cobertores sem referência de local"
+      ],
+      "context_factors": {
+        "weather": "cold"
+      }
+    },
+    "expected": "ambiguous"
+  }
+]

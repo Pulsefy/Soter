@@ -250,6 +250,7 @@ async def _verify_claim_cached(
     org_id: str,
     prompt_version: str = "",
     content_hash: str = "",
+    language: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Cacheable wrapper around HumanitarianVerificationService.verify_claim.
@@ -284,9 +285,14 @@ async def _verify_claim_cached(
             provider_preference=provider_preference,
             timeout=timeout,
             prompt_version=prompt_version or None,
+            language=language,
         )
     except TypeError as exc:
-        if "prompt_version" in str(exc) or "timeout" in str(exc):
+        if (
+            "language" in str(exc)
+            or "prompt_version" in str(exc)
+            or "timeout" in str(exc)
+        ):
             try:
                 return humanitarian_verification_service.verify_claim(
                     aid_claim=aid_claim,
@@ -506,6 +512,7 @@ async def verify_humanitarian_claim(
                             timeout=timeout,
                             prompt_version=prompt_version,
                             on_token=lambda token: publish("token", token),
+                            language=request.language,
                         )
                         publish("result", raw_result)
                     except Exception as exc:
@@ -577,6 +584,7 @@ async def verify_humanitarian_claim(
             org_id=x_org_id,
             prompt_version=prompt_version,
             content_hash=content_hash,
+            language=request.language,
         )
         return _build_verification_envelope(
             http_request,
