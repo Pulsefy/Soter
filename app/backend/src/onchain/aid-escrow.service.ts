@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  InternalServerErrorException,
   Inject,
   Injectable,
   Logger,
@@ -19,6 +20,7 @@ import {
   DryRunAidPackageResultDto,
   DryRunValidationErrorDto,
   SetDelegateDto,
+  UpdateAidEscrowConfigDto,
 } from './dto/aid-escrow.dto';
 import { BudgetService } from '../common/budget/budget.service';
 import { AuditService } from '../audit/audit.service';
@@ -28,6 +30,7 @@ import {
   RevokeDelegateResult,
   GetDelegateResult,
   GetDelegateHistoryResult,
+  AidEscrowConfig,
 } from './onchain.adapter';
 import { explorerTxUrl } from '../common/utils/explorer-url.util';
 
@@ -504,6 +507,63 @@ export class AidEscrowService {
     });
 
     return result;
+  }
+
+  /** Apply a full, validated contract configuration and audit the change. */
+  async updateConfig(dto: UpdateAidEscrowConfigDto, actorId: string) {
+    if (
+      !dto ||
+      typeof dto.minAmount !== 'string' ||
+      !/^[1-9]\d*$/.test(dto.minAmount) ||
+      !Number.isSafeInteger(dto.maxExpiresIn) ||
+      dto.maxExpiresIn <= 0 ||
+      !Number.isSafeInteger(dto.claimCooldown) ||
+      dto.claimCooldown < 0 ||
+      !Array.isArray(dto.allowedTokens) ||
+      dto.allowedTokens.length === 0 ||
+      new Set(dto.allowedTokens).size !== dto.allowedTokens.length ||
+      dto.allowedTokens.some(token => !/^C[A-Z2-7]{55}$/.test(token))
+    ) {
+      throw new BadRequestException(
+        'A complete configuration with a positive minAmount, positive maxExpiresIn, non-negative claimCooldown, and unique token contract addresses is required.',
+      );
+    }
+    if (!this.auditService) {
+      throw new InternalServerErrorException(
+        'Audit logging is required for contract configuration updates.',
+      );
+    }
+
+    const before = await this.onchainAdapter.getConfig();
+    const after: AidEscrowConfig = {
+      minAmount: dto.minAmount,
+      maxExpiresIn: dto.maxExpiresIn,
+      allowedTokens: [...dto.allowedTokens],
+      claimCooldown: dto.claimCooldown,
+    };
+    const update = await this.onchainAdapter.setConfig(after);
+
+    await this.auditService.record({
+      actorId,
+      entity: 'aid_escrow_config',
+      entityId: 'global',
+      action: 'update_config',
+      metadata: {
+        before,
+        after,
+        transactionHash: update.transactionHash,
+      },
+    });
+
+    return {
+      config: after,
+      previousConfig: before,
+      transactionHash: update.transactionHash,
+      timestamp: update.timestamp,
+      explorerUrl: update.transactionHash
+        ? explorerTxUrl(update.transactionHash, this.network)
+        : undefined,
+    };
   }
 
   /**

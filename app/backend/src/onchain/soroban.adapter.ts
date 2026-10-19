@@ -42,6 +42,8 @@ import {
   PausableAction,
   ActionPauseResult,
   FeeConfig,
+  AidEscrowConfig,
+  SetAidEscrowConfigResult,
   PackageSummary,
   GetTransactionStatusParams,
   GetTransactionStatusResult,
@@ -79,6 +81,7 @@ import {
 } from './utils/surplus-withdrawal.errors';
 import {
   Aggregates,
+  Config,
   Package,
   PackageStatus,
 } from './generated/aid-escrow.contract';
@@ -1232,6 +1235,48 @@ export class SorobanAdapter implements OnchainAdapter {
       maxFee: '0',
       timestamp: new Date(),
     });
+  }
+
+  async getConfig(): Promise<AidEscrowConfig> {
+    this.ensureConfigured();
+    const result = await this.simulateReadOnly(
+      'get_config',
+      [],
+      this.correlationId(),
+    );
+    if (!result || typeof result !== 'object') {
+      throw new Error('Contract returned an invalid configuration');
+    }
+    const config = result as Partial<Config>;
+    return {
+      minAmount: String(config.min_amount ?? ''),
+      maxExpiresIn: Number(config.max_expires_in ?? 0),
+      allowedTokens: Array.isArray(config.allowed_tokens)
+        ? config.allowed_tokens.map(token => String(token))
+        : [],
+      claimCooldown: Number(config.claim_cooldown ?? 0),
+    };
+  }
+
+  async setConfig(
+    config: AidEscrowConfig,
+  ): Promise<SetAidEscrowConfigResult> {
+    this.ensureConfigured();
+    const entries = [
+      { key: this.scvSymbol('min_amount'), value: this.scvI128(config.minAmount) },
+      { key: this.scvSymbol('max_expires_in'), value: this.scvU64(config.maxExpiresIn) },
+      {
+        key: this.scvSymbol('allowed_tokens'),
+        value: this.scvVec(config.allowedTokens.map(token => this.scvAddress(token))),
+      },
+      { key: this.scvSymbol('claim_cooldown'), value: this.scvU64(config.claimCooldown) },
+    ];
+    const { hash } = await this.submitContractOp(
+      'set_config',
+      [nativeToScVal(entries, { type: 'map' })],
+      this.correlationId(),
+    );
+    return { transactionHash: hash, timestamp: new Date() };
   }
 
   async getPackageSummary(packageId: string): Promise<PackageSummary> {

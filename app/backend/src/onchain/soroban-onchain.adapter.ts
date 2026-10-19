@@ -35,6 +35,8 @@ import {
   PausableAction,
   ActionPauseResult,
   FeeConfig,
+  AidEscrowConfig,
+  SetAidEscrowConfigResult,
   PackageSummary,
   GetTransactionStatusParams,
   GetTransactionStatusResult,
@@ -626,6 +628,39 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
     return {
       feePercentage: readString(fee.fee_percentage, '0'),
       maxFee: readString(fee.max_fee, '0'),
+      timestamp: new Date(),
+    };
+  }
+
+  async getConfig(): Promise<AidEscrowConfig> {
+    const result = await rpcCall(this.http, this.rpcUrl, 'getContractData', {
+      contractId: this.contractId,
+      key: 'config',
+    });
+    const config = asRecord(result);
+    const tokens = config.allowed_tokens;
+    return {
+      minAmount: readString(config.min_amount, ''),
+      maxExpiresIn: Number(config.max_expires_in ?? 0),
+      allowedTokens: Array.isArray(tokens) ? tokens.map(String) : [],
+      claimCooldown: Number(config.claim_cooldown ?? 0),
+    };
+  }
+
+  async setConfig(
+    config: AidEscrowConfig,
+  ): Promise<SetAidEscrowConfigResult> {
+    const result = await this.invokeContract('set_config', [
+      {
+        min_amount: config.minAmount,
+        max_expires_in: config.maxExpiresIn,
+        allowed_tokens: config.allowedTokens,
+        claim_cooldown: config.claimCooldown,
+      },
+    ]);
+    const record = asRecord(result);
+    return {
+      transactionHash: readString(record.transactionHash, ''),
       timestamp: new Date(),
     };
   }

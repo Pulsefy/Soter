@@ -31,6 +31,8 @@ import {
   PausableAction,
   ActionPauseResult,
   FeeConfig,
+  AidEscrowConfig,
+  SetAidEscrowConfigResult,
   PackageSummary,
   GetTransactionStatusParams,
   GetTransactionStatusResult,
@@ -109,6 +111,12 @@ export class MockOnchainAdapter implements OnchainAdapter {
   private readonly mockEscrowAddress =
     'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
   private readonly mockContractVersions = new Map<string, number>();
+  private mockConfig: AidEscrowConfig = {
+    minAmount: '1',
+    maxExpiresIn: 31_536_000,
+    allowedTokens: [],
+    claimCooldown: 0,
+  };
 
   /**
    * Admin/pending-admin per contract, mirroring the contract's two-step
@@ -878,6 +886,22 @@ export class MockOnchainAdapter implements OnchainAdapter {
     return {
       feePercentage: '0',
       maxFee: '0',
+      timestamp: new Date(),
+    };
+  }
+
+  async getConfig(): Promise<AidEscrowConfig> {
+    return { ...this.mockConfig, allowedTokens: [...this.mockConfig.allowedTokens] };
+  }
+
+  async setConfig(
+    config: AidEscrowConfig,
+  ): Promise<SetAidEscrowConfigResult> {
+    this.mockConfig = { ...config, allowedTokens: [...config.allowedTokens] };
+    return {
+      transactionHash: this.generateMockHash(
+        `set-config-${JSON.stringify(config)}`,
+      ),
       timestamp: new Date(),
     };
   }
