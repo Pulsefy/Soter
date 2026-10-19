@@ -13,6 +13,8 @@ import { LedgerReconciliationService } from './ledger-reconciliation.service';
 import { LedgerAdminController } from './ledger-admin.controller';
 import { AdminTransferController } from './admin-transfer.controller';
 import { AdminTransferService } from './admin-transfer.service';
+import { ActionPauseController } from './action-pause.controller';
+import { ActionPauseService } from './action-pause.service';
 import { StellarLedgerSource } from './stellar-ledger-source';
 import { SurplusWithdrawalController } from './surplus-withdrawal.controller';
 import { SurplusWithdrawalService } from './surplus-withdrawal.service';
@@ -100,6 +102,7 @@ const onchainAdapterProvider: Provider = {
   controllers: [
     LedgerAdminController,
     AdminTransferController,
+    ActionPauseController,
     SurplusWithdrawalController,
   ],
   providers: [
@@ -113,6 +116,7 @@ const onchainAdapterProvider: Provider = {
     LedgerReconciliationService,
     SurplusWithdrawalService,
     AdminTransferService,
+    ActionPauseService,
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
     SorobanTransactionProcessor,

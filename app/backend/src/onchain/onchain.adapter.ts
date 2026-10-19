@@ -198,6 +198,39 @@ export interface PauseState {
   timestamp: Date;
 }
 
+/**
+ * Actions the contract can pause independently of the global pause. Mirrors
+ * the symbols accepted by the contract's `get_pause_key`; any other symbol is
+ * rejected on-chain with `InvalidState`.
+ */
+export const PAUSABLE_ACTIONS = [
+  'create',
+  'claim',
+  'withdraw',
+  'refund',
+] as const;
+
+export type PausableAction = (typeof PAUSABLE_ACTIONS)[number];
+
+export function isPausableAction(value: unknown): value is PausableAction {
+  return (
+    typeof value === 'string' &&
+    (PAUSABLE_ACTIONS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Result of a per-action pause or unpause write. `isPaused` is read back from
+ * the contract after the write, and so reflects the effective state: it stays
+ * `true` after `unpauseAction` while the contract is globally paused.
+ */
+export interface ActionPauseResult {
+  action: PausableAction;
+  transactionHash: string;
+  isPaused: boolean;
+  timestamp: Date;
+}
+
 export interface FeeConfig {
   feePercentage: string;
   maxFee: string;
@@ -511,6 +544,23 @@ export interface OnchainAdapter {
     params: MigrateContractParams,
   ): Promise<MigrateContractResult>;
   getPauseState(): Promise<PauseState>;
+
+  /**
+   * Pause a single action (`pause_action`) without pausing the whole contract.
+   */
+  pauseAction(action: PausableAction): Promise<ActionPauseResult>;
+
+  /**
+   * Lift a per-action pause (`unpause_action`). Does not lift a global pause.
+   */
+  unpauseAction(action: PausableAction): Promise<ActionPauseResult>;
+
+  /**
+   * Whether `action` is currently blocked (`is_action_paused`). Returns `true`
+   * while the contract is globally paused, regardless of per-action state.
+   */
+  isActionPaused(action: PausableAction): Promise<boolean>;
+
   getFeeConfig(): Promise<FeeConfig>;
   getPackageSummary(packageId: string): Promise<PackageSummary>;
 

@@ -28,6 +28,8 @@ import {
   GetTokenBalanceResult,
   ContractMetadata,
   PauseState,
+  PausableAction,
+  ActionPauseResult,
   FeeConfig,
   PackageSummary,
   GetTransactionStatusParams,
@@ -60,6 +62,8 @@ import {
   SURPLUS_WITHDRAWAL_TIMELOCK_SECS,
   SurplusWithdrawalTimelockNotElapsedError,
 } from './utils/surplus-withdrawal.errors';
+import { CONTRACT_ERROR_BY_NAME } from './utils/contract-error-catalog';
+import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 
 /**
  * Lifecycle states a mock aid package can occupy.
@@ -133,6 +137,28 @@ export class MockOnchainAdapter implements OnchainAdapter {
   mockSurplusWithdrawalDelaySeconds = SURPLUS_WITHDRAWAL_TIMELOCK_SECS;
 
   /**
+   * Whole-contract pause flag, mirroring the contract's `KEY_PAUSED`. Exposed
+   * so tests can reproduce a global pause; it always overrides per-action
+   * state, exactly like the contract's `is_action_paused`.
+   */
+  mockGloballyPaused = false;
+
+  /** Per-action pause flags, mirroring the contract's `KEY_PAUSE_*` slots. */
+  private readonly mockPausedActions = new Set<PausableAction>();
+
+  /**
+   * Reject a call whose action is paused with the same mapped
+   * `ContractPaused` error the Soroban adapter surfaces.
+   */
+  private assertActionNotPaused(action: PausableAction): void {
+    if (this.mockGloballyPaused || this.mockPausedActions.has(action)) {
+      new SorobanErrorMapper().throwMappedError({
+        errorCode: CONTRACT_ERROR_BY_NAME.ContractPaused.code,
+      });
+    }
+  }
+
+  /**
    * Read the mock's admin pair, seeding a default admin on first access.
    */
   private readMockAdminState(contractId: string): AdminState {
@@ -188,6 +214,7 @@ export class MockOnchainAdapter implements OnchainAdapter {
     params: CreateAidPackageParams,
   ): Promise<CreateAidPackageResult> {
     await Promise.resolve();
+    this.assertActionNotPaused('create');
     const transactionHash = this.generateMockHash(
       `create-package-${params.packageId}-${Date.now()}`,
     );
@@ -250,6 +277,7 @@ export class MockOnchainAdapter implements OnchainAdapter {
     params: ClaimAidPackageParams,
   ): Promise<ClaimAidPackageResult> {
     await Promise.resolve();
+    this.assertActionNotPaused('claim');
     const transactionHash = this.generateMockHash(
       `claim-package-${params.packageId}-${params.recipientAddress}-${Date.now()}`,
     );
@@ -603,9 +631,36 @@ export class MockOnchainAdapter implements OnchainAdapter {
   async getPauseState(): Promise<PauseState> {
     await Promise.resolve();
     return {
-      isPaused: false,
+      isPaused: this.mockGloballyPaused,
       timestamp: new Date(),
     };
+  }
+
+  async pauseAction(action: PausableAction): Promise<ActionPauseResult> {
+    await Promise.resolve();
+    this.mockPausedActions.add(action);
+    return {
+      action,
+      transactionHash: this.generateMockHash(`pause-action-${action}`),
+      isPaused: await this.isActionPaused(action),
+      timestamp: new Date(),
+    };
+  }
+
+  async unpauseAction(action: PausableAction): Promise<ActionPauseResult> {
+    await Promise.resolve();
+    this.mockPausedActions.delete(action);
+    return {
+      action,
+      transactionHash: this.generateMockHash(`unpause-action-${action}`),
+      isPaused: await this.isActionPaused(action),
+      timestamp: new Date(),
+    };
+  }
+
+  async isActionPaused(action: PausableAction): Promise<boolean> {
+    await Promise.resolve();
+    return this.mockGloballyPaused || this.mockPausedActions.has(action);
   }
 
   async getAdminState(params: AdminTransferParams = {}): Promise<AdminState> {
