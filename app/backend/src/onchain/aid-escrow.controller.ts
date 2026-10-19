@@ -713,7 +713,7 @@ export class AidEscrowController {
             integrationErrorCode: 'ONCHAIN_CONTRACT_PAUSED',
           },
         ],
-        total: 28,
+        total: 31,
       },
     },
   })

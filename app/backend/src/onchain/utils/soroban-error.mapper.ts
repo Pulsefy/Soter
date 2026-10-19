@@ -7,6 +7,23 @@ import {
   CONTRACT_ERROR_BY_NAME,
 } from './contract-error-catalog';
 
+/** Generic fallback messages returned when no catalog entry matches. */
+export const GENERIC_CONTRACT_ERROR_MESSAGES: readonly string[] = [
+  'Contract error occurred',
+  'An error occurred while communicating with the blockchain',
+  'Transaction submission failed',
+];
+
+const CONTRACT_ERROR_NAMES_LONGEST_FIRST: readonly string[] = Object.keys(
+  CONTRACT_ERROR_BY_NAME,
+).sort((a, b) => b.length - a.length);
+
+/**
+ * Matches the `Error(Contract, #N)` host error the Soroban SDK embeds in
+ * simulation and transaction failures, however the error reached us.
+ */
+const CONTRACT_ERROR_CODE_IN_MESSAGE = /Error\(Contract,\s*#\d+\)/;
+
 /**
  * Maps Soroban contract errors to standardized backend error responses
  * Aligns with the global error handling strategy
@@ -91,28 +108,8 @@ export class SorobanErrorMapper {
     const message = error?.message as string | undefined;
     if (
       message &&
-      (message.includes('NotInitialized') ||
-        message.includes('AlreadyInitialized') ||
-        message.includes('NotAuthorized') ||
-        message.includes('PackageNotFound') ||
-        message.includes('PackageExpired') ||
-        message.includes('PackageNotActive') ||
-        message.includes('PackageNotExpired') ||
-        message.includes('InsufficientFunds') ||
-        message.includes('InsufficientSurplus') ||
-        message.includes('PackageIdExists') ||
-        message.includes('InvalidState') ||
-        message.includes('MismatchedArrays') ||
-        message.includes('ContractPaused') ||
-        message.includes('ClaimTooEarly') ||
-        message.includes('InvalidAmount') ||
-        message.includes('InvalidProof') ||
-        message.includes('InvalidToken') ||
-        message.includes('TokenTransferFailed') ||
-        message.includes('NoPendingTransfer') ||
-        message.includes('InvalidPendingAdmin') ||
-        message.includes('BatchTooLarge') ||
-        message.includes('ClaimCooldownActive'))
+      (CONTRACT_ERROR_CODE_IN_MESSAGE.test(message) ||
+        CONTRACT_ERROR_NAMES_LONGEST_FIRST.some(name => message.includes(name)))
     ) {
       return this.mapContractErrorMessage(message);
     }
@@ -230,8 +227,11 @@ export class SorobanErrorMapper {
     errorCode: string;
     details?: Record<string, unknown>;
   } {
-    // Try to match by error name from the catalog
-    for (const [errorName, entry] of Object.entries(CONTRACT_ERROR_BY_NAME)) {
+    // Try to match by error name from the catalog. Longest names are tried
+    // first so a name that contains another (e.g. a future `FooNotBar` vs
+    // `Bar`) resolves to the most specific variant.
+    for (const errorName of CONTRACT_ERROR_NAMES_LONGEST_FIRST) {
+      const entry = CONTRACT_ERROR_BY_NAME[errorName];
       if (message.includes(errorName)) {
         return {
           statusCode: entry.httpStatusCode,
