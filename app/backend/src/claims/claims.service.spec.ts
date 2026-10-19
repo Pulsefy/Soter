@@ -954,4 +954,79 @@ describe('ClaimsService', () => {
       expect(columns[reasonIndex]).toBe('Duplicate of claim-0');
     });
   });
+
+  describe('reverify', () => {
+    const reverifyDto: any = {
+      reason: 'Prompt/model fix applied',
+      actor: 'admin-user-1',
+    };
+
+    it('re-enqueues verification and records the reason/actor in the audit log', async () => {
+      jest
+        .spyOn(prismaService.claim, 'findUnique')
+        .mockResolvedValue(mockClaim);
+      mockVerificationService.enqueueVerification.mockResolvedValue({
+        jobId: 'job-reverify-1',
+        priority: 0,
+      });
+
+      const result = await service.reverify('claim-123', reverifyDto);
+
+      expect(mockVerificationService.enqueueVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ claimId: 'claim-123' }),
+      );
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: reverifyDto.actor,
+          entity: 'claim',
+          entityId: 'claim-123',
+          action: 'reverify',
+          metadata: expect.objectContaining({
+            reason: reverifyDto.reason,
+          }),
+        }),
+      );
+      expect(result).toEqual(
+        expect.objectContaining({ jobId: 'job-reverify-1' }),
+      );
+    });
+
+    it('rejects re-verification for a disbursed claim without an override flag', async () => {
+      jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue({
+        ...mockClaim,
+        status: ClaimStatus.disbursed,
+      });
+
+      await expect(
+        service.reverify('claim-123', reverifyDto),
+      ).rejects.toThrow(AppException);
+      expect(
+        mockVerificationService.enqueueVerification,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('allows re-verification of a disbursed claim when the override flag is set and logs it', async () => {
+      jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue({
+        ...mockClaim,
+        status: ClaimStatus.disbursed,
+      });
+      mockVerificationService.enqueueVerification.mockResolvedValue({
+        jobId: 'job-reverify-2',
+        priority: 0,
+      });
+
+      await service.reverify('claim-123', {
+        ...reverifyDto,
+        override: true,
+      });
+
+      expect(mockVerificationService.enqueueVerification).toHaveBeenCalled();
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'reverify',
+          metadata: expect.objectContaining({ override: true }),
+        }),
+      );
+    });
+  });
 });

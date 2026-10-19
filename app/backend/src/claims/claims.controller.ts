@@ -48,6 +48,7 @@ import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
 import { SorobanEventCorrelationService } from '../onchain/soroban-event-correlation.service';
 import { streamCsvResponse } from '../common/csv/stream-csv-response';
+import { ReverifyClaimDto } from './dto/reverify-claim.dto';
 
 @ApiTags('Onchain Proxy')
 @ApiBearerAuth('JWT-auth')
@@ -227,6 +228,41 @@ export class ClaimsController {
     const claim = await this.claimsService.findOne(id);
     this.ensureOrgAccess(req.user, claim);
     return this.claimsService.verify(id);
+  }
+
+  @Post(':id/reverify')
+  @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'Re-enqueue verification for a claim',
+    description:
+      'Re-runs the verification pipeline for a single claim, for example after ' +
+      'a prompt/model fix or after evidence was corrected post-submission. ' +
+      'The reason and acting user are recorded in the audit log. ' +
+      'Re-verification is rejected for claims in a terminal state (disbursed) ' +
+      'unless `override` is explicitly set, which is also logged.',
+  })
+  @ApiOkResponse({
+    description: 'Verification re-enqueued successfully.',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Claim is in a terminal state and `override` was not set, or invalid input.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Access denied - admin role required.',
+  })
+  @ApiNotFoundResponse({
+    description: 'The specified claim was not found.',
+  })
+  async reverify(
+    @Param('id') id: string,
+    @Body() dto: ReverifyClaimDto,
+    @Request() req: ExpressRequest,
+  ) {
+    const claim = await this.claimsService.findOne(id);
+    this.ensureOrgAccess(req.user, claim);
+    const actorId = req.user?.apiKeyId || req.user?.authType || 'system';
+    return this.claimsService.reverify(id, dto, actorId);
   }
 
   @Post(':id/approve')

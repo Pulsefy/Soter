@@ -32,6 +32,12 @@ import { VerificationService } from '../verification/verification.service';
 import { readPersistedVerificationResult } from '../verification/verification-result.persistence';
 import { AnalyticsService } from '../analytics/analytics.service';
 
+export interface ReverifyClaimOptions {
+  reason: string;
+  actor: string;
+  overrideTerminalState?: boolean;
+}
+
 export interface ClaimExportRow {
   id: string;
   campaignId: string;
@@ -198,6 +204,60 @@ export class ClaimsService {
     await this.invalidateDashboardSummary('claim_updated');
 
     return claim;
+  }
+
+  /**
+   * Re-enqueue verification for a single claim.
+   *
+   * Claim creation already enqueues verification automatically, but operators
+   * need a supported way to re-run it for one claim - e.g. after a prompt or
+   * model fix, or after evidence was corrected post-submission. The reason and
+   * actor are recorded in the audit log so re-runs are traceable.
+   *
+   * Claims in a terminal state (disbursed) are rejected unless the caller
+   * explicitly sets `overrideTerminalState`, which is itself audited.
+   */
+  async reverify(id: string, options: ReverifyClaimOptions) {
+    const claim = await this.prisma.claim.findUnique({ where: { id } });
+    if (!claim || claim.deletedAt) {
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
+    }
+
+    const isTerminal = claim.status === ClaimStatus.disbursed;
+    if (isTerminal && !options.overrideTerminalState) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `Claim ${id} is in terminal state ${claim.status} and cannot be re-verified without an explicit override.`,
+      );
+    }
+
+    await this.auditService.record({
+      actorId: options.actor,
+      entity: 'claim',
+      entityId: id,
+      action: 'verification_requeued',
+      metadata: {
+        reason: options.reason,
+        previousStatus: claim.status,
+        overrideTerminalState: Boolean(options.overrideTerminalState),
+      },
+    });
+
+    await this.verificationService.enqueueVerification(id);
+
+    this.loggerService.log(
+      `Re-enqueued verification for claim ${id}`,
+      'ClaimsService',
+      {
+        claimId: id,
+        actor: options.actor,
+        reason: options.reason,
+        overrideTerminalState: Boolean(options.overrideTerminalState),
+      },
+    );
+
+    return this.findOne(id);
   }
 
   /**
