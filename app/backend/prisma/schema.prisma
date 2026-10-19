@@ -314,6 +314,12 @@ model SorobanTransaction {
   packageId         String?               /// Soroban package ID if applicable
   txHash            String?               /// Actual transaction hash when submitted
   status            SorobanTransactionStatus @default(pending)
+
+  /// Idempotency key tying a logical operation (e.g. a claim disbursement) to
+  /// at most one transaction row. A retry after a partial failure reuses the
+  /// existing row instead of creating a second one, so it cannot double-submit.
+  /// Nullable: not all operations are keyed.
+  idempotencyKey    String?               @unique
   
   /// Retry mechanism tracking
   attemptCount      Int                   @default(0)

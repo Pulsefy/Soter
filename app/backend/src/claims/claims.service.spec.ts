@@ -402,6 +402,21 @@ describe('ClaimsService', () => {
       expect(result.campaign).toBeDefined();
     });
 
+    it('keys the Soroban transaction with a per-claim idempotency key', async () => {
+      arrangeSuccessfulDisburse();
+
+      await service.disburse('claim-123');
+
+      expect(
+        mockSorobanTxLifecycleService.createTransaction,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          claimId: 'claim-123',
+          idempotencyKey: 'disburse:claim-123',
+        }),
+      );
+    });
+
     it('propagates an explicit correlation ID to the transaction record and job', async () => {
       arrangeSuccessfulDisburse();
 

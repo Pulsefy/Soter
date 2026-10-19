@@ -349,6 +349,12 @@ export class ClaimsService {
             amount: claim.amount.toString(),
             tokenAddress,
             correlationId: traceId,
+            // One disbursement row per claim, ever. A retry after a partial
+            // failure (crash between submission and the local status update)
+            // reuses the existing row — and its onchain-state verification —
+            // instead of creating a second transaction that would resubmit
+            // and double-disburse.
+            idempotencyKey: `disburse:${id}`,
             metadata: {
               campaignId: claim.campaignId,
               claimAmount: claim.amount,
