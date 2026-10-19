@@ -1,4 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsArray, IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
 
 export class ClaimTimelineEntryDto {
   @ApiProperty({ description: 'Status the claim transitioned to' })
@@ -125,18 +126,28 @@ export class ClaimShareResponseDto {
 }
 
 export class SendReceiptShareDto {
-  @ApiProperty({
-    description: 'Email address(es) to send receipt to',
+  @ApiPropertyOptional({
+    description:
+      'Email address(es) to send receipt to (used when channel is "email")',
     example: ['recipient@example.com'],
     isArray: true,
+    type: String,
   })
+  @IsOptional()
+  @IsArray()
+  @IsEmail({}, { each: true })
   emailAddresses?: string[];
 
-  @ApiProperty({
-    description: 'Phone number(s) to send receipt to (SMS)',
+  @ApiPropertyOptional({
+    description:
+      'Phone number(s) to send receipt to (used when channel is "sms")',
     example: ['+1234567890'],
     isArray: true,
+    type: String,
   })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   phoneNumbers?: string[];
 
   @ApiProperty({
@@ -144,11 +155,13 @@ export class SendReceiptShareDto {
     enum: ['email', 'sms', 'inline'],
     example: 'email',
   })
+  @IsIn(['email', 'sms', 'inline'])
   channel: 'email' | 'sms' | 'inline';
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Custom message to include with receipt (optional)',
-    required: false,
   })
+  @IsOptional()
+  @IsString()
   message?: string;
 }
