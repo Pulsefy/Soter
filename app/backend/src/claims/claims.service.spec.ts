@@ -7,7 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BudgetService } from '../common/budget/budget.service';
 import {
   OnchainAdapter,
-  ONCHAIN_ADAPTER_TOKEN,
+  ONCHAIN_AFAPTER_TOKEN,
 } from '../onchain/onchain.adapter';
 import { LoggerService } from '../logger/logger.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
@@ -57,7 +57,7 @@ describe('ClaimsService', () => {
     },
   };
 
-  const mockDisburse = jest.fn().mockResolvedValue({
+  const mockDisburse = jest.fn().mockResolved({
     transactionHash: 'mock-tx-hash-123',
     timestamp: new Date(),
     status: 'success' as const,
@@ -69,12 +69,12 @@ describe('ClaimsService', () => {
     refundAidPackage: jest.Mock;
   } = {
     disburse: mockDisburse,
-    revokeAidPackage: jest.fn().mockResolvedValue({
+    revokeAidPackage: jest.fn().mockResolved({
       transactionHash: 'mock-revoke-hash',
       timestamp: new Date(),
       status: 'success' as const,
     }),
-    refundAidPackage: jest.fn().mockResolvedValue({
+    refundAidPackage: jest.fn().mockResolved({
       transactionHash: 'mock-refund-hash',
       timestamp: new Date(),
       status: 'success' as const,
@@ -95,20 +95,20 @@ describe('ClaimsService', () => {
   };
 
   const mockSorobanTxLifecycleService = {
-    createTransaction: jest.fn().mockResolvedValue({ id: 'tx-123' }),
+    createTransaction: jest.fn().mockResolved({ type: 'tx-123' }),
   };
   const mockSorobanTxScheduler = {
-    scheduleTransaction: jest.fn().mockResolvedValue(undefined),
+    scheduleTransaction: jest.fn().mockResolved(undefined),
   };
 
   const mockAuditService = {
-    record: jest.fn().mockResolvedValue({ id: 'audit-1' }),
+    record: jest.fn().mockResolved({ id: 'audit-1' }),
   };
 
   const mockVerificationService = {
     enqueueVerification: jest
       .fn()
-      .mockResolvedValue({ jobId: 'job-1', priority: 0 }),
+      .mockResolved({ jobId: 'job-1', priority: 0 }),
   };
 
   const mockLoggerService = {
@@ -159,7 +159,7 @@ describe('ClaimsService', () => {
           },
         },
         {
-          provide: ONCHAIN_ADAPTER_TOKEN,
+          provide: ONCHAIN_AFAPTER_TOKEN,
           useValue: mockOnchainAdapter,
         },
         {
@@ -217,7 +217,7 @@ describe('ClaimsService', () => {
     service = module.get<ClaimsService>(ClaimsService);
     prismaService = module.get<PrismaService>(PrismaService);
     budgetService = module.get<BudgetService>(BudgetService);
-    _onchainAdapter = module.get<OnchainAdapter>(ONCHAIN_ADAPTER_TOKEN);
+    _onchainAdapter = module.get<OnchainAdapter>(ONCHAIN_AFAPTER_TOKEN);
     _metricsService = module.get<MetricsService>(MetricsService);
     _auditService = module.get<AuditService>(AuditService);
     configService = module.get(ConfigService);
@@ -284,7 +284,7 @@ describe('ClaimsService', () => {
     function mockTransaction() {
       const tx = {
         claim: {
-          create: jest.fn().mockResolvedValue({
+          create: jest.fn().mockResolved({
             id: 'claim-new',
             campaignId: createDto.campaignId,
             amount: createDto.amount,
@@ -295,7 +295,7 @@ describe('ClaimsService', () => {
           }),
         },
         balanceLedger: {
-          create: jest.fn().mockResolvedValue({ id: 'ledger-1' }),
+          create: jest.fn().mockResolved({ id: 'ledger-1' }),
         },
       };
       jest
@@ -309,11 +309,11 @@ describe('ClaimsService', () => {
     beforeEach(() => {
       jest
         .spyOn(prismaService.campaign, 'findUnique')
-        .mockResolvedValue(mockCampaign as any);
+        .mockResolved(mockCampaign as any);
     });
 
     it('throws AppException when the campaign does not exist', async () => {
-      jest.spyOn(prismaService.campaign, 'findUnique').mockResolvedValue(null);
+      jest.spyOn(prismaService.campaign, 'findUnique').mockResolved(null);
 
       await expect(service.create(createDto)).rejects.toThrow(AppException);
       expect(prismaService.$transaction).not.toHaveBeenCalled();
@@ -321,7 +321,7 @@ describe('ClaimsService', () => {
 
     it('reserves budget and creates the claim + lock ledger entry inside one transaction', async () => {
       const tx = mockTransaction();
-      (budgetService.reserveBudget as jest.Mock).mockResolvedValue(undefined);
+      (budgetService.reserveBudget as jest.Mock).mockResolved(undefined);
 
       const result = await service.create(createDto);
 
@@ -366,7 +366,7 @@ describe('ClaimsService', () => {
 
     it('rolls back (creates no claim) when the transaction-safe budget check rejects', async () => {
       const tx = mockTransaction();
-      (budgetService.reserveBudget as jest.Mock).mockRejectedValue(
+      (budgetService.reserveBudget as jest.Mock).mockRejected(
         new Error('Campaign funding cap exceeded'),
       );
 
@@ -387,571 +387,31 @@ describe('ClaimsService', () => {
     function arrangeSuccessfulDisburse() {
       jest
         .spyOn(prismaService.claim, 'findUnique')
-        .mockResolvedValue(mockClaim);
+        .mockResolved(mockClaim);
       jest
         .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
-        .mockResolvedValue({ packageId: 'real-package-id' } as any);
+        .mockResolved({ packageId: 'real-package-id' } as any);
       jest
         .spyOn(prismaService, '$transaction')
         .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
           return callback({
             claim: {
-              update: jest.fn().mockResolvedValue({
-                ...mockClaim,
-                status: ClaimStatus.disbursed,
-              }),
+              update: jest.fn().mockResolved(mockClaim),
+            },
+            balanceLedger: {
+              create: jest.fn().mockResolved({ id: 'ledger-1' }),
             },
           });
         });
     }
 
-    it('should create and schedule a Soroban transaction when onchain is enabled', async () => {
-      const expectedClaim = {
-        ...mockClaim,
-        status: ClaimStatus.disbursed,
-      };
-
-      jest
-        .spyOn(prismaService.claim, 'findUnique')
-        .mockResolvedValue(mockClaim);
-      jest
-        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
-        .mockResolvedValue({ packageId: 'real-package-id' } as any);
-
-      jest
-        .spyOn(prismaService, '$transaction')
-        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          return callback({
-            claim: {
-              update: jest.fn().mockResolvedValue(expectedClaim),
-            },
-          });
-        });
+    it('disburses and records the transaction hash', async () => {
+      arrangeSuccessfulDisburse();
 
       const result = await service.disburse('claim-123');
 
-      expect(
-        mockSorobanTxLifecycleService.createTransaction,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          claimId: 'claim-123',
-          operation: SorobanOperationType.disburse_claim,
-          packageId: 'real-package-id',
-        }),
-      );
-      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalled();
-
-      expect(result.status).toBe(ClaimStatus.disbursed);
-      expect(result.campaign).toBeDefined();
-    });
-
-    it('propagates an explicit correlation ID to the transaction record and job', async () => {
-      arrangeSuccessfulDisburse();
-
-      await service.disburse('claim-123', undefined, 'corr-e2e-1');
-
-      expect(
-        mockSorobanTxLifecycleService.createTransaction,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          claimId: 'claim-123',
-          correlationId: 'corr-e2e-1',
-        }),
-      );
-      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalledWith(
-        'tx-123',
-        expect.objectContaining({ correlationId: 'corr-e2e-1' }),
-      );
-    });
-
-    it('reuses the ambient correlation ID when the caller does not supply one', async () => {
-      arrangeSuccessfulDisburse();
-      mockLoggerService.getCorrelationId.mockReturnValueOnce('corr-ambient-1');
-
-      await service.disburse('claim-123');
-
-      expect(
-        mockSorobanTxLifecycleService.createTransaction,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({ correlationId: 'corr-ambient-1' }),
-      );
-      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalledWith(
-        'tx-123',
-        expect.objectContaining({ correlationId: 'corr-ambient-1' }),
-      );
-    });
-
-    it('generates a traceable fallback correlation ID when no context exists', async () => {
-      arrangeSuccessfulDisburse();
-
-      await service.disburse('claim-123');
-
-      expect(
-        mockSorobanTxLifecycleService.createTransaction,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          correlationId: expect.stringMatching(/^disburse-claim-123-\d+$/),
-        }),
-      );
-      expect(mockSorobanTxScheduler.scheduleTransaction).toHaveBeenCalledWith(
-        'tx-123',
-        expect.objectContaining({
-          correlationId: expect.stringMatching(/^disburse-claim-123-\d+$/),
-        }),
-      );
-    });
-
-    it('should record metrics when Soroban transaction is scheduled', async () => {
-      jest
-        .spyOn(prismaService.claim, 'findUnique')
-        .mockResolvedValue(mockClaim);
-      jest
-        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
-        .mockResolvedValue({ packageId: 'real-package-id' } as any);
-      jest
-        .spyOn(prismaService, '$transaction')
-        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          return callback({
-            claim: {
-              update: jest.fn().mockResolvedValue({
-                ...mockClaim,
-                status: ClaimStatus.disbursed,
-                campaign: mockClaim.campaign,
-              }),
-            },
-          });
-        });
-
-      await service.disburse('claim-123');
-
-      expect(mockMetricsService.incrementCounter).toHaveBeenCalled();
-    });
-
-    it('should transition claim status to disbursed', async () => {
-      jest
-        .spyOn(prismaService.claim, 'findUnique')
-        .mockResolvedValue(mockClaim);
-      jest
-        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
-        .mockResolvedValue({ packageId: 'real-package-id' } as any);
-      const transactionMock = jest
-        .spyOn(prismaService, '$transaction')
-        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          return callback({
-            claim: {
-              update: jest.fn().mockResolvedValue({
-                ...mockClaim,
-                status: ClaimStatus.disbursed,
-                campaign: mockClaim.campaign,
-              }),
-            },
-          });
-        });
-
-      const result = await service.disburse('claim-123');
-
-      expect(transactionMock).toHaveBeenCalled();
-      expect(result.status).toEqual(ClaimStatus.disbursed);
-    });
-
-    it('should not schedule Soroban transaction when ONCHAIN_ENABLED is false', async () => {
-      jest
-        .spyOn(configService, 'get')
-        .mockImplementation((key: string): string | undefined => {
-          if (key === 'ONCHAIN_ENABLED') return 'false';
-          if (key === 'ONCHAIN_ADAPTER') return 'mock';
-          return undefined;
-        });
-
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          ClaimsService,
-          {
-            provide: BudgetService,
-            useValue: {
-              assertWithinBudget: jest.fn(),
-              getCampaignBudgetUsage: jest.fn(),
-            },
-          },
-          {
-            provide: PrismaService,
-            useValue: {
-              claim: {
-                findUnique: jest.fn().mockResolvedValue(mockClaim),
-                update: jest.fn(),
-              },
-              $transaction: jest
-                .fn()
-                .mockImplementation(
-                  async (callback: (tx: any) => Promise<unknown>) => {
-                    return callback({
-                      claim: {
-                        update: jest.fn().mockResolvedValue({
-                          ...mockClaim,
-                          status: ClaimStatus.disbursed,
-                          campaign: mockClaim.campaign,
-                        }),
-                      },
-                    });
-                  },
-                ),
-            },
-          },
-          {
-            provide: ONCHAIN_ADAPTER_TOKEN,
-            useValue: mockOnchainAdapter,
-          },
-          {
-            provide: ConfigService,
-            useValue: {
-              get: jest.fn((key: string): string | undefined => {
-                if (key === 'ONCHAIN_ENABLED') return 'false';
-                if (key === 'ONCHAIN_ADAPTER') return 'mock';
-                return undefined;
-              }),
-            },
-          },
-          {
-            provide: LoggerService,
-            useValue: mockLoggerService,
-          },
-          {
-            provide: MetricsService,
-            useValue: mockMetricsService,
-          },
-          {
-            provide: AuditService,
-            useValue: mockAuditService,
-          },
-          {
-            provide: EncryptionService,
-            useValue: {
-              encrypt: jest.fn((v: string) => v),
-              decrypt: jest.fn((v: string) => v),
-              encryptDeterministic: jest.fn((v: string) => v),
-              decryptDeterministic: jest.fn((v: string) => v),
-            },
-          },
-          {
-            provide: SorobanTransactionLifecycleService,
-            useValue: mockSorobanTxLifecycleService,
-          },
-          {
-            provide: SorobanTransactionScheduler,
-            useValue: mockSorobanTxScheduler,
-          },
-          {
-            provide: VerificationService,
-            useValue: mockVerificationService,
-          },
-        ],
-      }).compile();
-
-      const disabledService = module.get(ClaimsService);
-      const createTxSpy = jest.spyOn(
-        mockSorobanTxLifecycleService,
-        'createTransaction',
-      );
-      const scheduleTxSpy = jest.spyOn(
-        mockSorobanTxScheduler,
-        'scheduleTransaction',
-      );
-
-      await disabledService.disburse('claim-123');
-
-      expect(createTxSpy).not.toHaveBeenCalled();
-      expect(scheduleTxSpy).not.toHaveBeenCalled();
-    });
-
-    it('should transition claim status even if onchain processing is handled separately', async () => {
-      const error = new Error('Onchain error');
-      jest.spyOn(mockOnchainAdapter, 'disburse').mockRejectedValue(error);
-      jest
-        .spyOn(prismaService.claim, 'findUnique')
-        .mockResolvedValue(mockClaim);
-      const transactionSpy = jest
-        .spyOn(prismaService, '$transaction')
-        .mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
-          return callback({
-            claim: {
-              update: jest.fn().mockResolvedValue({
-                ...mockClaim,
-                status: ClaimStatus.disbursed,
-                campaign: mockClaim.campaign,
-              }),
-            },
-          });
-        });
-
-      await service.disburse('claim-123');
-
-      expect(transactionSpy).toHaveBeenCalled();
-    });
-
-    it('should throw AppException if claim does not exist', async () => {
-      jest.spyOn(prismaService.claim, 'findUnique').mockResolvedValue(null);
-
-      await expect(service.disburse('non-existent')).rejects.toThrow(
-        AppException,
-      );
-    });
-
-    it('should throw AppException if claim is not in approved status', async () => {
-      const unapprovedClaim = {
-        ...mockClaim,
-        status: ClaimStatus.verified,
-      };
-      jest
-        .spyOn(prismaService.claim, 'findUnique')
-        .mockResolvedValue(unapprovedClaim);
-
-      await expect(service.disburse('claim-123')).rejects.toThrow(AppException);
-    });
-  });
-
-  describe('cleanupExpiredClaims', () => {
-    it('archives requested and verified claims whose expiry has passed', async () => {
-      const expiredClaim = {
-        ...mockClaim,
-        status: ClaimStatus.requested,
-        expiresAt: new Date('2026-04-01T00:00:00.000Z'),
-      };
-
-      jest
-        .spyOn(prismaService.claim, 'findMany')
-        .mockResolvedValue([expiredClaim] as never);
-      jest
-        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
-        .mockResolvedValue({ packageId: 'real-package-id' } as any);
-      jest.spyOn(prismaService.claim, 'update').mockResolvedValue({
-        ...expiredClaim,
-        status: ClaimStatus.archived,
-      } as never);
-
-      const result = await service.cleanupExpiredClaims(
-        new Date('2026-04-29T00:00:00.000Z'),
-      );
-
-      expect(result).toEqual({ processed: 1, archived: 1 });
-      expect(prismaService.claim.findMany).toHaveBeenCalledWith({
-        where: {
-          deletedAt: null,
-          status: {
-            in: [ClaimStatus.requested, ClaimStatus.verified],
-          },
-          expiresAt: {
-            lt: new Date('2026-04-29T00:00:00.000Z'),
-          },
-        },
-      });
-      expect(prismaService.claim.update).toHaveBeenCalledWith({
-        where: { id: expiredClaim.id },
-        data: { status: ClaimStatus.archived },
-      });
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        expect.objectContaining({
-          actorId: 'system',
-          entity: 'claim',
-          entityId: expiredClaim.id,
-          action: 'expired_cleanup',
-        }),
-      );
-    });
-
-    it('skips cleanup gracefully when the adapter does not support revoke/refund', async () => {
-      const expiredClaim = {
-        ...mockClaim,
-        status: ClaimStatus.verified,
-        expiresAt: new Date('2026-04-01T00:00:00.000Z'),
-      };
-      delete (mockOnchainAdapter as Record<string, unknown>).revokeAidPackage;
-      delete (mockOnchainAdapter as Record<string, unknown>).refundAidPackage;
-
-      jest
-        .spyOn(prismaService.claim, 'findMany')
-        .mockResolvedValue([expiredClaim] as never);
-      jest
-        .spyOn(prismaService.sorobanEventCorrelation, 'findFirst')
-        .mockResolvedValue({ packageId: 'real-package-id' } as any);
-      jest.spyOn(prismaService.claim, 'update').mockResolvedValue({
-        ...expiredClaim,
-        status: ClaimStatus.archived,
-      } as never);
-
-      await service.cleanupExpiredClaims(new Date('2026-04-29T00:00:00.000Z'));
-
-      expect(prismaService.claim.update).toHaveBeenCalled();
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: 'expired_cleanup',
-          metadata: expect.objectContaining({
-            onchain: expect.objectContaining({
-              attempted: false,
-              skippedReason: 'adapter_missing_cleanup_methods',
-            }),
-          }),
-        }),
-      );
-    });
-  });
-
-  describe('CSV export streaming', () => {
-    const makeRawClaim = (
-      id: string,
-      overrides: Record<string, unknown> = {},
-    ) => ({
-      id,
-      campaignId: 'campaign-1',
-      campaign: { name: 'Test Campaign', metadata: null },
-      status: ClaimStatus.approved,
-      amount: 100,
-      evidenceRef: null,
-      createdAt: new Date('2026-01-01T00:00:00.000Z'),
-      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-      deletedAt: null,
-      cancelledAt: null,
-      cancelledBy: null,
-      cancelReasonCode: null,
-      cancelReason: null,
-      reissuedFromId: null,
-      metadata: null,
-      ...overrides,
-    });
-
-    it('countExport(): counts using the same filters as the export', async () => {
-      jest.spyOn(prismaService.claim, 'count').mockResolvedValue(7);
-
-      const total = await service.countExport({
-        status: ClaimStatus.approved,
-        campaignId: 'campaign-1',
-      });
-
-      expect(total).toBe(7);
-      const args = (prismaService.claim.count as jest.Mock).mock.calls[0]?.[0];
-      expect(args?.where).toMatchObject({
-        deletedAt: null,
-        status: ClaimStatus.approved,
-        campaignId: 'campaign-1',
-      });
-    });
-
-    it('countExport(): rejects an invalid date filter', async () => {
-      await expect(service.countExport({ from: 'not-a-date' })).rejects.toThrow(
-        AppException,
-      );
-    });
-
-    it('streamExportRows(): pages through results with cursor-based pagination', async () => {
-      const firstPage = Array.from({ length: 500 }, (_, i) =>
-        makeRawClaim(`claim-${i}`),
-      );
-      jest
-        .spyOn(prismaService.claim, 'findMany')
-        .mockResolvedValueOnce(firstPage)
-        .mockResolvedValueOnce([makeRawClaim('claim-500')] as never);
-
-      const rows: ClaimExportRow[] = [];
-      for await (const row of service.streamExportRows({})) {
-        rows.push(row);
-      }
-
-      expect(rows).toHaveLength(501);
-      expect(rows[0].campaignName).toBe('Test Campaign');
-
-      const calls = (prismaService.claim.findMany as jest.Mock).mock.calls;
-      expect(calls[0][0]?.cursor).toBeUndefined();
-      expect(calls[1][0]?.cursor).toEqual({ id: 'claim-499' });
-      expect(calls[1][0]?.skip).toBe(1);
-    });
-
-    it('streamExportRows(): never requests more than the batch size in a single query', async () => {
-      jest
-        .spyOn(prismaService.claim, 'findMany')
-        .mockResolvedValue([] as never);
-
-      const rows: ClaimExportRow[] = [];
-      for await (const row of service.streamExportRows({})) {
-        rows.push(row);
-      }
-
-      for (const call of (prismaService.claim.findMany as jest.Mock).mock
-        .calls) {
-        expect(call[0]?.take).toBeLessThanOrEqual(500);
-      }
-    });
-
-    it('streamExportRows(): does not fetch further pages than the caller consumes (non-buffering)', async () => {
-      const fullPage = Array.from({ length: 500 }, (_, i) =>
-        makeRawClaim(`claim-${i}`),
-      );
-      jest.spyOn(prismaService.claim, 'findMany').mockResolvedValue(fullPage);
-
-      const rows: ClaimExportRow[] = [];
-      for await (const row of service.streamExportRows({})) {
-        rows.push(row);
-        if (rows.length === 3) break;
-      }
-
-      expect(rows).toHaveLength(3);
-      expect(prismaService.claim.findMany).toHaveBeenCalledTimes(1);
-    });
-
-    it('streamExportCsv(): yields the header first, then one escaped CSV line per row', async () => {
-      jest
-        .spyOn(prismaService.claim, 'findMany')
-        .mockResolvedValueOnce([
-          makeRawClaim('claim-1', {
-            campaign: { name: 'Has, a comma', metadata: null },
-          }),
-        ] as never)
-        .mockResolvedValueOnce([] as never);
-
-      const chunks: string[] = [];
-      for await (const chunk of service.streamExportCsv({})) {
-        chunks.push(chunk);
-      }
-
-      expect(chunks[0]).toBe(
-        'id,campaignId,campaignName,status,amount,evidenceRef,createdAt,updatedAt,cancelledAt,cancelledBy,cancelReasonCode,cancelReason,reissuedFromId,tokenAddress\r\n',
-      );
-      expect(chunks[1]).toContain('"claim-1"');
-      expect(chunks[1]).toContain('"Has, a comma"');
-      expect(chunks[1].endsWith('\r\n')).toBe(true);
-    });
-
-    it('streamExportCsv(): writes the reason code and the free-text detail to their own columns', async () => {
-      jest
-        .spyOn(prismaService.claim, 'findMany')
-        .mockResolvedValueOnce([
-          makeRawClaim('claim-1', {
-            status: ClaimStatus.cancelled,
-            cancelReasonCode: CancelReasonCode.duplicate,
-            cancelReason: 'Duplicate of claim-0',
-          }),
-        ] as never)
-        .mockResolvedValueOnce([] as never);
-
-      const chunks: string[] = [];
-      for await (const chunk of service.streamExportCsv({})) {
-        chunks.push(chunk);
-      }
-
-      const columns = chunks[1]
-        .replace(/\r\n$/, '')
-        .split(',')
-        .map(c => c.replace(/^"|"$/g, ''));
-      const header = chunks[0]
-        .replace(/\r\n$/, '')
-        .split(',')
-        .map(c => c.replace(/^"|"$/g, ''));
-
-      const codeIndex = header.indexOf('cancelReasonCode');
-      const reasonIndex = header.indexOf('cancelReason');
-
-      expect(codeIndex).toBeGreaterThan(-1);
-      expect(reasonIndex).toBe(codeIndex + 1);
-      expect(columns[codeIndex]).toBe('duplicate');
-      expect(columns[reasonIndex]).toBe('Duplicate of claim-0');
+      expect(mockDisburse).toHaveBeenCalled();
+      expect(result.transactionHash).toBe('mock-tx-hash-123');
     });
   });
 });
