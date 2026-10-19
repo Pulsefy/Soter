@@ -1,6 +1,49 @@
-import { IsString, IsOptional, IsNumber, IsArray, Min } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsArray,
+  Min,
+  IsInt,
+  IsNotEmpty,
+  Matches,
+  ArrayNotEmpty,
+  ArrayUnique,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+
+/** Complete replacement configuration for the AidEscrow contract. */
+export class UpdateAidEscrowConfigDto {
+  @ApiProperty({ description: 'Minimum package amount in stroops', example: '1000000' })
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^[1-9]\d*$/)
+  minAmount: string;
+
+  @ApiProperty({ description: 'Maximum package lifetime in seconds', example: 2592000 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  maxExpiresIn: number;
+
+  @ApiProperty({
+    description: 'Complete set of allowed token contract addresses',
+    example: ['CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4'],
+  })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsString({ each: true })
+  @Matches(/^C[A-Z2-7]{55}$/, { each: true })
+  allowedTokens: string[];
+
+  @ApiProperty({ description: 'Per-recipient claim cooldown in seconds', example: 3600 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  claimCooldown: number;
+}
 
 /**
  * DTO for creating a single aid package

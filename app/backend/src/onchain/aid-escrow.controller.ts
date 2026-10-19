@@ -9,6 +9,7 @@ import {
   HttpStatus,
   Req,
   Query,
+  Put,
   Logger,
 } from '@nestjs/common';
 import { Request } from 'express';
@@ -30,6 +31,7 @@ import {
   DryRunAidPackageResultDto,
   ExtendAidPackageExpiryDto,
   SetDelegateDto,
+  UpdateAidEscrowConfigDto,
 } from './dto/aid-escrow.dto';
 import { CONTRACT_ERROR_CATALOG } from './utils/contract-error-catalog';
 import { Roles } from '../auth/roles.decorator';
@@ -68,6 +70,27 @@ export class AidEscrowController {
     private readonly aidEscrowService: AidEscrowService,
     private readonly eventCorrelationService: SorobanEventCorrelationService,
   ) {}
+
+  @Put('config')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update AidEscrow contract configuration (admin only)',
+    description:
+      'Validates a complete replacement configuration, submits set_config, and records the before and after values in the audit log.',
+  })
+  @ApiOkResponse({ description: 'Contract configuration updated.' })
+  @ApiBadRequestResponse({ description: 'Configuration is incomplete or invalid.' })
+  async updateConfig(
+    @Body() dto: UpdateAidEscrowConfigDto,
+    @Req() req: Request,
+  ) {
+    const user = req.user as { id?: string } | undefined;
+    if (!user?.id) {
+      throw new AppException(ERROR_CODES.UNAUTHORIZED, 401, 'Unauthorized');
+    }
+    return this.aidEscrowService.updateConfig(dto, user.id);
+  }
 
   /**
    * Create a single aid package
