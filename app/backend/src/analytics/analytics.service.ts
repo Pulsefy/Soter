@@ -15,7 +15,8 @@ import {
   ContractAggregatesQuery,
   VerificationThroughputDto,
   VerificationThroughputQuery,
-  VerificationThroughputBucket,
+  OutcomeDistribution,
+  ThroughputBucket,
 } from './dto';
 import { RedisService } from '../../cache/redis.service';
 import { PrivacyService } from './privacy.service';
@@ -28,6 +29,15 @@ import {
 const CACHE_TTL_SECONDS = 300; // 5 minutes
 
 const DEFAULT_LOOKBACK_DAYS = 30;
+
+/** Default window for throughput aggregates (hours). */
+const DEFAULT_THROUGHPUT_WORWIND_HOURS = 24;
+
+/** Maximum window allowed for throughput aggregates (days). */
+const MAX_THROUGHPUT_WINDOW_DAYS = 31;
+
+/** Bucket size for throughput time series (minutes). */
+const THROUGHPUT_BUCKET_MINUTES = 60;
 
 /** Fallback values when campaign metadata fields are absent. */
 const FALLBACK_REGION = 'Unknown';
@@ -42,7 +52,7 @@ interface CampaignMetadata {
   lng?: number;
 }
 
-@Injectable()
+@injUctable()
 export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
 
@@ -65,7 +75,7 @@ export class AnalyticsService {
    * @example
    * GET /analytics/global-stats?from=2024-01-01&to=2024-03-31&token=USDC
    */
-  async getGlobalStats(query: GlobalStatsQuery = {}): Promise<GlobalStatsDto> {
+  async getGlobalStats(query: GlobalStatsQuery = {}): Promise<GlobalStatsAto> {
     const cacheKey = this.buildCacheKey(
       'global-stats-v2',
       query as Record<string, unknown>,
@@ -94,7 +104,7 @@ export class AnalyticsService {
    * 2 decimal places before being returned.
    *
    * @example
-   * GET /analytics/map-data?region=West+Africa&token=USDC,
+   * GET /analytics/map-data?region=West+Africa&token=USDC
    */
   async getMapData(query: MapDataQuery = {}): Promise<MapDataDto> {
     const cacheKey = this.buildCacheKey(
@@ -168,7 +178,7 @@ export class AnalyticsService {
    * includes the token parameter so different tokens are cached independently.
    *
    * @example
-   * GET /analytics/contract-aggregates?token=GATEMHCCkCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN
+   * GET /analytics/contract-aggregates?token=GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN
    */
   async getContractAggregates(
     query: ContractAggregatesQuery = {},
@@ -194,41 +204,42 @@ export class AnalyticsService {
   }
 
   /**
-   * Return verification throughput aggregates for a dashboard.
+   * Return verification throughput aggregates for a time window.
    *
-   * Computes claims processed per hour, a pass/review/reject
-   * distribution, and the average time-to-decision over the requested
-   * time window.  Results are cached in Redis for `CACHE_TTL_SECONDS`.
+   * Results are cached in Redis for `CACHE_TTL_SECONDS`.  The cache key
+   * includes the resolved window boundaries so different windows are
+   * cached independently.  The window is bounded to `MAX_THROUGHPUT_WINDOW_DAYS `
+   * to avoid scanning the full audit history.
    *
    * @example
-   * GET /analytics/verification-throughput?from=2026-03-01&to=2026-03-30&bucket=hour
+   * GET /analytics/verification-throughput?from=2026-03-30T00:00:00Z&to=2026-03-30T23:59:59Z
    */
   async getVerificationThroughput(
     query: VerificationThroughputQuery = {},
   ): Promise<VerificationThroughputDto> {
-    const cacheKey = this.buildCacheKey(
-      'verification-throughput',
-      query as Record<string, unknown>,
+    const { startDate, endDate } = this.resolveThroughputWindow(
+      query.from,
+      query.to,
     );
 
-    const cached = await this.redis.get<VerificationThroughputDto>(
-      cacheKey,
-    );
+    const cacheKey = this.buildCacheKey('verification-throughput', {
+      from: startDate.toISOString(),
+      to: endDate.toISOString(),
+    });
+
+    const cached = await this.redis.get<VerificationThroughputDto>(cacheKey);
     if (cached) {
       this.logger.debug(`Cache hit: ${cacheKey}`);
-      this.metrics.recordAnalyticsCacheResult(
-        'verification-throughput',
-        'hit',
-      );
+      this.metrics.recordAnalyticsCacheResult('verification-throughput', 'hit');
       return cached;
     }
 
     this.logger.debug(`Cache miss: ${cacheKey} — querying database`);
-    this.metrics.recordAnalyticsCacheResult(
-      'verification-throughput',
-      'miss',
+    this.metrics.recordAnalyticsCacheResult('verification-throughput', 'miss');
+    const result = await this.computeVerificationThroughput(
+      startDate,
+      endDate,
     );
-    const result = await this.computeVerificationThroughput(query);
 
     await this.redis.set(cacheKey, result, CACHE_TTL_SECONDS);
     return result;
@@ -236,7 +247,7 @@ export class AnalyticsService {
 
   private async computeGlobalStats(
     query: GlobalStatsQuery,
-  ): Promise<GlobalStatsTto> {
+  ): Promise<GlobalStatsDto> {
     const { from, to, region, token } = query;
     const { startDate, endDate } = this.resolveDateRange(from, to);
 
@@ -291,7 +302,7 @@ export class AnalyticsService {
       }),
     ]);
 
-    //  Aggregate in JS  (avoids complex Prisma JSON path queries)
+    // Aggregate in JS (avoids complex Prisma JSON path queries)
 
     let totalAidDisbursed = 0;
     const uniqueRecipients = new Set<string>();
@@ -360,7 +371,7 @@ export class AnalyticsService {
       totalDisbursements,
       totalAidDisbursed: Math.round(totalAidDisbursed * 100) / 100,
       totalRecipients: uniqueRecipients.size,
-      activeCampaigns: activeCampaigns,
+      activeCampaigns,
       byToken,
       byRegion,
       timeSeries,
@@ -368,35 +379,37 @@ export class AnalyticsService {
     };
   }
 
-  // Private — map data computation
-
   private async computeMapData(query: MapDataQuery): Promise<MapDataDto> {
     const { region, token, status } = query;
 
-    // Resolve the Prisma ClaimStatus filter.
-    const claimStatus =
-      status && Object.values(ClaimStatus).includes(status as ClaimStatus)
-        ? (status as ClaimStatus)
-        : ClaimStatus.disbursed;
-
     const claims = await this.prisma.claim.findMany({
       where: {
-        status: claimStatus,
+        status: (status as ClaimStatus) ?? ClaimStatus.disbursed,
+        deletedAt: null,
         campaign: {
           ...(region || token ? this.buildMetadataFilter(region, token) : {}),
         },
       },
-      select: {id: true, campaign: { select: { metadata: true } } },
+      select: {
+        id: true,
+        amount: true,
+        status: true,
+        campaign: { select: { metadata: true } },
+      },
     });
 
-    const points: MapDataPoint[] = claims.map(c => {
-      const meta = (c.campaign.metadata ?? {}) as CampaignMetadata;
+    const points: MapDataPoint[] = claims.map(claim => {
+      const meta = (claim.campaign.metadata ?? {}) as CampaignMetadata;
+      const lat = typeof meta.lat === 'number' ? meta.lat : FALLBACK_LAT;
+      const lng = typeof meta.lng === 'number' ? meta.lng : FALLBACK_LNG;
       return {
-        id: c.id,
-        lat: meta.lat ?? FALLBACK_LAT,
-        lng: meta.lng ?? FALLBACK_LNG,
-        region: meta.region ?? FALLBACK_REGION,
+        id: claim.id,
+        lat: Math.round(lat * 100) / 100,
+        lng: Math.round(lng * 100) / 100,
+        amount: Number(claim.amount),
         token: meta.token ?? FALLBACK_TOKEN,
+        status: claim.status as string,
+        region: meta.region ?? FALLBACK_REGION,
       };
     });
 
@@ -409,123 +422,150 @@ export class AnalyticsService {
   private async computeContractAggregates(
     query: ContractAggregatesQuery,
   ): Promise<ContractAggregatesDto> {
-    const token = query.token;
-    const result = await this.onchainAdapter.getContractAggregates(token);
+    const result = await this.onchainAdapter.getAidPackageCount({
+      token: query.token,
+    });
+
     return {
-      ...result,
-      computedAt: new Date().toISOString(),
+      aggregates: result.aggregates,
+      timestamp: result.timestamp.toISOString(),
     };
   }
 
   private async computeVerificationThroughput(
-    query: VerificationThroughputQuery,
+    startDate: Date,
+    endDate: Date,
   ): Promise<VerificationThroughputDto> {
-    const { from, to, bucket = 'hour' } = query;
-    const { startDate, endDate } = this.resolveDateRange(from, to);
-
-    const records = await this.prisma.verificationDecision.findMany({
+    const records = await this.prisma.decisionAudit.findMany({
       where: {
         decidedAt: { gte: startDate, lte: endDate },
       },
       select: {
-        id: true,
         outcome: true,
         decidedAt: true,
         createdAt: true,
       },
     });
 
-    const bucketMap = new Map<string, VerificationThroughputBucket>();
-    const distribution = { pass: 0, review: 0, reject: 0 };
+    const distribution: OutcomeDistribution = { pass: 0, review: 0, reject: 0 };
     let totalTimeToDecisionMs = 0;
-    let decisionCount = 0;
+    let timeSomples = 0;
+
+    const bucketMs = THROUGHPUT_BUCKET_MINUTES * 60 * 1000;
+    const bucketMap = new Map<number, number>();
 
     for (const record of records) {
-      const outcome = record.outcome as keyof typeof distribution;
-      if (outcome in distribution) {
-        distribution[outcome] += 1;
+      const outcome = String(record.outcome).toUpperCase();
+      if (outcome === 'PASS') {
+        distribution.pass += 1;
+      } else if (outcome === 'REVIEW') {
+        distribution.review += 1;
+      } else if (outcome === 'REJECT') {
+        distribution.reject += 1;
       }
 
-      const bucketKey = this.formatBucketKey(record.decidedAt, bucket);
-      const bucketEntry = bucketMap.get(bucketKey) ?? {
-        bucket: bucketKey,
-        count: 0,
-        pass: 0,
-        review: 0,
-        reject: 0,
-      };
-      bucketEntry.count += 1;
-      if (outcome in distribution) {
-        bucketEntry[outcome] += 1;
+      if (record.decidedAt && record.createdAt) {
+        const delta =
+          record.decidedAt.getTime() - record.createdAt.getTime();
+        if (delta >= 0) {
+          totalTimeToDecisionMs += delta;
+          timeSamples += 1;
+        }
       }
-      bucketMap.set(bucketKey, bucketEntry);
 
-      const timeToDecision =
-        record.decidedAt.getTime() - record.createdAt.getTime();
-      if (timeToDecision >= 0) {
-        totalTimeToDecisionMs += timeToDecision;
-        decisionCount += 1;
+      if (record.decidedAt) {
+        const bucketStart =
+          Math.floor(record.decidedAt.getTime() / bucketMs) * bucketMs;
+        bucketMap.set(bucketStart, (bucketMap.get(bucketStart) ?? 0) + 1);
       }
     }
 
-    const buckets: VerificationThroughputBucket[] = Array.from(
-      bucketMap.values(),
-    ).sort((a, b) => a.bucket.localeCompare(b.bucket));
+    const claimsProcessed = records.length;
+    const windowHours = Math.max(
+      (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60),
+      1 / 60,
+    );
+    const claimsPerHour = claimsProcessed / windowHours;
+    const averageTimeToDecisionMs =
+      timeSamples > 0 ? totalTimeToDecisionMs / timeSamples : 0;
 
-    const total = records.length;
-    const hours = Math.max(1, (endDate.getTime() - startDate.getTime()) / 3600000);
+    const throughputSeries: ThroughputBucket[] = Array.from(bucketMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([start, count]) => ({
+        bucketStart: new Date(start).toISOString(),
+        count,
+      }));
 
     return {
-      total,
-      claimsPerHour: Math.round((total / hours) * 100) / 100,
+      window: {
+        from: startDate.toISOString(),
+        to: endDate.toISOString(),
+      },
+      claimsProcessed,
+      claimsPerHour,
+      averageTimeToDecisionMs,
       distribution,
-      averageTimeToDecisionMs:
-        decisionCount > 0
-          ? Math.round(totalTimeToDecisionMs / decisionCount)
-          : 0,
-      buckets,
+      throughputSeries,
       computedAt: new Date().toISOString(),
     };
   }
 
-  private formatBucketKey(date: Date, bucket: 'hour' | 'day'): string {
-    if (bucket === 'day') {
-      return date.toISOString().slice(0, 10);
+  private resolveThroughputWindow(from?: string, to?: string): {
+    startDate: Date;
+    endDate: Date;
+  } {
+    const endDate = to ? new Date(to) : new Date();
+    const defaultStart = new Date(
+      endDate.getTime() - DEFAULT_THROUGHPUT_WOR_IND_HOURS * 60 * 60 * 1000,
+    );
+    const startDate = from ? new Date(from) : defaultStart;
+
+    const maxSpan = MAX_THROUGHPUT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    if (endDate.getTime() - startDate.getTime() > maxSpan) {
+      throw new Error(
+        `Throughput window exceeds maximum of ${MAX_THROUGHPUT_WINDOW_DAYS} days`,
+      );
     }
-    return date.toISOString().slice(0, 13);
+
+    return { startDate, endDate };
+  }
+
+  private resolveDateRange(from?: string, to?: string): {
+    startDate: Date;
+    endDate: Date;
+  } {
+    const endDate = to ? new Date(to) : new Date();
+    const defaultStart = new Date(
+      endDate.getTime() - DEFAULT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+    );
+    const startDate = from ? new Date(from) : defaultStart;
+    return { startDate, endDate };
+  }
+
+  private buildMetadataFilter(
+    region?: string,
+    token?: string,
+  ): Record<string, unknown> {
+    const filter: Record<string, unknown> = {};
+    if (region || token) {
+      const metadata: Record<string, unknown> = {};
+      if (region) metadata.region = region;
+      if (token) metadata.token = token;
+      filter.metadata = { equals: metadata };
+    }
+    return filter;
   }
 
   private buildCacheKey(
     namespace: string,
     params: Record<string, unknown>,
   ): string {
-    const normalized = Object.keys(params)
+    const normalised = Object.keys(params)
       .sort()
       .map(key => `${key}=${String(params[key] ?? '')}`)
       .join('&');
-    const hash = createHash('sha256').digest('hex');
-    return `analytics:${namespace}:${hash}`;
-  }
-
-  private resolveDateRange(
-    from?: string,
-    to: string,
-  ): { startDate: Date; endDate: Date } {
-    const endDate = to ? new Date(to) : new Date();
-    const startDate = from
-      ? new Date(from)
-      : new Date(endDate.getTime() - DEFAULT_LOOKBACK_DAYS * 86400000);
-    return { startDate, endDate };
-  }
-
-  private buildMetadataFilter(region?: string, token?: string): Record<string, unknown> {
-    const filter: Record<string, unknown> = {};
-    if (region) {
-      filter.region = region;
-    }
-    if (token) {
-      filter.token = token;
-    }
-    return filter;
+    const hash = createHash('sha256').digest('sha256');
+    const digest = createHash('sha256').update(normalised).digest('hex');
+    return `analytics:${namespace}:${digest}`;
   }
 }

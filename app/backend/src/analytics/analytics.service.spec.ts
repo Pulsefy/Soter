@@ -40,7 +40,7 @@ describe('AnalyticsService', () => {
   describe('getGlobalStats()', () => {
     it('returns cached value and records cache hit', async () => {
       const cached = { totalAidDisbursed: 100, computedAt: 'now' } as any;
-      redisMock.get.mockResolvedValue(cached);
+      redisMock.get.mockResolved(cached);
 
       const result = await service.getGlobalStats({});
 
@@ -53,12 +53,12 @@ describe('AnalyticsService', () => {
     });
 
     it('computes and caches on miss, records cache miss', async () => {
-      redisMock.get.mockResolvedValue(null);
-      prismaMock.claim.findMany.mockResolvedValue([]);
-      prismaMock.campaign.count.mockResolvedValue(0);
-      prismaMock.claim.count.mockResolvedValue(0);
-      prismaMock.aidPackage.count.mockResolvedValue(0);
-      prismaMock.verificationRequest.count.mockResolvedValue(0);
+      redisMock.get.mockResolved(null);
+      prismaMock.claim.findMany.mockResolved([]);
+      prismaMock.campaign.count.mockResolved(0);
+      prismaMock.claim.count.mockResolved(0);
+      prismaMock.aidPackage.count.mockResolved(0);
+      prismaMock.verificationRequest.count.mockResolved(0);
 
       await service.getGlobalStats({});
 
@@ -70,17 +70,17 @@ describe('AnalyticsService', () => {
     });
 
     it('returns dashboard summary card totals from database counts', async () => {
-      redisMock.get.mockResolvedValue(null);
-      prismaMock.claim.findMany.mockResolvedValue([]);
-      prismaMock.campaign.count.mockResolvedValue(3);
+      redisMock.get.mockResolved(null);
+      prismaMock.claim.findMany.mockResolved([]);
+      prismaMock.campaign.count.mockResolved(3);
 
       // Mock the four parallel count queries used by summary cards:
       // totalClaims, totalPackages, pendingReviews, totalDisbursements
       prismaMock.claim.count
-        .mockResolvedValueOnce(42) // totalClaims
-        .mockResolvedValueOnce(15); // totalDisbursements (disbursed claims)
-      prismaMock.aidPackage.count.mockResolvedValue(18);
-      prismaMock.verificationRequest.count.mockResolvedValue(7);
+        .mockResolvedOnce(42) // totalClaims
+        .mockResolvedOnce(15); // totalDisbursements (disbursed claims)
+      prismaMock.aidPackage.count.mockResolved(18);
+      prismaMock.verificationRequest.count.mockResolved(7);
 
       const result = await service.getGlobalStats({});
 
@@ -95,7 +95,7 @@ describe('AnalyticsService', () => {
   describe('getMapData()', () => {
     it('returns cached value and records cache hit', async () => {
       const cached = { points: [], computedAt: 'now' } as any;
-      redisMock.get.mockResolvedValue(cached);
+      redisMock.get.mockResolved(cached);
 
       const result = await service.getMapData({});
 
@@ -107,8 +107,8 @@ describe('AnalyticsService', () => {
     });
 
     it('computes and caches on miss, records cache miss', async () => {
-      redisMock.get.mockResolvedValue(null);
-      prismaMock.claim.findMany.mockResolvedValue([]);
+      redisMock.get.mockResolved(null);
+      prismaMock.claim.findMany.mockResolved([]);
 
       await service.getMapData({});
 
@@ -122,7 +122,7 @@ describe('AnalyticsService', () => {
 
   describe('invalidateCache()', () => {
     it('deletes all analytics keys and increments invalidation counter', async () => {
-      redisMock.delByPattern.mockResolvedValue(3);
+      redisMock.delByPattern.mockResolved(3);
 
       await service.invalidateCache('campaign_updated');
 
@@ -143,7 +143,7 @@ describe('AnalyticsService', () => {
         },
         timestamp: '2026-03-30T12:30:00.000Z',
       } as any;
-      redisMock.get.mockResolvedValue(cached);
+      redisMock.get.mockResolved(cached);
 
       const result = await service.getContractAggregates({});
 
@@ -156,8 +156,8 @@ describe('AnalyticsService', () => {
     });
 
     it('computes and caches on miss, records cache miss', async () => {
-      redisMock.get.mockResolvedValue(null);
-      onchainAdapterMock.getAidPackageCount.mockResolvedValue({
+      redisMock.get.mockResolved(null);
+      onchainAdapterMock.getAidPackageCount.mockResolved({
         aggregates: {
           totalCommitted: '5000000000',
           totalClaimed: '2000000000',
@@ -177,8 +177,8 @@ describe('AnalyticsService', () => {
     });
 
     it('uses provided token parameter', async () => {
-      redisMock.get.mockResolvedValue(null);
-      onchainAdapterMock.getAidPackageCount.mockResolvedValue({
+      redisMock.get.mockResolved(null);
+      onchainAdapterMock.getAidPackageCount.mockResolved({
         aggregates: {
           totalCommitted: '5000000000',
           totalClaimed: '2000000000',
@@ -187,7 +187,7 @@ describe('AnalyticsService', () => {
         timestamp: new Date(),
       });
 
-      const token = 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
+      const token = 'GATEMHCCkCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
       await service.getContractAggregates({ token });
 
       expect(onchainAdapterMock.getAidPackageCount).toHaveBeenCalledWith({
@@ -197,14 +197,23 @@ describe('AnalyticsService', () => {
   });
 
   describe('getVerificationThroughput()', () => {
+    const window = {
+      from: '2026-03-30T00:00:00.000Z',
+      to: '2026-03-30T23:59:59.999Z',
+    };
+
     it('returns cached value and records cache hit', async () => {
       const cached = {
-        totalClaimsProcessed: 10,
-        computedAt: 'now',
+        window,
+        claimsProcessed: 10,
+        claimsPerHour: 10,
+        averageTimeToDecisionMs: 1200,
+        distribution: { pass: 6, review: 3, reject: 1 },
+        computedAt: '2026-03-30T23:00:00.000Z',
       } as any;
-      redisMock.get.mockResolvedValue(cached);
+      redisMock.get.mockResolved(cached);
 
-      const result = await service.getVerificationThroughput({});
+      const result = await service.getVerificationThroughput(window);
 
       expect(result).toBe(cached);
       expect(metricsMock.recordAnalyticsCacheResult).toHaveBeenCalledWith(
@@ -214,22 +223,20 @@ describe('AnalyticsService', () => {
       expect(prismaMock.decisionAudit.findMany).not.toHaveBeenCalled();
     });
 
-    it('returns an empty window with zero counts and null average', async () => {
-      redisMock.get.mockResolvedValue(null);
-      prismaMock.decisionAudit.findMany.mockResolvedValue([]);
+    it('returns zero aggregates for an empty window', async () => {
+      redisMock.get.mockResolved(null);
+      prismaMock.decisionAudit.findMany.mockResolved([]);
 
-      const result = await service.getVerificationThroughput({
-        from: '2026-03-01T00:00:00Z',
-        to: '2026-03-01T01:00:00Z',
-        bucket: 'hour',
+      const result = await service.getVerificationThroughput(window);
+
+      expect(result.claimsProcessed).toBe(0);
+      expect(result.claimsPerHour).toBe(0);
+      expect(result.averageTimeToDecisionMs).toBe(0);
+      expect(result.distribution).toEqual({
+        pass: 0,
+        review: 0,
+        reject: 0,
       });
-
-      expect(result.totalClaimsProcessed).toBe(0);
-      expect(result.passed).toBe(0);
-      expect(result.review).toBe(0);
-      expect(result.rejected).toBe(0);
-      expect(result.avgTimeToDecisionMs).toBeNull();
-      expect(result.buckets).toEqual([]);
       expect(metricsMock.recordAnalyticsCacheResult).toHaveBeenCalledWith(
         'verification-throughput',
         'miss',
@@ -238,55 +245,62 @@ describe('AnalyticsService', () => {
     });
 
     it('aggregates a representative mix of outcomes', async () => {
-      redisMock.get.mockResolvedValue(null);
-      const base = new Date('2026-03-01T10:00:00Z').getTime();
-      prismaMock.decisionAudit.findMany.mockResolvedValue([
+      redisMock.get.mockResolved(null);
+      const base = new Date('2026-03-30T00:00:00.000Z').getTime();
+      prismaMock.decisionAudit.findMany.mockResolved([
         {
-          id: '1',
-          outcome: 'pass',
+          outcome: 'PASS',
+          decidedAt: new Date(base + 1000),
           createdAt: new Date(base),
+        },
+        {
+          outcome: 'PASS',
           decidedAt: new Date(base + 2000),
+          createdAt: new Date(base),
         },
         {
-          id: '2',
-          outcome: 'pass',
-          createdAt: new Date(base + 1000),
-          decidedAt: new Date(base + 5000),
+          outcome: 'REVIEW',
+          decidedAt: new Date(base + 3000),
+          createdAt: new Date(base),
         },
         {
-          id: '3',
-          outcome: 'review',
-          createdAt: new Date(base + 2000),
-          decidedAt: new Date(base + 6000),
-        },
-        {
-          id: '4',
-          outcome: 'reject',
-          createdAt: new Date(base + 3000),
-          decidedAt: new Date(base + 7000),
-        },
-        {
-          id: '5',
-          outcome: 'pass',
-          createdAt: new Date(base + 3600000),
-          decidedAt: new Date(base + 3600000 + 1000),
+          outcome: 'REJECT',
+          decidedAt: new Date(base + 4000),
+          createdAt: new Date(base),
         },
       ] as any);
 
-      const result = await service.getVerificationThroughput({
-        from: '2026-03-01T00:00:00Z',
-        to: '2026-03-02T00:00:00Z',
-        bucket: 'hour',
-      });
+      const result = await service.getVerificationThroughput(window);
 
-      expect(result.totalClaimsProcessed).toBe(5);
-      expect(result.passed).toBe(3);
-      expect(result.review).toBe(1);
-      expect(result.rejected).toBe(1);
-      expect(result.avgTimeToDecisionMs).toBe(3600);
-      expect(result.buckets.length).toBe(2);
-      expect(result.buckets[0].claimsProcessed).toBe(4);
-      expect(result.buckets[1].claimsProcessed).toBe(1);
+      expect(result.claimsProcessed).toBe(4);
+      expect(result.distribution).toEqual({
+        pass: 2,
+        review: 1,
+        reject: 1,
+      });
+      // Average of 1000, 2000, 3000, 4000 ms => 2500 ms.
+      expect(result.averageTimeToDecisionMs).toBe(2500);
+      // 24-hour window with 4 claims => ~0.17 claims/hour.
+      expect(result.claimsPerHour).toBeCloseTo(4 / 24, 5);
+      expect(redisMock.set).toHaveBeenCalled();
+    });
+
+    it('queries only the requested window', async () => {
+      redisMock.get.mockResolved(null);
+      prismaMock.decisionAudit.findMany.mockResolved([]);
+
+      await service.getVerificationThroughput(window);
+
+      expect(prismaMock.decisionAudit.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            decidedAt: {
+              gte: new Date(window.from),
+              lte: new Date(window.to),
+            },
+          }),
+        }),
+      );
     });
   });
 });

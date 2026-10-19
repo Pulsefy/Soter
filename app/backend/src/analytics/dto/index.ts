@@ -123,7 +123,7 @@ export class GlobalStatsQuery {
   from?: string;
 
   @ApiPropertyOptional({ example: '2026-03-30' })
-  to?: string;
+  to: string;
 
   @ApiPropertyOptional({ example: 'Lagos' })
   region?: string;
@@ -156,7 +156,7 @@ export class AidPackageAggregatesDto {
 
 export class TokenAggregatesDto {
   @ApiProperty({
-    example: 'GATEMHCCkCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+    example: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
   })
   tokenAddress: string;
 
@@ -177,82 +177,65 @@ export class ContractAggregatesDto {
 
 export class ContractAggregatesQuery {
   @ApiPropertyOptional({
-    example: 'GATEMHCCkCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+    example: 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
   })
   token?: string;
 }
 
-export class VerificationThroughputQuery {
-  @ApiPropertyOptional({ example: '2026-01-01' })
-  from?: string;
+export class OutcomeDistribution {
+  @ApiProperty({ example: 60 })
+  pass: number;
 
-  @ApiPropertyOptional({ example: '2026-03-30' })
-  to?: string;
-
-  @ApiProperty({ example: 'hour', enum: ['hour', 'day'], default: 'hour' })
-  bucket: 'hour' | 'day' = 'hour';
-}
-
-export class VerificationThroughputBucket {
-  @ApiProperty({ example: '2026-03-30T10:00:00Z' })
-  bucketStart: string;
-
-  @ApiProperty({ example: 120 })
-  claimsProcessed: number;
-
-  @ApiProperty({ example: 100 })
-  passed: number;
-
-  @ApiProperty({ example: 15 })
+  @ApiProperty({ example: 25 })
   review: number;
 
-  @ApiProperty({ example: 5 })
-  rejected: number;
+  @ApiProperty({ example: 15 })
+  reject: number;
+}
 
-  @ApiProperty({ example: 4200, nullable: true })
-  avgTimeToDecisionMs: number | null;
+export class ThroughputBucket {
+  @ApiProperty({ example: '2026-03-30T09:00:00Z' })
+  bucketStart: string;
+
+  @ApiProperty({ example: 12 })
+  count: number;
+}
+
+export class ThroughputWindow {
+  @ApiProperty({ example: '2026-03-30T00:00:00.000Z' })
+  from: string;
+
+  @ApiProperty({ example: '2026-03-30T23:59:59.999Z' })
+  to: string;
 }
 
 export class VerificationThroughputDto {
-  @ApiProperty({ example: '2026-03-01T00:00:00Z' })
-  windowFrom: string;
-
-  @ApiProperty({ example: '2026-03-30T23:59:59Z' })
-  windowTo: string;
-
-  @ApiProperty({ example: 'hour' })
-  bucket: 'hour' | 'day';
-
-  @ApiProperty({ example: 2400 })
-  totalClaimsProcessed: number;
-
-  @ApiProperty({ example: 100.5 })
-  claimsPerHour: number;
-
-  @ApiProperty({ example: 2000 })
-  passed: number;
-
-  @ApiProperty({ example: 300 })
-  review: number;
+  @ApiProperty({ type: ThroughputWindow })
+  window: ThroughputWindow;
 
   @ApiProperty({ example: 100 })
-  rejected: number;
+  claimsProcessed: number;
 
-  @ApiProperty({ example: 0.8333 })
-  passRate: number;
+  @ApiProperty({ example: 100 })
+  claimsPerHour: number;
 
-  @ApiProperty({ example: 0.125 })
-  reviewRate: number;
+  @ApiProperty({ example: 42.5 })
+  averageTimeToDecisionMs: number;
 
-  @ApiProperty({ example: 0.0417 })
-  rejectRate: number;
+  @ApiProperty({ type: OutcomeDistribution })
+  distribution: OutcomeDistribution;
 
-  @ApiProperty({ example: 4200, nullable: true })
-  avgTimeToDecisionMs: number | null;
-
-  @ApiProperty({ type: [VerificationThroughputBucket] })
-  buckets: VerificationThroughputBucket[];
+  @ApiProperty({ type: [ThroughputBucket] })
+  throughputSeries: ThroughputBucket[];
 
   @ApiProperty({ example: '2026-03-30T10:00:00Z' })
   computedAt: string;
+}
+
+export class VerificationThroughputQuery {
+  @ApiPropertyOptional({ example: '2026-03-30T00:00:00Z' })
+  from?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-30T23:59:59Z' })
+  to: string;
 }

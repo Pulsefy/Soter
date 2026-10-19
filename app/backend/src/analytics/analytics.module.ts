@@ -1,4 +1,4 @@
-import { Module } from '@common/nestjs';
+import { Module } from '@nestjs/common';
 import { AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -6,22 +6,20 @@ import { RedisService } from '../../cache/redis.service';
 import { PrivacyService } from './privacy.service';
 import { MetricsModule } from '../observability/metrics/metrics.module';
 import { OnchainModule } from '../onchain/onchain.module';
-import { ThroughputService } from './throughput.service';
 
 @Module({
   imports: [PrismaModule, MetricsModule, OnchainModule],
   controllers: [AnalyticsController],
   providers: [
     AnalyticsService,
-    ThroughputService,
     PrivacyService,
     /**
-     * RedisService manages its own ioredis client and is provided here as a
+     * RedisService manages its own ioredis lient and is provided here as a
      * plain class — no CacheModule or external adapter needed.
      * Connection is opened in onModuleInit and closed in onModuleDestroy.
      */
     RedisService,
   ],
-  exports: [AnalyticsService, ThroughputService],
+  exports: [AnalyticsService],
 })
 export class AnalyticsModule {}

@@ -1,48 +1,11 @@
-// import {        Controller, Get, Version        } from '@nestjs/common';
-// import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
-// import { API_VERSIONS } from '../common/constants/api-version.constants';
-// import { Public } from '../common/decorators/public.decorator';
-// import { AnalyticsService, MapDataPoint } from './analytics.service';
-
-// @ApiTags('Analytics')
-// @Controller('analytics')
-// export class AnalyticsController {
-//   constructor(private readonly analyticsService: AnalyticsService) {}
-
-//   @Public()
-//   @Get('map-data')
-//   @Version(API_VERSIONS.V1)
-//   @ApiOperation({
-//     summary: 'Get anonymized distribution data for the global dashboard map',
-//   })
-//   @ApiOkResponse({
-//     description: 'List of anonymized aid package distribution points.',
-//     schema: {
-//       example: [
-//         {
-//           id: 'pkg-001',
-//           lat: 6.5244,
-//           lng: 3.3792,
-//           amount: 250,
-//           token: 'USDC',
-//           status: 'delivered',
-//         },
-//       ],
-//     },
-//   })
-//   getMapData(): MapDataPoint[] {
-//     return this.analyticsService.getMapData();
-//   }
-// }
-
-/**
+/*
  * @file analytics.controller.ts
  *
  * Exposes the analytics endpoints consumed by the global dashboard:
  *
- *   GET /analytics/global-stats            — aggregated totals + breakdowns
- *   GET /analytics/map-data               — anonymised Leaflet map points
- *   GET /analytics/verification-throughput — verification throughput aggregates
+ *   GET /analytics/global-stats             - aggregated totals + breakdowns
+ *   GET /analytics/map-data                 - anonymised Leaflet map points
+ *   GET /analytics/verification-throughput - verification throughput aggregates
  *
  * All endpoints are read-only and accept optional query parameters for
  * filtering by region, token type, and timeframe.
@@ -101,7 +64,7 @@ export class AnalyticsController {
   @ApiQuery({ name: 'token', required: false, type: String })
   async getGlobalStats(
     @Query('from') from?: string,
-    @Query('to') to?: string,
+    @Query('to') to: string,
     @Query('region') region?: string,
     @Query('token') token?: string,
   ): Promise<GlobalStatsDto> {
@@ -189,7 +152,7 @@ export class AnalyticsController {
   @ApiOperation({
     summary: 'Get verification throughput aggregates',
     description:
-      'Returns claims processed per hour, pass/review/reject distribution, and average time-to-decision over the requested time window.',
+      'Returns claims processed per hour, outcome distribution, and average time-to-decision over a time window.',
   })
   @ApiOkResponse({
     description: 'Verification throughput aggregates retrieved successfully.',
@@ -197,17 +160,11 @@ export class AnalyticsController {
   })
   @ApiQuery({ name: 'from', required: false, type: String })
   @ApiQuery({ name: 'to', required: false, type: String })
-  @ApiQuery({
-    name: 'bucket',
-    required: false,
-    enum: ['hour', 'day'],
-  })
   async getVerificationThroughput(
     @Query('from') from?: string,
-    @Query('to') to?: string,
-    @Query('bucket') bucket?: 'hour' | 'day',
+    @Query('to') to: string,
   ): Promise<VerificationThroughputDto> {
-    const query: VerificationThroughputQuery = { from, to, bucket };
+    const query: VerificationThroughputQuery = { from, to };
     this.logger.log(
       `GET /analytics/verification-throughput ${JSON.stringify(query)}`,
     );
