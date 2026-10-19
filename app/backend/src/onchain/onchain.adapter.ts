@@ -422,6 +422,30 @@ export interface GetDelegateHistoryResult {
   timestamp: Date;
 }
 
+export interface ListRecipientPackagesPagination {
+  cursor?: number;
+  limit?: number;
+}
+
+export interface ListRecipientPackagesParams {
+  recipient: string;
+  cursor?: number;
+  limit?: number;
+}
+
+export interface ListRecipientPackagesResult {
+  packageIds: string[];
+  cursor: number;
+  limit: number;
+  hasMore: boolean;
+  totalCount?: number;
+  timestamp: Date;
+}
+
+export interface GetRecipientPackageCountParams {
+  recipient: string;
+}
+
 /**
  * Interface for on-chain operations with Soroban AidEscrow contract
  */
@@ -608,4 +632,26 @@ export interface OnchainAdapter {
   getDelegateHistory(
     params: GetDelegateHistoryParams,
   ): Promise<GetDelegateHistoryResult>;
+
+  /**
+   * List package IDs assigned to a recipient, with pagination.
+   */
+  listRecipientPackages(
+    recipient: string,
+    pagination?: ListRecipientPackagesPagination,
+  ): Promise<ListRecipientPackagesResult>;
+  listRecipientPackages(
+    params: ListRecipientPackagesParams,
+  ): Promise<ListRecipientPackagesResult>;
+  listRecipientPackages(
+    recipientOrParams: string | ListRecipientPackagesParams,
+    pagination?: ListRecipientPackagesPagination,
+  ): Promise<ListRecipientPackagesResult>;
+
+  /**
+   * Returns the count of packages assigned to a recipient.
+   */
+  getRecipientPackageCount(
+    recipientOrParams: string | GetRecipientPackageCountParams,
+  ): Promise<number>;
 }

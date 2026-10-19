@@ -28,6 +28,7 @@ import {
   RevokeDelegateResult,
   GetDelegateResult,
   GetDelegateHistoryResult,
+  ListRecipientPackagesResult,
 } from './onchain.adapter';
 import { explorerTxUrl } from '../common/utils/explorer-url.util';
 
@@ -628,5 +629,34 @@ export class AidEscrowService {
   ): Promise<GetDelegateHistoryResult> {
     this.logger.debug('Getting delegate history:', { packageId });
     return this.onchainAdapter.getDelegateHistory({ packageId });
+  }
+
+  /**
+   * List package IDs assigned to a recipient, with pagination.
+   */
+  async listRecipientPackages(
+    recipientAddress: string,
+    cursor?: number,
+    limit?: number,
+  ): Promise<ListRecipientPackagesResult> {
+    this.logger.debug('Listing recipient packages:', {
+      recipient: recipientAddress,
+      cursor,
+      limit,
+    });
+    return this.onchainAdapter.listRecipientPackages(recipientAddress, {
+      cursor,
+      limit,
+    });
+  }
+
+  /**
+   * Get the total package count assigned to a recipient.
+   */
+  async getRecipientPackageCount(recipientAddress: string): Promise<number> {
+    this.logger.debug('Getting recipient package count:', {
+      recipient: recipientAddress,
+    });
+    return this.onchainAdapter.getRecipientPackageCount(recipientAddress);
   }
 }

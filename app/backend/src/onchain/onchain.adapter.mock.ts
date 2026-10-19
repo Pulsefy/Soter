@@ -54,6 +54,10 @@ import {
   GetDelegateHistoryParams,
   GetDelegateHistoryResult,
   DelegateHistoryEntry,
+  ListRecipientPackagesPagination,
+  ListRecipientPackagesParams,
+  ListRecipientPackagesResult,
+  GetRecipientPackageCountParams,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 import {
@@ -1037,6 +1041,87 @@ export class MockOnchainAdapter implements OnchainAdapter {
     return {
       packageId: params.packageId,
       history,
+      timestamp: new Date(),
+    };
+  }
+
+  async getRecipientPackageCount(
+    recipientOrParams: string | GetRecipientPackageCountParams,
+  ): Promise<number> {
+    await Promise.resolve();
+    const recipient =
+      typeof recipientOrParams === 'string'
+        ? recipientOrParams
+        : recipientOrParams.recipient ||
+          (recipientOrParams as any).recipientAddress ||
+          '';
+
+    let count = 0;
+    for (const pkg of this.mockPackages.values()) {
+      if (pkg.recipient === recipient) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  async listRecipientPackages(
+    recipientOrParams: string | ListRecipientPackagesParams,
+    pagination?: ListRecipientPackagesPagination,
+  ): Promise<ListRecipientPackagesResult> {
+    await Promise.resolve();
+    const recipient =
+      typeof recipientOrParams === 'string'
+        ? recipientOrParams
+        : recipientOrParams.recipient ||
+          (recipientOrParams as any).recipientAddress ||
+          '';
+
+    const rawCursor =
+      typeof recipientOrParams === 'object' &&
+      recipientOrParams.cursor !== undefined
+        ? recipientOrParams.cursor
+        : (pagination?.cursor ?? 0);
+
+    const rawLimit =
+      typeof recipientOrParams === 'object' &&
+      recipientOrParams.limit !== undefined
+        ? recipientOrParams.limit
+        : (pagination?.limit ?? 50);
+
+    const cursor = Math.max(0, rawCursor);
+    const limit = Math.min(Math.max(1, rawLimit), 50);
+
+    const matchingPackages: MockAidPackage[] = [];
+    for (const pkg of this.mockPackages.values()) {
+      if (pkg.recipient === recipient) {
+        matchingPackages.push(pkg);
+      }
+    }
+
+    const totalCount = matchingPackages.length;
+
+    if (cursor >= totalCount) {
+      return {
+        packageIds: [],
+        cursor,
+        limit,
+        hasMore: false,
+        totalCount,
+        timestamp: new Date(),
+      };
+    }
+
+    const page = matchingPackages.slice(cursor, cursor + limit);
+    const packageIds = page.map(p => p.id);
+    const hasMore = cursor + limit < totalCount;
+
+    return {
+      packageIds,
+      cursor,
+      limit,
+      hasMore,
+      totalCount,
       timestamp: new Date(),
     };
   }

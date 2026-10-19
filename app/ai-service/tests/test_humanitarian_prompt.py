@@ -148,6 +148,65 @@ class TestPromptRegistry:
         assert reg.get_active_version("humanitarian_primary") == "v1"
         assert reg.get_active_version("humanitarian_fallback") == "v1"
 
+    def test_validate_and_verify_active_versions_valid(self):
+        reg = create_default_prompt_registry()
+        errors = reg.validate_active_versions(
+            ["humanitarian_primary", "humanitarian_fallback"]
+        )
+        assert errors == []
+        # Does not raise
+        reg.verify_active_versions(["humanitarian_primary", "humanitarian_fallback"])
+
+    def test_validate_and_verify_active_versions_missing_prompt(self):
+        reg = PromptRegistry()
+        errors = reg.validate_active_versions(["missing_prompt"])
+        assert len(errors) == 1
+        assert "missing_prompt" in errors[0]
+        assert "not registered" in errors[0]
+
+        with pytest.raises(ValueError) as exc_info:
+            reg.verify_active_versions(["missing_prompt"])
+        assert "missing_prompt" in str(exc_info.value)
+
+    def test_validate_and_verify_active_versions_unset_active(self):
+        reg = PromptRegistry()
+        reg.register(CustomTestPrompt(name="test_prompt", version="v1"))
+        reg._active_versions.pop("test_prompt", None)
+
+        errors = reg.validate_active_versions(["test_prompt"])
+        assert len(errors) == 1
+        assert "test_prompt" in errors[0]
+        assert "no active version configured" in errors[0]
+
+        with pytest.raises(ValueError) as exc_info:
+            reg.verify_active_versions(["test_prompt"])
+        assert "test_prompt" in str(exc_info.value)
+
+    def test_validate_and_verify_active_versions_invalid_active(self):
+        reg = PromptRegistry()
+        reg.register(CustomTestPrompt(name="test_prompt", version="v1"))
+        reg._active_versions["test_prompt"] = "v_typo"
+
+        errors = reg.validate_active_versions(["test_prompt"])
+        assert len(errors) == 1
+        assert "test_prompt" in errors[0]
+        assert "v_typo" in errors[0]
+        assert "is not registered" in errors[0]
+
+        with pytest.raises(ValueError) as exc_info:
+            reg.verify_active_versions(["test_prompt"])
+        assert "test_prompt" in str(exc_info.value)
+        assert "v_typo" in str(exc_info.value)
+
+    def test_validate_active_versions_defaults_to_registered(self):
+        reg = PromptRegistry()
+        reg.register(CustomTestPrompt(name="test_prompt", version="v1"))
+        reg._active_versions["test_prompt"] = "bad"
+        errors = reg.validate_active_versions()
+        assert len(errors) == 1
+        assert "test_prompt" in errors[0]
+
+
 
 class TestHumanitarianPromptEngine:
     def setup_method(self):

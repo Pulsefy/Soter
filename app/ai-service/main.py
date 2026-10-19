@@ -120,6 +120,16 @@ async def lifespan(app: FastAPI):
     # reported together by validate_configuration().
     settings.validate_configuration()
 
+    # Verify that every expected prompt has a valid active version configured.
+    # A missing or typo'd active version will abort startup with a clear error.
+    from services.prompt_registry import KNOWN_PROMPT_NAMES
+    from services.humanitarian_prompt import default_prompt_registry
+
+    prompt_reg = getattr(
+        humanitarian_verification_service, "prompt_registry", default_prompt_registry
+    )
+    prompt_reg.verify_active_versions(KNOWN_PROMPT_NAMES)
+
     # Report optional values still at their defaults (DEBUG only; secrets
     # are never included, consistent with logging_redaction.py).
     settings.report_boot_configuration(logger)
@@ -633,6 +643,27 @@ async def health_check(request: Request):
                 "version": "1.0.0",
             },
         )
+
+    # Verify every expected prompt resolves to a valid active version
+    from services.prompt_registry import KNOWN_PROMPT_NAMES
+    from services.humanitarian_prompt import default_prompt_registry
+
+    prompt_reg = getattr(
+        humanitarian_verification_service, "prompt_registry", default_prompt_registry
+    )
+    prompt_errors = prompt_reg.validate_active_versions(KNOWN_PROMPT_NAMES)
+    if prompt_errors:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "service": "soter-ai-service",
+                "version": "1.0.0",
+                "error": f"Prompt registry misconfiguration: {'; '.join(prompt_errors)}",
+                "details": prompt_errors,
+            },
+        )
+
     return {"status": "healthy", "service": "soter-ai-service", "version": "1.0.0"}
 
 
@@ -701,6 +732,29 @@ async def health_dependencies():
         checks["filesystem"] = {"ok": True}
     except Exception as exc:
         checks["filesystem"] = {"ok": False, "error": type(exc).__name__}
+
+    # --- Prompt Registry ---
+    from services.prompt_registry import KNOWN_PROMPT_NAMES
+    from services.humanitarian_prompt import default_prompt_registry
+
+    prompt_reg = getattr(
+        humanitarian_verification_service, "prompt_registry", default_prompt_registry
+    )
+    prompt_errors = prompt_reg.validate_active_versions(KNOWN_PROMPT_NAMES)
+    if not prompt_errors:
+        checks["prompt_registry"] = {
+            "ok": True,
+            "active_versions": {
+                name: prompt_reg.get_active_version(name)
+                for name in KNOWN_PROMPT_NAMES
+                if prompt_reg.has(name)
+            },
+        }
+    else:
+        checks["prompt_registry"] = {
+            "ok": False,
+            "error": "; ".join(prompt_errors),
+        }
 
     overall_ok = all(v["ok"] for v in checks.values())
     return {
