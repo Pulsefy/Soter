@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1343-sync-theme-with-the-os-color-scheme-preference",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-1343-sync-theme-with-the-os-color-scheme-preference": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1343-sync-theme-with-the-os-color-scheme-preference",
+    "origin"
+  ]
+}
