@@ -8,7 +8,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { CameraView, BarcodeScanningResult } from 'expo-camera';
+import { CameraView, BarcodeScanningResult, Camera } from 'expo-camera';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useTheme } from '../theme/ThemeContext';
@@ -52,6 +52,8 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
     skipped: 0,
   });
   const [isDuplicateScan, setIsDuplicateScan] = useState<Awaited<ReturnType<typeof createScanDeduper>> | null>(null);
+  const [torchEnabled, setTorchEnabled] = useState(false);
+  const [torchAvailable, setTorchAvailable] = useState(false);
 
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -61,6 +63,17 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
     recordScanStarted('bulk');
     // Initialize the async deduper with configured retention window
     createScanDeduper(undefined, config.crossSessionDedupeWindowMs).then(setIsDuplicateScan);
+
+    // Check torch availability
+    const checkTorchAvailability = async () => {
+      try {
+        const hasFlash = await Camera.isAvailableAsync('flash');
+        setTorchAvailable(hasFlash);
+      } catch (error) {
+        setTorchAvailable(false);
+      }
+    };
+    checkTorchAvailability();
   }, []);
 
   const {
@@ -181,6 +194,7 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
         onBarcodeScanned={isProcessing ? undefined : handleBarCodeScanned}
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
         style={StyleSheet.absoluteFillObject}
+        enableTorch={torchEnabled}
       />
 
       <View style={styles.overlay} pointerEvents="box-none">
@@ -250,6 +264,24 @@ export const BulkScannerScreen: React.FC<Props> = ({ navigation }) => {
           >
             <Text style={styles.closeButtonText}>{t('scannerBulk.endSession')}</Text>
           </TouchableOpacity>
+
+          {torchAvailable && (
+            <TouchableOpacity
+              style={[
+                styles.torchButton,
+                { backgroundColor: torchEnabled ? 'rgba(255, 193, 7, 0.3)' : 'rgba(255, 255, 255, 0.1)' },
+                { borderColor: torchEnabled ? '#FFC107' : 'rgba(255, 255, 255, 0.3)' }
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={torchEnabled ? 'Turn off flash' : 'Turn on flash'}
+              accessibilityHint={torchEnabled ? 'Disable the camera flash light' : 'Enable the camera flash light for better visibility in low light'}
+              onPress={() => setTorchEnabled(!torchEnabled)}
+            >
+              <Text style={[styles.torchButtonText, { color: torchEnabled ? '#FFC107' : '#FFFFFF' }]}>
+                {torchEnabled ? 'Flash On' : 'Flash Off'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </View>
@@ -389,5 +421,16 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '700',
+  },
+  torchButton: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  torchButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
