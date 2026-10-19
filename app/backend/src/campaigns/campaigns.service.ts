@@ -1,5 +1,5 @@
 import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   CampaignStatus,
   ClaimStatus,
@@ -17,6 +17,7 @@ import {
   ENTITY_LINK_CONFIDENCE_CONFIG,
   getCampaignConfidenceThreshold,
 } from '../common/config/entity-link-confidence.config';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 export interface CampaignConfidenceThresholds {
   reviewThreshold: number;
@@ -65,7 +66,22 @@ export interface CampaignTimelineMilestone {
 
 @Injectable()
 export class CampaignsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(CampaignsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly analyticsService?: AnalyticsService,
+  ) {}
+
+  private async invalidateDashboardSummary(reason: string) {
+    try {
+      await this.analyticsService?.invalidateCache(reason);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate dashboard summary cache after ${reason}: ${String(error)}`,
+      );
+    }
+  }
 
   private static readonly DEFAULT_CONFIDENCE_THRESHOLDS: CampaignConfidenceThresholds =
     {
@@ -100,7 +116,7 @@ export class CampaignsService {
       return CampaignsService.DEFAULT_CONFIDENCE_THRESHOLDS;
     }
 
-    const { reviewThreshold, rejectThreshold } = raw as Record;
+    const { reviewThreshold, rejectThreshold } = raw as Record<
       string,
       unknown
     >;
@@ -168,7 +184,7 @@ export class CampaignsService {
       dto.confidenceThreshold,
     );
 
-    return this.prisma.campaign.create({
+    const created = await this.prisma.campaign.create({
       data: {
         name: dto.name,
         status: dto.status ?? CampaignStatus.draft,
@@ -177,6 +193,9 @@ export class CampaignsService {
         ngoId: ngoId ?? null,
       },
     });
+
+    await this.invalidateDashboardSummary('campaign_updated');
+    return created;
   }
 
   async findAll(includeArchived = false, ngoId?: string | null) {
@@ -222,7 +241,7 @@ export class CampaignsService {
     }
 
     const allTransactions = campaign.claims.flatMap(claim =>
-      claim.sorobanTransactions.map(tx => ({ ...tx, claim }),
+      claim.sorobanTransactions.map(tx => ({ ...tx, claim })),
     );
     const claimTransactions = allTransactions.filter(
       tx => tx.operation === SorobanOperationType.create_claim,
@@ -328,7 +347,7 @@ export class CampaignsService {
             dto.confidenceThreshold,
           );
 
-    return this.prisma.campaign.update({
+    const updated = await this.prisma.campaign.update({
       where: { id },
       data: {
         name: dto.name,
@@ -340,6 +359,9 @@ export class CampaignsService {
             : this.sanitizeMetadata(metadata),
       },
     });
+
+    await this.invalidateDashboardSummary('campaign_updated');
+    return updated;
   }
 
   private latestTransaction<
@@ -390,15 +412,20 @@ export class CampaignsService {
         archivedAt: new Date(),
       },
     });
-    return { alreadyArchived: false, campaign: updated };
+
+    await this.invalidateDashboardSummary('campaign_updated');
+    return { campaign: updated, alreadyArchived: false };
   }
 
   async softDelete(id: string) {
     await this.findOne(id);
-    return this.prisma.campaign.update({
+    const deleted = await this.prisma.campaign.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
+
+    await this.invalidateDashboardSummary('campaign_updated');
+    return deleted;
   }
 
   async countExport(query: ExportCampaignsQueryDto): Promise<number> {

@@ -9,10 +9,12 @@ import {
   CAMPAIGN_CONFIDENCE_THRESHOLD_KEY,
   ENTITY_LINK_CONFIDENCE_CONFIG,
 } from '../common/config/entity-link-confidence.config';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 describe('CampaignsService', () => {
   let service: CampaignsService;
   let prismaMock: DeepMockProxy<PrismaService>;
+  let analyticsServiceMock: { invalidateCache: jest.Mock };
 
   const now = new Date('2026-01-25T00:00:00.000Z');
 
@@ -33,11 +35,13 @@ describe('CampaignsService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     prismaMock = mockDeep<PrismaService>();
+    analyticsServiceMock = { invalidateCache: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         CampaignsService,
         { provide: PrismaService, useValue: prismaMock },
+        { provide: AnalyticsService, useValue: analyticsServiceMock },
       ],
     }).compile();
 
@@ -80,6 +84,9 @@ describe('CampaignsService', () => {
 
     const createArgs = prismaMock.campaign.create.mock.calls[0]?.[0];
     expect(createArgs?.data).toMatchObject({ ngoId: 'ngo-1' });
+    expect(analyticsServiceMock.invalidateCache).toHaveBeenCalledWith(
+      'campaign_updated',
+    );
   });
 
   it('create(): persists a confidence threshold override into metadata', async () => {

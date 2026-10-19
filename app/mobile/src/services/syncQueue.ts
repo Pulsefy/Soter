@@ -9,6 +9,10 @@ import {
 import { config } from '../config';
 import { buildCorrelationHeaders, structuredLogger } from './logger';
 import { sha256, toHex } from './sha256';
+import {
+  beginBackgroundWork,
+  endBackgroundWork,
+} from './backgroundTaskManager';
 
 const API_URL = config.apiUrl;
 
@@ -542,144 +546,178 @@ const runAction = async (action: QueuedSyncAction) => {
       const fileBytes = base64ToUint8Array(requestData.imageBase64);
       const chunkSize = 512 * 1024; // 512 KB chunks
 
-      if (!payload.sessionId) {
-        const createSessionRes = await fetch(`${API_URL}/evidence/upload-sessions`, {
+      /**
+       * iOS background-task expiration handling (#1364).
+       *
+       * `beginBackgroundWork` registers a time-bounded background-task token
+       * with the OS and starts a safety-margin timer.  When the OS expires the
+       * budget (or the timer fires first) the `onExpire` callback is invoked,
+       * which persists the current chunk progress to AsyncStorage so the next
+       * foreground or background opportunity can resume from the last
+       * successfully uploaded chunk rather than restarting from scratch.
+       */
+      const bgHandle = beginBackgroundWork(
+        `evidence-upload:${action.id}`,
+        async (_taskName: string) => {
+          // Checkpoint: persist the upload state accumulated so far.
+          // `payload` is mutated in-place as chunks succeed, so whatever
+          // progress has been made is already reflected here.
+          logSync('warn', 'sync.evidenceUpload.backgroundExpired', action, {
+            actionId: action.id,
+            sessionId: payload.sessionId,
+            uploadedChunks: payload.uploadedChunks?.length ?? 0,
+            totalChunks: payload.totalChunks ?? 0,
+          });
+          await persistQueue();
+        },
+      );
+
+      try {
+        if (!payload.sessionId) {
+          const createSessionRes = await fetch(`${API_URL}/evidence/upload-sessions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...buildCorrelationHeaders(action.correlationId),
+            },
+            body: JSON.stringify({
+              fileName: requestData.filename,
+              mimeType: requestData.contentType,
+              totalSize: fileBytes.length,
+              chunkSize,
+            }),
+          });
+
+          if (!createSessionRes.ok) {
+            let errorMsg = `HTTP error ${createSessionRes.status}`;
+            try {
+              const errData = await createSessionRes.json();
+              if (errData?.message) errorMsg = errData.message;
+            } catch {}
+            if (createSessionRes.status === 429) {
+              throwHttpError(createSessionRes, 'Failed to create upload session');
+            }
+            throw new Error(`Failed to create upload session: ${errorMsg}`);
+          }
+
+          const session = await createSessionRes.json();
+          payload.sessionId = session.id;
+          payload.totalChunks = session.totalChunks;
+          payload.uploadedChunks = [];
+          payload.progress = 0;
+          await persistQueue();
+          emitQueueState();
+        } else {
+          const statusRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/status`, {
+            headers: buildCorrelationHeaders(action.correlationId),
+          });
+          if (statusRes.status === 404) {
+            payload.sessionId = undefined;
+            payload.uploadedChunks = undefined;
+            payload.totalChunks = undefined;
+            payload.progress = 0;
+            await persistQueue();
+            emitQueueState();
+            endBackgroundWork(bgHandle);
+            return runAction(action);
+          }
+          if (!statusRes.ok) {
+            throwHttpError(statusRes, 'Failed to query session status');
+          }
+          const statusData = await statusRes.json();
+          payload.uploadedChunks = statusData.receivedChunks || [];
+          payload.totalChunks = statusData.totalChunks;
+          payload.progress = payload.totalChunks ? payload.uploadedChunks.length / payload.totalChunks : 0;
+          await persistQueue();
+          emitQueueState();
+        }
+
+        const totalChunks = payload.totalChunks || 0;
+        const uploadedChunks = payload.uploadedChunks || [];
+
+        for (let index = 0; index < totalChunks; index++) {
+          if (uploadedChunks.includes(index)) {
+            continue;
+          }
+
+          const start = index * chunkSize;
+          const end = Math.min(start + chunkSize, fileBytes.length);
+          const chunkBytes = fileBytes.subarray(start, end);
+
+          const checksum = await sha256Hex(chunkBytes);
+
+          // The chunk is attached as a `data:` URI file part rather than a
+          // `Blob`. React Native's Blob cannot be built from bytes — its
+          // `createFromParts` throws "Creating blobs from 'ArrayBuffer' and
+          // 'ArrayBufferView' are not supported" — so `new Blob([chunkBytes])`
+          // fails on device (it works under Jest, where Blob is Node's, which
+          // is why the unit tests and the CI harness never disagreed until the
+          // upload ran on an emulator). A `{ uri, name, type }` part is the
+          // form React Native's networking layer expects, and both platforms
+          // read its bytes from the `data:` URI (Android:
+          // `RequestBodyUtil.getFileInputStream` base64-decodes it; iOS:
+          // `processDataForHTTPQuery` loads it through `NSURLRequest`).
+          const formData = new FormData();
+          formData.append('chunk', {
+            uri: `data:application/octet-stream;base64,${uint8ArrayToBase64(chunkBytes)}`,
+            name: requestData.filename,
+            type: 'application/octet-stream',
+          } as unknown as Blob);
+          formData.append('index', index.toString());
+          formData.append('checksum', checksum);
+
+          const uploadChunkRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/chunks`, {
+            method: 'POST',
+            body: formData,
+            headers: buildCorrelationHeaders(action.correlationId),
+          });
+
+          if (!uploadChunkRes.ok) {
+            let errorMsg = `HTTP error ${uploadChunkRes.status}`;
+            try {
+              const errData = await uploadChunkRes.json();
+              if (errData?.message) errorMsg = errData.message;
+            } catch {}
+            if (uploadChunkRes.status === 429) {
+              throwHttpError(uploadChunkRes, `Chunk ${index} upload failed`);
+            }
+            throw new Error(`Chunk ${index} upload failed: ${errorMsg}`);
+          }
+
+          uploadedChunks.push(index);
+          payload.uploadedChunks = uploadedChunks;
+          payload.progress = uploadedChunks.length / totalChunks;
+          // Persist after each chunk so expiration always has an up-to-date checkpoint.
+          await persistQueue();
+          emitQueueState();
+        }
+
+        const finalizeRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/finalize`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             ...buildCorrelationHeaders(action.correlationId),
           },
-          body: JSON.stringify({
-            fileName: requestData.filename,
-            mimeType: requestData.contentType,
-            totalSize: fileBytes.length,
-            chunkSize,
-          }),
         });
 
-        if (!createSessionRes.ok) {
-          let errorMsg = `HTTP error ${createSessionRes.status}`;
+        if (!finalizeRes.ok) {
+          let errorMsg = `HTTP error ${finalizeRes.status}`;
           try {
-            const errData = await createSessionRes.json();
+            const errData = await finalizeRes.json();
             if (errData?.message) errorMsg = errData.message;
           } catch {}
-          if (createSessionRes.status === 429) {
-            throwHttpError(createSessionRes, 'Failed to create upload session');
+          if (finalizeRes.status === 429) {
+            throwHttpError(finalizeRes, 'Failed to finalize upload');
           }
-          throw new Error(`Failed to create upload session: ${errorMsg}`);
+          throw new Error(`Failed to finalize upload: ${errorMsg}`);
         }
 
-        const session = await createSessionRes.json();
-        payload.sessionId = session.id;
-        payload.totalChunks = session.totalChunks;
-        payload.uploadedChunks = [];
-        payload.progress = 0;
-        await persistQueue();
-        emitQueueState();
-      } else {
-        const statusRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/status`, {
-          headers: buildCorrelationHeaders(action.correlationId),
-        });
-        if (statusRes.status === 404) {
-          payload.sessionId = undefined;
-          payload.uploadedChunks = undefined;
-          payload.totalChunks = undefined;
-          payload.progress = 0;
-          await persistQueue();
-          emitQueueState();
-          return runAction(action);
-        }
-        if (!statusRes.ok) {
-          throwHttpError(statusRes, 'Failed to query session status');
-        }
-        const statusData = await statusRes.json();
-        payload.uploadedChunks = statusData.receivedChunks || [];
-        payload.totalChunks = statusData.totalChunks;
-        payload.progress = payload.totalChunks ? payload.uploadedChunks.length / payload.totalChunks : 0;
-        await persistQueue();
-        emitQueueState();
+        return finalizeRes.json();
+      } finally {
+        // Always release the background-task token, whether the upload
+        // succeeded, threw, or was interrupted by the expiration handler.
+        endBackgroundWork(bgHandle);
       }
-
-      const totalChunks = payload.totalChunks || 0;
-      const uploadedChunks = payload.uploadedChunks || [];
-
-      for (let index = 0; index < totalChunks; index++) {
-        if (uploadedChunks.includes(index)) {
-          continue;
-        }
-
-        const start = index * chunkSize;
-        const end = Math.min(start + chunkSize, fileBytes.length);
-        const chunkBytes = fileBytes.subarray(start, end);
-
-        const checksum = await sha256Hex(chunkBytes);
-
-        // The chunk is attached as a `data:` URI file part rather than a
-        // `Blob`. React Native's Blob cannot be built from bytes — its
-        // `createFromParts` throws "Creating blobs from 'ArrayBuffer' and
-        // 'ArrayBufferView' are not supported" — so `new Blob([chunkBytes])`
-        // fails on device (it works under Jest, where Blob is Node's, which
-        // is why the unit tests and the CI harness never disagreed until the
-        // upload ran on an emulator). A `{ uri, name, type }` part is the
-        // form React Native's networking layer expects, and both platforms
-        // read its bytes from the `data:` URI (Android:
-        // `RequestBodyUtil.getFileInputStream` base64-decodes it; iOS:
-        // `processDataForHTTPQuery` loads it through `NSURLRequest`).
-        const formData = new FormData();
-        formData.append('chunk', {
-          uri: `data:application/octet-stream;base64,${uint8ArrayToBase64(chunkBytes)}`,
-          name: requestData.filename,
-          type: 'application/octet-stream',
-        } as unknown as Blob);
-        formData.append('index', index.toString());
-        formData.append('checksum', checksum);
-
-        const uploadChunkRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/chunks`, {
-          method: 'POST',
-          body: formData,
-          headers: buildCorrelationHeaders(action.correlationId),
-        });
-
-        if (!uploadChunkRes.ok) {
-          let errorMsg = `HTTP error ${uploadChunkRes.status}`;
-          try {
-            const errData = await uploadChunkRes.json();
-            if (errData?.message) errorMsg = errData.message;
-          } catch {}
-          if (uploadChunkRes.status === 429) {
-            throwHttpError(uploadChunkRes, `Chunk ${index} upload failed`);
-          }
-          throw new Error(`Chunk ${index} upload failed: ${errorMsg}`);
-        }
-
-        uploadedChunks.push(index);
-        payload.uploadedChunks = uploadedChunks;
-        payload.progress = uploadedChunks.length / totalChunks;
-        await persistQueue();
-        emitQueueState();
-      }
-
-      const finalizeRes = await fetch(`${API_URL}/evidence/upload-sessions/${payload.sessionId}/finalize`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...buildCorrelationHeaders(action.correlationId),
-        },
-      });
-
-      if (!finalizeRes.ok) {
-        let errorMsg = `HTTP error ${finalizeRes.status}`;
-        try {
-          const errData = await finalizeRes.json();
-          if (errData?.message) errorMsg = errData.message;
-        } catch {}
-        if (finalizeRes.status === 429) {
-          throwHttpError(finalizeRes, 'Failed to finalize upload');
-        }
-        throw new Error(`Failed to finalize upload: ${errorMsg}`);
-      }
-
-      return finalizeRes.json();
     }
     case 'claim-submission': {
       const { claimId, idempotencyKey } = action.payload as ClaimSubmissionPayload;

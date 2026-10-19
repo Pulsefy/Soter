@@ -266,6 +266,23 @@ export const CONTRACT_ERROR_CATALOG: readonly ContractErrorEntry[] = [
     httpStatusCode: 400,
     integrationErrorCode: 'ONCHAIN_CONTRACT_ERROR',
   },
+  {
+    code: 30,
+    name: 'InvalidSurplusWithdrawalStaleness',
+    meaning:
+      'Surplus withdrawal staleness period must exceed the execution timelock',
+    retryable: false,
+    httpStatusCode: 400,
+    integrationErrorCode: 'ONCHAIN_CONTRACT_ERROR',
+  },
+  {
+    code: 31,
+    name: 'SurplusWithdrawalNotStale',
+    meaning: 'Pending surplus withdrawal has not yet reached its staleness age',
+    retryable: true,
+    httpStatusCode: 400,
+    integrationErrorCode: 'ONCHAIN_CONTRACT_ERROR',
+  },
 ] as const;
 
 /**

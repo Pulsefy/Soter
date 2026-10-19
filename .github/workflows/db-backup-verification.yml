@@ -1,0 +1,186 @@
+name: Database Backup Verification
+
+# Proves the most recent production database backup is actually restorable by
+# restoring it into an ephemeral Postgres service container and running
+# integrity checks against it. Runbook:
+# docs/database-backup-verification-runbook.md
+
+on:
+  schedule:
+    # Daily at 04:17 UTC, after the nightly backup window.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      backup_s3_uri:
+        description: 'Override the backup location (s3://bucket/prefix/)'
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - 'scripts/db/**'
+      - '.github/workflows/db-backup-verification.yml'
+
+concurrency:
+  group: db-backup-verification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-latest-backup:
+    name: Restore and verify latest backup
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: verify
+          POSTGRES_PASSWORD: verify
+          POSTGRES_DB: restore_verify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U verify -d restore_verify"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      RESTORE_DATABASE_URL: postgresql://verify:verify@localhost:5432/restore_verify
+      RESTORE_TARGET_IS_DISPOSABLE: 'true'
+      MIGRATIONS_DIR: app/backend/prisma/migrations
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Secrets cannot be referenced in a job-level `if:`, so presence is
+      # detected here. Forks without backup access skip with a warning; once
+      # the repository variable BACKUP_VERIFICATION_ENABLED is 'true', missing
+      # configuration fails the run instead, so the job can never go silent.
+      - name: Detect backup configuration
+        id: config
+        env:
+          BACKUP_S3_URI: ${{ inputs.backup_s3_uri || secrets.BACKUP_S3_URI }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+          ENABLED: ${{ vars.BACKUP_VERIFICATION_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BACKUP_S3_URI}" ] && [ -n "${AWS_ACCESS_KEY_ID}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          if [ "${ENABLED}" = "true" ]; then
+            echo "::error::BACKUP_S3_URI / BACKUP_AWS_ACCESS_KEY_ID are not set but BACKUP_VERIFICATION_ENABLED is true."
+            exit 1
+          fi
+          echo "::warning::Backup verification is not configured for this repository; skipping. See docs/database-backup-verification-runbook.md."
+
+      - name: Install PostgreSQL client
+        if: steps.config.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          pg_restore --version
+
+      - name: Restore and verify
+        if: steps.config.outputs.configured == 'true'
+        env:
+          BACKUP_S3_URI: ${{ inputs.backup_s3_uri || secrets.BACKUP_S3_URI }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ vars.BACKUP_AWS_REGION || 'us-east-1' }}
+          BACKUP_MAX_AGE_HOURS: ${{ vars.BACKUP_MAX_AGE_HOURS || '26' }}
+          MIN_ROW_COUNTS: ${{ vars.BACKUP_MIN_ROW_COUNTS }}
+          BACKUP_ALERT_WEBHOOK_URL: ${{ secrets.BACKUP_ALERT_WEBHOOK_URL }}
+        run: scripts/db/verify-backup.sh
+
+      # A dedicated issue label gives backup failures their own alert channel,
+      # separate from operational alerting. Repeat failures comment on the
+      # open issue rather than opening duplicates.
+      - name: Open backup-verification incident
+        if: failure() && steps.config.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          label="backup-verification-failure"
+          gh label create "$label" --color B60205 \
+            --description "Scheduled database backup restore verification failed" 2>/dev/null || true
+          body="The scheduled database backup verification failed: ${RUN_URL}
+
+          Follow docs/database-backup-verification-runbook.md to triage."
+          existing=$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "Database backup verification failed" \
+              --label "$label" --body "$body"
+          fi
+
+  self-test:
+    name: Verifier self-test
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: soter
+          POSTGRES_PASSWORD: soter
+          POSTGRES_DB: soter_src
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U soter -d soter_src"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      SOURCE_DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_src
+      RESTORE_DATABASE_URL: postgresql://soter:soter@localhost:5432/soter_restore_verify
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+      - name: Prepare source and restore databases
+        working-directory: app/backend
+        env:
+          DATABASE_URL: ${{ env.SOURCE_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE soter_restore_verify'
+          npx prisma migrate deploy
+
+      - name: Run verifier self-test
+        run: scripts/db/verify-backup.selftest.sh

@@ -112,6 +112,7 @@
     "languageHint": "Elige el idioma utilizado en toda la app",
     "securityTitle": "Seguridad",
     "biometricLock": "Bloqueo biométrico",
+    "sharedDeviceMode": "Modo dispositivo compartido",
     "pushNotifications": "Notificaciones push",
     "autoDetect": "Detección automática",
     "aidCache": "Caché de ayuda",
@@ -286,7 +287,12 @@
     "contractId": "ID del contrato"
   },
   "forceUpgrade": {
-    "updateNow": "Actualizar ahora"
+    "updateNow": "Actualizar ahora",
+    "warningTitle": "Actualización requerida pronto",
+    "warningMessage": "Pronto se requerirá una actualización obligatoria. Complete y sincronice sus tareas actuales, luego actualice para continuar usando Soter.",
+    "gracePeriodCountdown": "Período de gracia restante: {time}",
+    "gracePeriodExpired": "El período de gracia ha expirado. Se requiere actualización para continuar.",
+    "dismiss": "Descartar"
   },
   "submissionQueue": {
     "retries": "Reintentos",

@@ -30,6 +30,7 @@ import { escapeCsvField, toCsvRow } from '../common/csv/csv.util';
 import { streamCursorPaginated } from '../common/streaming/cursor-paginate';
 import { VerificationService } from '../verification/verification.service';
 import { readPersistedVerificationResult } from '../verification/verification-result.persistence';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 export interface ClaimExportRow {
   id: string;
@@ -116,6 +117,7 @@ export class ClaimsService {
     private readonly sorobanTransactionService: SorobanTransactionLifecycleService,
     private readonly sorobanTransactionScheduler: SorobanTransactionScheduler,
     private readonly verificationService: VerificationService,
+    @Optional() private readonly analyticsService?: AnalyticsService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
@@ -161,6 +163,16 @@ export class ClaimsService {
     }
     const parsed = Number(configured);
     return Number.isFinite(parsed) ? parsed : DEFAULT_CONFIDENCE_THRESHOLD;
+  }
+
+  private async invalidateDashboardSummary(reason: string) {
+    try {
+      await this.analyticsService?.invalidateCache(reason);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate dashboard summary cache after ${reason}: ${String(error)}`,
+      );
+    }
   }
 
   async create(createClaimDto: CreateClaimDto) {
@@ -248,6 +260,7 @@ export class ClaimsService {
     );
 
     await this.enqueueVerificationForClaim(claim.id);
+    await this.invalidateDashboardSummary('claim_updated');
 
     return claim;
   }
@@ -391,11 +404,104 @@ export class ClaimsService {
       );
     }
 
-    const disburseResult: DisburseResult = await this.onchainAdapter.disburse({
-      claimId: claim.id,
-      campaignId: claim.campaignId,
-      amount: claim.amount,
-      recipientRef: this.encryptionService.decrypt(claim.recipientRef),
+    const traceId =
+      correlationId?.trim() ||
+      this.loggerService.getCorrelationId() ||
+      `disburse-${id}-${Date.now()}`;
+
+    let sorobanTransaction: SorobanTransaction | undefined;
+    if (this.onchainEnabled && this.onchainAdapter) {
+      try {
+        const packageId = await this.getPackageIdForClaim(id);
+        const tokenAddress = this.getTokenAddressForClaim(claim);
+
+        sorobanTransaction =
+          await this.sorobanTransactionService.createTransaction({
+            claimId: id,
+            operation: SorobanOperationType.disburse_claim,
+            packageId,
+            operatorAddress: 'admin',
+            recipientAddress: this.encryptionService.decrypt(
+              claim.recipientRef,
+            ),
+            amount: claim.amount.toString(),
+            tokenAddress,
+            correlationId: traceId,
+            metadata: {
+              campaignId: claim.campaignId,
+              claimAmount: claim.amount,
+              originalClaimStatus: claim.status,
+              receiptPointer,
+            },
+            maxAttempts: 5,
+          });
+
+        await this.sorobanTransactionScheduler.scheduleTransaction(
+          sorobanTransaction.id,
+          {
+            correlationId: traceId,
+            priority: 1,
+          },
+        );
+
+        this.loggerService.log(
+          'Created Soroban transaction with lifecycle tracking for claim disbursement',
+          'ClaimsService',
+          {
+            claimId: id,
+            transactionId: sorobanTransaction.id,
+            packageId,
+            correlationId: traceId,
+            receiptPointer,
+          },
+        );
+
+        this.metricsService.incrementCounter('soroban_disbursement_scheduled', {
+          claimId: id,
+          transactionId: sorobanTransaction.id,
+        });
+      } catch (error) {
+        this.loggerService.error(
+          `Failed to create or schedule Soroban transaction for claim ${id}`,
+          error instanceof Error ? error.stack : undefined,
+          'ClaimsService',
+          {
+            claimId: id,
+            correlationId: traceId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+    }
+
+    const updatedClaim = await this.transitionStatus(
+      id,
+      ClaimStatus.approved,
+      ClaimStatus.disbursed,
+    );
+
+    this.loggerService.log(
+      `Claim ${id} marked as disbursed with Soroban transaction tracking`,
+      'ClaimsService',
+      {
+        claimId: id,
+        sorobanTransactionId: sorobanTransaction?.id,
+        correlationId: traceId,
+        receiptPointer,
+      },
+    );
+
+    await this.invalidateDashboardSummary('claim_updated');
+    return updatedClaim;
+  }
+
+  private async getPackageIdForClaim(claimId: string): Promise<string> {
+    const correlation = await this.prisma.sorobanEventCorrelation.findFirst({
+      where: {
+        claimId,
+        eventTopic: 'package_created',
+      },
+      orderBy: { createdAt: 'desc' },
     });
 
     const transaction = await this.sorobanTransactionService.create({
@@ -464,6 +570,32 @@ export class ClaimsService {
 
       return updated;
     });
+
+    const durationSeconds = (Date.now() - claim.updatedAt.getTime()) / 1000;
+
+    const campaignId = claim.campaignId;
+
+    if (toStatus === ClaimStatus.verified) {
+      this.metricsService.incrementClaimsVerified(campaignId);
+    } else if (toStatus === ClaimStatus.approved) {
+      this.metricsService.incrementClaimsApproved(campaignId);
+    } else if (toStatus === ClaimStatus.disbursed) {
+      this.metricsService.incrementClaimsDisbursed(
+        campaignId,
+        this.onchainEnabled ?? false,
+      );
+    }
+
+    this.metricsService.recordClaimFunnelDuration(
+      fromStatus,
+      toStatus,
+      durationSeconds,
+    );
+    this.metricsService.adjustClaimsInFunnel(fromStatus, -1);
+    this.metricsService.adjustClaimsInFunnel(toStatus, 1);
+
+    await this.invalidateDashboardSummary('claim_updated');
+    return updatedClaim;
   }
 
   async reissue(id: string, createClaimDto: CreateClaimDto) {

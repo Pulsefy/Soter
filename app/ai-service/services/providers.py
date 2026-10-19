@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -32,6 +33,102 @@ from config import DEFAULT_PROVIDER_CAPABILITY_MATRIX, settings
 from exceptions import AIServiceError
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "close_provider_http_clients",
+    "FixtureProvider",
+    "GroqProvider",
+    "LLMResponse",
+    "ModelProvider",
+    "OCRField",
+    "OCRResponse",
+    "OpenAIProvider",
+    "ProviderRegistry",
+    "TesseractOCRProvider",
+    "validate_fallback_order",
+]
+
+
+class _ProviderHTTPClientPool:
+    """Lazily shared HTTP clients with idle connection recycling."""
+
+    def __init__(self) -> None:
+        self._clients: Dict[str, httpx.Client] = {}
+        self._last_used: Dict[str, float] = {}
+        self._lock = threading.RLock()
+
+    def request(
+        self,
+        base_url: str,
+        *,
+        timeout: float,
+        json_payload: Dict[str, Any],
+        headers: Dict[str, str],
+    ) -> httpx.Response:
+        """Send a request, replacing an idle/stale connection once on failure."""
+        for attempt in range(2):
+            client = self._get(base_url, timeout)
+            try:
+                response = client.post(
+                    base_url,
+                    json=json_payload,
+                    headers=headers,
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                return response
+            except httpx.TimeoutException:
+                # Timeouts are surfaced to the provider error mapping and are
+                # not retried as stale-connection failures.
+                raise
+            except httpx.TransportError:
+                self._discard(base_url, client)
+                if attempt == 0:
+                    logger.info("Recycling stale provider HTTP connection and retrying")
+                    continue
+                raise
+        raise AssertionError("provider HTTP request retry loop did not return")
+
+    def _get(self, base_url: str, timeout: float) -> httpx.Client:
+        now = time.monotonic()
+        idle_timeout = float(settings.provider_http_idle_timeout_seconds)
+        with self._lock:
+            client = self._clients.get(base_url)
+            last_used = self._last_used.get(base_url, now)
+            if client is not None and now - last_used >= idle_timeout:
+                self._discard_locked(base_url, client)
+                client = None
+            if client is None:
+                client = httpx.Client(timeout=timeout)
+                self._clients[base_url] = client
+            self._last_used[base_url] = now
+            return client
+
+    def _discard(self, base_url: str, client: httpx.Client) -> None:
+        with self._lock:
+            if self._clients.get(base_url) is client:
+                self._discard_locked(base_url, client)
+
+    def _discard_locked(self, base_url: str, client: httpx.Client) -> None:
+        self._clients.pop(base_url, None)
+        self._last_used.pop(base_url, None)
+        try:
+            client.close()
+        except Exception:
+            logger.debug("Failed to close provider HTTP client", exc_info=True)
+
+    def close(self) -> None:
+        with self._lock:
+            for base_url, client in list(self._clients.items()):
+                self._discard_locked(base_url, client)
+
+
+_provider_http_clients = _ProviderHTTPClientPool()
+
+
+def close_provider_http_clients() -> None:
+    """Close all pooled provider clients during process shutdown or tests."""
+    _provider_http_clients.close()
 
 
 # Provider names that can appear in a configured fallback order. Kept here so
@@ -381,10 +478,13 @@ class OpenAIProvider(ModelProvider):
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             }
-            with httpx.Client(timeout=req_timeout) as client:
-                response = client.post(base_url, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
+            response = _provider_http_clients.request(
+                base_url,
+                timeout=req_timeout,
+                json_payload=payload,
+                headers=headers,
+            )
+            data = response.json()
         except httpx.TimeoutException as exc:
             raise AIServiceError(
                 message=f"LLM request timed out after {req_timeout}s",
@@ -425,10 +525,13 @@ class OpenAIProvider(ModelProvider):
                     "Authorization": f"Bearer {fallback_api_key}",
                     "Content-Type": "application/json",
                 }
-                with httpx.Client(timeout=req_timeout) as client:
-                    response = client.post(base_url, json=payload, headers=headers)
-                    response.raise_for_status()
-                    data = response.json()
+                response = _provider_http_clients.request(
+                    base_url,
+                    timeout=req_timeout,
+                    json_payload=payload,
+                    headers=headers,
+                )
+                data = response.json()
                 logger.info(
                     "Fallback key succeeded for %s after primary key failed with %d",
                     provider_name,

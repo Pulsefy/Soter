@@ -22,20 +22,22 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install actionlint
-        continue-on-error: true
         run: |
           ACTIONLINT_VERSION=1.7.7
           curl -fsSL \
             "https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash" \
-            -o /tmp/download-actionlint.bash || true
-          bash /tmp/download-actionlint.bash "$ACTIONLINT_VERSION" /tmp/actionlint || true
-          chmod +x /tmp/actionlint || true
+            -o /tmp/download-actionlint.bash
+          bash /tmp/download-actionlint.bash "$ACTIONLINT_VERSION" /tmp
 
       - name: Run actionlint
-        continue-on-error: true
+        # Fails the job on any workflow error (e.g. invalid YAML structure,
+        # secrets in `if:`) so it is caught before merge (#1399).
+        # The ignores below cover pre-existing notices in other workflows
+        # (setup-python@v4 runner age, SC2034 in backend-ci.yml, SC2044 in
+        # frontend-ci.yml). Remove each once the underlying workflow is fixed.
         run: |
-          # actionlint catches invalid workflow constructs like secrets-in-if:
-          # (#1326). Pre-existing deprecation warnings (Node 20, ubuntu-latest)
-          # in other workflows don't block — they're informational.
-          # The `|| true` ensures this step NEVER fails the job.
-          /tmp/actionlint -color || echo "actionlint completed with warnings (may be pre-existing deprecation notices)"
+          /tmp/actionlint -color \
+            -ignore 'the runner of "actions/setup-python@v4" action is too old' \
+            -ignore 'SC2034:warning:1:1: i appears unused' \
+            -ignore 'SC2044:warning:2:12: For loops over find output are fragile'
+            

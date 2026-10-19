@@ -1,4 +1,12 @@
-import { Controller, Get, Req, Res, Version, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Req,
+  Res,
+  Version,
+  HttpStatus,
+  UseInterceptors,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -19,6 +27,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { SkipThrottle } from '../common/decorators/skip-throttle.decorator';
 import { MetadataService } from './metadata.service';
 import { MetadataResponse } from './metadata.service';
+import { HealthRateLimitInterceptor } from './health-rate-limit.interceptor';
 
 @ApiTags('Health')
 @Controller('health')
@@ -30,6 +39,7 @@ export class HealthController {
 
   @Public()
   @SkipThrottle()
+  @UseInterceptors(HealthRateLimitInterceptor)
   @Get()
   @Version(API_VERSIONS.V1)
   @ApiOperation({
@@ -63,6 +73,7 @@ export class HealthController {
 
   @Public()
   @SkipThrottle()
+  @UseInterceptors(HealthRateLimitInterceptor)
   @Get('live')
   @Version(API_VERSIONS.V1)
   @ApiOperation({
@@ -96,13 +107,17 @@ export class HealthController {
 
   @Public()
   @SkipThrottle()
+  @UseInterceptors(HealthRateLimitInterceptor)
   @Get('ready')
   @Version(API_VERSIONS.V1)
   @ApiOperation({
     summary: 'Readiness probe',
     description:
-      'Checks Postgres, Redis, the AI service, Soroban RPC, and the configured on-chain adapter with per-dependency timeouts. ' +
-      'Results are cached briefly to protect against probe load. Responds 200 when ready or ' +
+      'Checks Postgres, Redis, the AI service, Soroban RPC, the configured on-chain adapter, and the email/SMS notification providers with per-dependency timeouts. ' +
+      'Notification provider outages are reported as degraded rather than not_ready. ' +
+      'Results are cached briefly to protect against probe load, and clients exceeding ' +
+      'HEALTH_RATE_LIMIT_MAX requests per HEALTH_RATE_LIMIT_WINDOW_MS receive the last-known ' +
+      'status (header `X-Health-Cache: throttled`) instead of a fresh check. Responds 200 when ready or ' +
       'degraded (non-critical dependency down), and 503 when a required dependency is down.',
   })
   @ApiOkResponse({
@@ -139,6 +154,16 @@ export class HealthController {
               connected: true,
               contractName: 'Soroban AidEscrow Contract',
               contractVersion: '1.0.0',
+            },
+          },
+          notificationProviders: {
+            status: 'up',
+            latencyMs: 42,
+            details: {
+              providers: {
+                email: { status: 'up', provider: 'sendgrid', latencyMs: 20 },
+                sms: { status: 'up', provider: 'twilio', latencyMs: 21 },
+              },
             },
           },
         },
@@ -178,6 +203,16 @@ export class HealthController {
               connected: true,
               contractName: 'Soroban AidEscrow Contract',
               contractVersion: '1.0.0',
+            },
+          },
+          notificationProviders: {
+            status: 'up',
+            latencyMs: 42,
+            details: {
+              providers: {
+                email: { status: 'up', provider: 'sendgrid', latencyMs: 20 },
+                sms: { status: 'up', provider: 'twilio', latencyMs: 21 },
+              },
             },
           },
         },

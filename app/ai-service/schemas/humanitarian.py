@@ -23,10 +23,14 @@ class LLMVerificationPayload(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
+AID_CLAIM_MAX_LENGTH = 5000
+
+
 class HumanitarianVerificationRequest(BaseModel):
     aid_claim: str = Field(
         min_length=10,
-        description="Aid claim to verify",
+        max_length=AID_CLAIM_MAX_LENGTH,
+        description=f"Aid claim to verify (10 to {AID_CLAIM_MAX_LENGTH} characters)",
         examples=["Family of 5 displaced by flood needs food and shelter"],
     )
     supporting_evidence: List[str] = Field(

@@ -17,3 +17,48 @@ export const fetchTaskList = async (): Promise<TaskItem[]> => {
   const { data } = await apiGet<TaskItem[]>('/tasks');
   return data;
 };
+
+/** Fallback mock data used when the backend is unreachable and no cache exists */
+export const getMockTaskList = (): TaskItem[] => {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('getMockTaskList cannot be used in production builds');
+  }
+
+  const now = new Date();
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  const today = new Date(now);
+
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  return [
+    {
+      id: 'task-1',
+      title: 'Verify Aid Package 1',
+      assignedPackageId: '1',
+      dueDate: yesterday.toISOString(),
+      dueState: 'overdue',
+      status: 'in-progress',
+    },
+    {
+      id: 'task-2',
+      title: 'Scan Recipient QR Code',
+      assignedPackageId: '2',
+      dueDate: today.toISOString(),
+      dueState: 'due-today',
+      status: 'pending',
+    },
+    {
+      id: 'task-3',
+      title: 'Deliver Medical Supplies',
+      assignedPackageId: '3',
+      dueDate: tomorrow.toISOString(),
+      dueState: 'upcoming',
+      status: 'pending',
+    },
+  ];
+};
+

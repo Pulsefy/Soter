@@ -39,6 +39,8 @@ import {
   GetTokenBalanceResult,
   ContractMetadata,
   PauseState,
+  PausableAction,
+  ActionPauseResult,
   FeeConfig,
   PackageSummary,
   GetTransactionStatusParams,
@@ -859,6 +861,58 @@ export class SorobanAdapter implements OnchainAdapter {
       isPaused: result === true,
       timestamp: new Date(),
     };
+  }
+
+  async pauseAction(action: PausableAction): Promise<ActionPauseResult> {
+    return this.setActionPaused(action, true);
+  }
+
+  async unpauseAction(action: PausableAction): Promise<ActionPauseResult> {
+    return this.setActionPaused(action, false);
+  }
+
+  async isActionPaused(action: PausableAction): Promise<boolean> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] isActionPaused action=${action}`);
+
+    const result = await this.simulateReadOnly(
+      'is_action_paused',
+      [this.scvSymbol(action)],
+      cid,
+    );
+    return result === true;
+  }
+
+  private async setActionPaused(
+    action: PausableAction,
+    paused: boolean,
+  ): Promise<ActionPauseResult> {
+    this.ensureConfigured();
+    const method = paused ? 'pause_action' : 'unpause_action';
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] ${method} action=${action}`);
+
+    const { hash } = await this.submitContractOp(
+      method,
+      [this.scvSymbol(action)],
+      cid,
+    );
+
+    return {
+      action,
+      transactionHash: hash,
+      isPaused: await this.isActionPaused(action),
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Translate a failure thrown by this adapter into the stable, user-facing
+   * error shape defined by the shared contract error catalog.
+   */
+  mapContractError(error: unknown): ReturnType<SorobanErrorMapper['mapError']> {
+    return this.errorMapper.mapError(error);
   }
 
   /**

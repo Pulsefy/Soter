@@ -60,6 +60,8 @@ export interface AppConfig {
    * Gradle-built release APK cannot be relied on to inline `process.env`
    * reads. Production builds leave both `false` and render nothing extra.
    */
+  /** Configurable grace period in milliseconds for force upgrades before blocking usage */
+  forceUpgradeGracePeriodMs?: number;
   e2eEnabled: boolean;
 }
 
@@ -139,6 +141,11 @@ const buildConfig = (): AppConfig => {
     logLevel: (process.env.EXPO_PUBLIC_LOG_LEVEL as LogLevel) || 'warn',
     apiKey: process.env.EXPO_PUBLIC_API_KEY,
     e2eEnabled: process.env.EXPO_PUBLIC_E2E === '1',
+    forceUpgradeGracePeriodMs: process.env.EXPO_PUBLIC_FORCE_UPGRADE_GRACE_PERIOD_MS
+      ? parseInt(process.env.EXPO_PUBLIC_FORCE_UPGRADE_GRACE_PERIOD_MS, 10)
+      : process.env.EXPO_PUBLIC_FORCE_UPGRADE_GRACE_PERIOD_SECONDS
+      ? parseInt(process.env.EXPO_PUBLIC_FORCE_UPGRADE_GRACE_PERIOD_SECONDS, 10) * 1000
+      : undefined,
     isValid: errors.length === 0,
     errors,
   };

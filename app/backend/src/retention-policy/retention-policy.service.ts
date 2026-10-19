@@ -16,6 +16,18 @@ export interface PurgeResult {
   cutoffDate: Date;
 }
 
+/** One entity's section of a dry-run report: the scheduled dry-run result plus a sample. */
+export interface DryRunReportEntry extends PurgeResult {
+  sampleIds: string[];
+}
+
+export interface DryRunReport {
+  dryRun: true;
+  generatedAt: string;
+  totalAffected: number;
+  entries: DryRunReportEntry[];
+}
+
 /** Supported entities for retention */
 const RETENTION_ENTITIES = [
   'AuditLog',
@@ -217,6 +229,75 @@ export class RetentionPolicyService {
     }
 
     return results;
+  }
+
+  /**
+   * On-demand dry run. Entries are the same PurgeResult objects the scheduled
+   * dry-run produces, each with a sample of the record ids that would be
+   * affected. Nothing is mutated.
+   */
+  async generateDryRunReport(sampleSize = 10): Promise<DryRunReport> {
+    const results = await this.executePurge({ dryRun: true });
+    const entries: DryRunReportEntry[] = [];
+    for (const r of results) {
+      entries.push({
+        ...r,
+        sampleIds:
+          r.affected > 0 ? await this.sampleAffectedIds(r, sampleSize) : [],
+      });
+    }
+    return {
+      dryRun: true,
+      generatedAt: new Date().toISOString(),
+      totalAffected: entries.reduce((sum, e) => sum + e.affected, 0),
+      entries,
+    };
+  }
+
+  private async sampleAffectedIds(
+    result: PurgeResult,
+    take: number,
+  ): Promise<string[]> {
+    const { entity, strategy, cutoffDate } = result;
+    // hard_delete removes soft-deleted rows too; the others skip them
+    const notDeleted = strategy === 'hard_delete' ? {} : { deletedAt: null };
+    const where = { createdAt: { lt: cutoffDate }, ...notDeleted };
+    const args = { select: { id: true }, take };
+
+    let rows: { id: string }[] = [];
+    switch (entity) {
+      case 'AuditLog':
+        rows = await this.prisma.auditLog.findMany({
+          ...args,
+          where: { timestamp: { lt: cutoffDate }, ...notDeleted },
+        });
+        break;
+      case 'VerificationSession':
+        rows = await this.prisma.verificationSession.findMany({
+          ...args,
+          where,
+        });
+        break;
+      case 'Session':
+        rows = await this.prisma.session.findMany({ ...args, where });
+        break;
+      case 'SessionSubmission':
+        rows = await this.prisma.sessionSubmission.findMany({
+          ...args,
+          where,
+        });
+        break;
+      case 'Claim':
+        rows = await this.prisma.claim.findMany({ ...args, where });
+        break;
+      case 'VerificationRequest':
+        rows = await this.prisma.verificationRequest.findMany({
+          ...args,
+          where,
+        });
+        break;
+    }
+    return rows.map(r => r.id);
   }
 
   /**

@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1433-add-a-configurable-default-confidence-threshold",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-1433-add-a-configurable-default-confidence-threshold": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1433-add-a-configurable-default-confidence-threshold",
+    "origin"
+  ]
+}

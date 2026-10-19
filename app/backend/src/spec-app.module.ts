@@ -55,6 +55,8 @@ import { EvidenceService } from '../src/evidence/evidence.service';
 import { ArtifactOwnershipTokenService } from '../src/evidence/artifact-ownership-token.service';
 import { UploadSessionController } from '../src/evidence/upload-session.controller';
 import { UploadSessionService } from '../src/evidence/upload-session.service';
+import { OrphanedArtifactsController } from '../src/evidence/orphaned-artifacts.controller';
+import { OrphanedArtifactsService } from '../src/evidence/orphaned-artifacts.service';
 
 import { HealthController } from '../src/health/health.controller';
 import { HealthService } from '../src/health/health.service';
@@ -146,6 +148,7 @@ const stub = <T>(value: T) => ({ useValue: value });
     EntityLinkingController,
     EvidenceController,
     UploadSessionController,
+    OrphanedArtifactsController,
     HealthController,
     JobsController,
     JobStatusStreamingController,
@@ -193,6 +196,7 @@ const stub = <T>(value: T) => ({ useValue: value });
     { provide: EvidenceService, ...stub({}) },
     { provide: ArtifactOwnershipTokenService, ...stub({}) },
     { provide: UploadSessionService, ...stub({}) },
+    { provide: OrphanedArtifactsService, ...stub({}) },
     { provide: HealthService, ...stub({}) },
     { provide: MetadataService, ...stub({}) },
     { provide: DlqService, ...stub({}) },
