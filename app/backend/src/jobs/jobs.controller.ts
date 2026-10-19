@@ -7,6 +7,7 @@ import {
   Param,
   Query,
   Req,
+  Body,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -16,6 +17,16 @@ import { DlqService } from './dlq.service';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
 import { Request } from 'express';
+import { ArrayMaxSize, ArrayNotEmpty, ArrayUnique, IsArray, IsString } from 'class-validator';
+
+class ReplayDlqJobsDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(250)
+  @ArrayUnique()
+  @IsString({ each: true })
+  ids: string[];
+}
 
 @ApiTags('Jobs')
 @Controller('jobs')
@@ -167,5 +178,20 @@ export class JobsController {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
     return this.dlqService.replayJob(id, user.id);
+  }
+
+  @ApiOperation({
+    summary: 'Replay dead-letter jobs at a paced rate (Admin only)',
+    description:
+      'Schedules up to 250 dead-letter jobs on their original queues, spacing replays by DLQ_REPLAY_INTERVAL_MS. Normal queue work remains eligible between replay jobs.',
+  })
+  @Roles(AppRole.admin)
+  @Post('dlq/replay')
+  async replayDlqJobs(@Body() dto: ReplayDlqJobsDto, @Req() req: Request) {
+    const user = req.user as any;
+    if (!user || !user.id) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+    return this.dlqService.replayJobs(dto.ids, user.id);
   }
 }
