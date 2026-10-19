@@ -3,3 +3,4 @@ export * from './request-id.interceptor';
 export * from './logging.interceptor';
 export * from './cache-response.interceptor';
 export * from './deprecation.interceptor';
+export * from './validate-body.interceptor';
