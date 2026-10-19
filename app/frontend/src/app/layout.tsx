@@ -13,6 +13,8 @@ import { MisconfiguredPage } from '@/components/MisconfiguredPage';
 import { EnvWarningBanner } from '@/components/EnvWarningBanner';
 import { DemoModeBanner, type DemoModeType } from '@/components/DemoModeBanner';
 import { NetworkMismatchBanner } from '@/components/NetworkMismatchBanner';
+import { OfflineIndicator } from '@/components/offline/OfflineIndicator';
+import { ServiceWorkerRegistration } from '@/components/offline/ServiceWorkerRegistration';
 import { VersionProvider } from '@/components/VersionProvider';
 import { validateEnv, demoModeEnabled } from '@/lib/env';
 
@@ -89,6 +91,8 @@ export default async function RootLayout({
                     {!envResult.ok && <EnvWarningBanner missing={envResult.missing} invalid={envResult.invalid} />}
                     <DemoModeBanner mode={demoMode} />
                     <NetworkMismatchBanner />
+                    <OfflineIndicator />
+                    <ServiceWorkerRegistration />
                     <Navbar />
                     {children}
                     <TestnetFaucetHelper />

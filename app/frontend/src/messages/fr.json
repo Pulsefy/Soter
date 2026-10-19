@@ -134,6 +134,10 @@
     "disconnectAndReconnect": "Déconnecter et reconnecter",
     "disconnectToReconnectLabel": "Déconnecter le portefeuille pour se reconnecter sur le bon réseau"
   },
+  "offline": {
+    "banner": "Hors ligne — affichage des données en cache de votre dernière connexion.",
+    "unreachable": "Serveur injoignable — affichage des données en cache. Reconnexion automatique."
+  },
   "errors": {
     "generic": "Une erreur inattendue s'est produite. Veuillez réessayer.",
     "networkError": "Impossible de joindre le service. Vérifiez votre connexion.",

@@ -134,6 +134,10 @@
     "disconnectAndReconnect": "Desconectar y reconectar",
     "disconnectToReconnectLabel": "Desconectar la billetera para reconectarse en la red correcta"
   },
+  "offline": {
+    "banner": "Sin conexión — mostrando los datos guardados de su última conexión.",
+    "unreachable": "No se puede alcanzar el servidor — mostrando datos guardados. Reconectando automáticamente."
+  },
   "errors": {
     "generic": "Ocurrió un error inesperado. Por favor, inténtalo de nuevo.",
     "networkError": "No se pudo conectar al servicio. Comprueba tu conexión a internet.",

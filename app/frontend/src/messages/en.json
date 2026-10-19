@@ -134,6 +134,10 @@
     "disconnectAndReconnect": "Disconnect & reconnect",
     "disconnectToReconnectLabel": "Disconnect wallet so you can reconnect on the correct network"
   },
+  "offline": {
+    "banner": "You're offline — showing cached data from your last connection.",
+    "unreachable": "Can't reach the server — showing cached data. Reconnecting automatically."
+  },
   "errors": {
     "generic": "An unexpected error occurred. Please try again.",
     "networkError": "Unable to reach the service. Please check your connection and try again.",

@@ -10,6 +10,16 @@ jest.mock('@/lib/analytics-api', () => ({
 
 const mockFetchGlobalStats = jest.mocked(fetchGlobalStats);
 
+const baseStats = {
+  totalAidDisbursed: 1500,
+  totalRecipients: 12,
+  activeCampaigns: 3,
+  byToken: [],
+  byRegion: [],
+  timeSeries: [],
+  computedAt: '2026-09-28T00:00:00.000Z',
+};
+
 describe('DashboardSummaryCards', () => {
   beforeEach(() => {
     mockFetchGlobalStats.mockReset();
@@ -65,5 +75,41 @@ describe('DashboardSummaryCards', () => {
     });
     await waitFor(() => expect(mockFetchGlobalStats).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('Active Campaigns')).toBeTruthy();
+  });
+
+  it('silently refreshes the last-known figures when connectivity returns', async () => {
+    mockFetchGlobalStats
+      .mockResolvedValueOnce(baseStats)
+      .mockImplementationOnce(() => new Promise(() => {}));
+
+    render(<DashboardSummaryCards />);
+    expect(await screen.findByText('1,500')).toBeTruthy();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    // Refetch is triggered but the previous figures stay on screen — no
+    // loading skeleton, no blank dashboard while the background refresh runs.
+    await waitFor(() => expect(mockFetchGlobalStats).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('1,500')).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('keeps the last-known figures when a background refresh fails', async () => {
+    mockFetchGlobalStats
+      .mockResolvedValueOnce(baseStats)
+      .mockRejectedValueOnce(new Error('offline'));
+
+    render(<DashboardSummaryCards />);
+    expect(await screen.findByText('1,500')).toBeTruthy();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    await waitFor(() => expect(mockFetchGlobalStats).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('1,500')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
