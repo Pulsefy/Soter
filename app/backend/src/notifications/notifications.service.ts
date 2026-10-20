@@ -80,8 +80,10 @@ export class NotificationsService {
     subject: string,
     message: string,
     correlationId?: string,
+    orgId?: string,
   ): Promise<{ outboxId: string; jobId: string }> {
-    // 1. Persist intent before enqueue (status = pending)
+    // 1. Persist intent before enqueue (status = pending). `orgId` records the
+    // owning tenant so the admin outbox endpoints can scope reads per org.
     const outbox = await this.prisma.notificationOutbox.create({
       data: {
         type: NotificationType.EMAIL,
@@ -89,6 +91,7 @@ export class NotificationsService {
         subject,
         message,
         scheduledFor: new Date(),
+        ...(orgId ? { orgId } : {}),
       },
     });
 
@@ -134,14 +137,17 @@ export class NotificationsService {
     recipient: string,
     message: string,
     correlationId?: string,
+    orgId?: string,
   ): Promise<{ outboxId: string; jobId: string }> {
-    // 1. Persist intent before enqueue (status = pending)
+    // 1. Persist intent before enqueue (status = pending). `orgId` records the
+    // owning tenant so the admin outbox endpoints can scope reads per org.
     const outbox = await this.prisma.notificationOutbox.create({
       data: {
         type: NotificationType.SMS,
         recipient,
         message,
         scheduledFor: new Date(),
+        ...(orgId ? { orgId } : {}),
       },
     });
 
@@ -184,21 +190,35 @@ export class NotificationsService {
 
   /**
    * Returns a single NotificationOutbox record by id, or null if not found.
+   *
+   * When `orgId` is supplied the lookup only matches records owned by that
+   * organisation, so a foreign record is indistinguishable from a missing
+   * one. Platform admins (no org context) pass `undefined` and see every
+   * record.
    */
-  async getOutboxRecord(id: string): Promise<NotificationOutbox | null> {
-    return this.prisma.notificationOutbox.findUnique({ where: { id } });
+  async getOutboxRecord(
+    id: string,
+    orgId?: string,
+  ): Promise<NotificationOutbox | null> {
+    return this.prisma.notificationOutbox.findFirst({
+      where: { id, ...(orgId ? { orgId } : {}) },
+    });
   }
 
   /**
    * Returns the full delivery-attempt timeline for a single outbox record,
    * newest first (issue #716). NotificationOutbox only ever holds the
    * latest attempt's outcome; this is what makes a real timeline possible.
+   *
+   * When `orgId` is supplied, attempts are only returned for outbox records
+   * owned by that organisation.
    */
   async getDeliveryAttempts(
     outboxId: string,
+    orgId?: string,
   ): Promise<NotificationDeliveryAttempt[]> {
     return this.prisma.notificationDeliveryAttempt.findMany({
-      where: { outboxId },
+      where: { outboxId, ...(orgId ? { outbox: { orgId } } : {}) },
       orderBy: { startedAt: 'desc' },
     });
   }
@@ -207,15 +227,18 @@ export class NotificationsService {
    * Returns a filtered, paginated slice of delivery attempts across all
    * outbox records, for the admin delivery-history endpoint (issue #716).
    */
-  async getDeliveryHistory(filters: {
-    outcome?: DeliveryAttemptOutcome;
-    failureCategory?: string;
-    type?: string;
-    from?: Date;
-    to?: Date;
-    limit?: number;
-    offset?: number;
-  }): Promise<{ items: NotificationDeliveryAttempt[]; total: number }> {
+  async getDeliveryHistory(
+    filters: {
+      outcome?: DeliveryAttemptOutcome;
+      failureCategory?: string;
+      type?: string;
+      from?: Date;
+      to?: Date;
+      limit?: number;
+      offset?: number;
+    },
+    orgId?: string,
+  ): Promise<{ items: NotificationDeliveryAttempt[]; total: number }> {
     const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
     const offset = Math.max(filters.offset ?? 0, 0);
 
@@ -223,13 +246,18 @@ export class NotificationsService {
       outcome?: DeliveryAttemptOutcome;
       failureCategory?: string;
       startedAt?: { gte?: Date; lte?: Date };
-      outbox?: { type: string };
+      outbox?: { type?: string; orgId?: string };
     } = {};
 
     if (filters.outcome) where.outcome = filters.outcome;
     if (filters.failureCategory)
       where.failureCategory = filters.failureCategory;
-    if (filters.type) where.outbox = { type: filters.type };
+    if (filters.type || orgId) {
+      where.outbox = {
+        ...(filters.type ? { type: filters.type } : {}),
+        ...(orgId ? { orgId } : {}),
+      };
+    }
     if (filters.from || filters.to) {
       where.startedAt = {
         ...(filters.from ? { gte: filters.from } : {}),
@@ -254,22 +282,26 @@ export class NotificationsService {
    * Returns all outbox records stuck in pending or enqueued status for more
    * than 10 minutes, ordered by scheduledFor ascending (oldest first).
    */
-  async getStuckOutboxRecords(): Promise<NotificationOutbox[]> {
+  async getStuckOutboxRecords(orgId?: string): Promise<NotificationOutbox[]> {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     return this.prisma.notificationOutbox.findMany({
       where: {
         status: { in: ['pending', 'enqueued'] },
         scheduledFor: { lt: tenMinutesAgo },
+        ...(orgId ? { orgId } : {}),
       },
       orderBy: { scheduledFor: 'asc' },
     });
   }
 
-  async getDeadLetterNotifications(page = 1, limit = 50) {
+  async getDeadLetterNotifications(page = 1, limit = 50, orgId?: string) {
     const take = Math.min(Math.max(limit, 1), 200);
     const currentPage = Math.max(page, 1);
     const skip = (currentPage - 1) * take;
-    const where = { status: 'dead_letter' as const };
+    const where = {
+      status: 'dead_letter' as const,
+      ...(orgId ? { orgId } : {}),
+    };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.notificationOutbox.findMany({
         where,
@@ -282,9 +314,13 @@ export class NotificationsService {
     return { items, total, page: currentPage, limit: take };
   }
 
-  async replayDeadLetterNotification(id: string, actorId: string) {
-    const record = await this.prisma.notificationOutbox.findUnique({
-      where: { id },
+  async replayDeadLetterNotification(
+    id: string,
+    actorId: string,
+    orgId?: string,
+  ) {
+    const record = await this.prisma.notificationOutbox.findFirst({
+      where: { id, ...(orgId ? { orgId } : {}) },
     });
     if (!record)
       throw new AppException(
@@ -301,7 +337,7 @@ export class NotificationsService {
     }
 
     const claimed = await this.prisma.notificationOutbox.updateMany({
-      where: { id, status: 'dead_letter' },
+      where: { id, status: 'dead_letter', ...(orgId ? { orgId } : {}) },
       data: {
         status: 'enqueued',
         retryCount: { increment: 1 },
@@ -363,9 +399,13 @@ export class NotificationsService {
     }
   }
 
-  async replayDeadLetterNotifications(ids: string[], actorId: string) {
+  async replayDeadLetterNotifications(
+    ids: string[],
+    actorId: string,
+    orgId?: string,
+  ) {
     const results = await Promise.allSettled(
-      ids.map(id => this.replayDeadLetterNotification(id, actorId)),
+      ids.map(id => this.replayDeadLetterNotification(id, actorId, orgId)),
     );
     return {
       replayed: results.filter(result => result.status === 'fulfilled').length,
@@ -382,10 +422,14 @@ export class NotificationsService {
     this.metricsService.setNotificationDeadLetterDepth(depth);
   }
 
-  async getActivityFeed(limit = 30): Promise<ActivityFeedItem[]> {
+  async getActivityFeed(
+    limit = 30,
+    orgId?: string,
+  ): Promise<ActivityFeedItem[]> {
     const take = Math.min(Math.max(limit, 1), 100);
     const [notifications, auditLogs, reviews] = await this.prisma.$transaction([
       this.prisma.notificationOutbox.findMany({
+        where: orgId ? { orgId } : undefined,
         orderBy: { createdAt: 'desc' },
         take,
       }),

@@ -147,10 +147,14 @@ export class CampaignBudgetAlertScheduler {
       `Please plan a top-up before claims start failing budget checks.`;
 
     for (const admin of admins) {
+      // Attribute the outbox record to the campaign's organisation so the
+      // admin outbox endpoints stay tenant-scoped for budget alerts.
       const { outboxId } = await this.notificationsService.sendEmail(
         admin.email,
         subject,
         message,
+        undefined,
+        orgId,
       );
       // Tag the outbox record so future runs deduplicate this threshold
       // crossing. Written per record (not at creation time) because the
