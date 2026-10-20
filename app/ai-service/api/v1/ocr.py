@@ -27,10 +27,11 @@ from schemas.ocr import (
     BatchOCRSummary,
     OCRData,
     LanguageHint,
+    MultiPageOCRData,
 )
 from schemas.common import ResultEnvelope
 from services.ocr_confidence import assess_confidence
-from services.ocr_job import run_ocr_from_bytes
+from services.ocr_job import run_ocr_from_bytes, stitch_multipage_ocr
 from services.ocr_batch_store import (
     BatchOCRError,
     OCRBatch,
@@ -359,6 +360,109 @@ async def retry_batch_ocr_document(
         batch_id, document_id, status="pending", task_id=task_id, error=None
     )
     return _batch_status_response(batch)
+
+
+@router.post(
+    "/ai/ocr/multi-page",
+    response_model=ResultEnvelope[MultiPageOCRData],
+)
+@limiter.limit(settings.request_rate_limit)
+async def process_multipage_ocr(
+    request: Request,
+    pages: Annotated[
+        list[UploadFile],
+        File(description="Ordered page images for one logical document (first page first)"),
+    ],
+    logical_document_id: Annotated[
+        str,
+        Form(description="Caller-supplied identifier grouping these pages as one logical document"),
+    ],
+    anchor_metadata: Annotated[
+        Optional[str], Form(description="JSON encoded AnchorMetadata")
+    ] = None,
+    language_hint: Annotated[
+        Optional[LanguageHint], Form(description="Language hint for OCR")
+    ] = None,
+    document_type: Annotated[
+        Optional[str],
+        Form(
+            description="Optional document type used to pick a per-document-type review threshold"
+        ),
+    ] = None,
+) -> ResultEnvelope[MultiPageOCRData]:
+    """Process multiple page images as one logical document and return stitched fields.
+
+    Pages are processed in submission order. When the same field is detected on
+    more than one page the highest-confidence value is kept. Every field in the
+    response carries a ``page`` attribute (1-based) so callers can trace which
+    page each value came from.
+    """
+    if not pages:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "empty_pages",
+                "message": "At least one page image is required",
+            },
+        )
+
+    if not logical_document_id or not logical_document_id.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "missing_logical_document_id",
+                "message": "logical_document_id is required",
+            },
+        )
+
+    page_bytes_list: list[bytes] = []
+    for i, page in enumerate(pages):
+        if page.content_type not in ALLOWED_CONTENT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "invalid_content_type",
+                    "message": (
+                        f"Page {i + 1}: invalid content type {page.content_type}. "
+                        f"Allowed: {', '.join(ALLOWED_CONTENT_TYPES)}"
+                    ),
+                },
+            )
+        contents = await page.read()
+        if not contents:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "empty_image",
+                    "message": f"Page {i + 1} image is empty",
+                },
+            )
+        _validate_image_bytes(contents)
+        page_bytes_list.append(contents)
+
+    raw = stitch_multipage_ocr(
+        pages=page_bytes_list,
+        logical_document_id=logical_document_id.strip(),
+        anchor_metadata=anchor_metadata,
+        language_hint=language_hint.value if language_hint else None,
+        document_type=document_type,
+    )
+
+    data = (
+        MultiPageOCRData(**raw["data"])
+        if isinstance(raw["data"], dict)
+        else raw["data"]
+    )
+
+    from main import correlation_id_var
+
+    return ResultEnvelope[MultiPageOCRData](
+        result=data,
+        confidence=raw.get("confidence"),
+        reasons=list(raw["review_reasons"]) if raw.get("needs_review") and raw.get("review_reasons") else None,
+        anchor_metadata=raw.get("anchor_metadata"),
+        trace_id=correlation_id_var.get() or None,
+    )
 
 
 @router.post(

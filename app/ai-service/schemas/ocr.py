@@ -186,6 +186,84 @@ class OCRData(BaseModel):
     }
 
 
+class OCRPageFieldResult(BaseModel):
+    """A field extracted from one page of a multi-page document, with attribution."""
+
+    value: str = Field(examples=["John Doe"])
+    confidence: float = Field(0.0, examples=[0.95])
+    page: int = Field(description="1-based page number this field was sourced from.", examples=[1])
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [{"value": "John Doe", "confidence": 0.95, "page": 1}]
+        }
+    }
+
+
+class MultiPageOCRData(BaseModel):
+    """Combined extraction result for a multi-page document."""
+
+    logical_document_id: str = Field(
+        description="Caller-supplied identifier grouping these pages as one logical document.",
+        examples=["doc-passport-001"],
+    )
+    page_count: int = Field(description="Number of pages processed.", examples=[2])
+    fields: dict[str, OCRPageFieldResult] = Field(
+        description=(
+            "Merged fields from all pages. Each field carries the page it was "
+            "sourced from; when the same field appears on multiple pages the "
+            "highest-confidence value wins."
+        ),
+        examples=[
+            {
+                "full_name": {"value": "John Doe", "confidence": 0.95, "page": 1},
+                "issue_date": {"value": "01/01/2020", "confidence": 0.88, "page": 2},
+            }
+        ],
+    )
+    raw_text_by_page: dict[int, str] = Field(
+        description="Raw extracted text keyed by 1-based page number.",
+        examples=[{1: "Full Name: John Doe", 2: "Issue Date: 01/01/2020"}],
+    )
+    processing_time_ms: int = Field(examples=[300])
+    confidence: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Mean confidence across all merged fields.",
+        examples=[0.91],
+    )
+    confidence_band: Optional[OCRConfidenceBand] = Field(None, examples=["high"])
+    needs_review: bool = Field(False)
+    review_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
+    document_type: Optional[str] = Field(None, examples=["passport"])
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "logical_document_id": "doc-passport-001",
+                    "page_count": 2,
+                    "fields": {
+                        "full_name": {"value": "John Doe", "confidence": 0.95, "page": 1},
+                        "issue_date": {"value": "01/01/2020", "confidence": 0.88, "page": 2},
+                    },
+                    "raw_text_by_page": {
+                        "1": "Full Name: John Doe",
+                        "2": "Issue Date: 01/01/2020",
+                    },
+                    "processing_time_ms": 300,
+                    "confidence": 0.915,
+                    "confidence_band": "high",
+                    "needs_review": False,
+                    "review_threshold": 0.75,
+                    "document_type": "passport",
+                }
+            ]
+        }
+    }
+
+
 class OCRResponse(BaseModel):
     success: bool = Field(examples=[True])
     data: OCRData | None = None
