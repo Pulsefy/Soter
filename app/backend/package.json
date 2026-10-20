@@ -28,6 +28,7 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:e2e:ci": "prisma migrate deploy && jest --config ./test/jest-e2e.json --runInBand",
+    "load:prisma-pool-saturation": "ts-node -r tsconfig-paths/register scripts/prisma-pool-saturation.load.ts",
     "spec:generate": "ts-node -r tsconfig-paths/register src/generate-spec.ts",
     "spec:check": "ts-node -r tsconfig-paths/register scripts/check-spec-drift.ts",
     "spec:lint": "redocly lint openapi/openapi.json",

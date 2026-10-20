@@ -11,24 +11,28 @@ Use the backend `/metrics`, `/health`, `/api/v1/health`, and `/jobs/health` endp
 
 ## Metrics To Watch
 
-| Signal | Metric | What it means |
-| --- | --- | --- |
-| Contract latency | `contract_call_latency_seconds{operation,status}` | Slow or failed Soroban contract operations by queue operation. Watch p95/p99 by `operation`. |
-| Transaction submission failures | `tx_submission_failures_total{operation,reason}` | Transaction submission or `tx_*` failures from onchain jobs. Spikes usually mean RPC congestion, expired transactions, bad sequence state, or network mismatch. |
-| Callback failures | `callback_failures_total{callback_type,reason}` | Failed AI webhooks, notification delivery jobs, and onchain job failure callbacks. |
-| Onchain throughput | `onchain_operations_total{operation,adapter,status}` | Existing onchain success/failure counter by adapter. |
-| Job failures | `jobs_failed_total{job_type}` | Background job failures across queues. Pair with `/jobs/health`. |
-| Webhook retries | `webhook_retries_total{webhook_type,reason}` | Retry pressure for webhook delivery paths. |
-| Claims created | `claims_created_total{campaign_id}` | Cumulative count of claims created, broken down by campaign. |
-| Claims verified | `claims_verified_total{campaign_id}` | Cumulative count of claims that passed verification. |
-| Claims approved | `claims_approved_total{campaign_id}` | Cumulative count of claims approved for disbursement. |
-| Claims disbursed | `claims_disbursed_total{campaign_id,onchain_enabled}` | Cumulative count of claims disbursed, labelled by whether on-chain execution was enabled. |
-| Claims cancelled | `claims_cancelled_total{campaign_id,from_status}` | Cumulative count of claims cancelled, labelled by the status they were in when cancelled. |
-| Claims in funnel | `claims_in_funnel{status}` | Current gauge of claims at each funnel stage (requested, verified, approved, disbursed, archived, cancelled). |
-| Claim stage duration | `claim_funnel_duration_seconds{from_status,to_status}` | Time (seconds) spent in a given funnel stage before transitioning to the next. Useful for identifying bottlenecks. |
-| Evidence queue depth | `evidence_queue_depth{status}` | Current number of evidence queue items per `EvidenceStatus` (`pending`, `uploading`, `completed`, `failed`). Rising `pending`/`uploading` means review/upload is falling behind intake. Refreshed once per minute. |
-| Oldest pending evidence | `evidence_queue_oldest_pending_age_seconds` | Age (seconds) of the oldest evidence item still `pending`. A steadily climbing value is the clearest SLA-breach signal for the evidence backlog. `0` when nothing is pending. |
-| Evidence intake→decision | `evidence_intake_to_decision_duration_seconds{status}` | Histogram of time from evidence intake to a terminal decision (`completed` or `failed`). Watch p95/p99 to see how long items take to clear the pipeline. |
+| Signal                          | Metric                                                 | What it means                                                                                                                                                                                                      |
+| ------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Contract latency                | `contract_call_latency_seconds{operation,status}`      | Slow or failed Soroban contract operations by queue operation. Watch p95/p99 by `operation`.                                                                                                                       |
+| Transaction submission failures | `tx_submission_failures_total{operation,reason}`       | Transaction submission or `tx_*` failures from onchain jobs. Spikes usually mean RPC congestion, expired transactions, bad sequence state, or network mismatch.                                                    |
+| Callback failures               | `callback_failures_total{callback_type,reason}`        | Failed AI webhooks, notification delivery jobs, and onchain job failure callbacks.                                                                                                                                 |
+| Onchain throughput              | `onchain_operations_total{operation,adapter,status}`   | Existing onchain success/failure counter by adapter.                                                                                                                                                               |
+| Job failures                    | `jobs_failed_total{job_type}`                          | Background job failures across queues. Pair with `/jobs/health`.                                                                                                                                                   |
+| Webhook retries                 | `webhook_retries_total{webhook_type,reason}`           | Retry pressure for webhook delivery paths.                                                                                                                                                                         |
+| Claims created                  | `claims_created_total{campaign_id}`                    | Cumulative count of claims created, broken down by campaign.                                                                                                                                                       |
+| Claims verified                 | `claims_verified_total{campaign_id}`                   | Cumulative count of claims that passed verification.                                                                                                                                                               |
+| Claims approved                 | `claims_approved_total{campaign_id}`                   | Cumulative count of claims approved for disbursement.                                                                                                                                                              |
+| Claims disbursed                | `claims_disbursed_total{campaign_id,onchain_enabled}`  | Cumulative count of claims disbursed, labelled by whether on-chain execution was enabled.                                                                                                                          |
+| Claims cancelled                | `claims_cancelled_total{campaign_id,from_status}`      | Cumulative count of claims cancelled, labelled by the status they were in when cancelled.                                                                                                                          |
+| Claims in funnel                | `claims_in_funnel{status}`                             | Current gauge of claims at each funnel stage (requested, verified, approved, disbursed, archived, cancelled).                                                                                                      |
+| Claim stage duration            | `claim_funnel_duration_seconds{from_status,to_status}` | Time (seconds) spent in a given funnel stage before transitioning to the next. Useful for identifying bottlenecks.                                                                                                 |
+| Evidence queue depth            | `evidence_queue_depth{status}`                         | Current number of evidence queue items per `EvidenceStatus` (`pending`, `uploading`, `completed`, `failed`). Rising `pending`/`uploading` means review/upload is falling behind intake. Refreshed once per minute. |
+| Oldest pending evidence         | `evidence_queue_oldest_pending_age_seconds`            | Age (seconds) of the oldest evidence item still `pending`. A steadily climbing value is the clearest SLA-breach signal for the evidence backlog. `0` when nothing is pending.                                      |
+| Evidence intake→decision        | `evidence_intake_to_decision_duration_seconds{status}` | Histogram of time from evidence intake to a terminal decision (`completed` or `failed`). Watch p95/p99 to see how long items take to clear the pipeline.                                                           |
+| Prisma pool capacity            | `prisma_pool_size`                                     | Configured maximum PostgreSQL connections in the Prisma pool (`DATABASE_POOL_MAX`, default 10).                                                                                                                    |
+| Prisma connections in use       | `prisma_pool_connections_in_use`                       | Connections currently checked out of the pool. Compare with `prisma_pool_size`.                                                                                                                                    |
+| Prisma queued connections       | `prisma_pool_waiting_connections`                      | Current connection requests waiting for an available pool connection. Any sustained nonzero value indicates pool pressure.                                                                                         |
+| Prisma connection wait          | `prisma_pool_wait_duration_seconds`                    | Histogram of time spent queued for an available pool connection. Use p95/p99 to detect user-visible pool contention.                                                                                               |
 
 ## Incident Checklist
 
@@ -51,3 +55,14 @@ Use the backend `/metrics`, `/health`, `/api/v1/health`, and `/jobs/health` endp
 - Claim funnel: bar chart or stacked area of `claims_in_funnel` by `status` to visualise pipeline flow.
 - Claim stage durations: p50/p95/p99 from `claim_funnel_duration_seconds` by `from_status`->`to_status` transition.
 - Funnel conversion rates: rate of `claims_disbursed_total` / rate of `claims_created_total` to measure end-to-end throughput.
+- Prisma pool saturation: graph `prisma_pool_connections_in_use / prisma_pool_size` and alert when it exceeds `0.8` for 5 minutes; alert immediately when `prisma_pool_waiting_connections > 0` for 1 minute or p95 `prisma_pool_wait_duration_seconds` exceeds `0.05` seconds. Tune thresholds to the service's latency SLO and database capacity.
+
+## Prisma Pool Load Test
+
+Run the saturation check against a disposable PostgreSQL database with the backend dependencies installed:
+
+```sh
+DATABASE_URL='postgresql://...' npm run load:prisma-pool-saturation
+```
+
+The test constrains the Prisma PostgreSQL pool to one connection, holds that connection, and issues ten simultaneous Prisma queries. It fails unless all ten are observable as waiting and the queued wait histogram records all ten acquisitions. `DATABASE_POOL_MAX` controls the backend pool limit; the isolated load-test pool stays at one connection to make saturation deterministic.
