@@ -39,6 +39,8 @@ const {
 } = require('./coldStartAnalysis');
 
 const ROOT = path.join(__dirname, '..');
+const CLOCK_SAMPLE_ATTEMPTS = 3;
+const CLOCK_SAMPLE_RETRY_DELAY_SECONDS = 1;
 
 function parseArgs(argv) {
   const args = {
@@ -118,22 +120,37 @@ function adb(args, deviceSerial, options = {}) {
 
 /** Host-vs-device clock offset: hostEpochMs - deviceEpochMs. */
 function measureClockOffset(deviceSerial) {
-  const before = Date.now();
-  const deviceTimeRaw = adb(
-    ['shell', 'date', '+%s%3N'],
-    deviceSerial,
-  ).trim();
-  const after = Date.now();
-  const deviceEpochMs = Number(deviceTimeRaw);
-  if (!Number.isFinite(deviceEpochMs)) {
-    throw new Error(
-      `Could not parse device clock from "adb shell date +%s%3N" output: "${deviceTimeRaw}"`,
-    );
+  let lastError;
+  for (let attempt = 1; attempt <= CLOCK_SAMPLE_ATTEMPTS; attempt += 1) {
+    const before = Date.now();
+    try {
+      const deviceTimeRaw = adb(
+        ['shell', 'date', '+%s%3N'],
+        deviceSerial,
+        { timeout: 10000 },
+      ).trim();
+      const after = Date.now();
+      const deviceEpochMs = Number(deviceTimeRaw);
+      if (!Number.isFinite(deviceEpochMs)) {
+        throw new Error(
+          `Could not parse device clock from "adb shell date +%s%3N" output: "${deviceTimeRaw}"`,
+        );
+      }
+      // Split the difference on the round-trip time of the `adb shell` call
+      // itself so the offset isn't biased by command latency.
+      const hostEpochMsAtDeviceSample = (before + after) / 2;
+      return hostEpochMsAtDeviceSample - deviceEpochMs;
+    } catch (error) {
+      lastError = error;
+      if (attempt < CLOCK_SAMPLE_ATTEMPTS) {
+        execFileSync('sleep', [String(CLOCK_SAMPLE_RETRY_DELAY_SECONDS)]);
+      }
+    }
   }
-  // Split the difference on the round-trip time of the `adb shell` call
-  // itself so the offset isn't biased by command latency.
-  const hostEpochMsAtDeviceSample = (before + after) / 2;
-  return hostEpochMsAtDeviceSample - deviceEpochMs;
+  throw new Error(
+    `Could not sample the device clock after ${CLOCK_SAMPLE_ATTEMPTS} attempts: ${lastError.message}`,
+    { cause: lastError },
+  );
 }
 
 function waitForInteractiveLog(deviceSerial, timeoutMs) {
@@ -179,10 +196,15 @@ function runOneColdStart({ deviceSerial, packageId, activity, timeoutMs }) {
   }
 
   const timestamps = waitForInteractiveLog(deviceSerial, timeoutMs);
+  const navigationDeviceToHostOffsetMs =
+    timestamps.navigationReady === undefined
+      ? deviceToHostOffsetMs
+      : measureClockOffset(deviceSerial);
   const durations = computePhaseDurations({
     timestamps,
     launchWallClockMs,
     deviceToHostOffsetMs,
+    navigationDeviceToHostOffsetMs,
   });
 
   const totalTimeMatch = /TotalTime:\s*(\d+)/.exec(nativeStartOutput);
@@ -269,6 +291,10 @@ function main() {
     if (result.missingPhases.length > 0) {
       console.warn(
         `[measure-cold-start] iteration ${i + 1} missing phase(s): ${result.missingPhases.join(', ')}`,
+      );
+    } else if (result.invalidReason) {
+      console.warn(
+        `[measure-cold-start] iteration ${i + 1} discarded: ${result.invalidReason}`,
       );
     } else {
       console.log(

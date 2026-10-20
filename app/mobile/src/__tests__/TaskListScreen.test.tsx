@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, waitFor, screen, fireEvent } from '@testing-library/react-native';
 import { TaskListScreen } from '../screens/TaskListScreen';
-import { fetchTaskList } from '../services/taskApi';
+import { fetchTaskList, getMockTaskList } from '../services/taskApi';
 import {
   cacheTaskList,
   loadCachedTaskList,
@@ -14,7 +14,14 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View } from 'react-native';
 
 // Mock dependencies
-jest.mock('../services/taskApi');
+jest.mock('../services/taskApi', () => {
+  const actual = jest.requireActual('../services/taskApi');
+  return {
+    ...actual,
+    fetchTaskList: jest.fn(),
+    getMockTaskList: jest.fn(actual.getMockTaskList),
+  };
+});
 jest.mock('../services/taskCache');
 
 jest.mock('../hooks/useNetworkStatus', () => ({
@@ -30,6 +37,7 @@ jest.mock('../components/DataFreshnessIndicator', () => ({
 }));
 
 const mockFetchTaskList = fetchTaskList as jest.MockedFunction<typeof fetchTaskList>;
+const mockGetMockTaskList = getMockTaskList as jest.MockedFunction<typeof getMockTaskList>;
 const mockCacheTaskList = cacheTaskList as jest.MockedFunction<typeof cacheTaskList>;
 const mockLoadCachedTaskList = loadCachedTaskList as jest.MockedFunction<typeof loadCachedTaskList>;
 const mockGetTaskCacheTimestamp = getTaskCacheTimestamp as jest.MockedFunction<typeof getTaskCacheTimestamp>;
@@ -102,21 +110,73 @@ describe('TaskListScreen', () => {
     });
   });
 
-  it('displays honest empty state when backend fails and no cache exists (no mock fallback)', async () => {
+  it('falls back to getMockTaskList and shows visible MOCK indicator when both cache and network fail', async () => {
     mockFetchTaskList.mockRejectedValueOnce(new Error('Network offline'));
     mockLoadCachedTaskList.mockResolvedValueOnce(null);
 
     renderScreen();
 
     await waitFor(() => {
-      expect(screen.getByText(/No tasks/i)).toBeTruthy();
+      // Mock badge is visible
+      expect(screen.getByText('🔧 MOCK')).toBeTruthy();
+      expect(screen.getByTestId('mock-badge')).toBeTruthy();
+      expect(screen.getByText('Showing mock task data — backend unreachable')).toBeTruthy();
+      // Mock tasks are rendered
+      expect(screen.getByText('Verify Aid Package 1')).toBeTruthy();
+      expect(screen.getByText('Scan Recipient QR Code')).toBeTruthy();
+      expect(screen.getByText('Deliver Medical Supplies')).toBeTruthy();
     });
 
-    // Ensure mock task data is NOT rendered
-    expect(screen.queryByText('Verify Aid Package 1')).toBeNull();
-    expect(screen.queryByText('Scan Recipient QR Code')).toBeNull();
-    expect(screen.queryByText('Deliver Medical Supplies')).toBeNull();
+    expect(mockGetMockTaskList).toHaveBeenCalledTimes(1);
   });
 
+  it('does not trigger mock fallback when cache is available', async () => {
+    const cachedTasks = [
+      {
+        id: 'task-cached-1',
+        title: 'Cached Task',
+        assignedPackageId: '1',
+        dueDate: new Date().toISOString(),
+        dueState: 'due-today' as const,
+        status: 'pending' as const,
+      },
+    ];
 
+    mockFetchTaskList.mockRejectedValueOnce(new Error('Network offline'));
+    mockLoadCachedTaskList.mockResolvedValueOnce(cachedTasks);
+
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText('Cached Task')).toBeTruthy();
+      expect(screen.queryByText('🔧 MOCK')).toBeNull();
+    });
+
+    expect(mockGetMockTaskList).not.toHaveBeenCalled();
+  });
+
+  it('does not trigger mock fallback when backend is reachable', async () => {
+    const freshTasks = [
+      {
+        id: 'task-live-1',
+        title: 'Live Task',
+        assignedPackageId: '1',
+        dueDate: new Date().toISOString(),
+        dueState: 'due-today' as const,
+        status: 'pending' as const,
+      },
+    ];
+
+    mockFetchTaskList.mockResolvedValueOnce(freshTasks);
+
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText('Live Task')).toBeTruthy();
+      expect(screen.queryByText('🔧 MOCK')).toBeNull();
+    });
+
+    expect(mockGetMockTaskList).not.toHaveBeenCalled();
+  });
 });
+

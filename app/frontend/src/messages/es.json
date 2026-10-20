@@ -127,7 +127,16 @@
     "transactionHistory": "Historial de Transacciones",
     "networkMismatch": "Discrepancia de red — su billetera está en {walletNetwork} pero esta aplicación requiere {expectedNetwork}. Abra Freighter y cambie a la red correcta para continuar.",
     "networkMismatchShort": "Red incorrecta — cambie a {expectedNetwork} en Freighter.",
-    "submitBlocked": "No se puede enviar: la billetera está en la red incorrecta."
+    "submitBlocked": "No se puede enviar: la billetera está en la red incorrecta.",
+    "refreshSession": "Cambié — actualizar",
+    "refreshingSession": "Actualizando…",
+    "refreshSessionLabel": "Volver a leer la red desde Freighter después de cambiar",
+    "disconnectAndReconnect": "Desconectar y reconectar",
+    "disconnectToReconnectLabel": "Desconectar la billetera para reconectarse en la red correcta"
+  },
+  "offline": {
+    "banner": "Sin conexión — mostrando los datos guardados de su última conexión.",
+    "unreachable": "No se puede alcanzar el servidor — mostrando datos guardados. Reconectando automáticamente."
   },
   "errors": {
     "generic": "Ocurrió un error inesperado. Por favor, inténtalo de nuevo.",

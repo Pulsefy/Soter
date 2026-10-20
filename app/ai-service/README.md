@@ -92,6 +92,15 @@ result envelope. Requests without `stream=true` continue to return the normal
 single JSON envelope and use the existing response cache. Token events contain
 partial provider text; the final result event is authoritative.
 
+Successful verification attempts for the same `anchor_metadata.claim_id` (or
+the same evidence artifact IDs when no claim ID is supplied) are subject to
+`VERIFICATION_COOLDOWN_SECONDS` (default `300`). The cooldown is scoped to the
+organization, and repeat requests inside the interval reuse the prior result
+without another provider call. Such responses include
+`X-Verification-Cooldown: true`. Attempts after the interval may be processed
+again. Requests without a claim ID or artifact IDs do not have a stable
+identity to cooldown.
+
 Request body:
 
 ```json
@@ -127,7 +136,13 @@ Response body:
 curl -X POST "http://localhost:8000/ai/ocr" -F "image=@document.jpg"
 ```
 
-**Rate limit:** 10 requests/minute per IP
+**Rate limits:** OCR requests retain the per-IP `REQUEST_RATE_LIMIT` (default
+`10/minute`) and also use the shared per-key sliding-window budget
+`RATE_LIMIT_PER_KEY_DEFAULT` (default `60/minute`), with optional
+`RATE_LIMIT_ENDPOINT_OVERRIDES` by route. Batch OCR charges one per-key unit
+for each uploaded document, rather than one unit for the whole submission.
+For example, a four-document batch uses four units; if the remaining budget is
+too small, the request is rejected with HTTP 429 before any OCR jobs are queued.
 
 ### Request Safety Limits
 
@@ -226,6 +241,28 @@ Response body:
   }
 }
 ```
+
+### Asynchronous Inference Webhooks
+
+`POST /v1/ai/inference` accepts an optional `webhook_url`. When supplied, the
+service POSTs signed lifecycle callbacks using the canonical AI callback
+contract: a `processing` event when a worker starts the task, followed by a
+`completed` or `failed` event. The `status` field identifies each event, and
+`taskId` and `taskType` identify the task. Webhook URLs must use HTTP or HTTPS.
+
+```json
+{
+"type": "inference",
+"data": { "document_url": "https://example.com/document.pdf" },
+"webhook_url": "https://client.example.com/task-events"
+}
+```
+
+The response still includes `task_id` and `status_url`; the existing
+`/v1/ai/status/{task_id}` and `/v1/ai/jobs/{task_id}` polling endpoints remain
+available. If `webhook_url` is omitted, the configured backend callback
+behavior is unchanged. Failed callback deliveries, including progress events,
+are recorded in the dead-letter queue and can be replayed.
 
 ### Dead-Letter Replay
 

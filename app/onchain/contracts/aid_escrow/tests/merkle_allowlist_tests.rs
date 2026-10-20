@@ -255,6 +255,103 @@ mod multi_level_tree {
     }
 
     #[test]
+    fn identical_proof_resubmitted_for_same_package_fails_on_claimed_status() {
+        let t = TestSetup::new();
+        let claimants: [Address; 4] = [
+            Address::generate(&t.env),
+            Address::generate(&t.env),
+            Address::generate(&t.env),
+            Address::generate(&t.env),
+        ];
+        let tree = build_four_leaf_tree(&t.env, &claimants);
+        t.fund_contract(ONE_TOKEN);
+
+        let metadata = merkle_metadata(&t.env, &tree.root_hex);
+        let id = t.client.create_package(
+            &t.admin,
+            &907u64,
+            &Address::generate(&t.env),
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3600),
+            &metadata,
+        );
+
+        assert!(t
+            .client
+            .try_claim_with_proof(&id, &claimants[1], &tree.proofs[1])
+            .is_ok());
+        assert_eq!(t.client.get_package(&id).status, PackageStatus::Claimed);
+
+        // Exact same claimant + proof again: rejected by the claimed-status
+        // check, not by (or in spite of) proof verification.
+        let replay = t
+            .client
+            .try_claim_with_proof(&id, &claimants[1], &tree.proofs[1]);
+        assert_eq!(replay, Err(Ok(Error::PackageNotActive)));
+        assert_eq!(t.client.get_package(&id).status, PackageStatus::Claimed);
+    }
+
+    #[test]
+    fn proof_from_one_package_tree_is_rejected_against_another_package() {
+        let t = TestSetup::new();
+        let claimants_a: [Address; 4] = [
+            Address::generate(&t.env),
+            Address::generate(&t.env),
+            Address::generate(&t.env),
+            Address::generate(&t.env),
+        ];
+        let claimants_b: [Address; 4] = [
+            Address::generate(&t.env),
+            Address::generate(&t.env),
+            Address::generate(&t.env),
+            Address::generate(&t.env),
+        ];
+        let tree_a = build_four_leaf_tree(&t.env, &claimants_a);
+        let tree_b = build_four_leaf_tree(&t.env, &claimants_b);
+        t.fund_contract(2 * ONE_TOKEN);
+
+        let id_a = t.client.create_package(
+            &t.admin,
+            &908u64,
+            &Address::generate(&t.env),
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3600),
+            &merkle_metadata(&t.env, &tree_a.root_hex),
+        );
+        let id_b = t.client.create_package(
+            &t.admin,
+            &909u64,
+            &Address::generate(&t.env),
+            &ONE_TOKEN,
+            &t.token,
+            &(t.now() + 3600),
+            &merkle_metadata(&t.env, &tree_b.root_hex),
+        );
+
+        // Claim package A with a valid leaf/proof from tree A.
+        assert!(t
+            .client
+            .try_claim_with_proof(&id_a, &claimants_a[0], &tree_a.proofs[0])
+            .is_ok());
+
+        // Reusing that leaf's address and proof against package B (a different
+        // root) must fail proof verification and leave B untouched.
+        let cross = t
+            .client
+            .try_claim_with_proof(&id_b, &claimants_a[0], &tree_a.proofs[0]);
+        assert_eq!(cross, Err(Ok(Error::InvalidProof)));
+        assert_eq!(t.client.get_package(&id_b).status, PackageStatus::Created);
+
+        // Package B is still claimable by its own allowlist member.
+        assert!(t
+            .client
+            .try_claim_with_proof(&id_b, &claimants_b[0], &tree_b.proofs[0])
+            .is_ok());
+    }
+
+    #[test]
     fn tampered_sibling_hash_is_rejected_deterministically() {
         let t = TestSetup::new();
         let claimants: [Address; 4] = [

@@ -113,6 +113,8 @@ async def create_inference_task(
 
     Offloads time-consuming AI tasks to background workers. Use the
     returned ``task_id`` to poll for results via ``GET /ai/status/{task_id}``.
+    Optionally provide ``webhook_url`` to receive signed callbacks when
+    processing begins and when the task completes or fails.
 
     Contract-aware metadata fields are used to anchor verification results
     to on-chain events during Testnet demos.

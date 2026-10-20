@@ -30,6 +30,7 @@ import { escapeCsvField, toCsvRow } from '../common/csv/csv.util';
 import { streamCursorPaginated } from '../common/streaming/cursor-paginate';
 import { VerificationService } from '../verification/verification.service';
 import { readPersistedVerificationResult } from '../verification/verification-result.persistence';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 export interface ClaimExportRow {
   id: string;
@@ -112,9 +113,20 @@ export class ClaimsService {
     private readonly sorobanTransactionService: SorobanTransactionLifecycleService,
     private readonly sorobanTransactionScheduler: SorobanTransactionScheduler,
     private readonly verificationService: VerificationService,
+    @Optional() private readonly analyticsService?: AnalyticsService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
+  }
+
+  private async invalidateDashboardSummary(reason: string) {
+    try {
+      await this.analyticsService?.invalidateCache(reason);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate dashboard summary cache after ${reason}: ${String(error)}`,
+      );
+    }
   }
 
   async create(createClaimDto: CreateClaimDto) {
@@ -183,6 +195,7 @@ export class ClaimsService {
     this.metricsService.adjustClaimsInFunnel('requested', 1);
 
     await this.enqueueVerificationForClaim(claim.id);
+    await this.invalidateDashboardSummary('claim_updated');
 
     return claim;
   }
@@ -349,6 +362,12 @@ export class ClaimsService {
             amount: claim.amount.toString(),
             tokenAddress,
             correlationId: traceId,
+            // One disbursement row per claim, ever. A retry after a partial
+            // failure (crash between submission and the local status update)
+            // reuses the existing row — and its onchain-state verification —
+            // instead of creating a second transaction that would resubmit
+            // and double-disburse.
+            idempotencyKey: `disburse:${id}`,
             metadata: {
               campaignId: claim.campaignId,
               claimAmount: claim.amount,
@@ -413,6 +432,7 @@ export class ClaimsService {
       },
     );
 
+    await this.invalidateDashboardSummary('claim_updated');
     return updatedClaim;
   }
 
@@ -661,6 +681,7 @@ export class ClaimsService {
     this.metricsService.adjustClaimsInFunnel(fromStatus, -1);
     this.metricsService.adjustClaimsInFunnel(toStatus, 1);
 
+    await this.invalidateDashboardSummary('claim_updated');
     return updatedClaim;
   }
 

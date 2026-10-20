@@ -29,6 +29,7 @@ class DeterministicVerificationProvider:
         aid_claim: str,
         supporting_evidence: Optional[List[str]] = None,
         context_factors: Optional[Dict[str, Any]] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Predict the label for a claim and return it with the raw verdict."""
         evidence = supporting_evidence or []
@@ -38,11 +39,13 @@ class DeterministicVerificationProvider:
                 aid_claim=aid_claim,
                 supporting_evidence=evidence,
                 context_factors=context,
+                language=language,
             ),
             self._prompt_engine.build_fallback_prompt(
                 aid_claim=aid_claim,
                 supporting_evidence=evidence,
                 context_factors=context,
+                language=language,
             ),
         ]
         response = None

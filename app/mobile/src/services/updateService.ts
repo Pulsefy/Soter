@@ -34,6 +34,10 @@ export const fetchVersionInfo = async (): Promise<VersionInfo> => {
     minRequiredVersion: data.minRequiredVersion || data.currentVersion,
     releaseNotes: data.releaseNotes?.changes || data.releaseNotesArray || DEFAULT_RELEASE_NOTES,
     storeUrl: data.storeUrl || DEFAULT_STORE_URL,
+    gracePeriodMs: data.gracePeriodMs,
+    gracePeriodSeconds: data.gracePeriodSeconds,
+    deadline: data.deadline,
+    forceUpgradeDeadline: data.forceUpgradeDeadline,
   };
 };
 
@@ -66,6 +70,193 @@ export const loadCachedVersionInfo = async (): Promise<VersionInfo | null> => {
     );
     return null;
   }
+};
+
+/** AsyncStorage key holding the force-upgrade deadline metadata. */
+export const FORCE_UPGRADE_DEADLINE_KEY = '@Soter:ForceUpgradeDeadline';
+
+export interface StoredGraceDeadline {
+  minRequiredVersion: string;
+  deadline: number;
+}
+
+export const getStoredGraceDeadline = async (
+  minRequiredVersion: string,
+): Promise<number | null> => {
+  try {
+    const raw = await AsyncStorage.getItem(FORCE_UPGRADE_DEADLINE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredGraceDeadline;
+    if (
+      parsed &&
+      parsed.minRequiredVersion === minRequiredVersion &&
+      typeof parsed.deadline === 'number'
+    ) {
+      return parsed.deadline;
+    }
+    return null;
+  } catch (error) {
+    structuredLogger.warn(
+      'updates.grace_deadline_read_failed',
+      { error: error instanceof Error ? error.message : String(error) },
+      'updates',
+    );
+    return null;
+  }
+};
+
+export const setStoredGraceDeadline = async (
+  minRequiredVersion: string,
+  deadline: number,
+): Promise<void> => {
+  try {
+    const payload: StoredGraceDeadline = { minRequiredVersion, deadline };
+    await AsyncStorage.setItem(
+      FORCE_UPGRADE_DEADLINE_KEY,
+      JSON.stringify(payload),
+    );
+  } catch (error) {
+    structuredLogger.warn(
+      'updates.grace_deadline_write_failed',
+      { error: error instanceof Error ? error.message : String(error) },
+      'updates',
+    );
+  }
+};
+
+export const clearStoredGraceDeadline = async (): Promise<void> => {
+  try {
+    await AsyncStorage.removeItem(FORCE_UPGRADE_DEADLINE_KEY);
+  } catch (error) {
+    structuredLogger.warn(
+      'updates.grace_deadline_clear_failed',
+      { error: error instanceof Error ? error.message : String(error) },
+      'updates',
+    );
+  }
+};
+
+/**
+ * Resolves the absolute timestamp (epoch ms) by which the user must upgrade.
+ *
+ * 1. If versionInfo specifies an explicit deadline string/timestamp, parse and use it.
+ * 2. If a duration is configured (in versionInfo or mobile config):
+ *    - Check AsyncStorage for an already active deadline for this required version.
+ *    - If found, continue using it (so closing/reopening doesn't reset grace).
+ *    - If not found, compute now + duration and persist it.
+ * 3. If no grace period or deadline is configured, returns null (immediate block).
+ */
+export const resolveGraceDeadline = async (
+  versionInfo: VersionInfo,
+  configGracePeriodMs?: number,
+  now = Date.now(),
+): Promise<number | null> => {
+  const explicitRaw = versionInfo.deadline ?? versionInfo.forceUpgradeDeadline;
+  if (explicitRaw !== undefined && explicitRaw !== null) {
+    const parsed =
+      typeof explicitRaw === 'number' ? explicitRaw : Date.parse(String(explicitRaw));
+    if (!Number.isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  // Check if a deadline was already stored for this version
+  const stored = await getStoredGraceDeadline(versionInfo.minRequiredVersion);
+  if (stored !== null) {
+    return stored;
+  }
+
+  const graceDurationMs =
+    versionInfo.gracePeriodMs ??
+    (versionInfo.gracePeriodSeconds !== undefined
+      ? versionInfo.gracePeriodSeconds * 1000
+      : undefined) ??
+    configGracePeriodMs;
+
+  if (graceDurationMs === undefined || graceDurationMs <= 0) {
+    return null;
+  }
+
+  const newDeadline = now + graceDurationMs;
+  await setStoredGraceDeadline(versionInfo.minRequiredVersion, newDeadline);
+  return newDeadline;
+};
+
+export type UpgradeState = 'none' | 'warn' | 'block';
+
+export interface UpgradeEvaluation {
+  upgradeState: UpgradeState;
+  graceDeadline: number | null;
+  remainingGraceMs: number;
+  isForceUpgrade: boolean;
+}
+
+/**
+ * Evaluates whether an upgrade is required, and if so, whether the app
+ * is currently in a grace period ("warn") or hard blocked ("block").
+ */
+export const determineUpgradeState = (
+  currentVersion: string,
+  minRequiredVersion: string,
+  deadline: number | null,
+  now = Date.now(),
+): UpgradeEvaluation => {
+  const requiresUpgrade =
+    compareVersions(minRequiredVersion, currentVersion) > 0;
+
+  if (!requiresUpgrade) {
+    return {
+      upgradeState: 'none',
+      graceDeadline: null,
+      remainingGraceMs: 0,
+      isForceUpgrade: false,
+    };
+  }
+
+  // If no deadline is set, immediate hard block
+  if (deadline === null) {
+    return {
+      upgradeState: 'block',
+      graceDeadline: null,
+      remainingGraceMs: 0,
+      isForceUpgrade: true,
+    };
+  }
+
+  const remaining = Math.max(0, deadline - now);
+  if (remaining > 0) {
+    return {
+      upgradeState: 'warn',
+      graceDeadline: deadline,
+      remainingGraceMs: remaining,
+      isForceUpgrade: false,
+    };
+  }
+
+  // Grace period expired: hard block
+  return {
+    upgradeState: 'block',
+    graceDeadline: deadline,
+    remainingGraceMs: 0,
+    isForceUpgrade: true,
+  };
+};
+
+/**
+ * Formats remaining milliseconds into HH:MM:SS (or MM:SS when < 1 hour).
+ */
+export const formatGraceCountdown = (remainingMs: number): string => {
+  if (remainingMs <= 0) return '00:00';
+  const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  if (hours > 0) {
+    return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  }
+  return `${pad(minutes)}:${pad(seconds)}`;
 };
 
 export type VersionInfoSource = 'network' | 'cache' | 'none';
@@ -119,3 +310,4 @@ export const compareVersions = (v1: string, v2: string): number => {
   }
   return 0;
 };
+

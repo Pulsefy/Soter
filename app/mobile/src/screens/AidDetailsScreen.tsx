@@ -25,6 +25,7 @@ import {
   cacheAidDetails,
   loadCachedAidDetails,
   getAidDetailsCacheTimestamp,
+  VERIFICATION_STATUS_STALE_THRESHOLD_MS,
 } from '../services/aidCache';
 import { useSync } from '../contexts/SyncContext';
 import { useSaverMode } from '../contexts/SaverModeContext';
@@ -52,6 +53,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [isCached, setIsCached] = useState(false);
+  const [freshnessNow, setFreshnessNow] = useState(Date.now());
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const {
@@ -128,6 +130,29 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
       void loadDetails(false);
     }
   }, [authState, loadDetails]);
+
+  // Keep the cached verification status honest while this screen stays open.
+  useEffect(() => {
+    if (!isCached || !lastUpdated) return;
+    const cachedAt = new Date(lastUpdated).getTime();
+    if (!Number.isFinite(cachedAt)) return;
+    const timeUntilStale = Math.max(
+      0,
+      cachedAt + VERIFICATION_STATUS_STALE_THRESHOLD_MS - Date.now(),
+    );
+    const timeout = setTimeout(() => setFreshnessNow(Date.now()), timeUntilStale);
+    return () => clearTimeout(timeout);
+  }, [isCached, lastUpdated]);
+
+  // A network reconnection should fetch a fresh status immediately, clearing
+  // the cached/stale marker as soon as the request succeeds.
+  const wasConnected = React.useRef(isConnected);
+  useEffect(() => {
+    if (isConnected && !wasConnected.current && authState === 'granted') {
+      void loadDetails(true);
+    }
+    wasConnected.current = isConnected;
+  }, [authState, isConnected, loadDetails]);
 
   // ── Periodic auto-refresh (normal mode only) ──────────────────────────────
   // In normal mode, refresh every 30 s while the screen is focused.
@@ -336,6 +361,11 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const statusLabel = formatStatus(details.status);
   const pillStyle = statusPillStyle(details.status, colors);
+  const isVerificationStatusStale = Boolean(
+    isCached &&
+      lastUpdated &&
+      freshnessNow - new Date(lastUpdated).getTime() >= VERIFICATION_STATUS_STALE_THRESHOLD_MS,
+  );
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -354,7 +384,7 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         <View
           style={[styles.statusPill, { backgroundColor: pillStyle.backgroundColor }]}
           accessible
-          accessibilityLabel={`Status: ${statusLabel}`}
+          accessibilityLabel={`${isVerificationStatusStale ? 'Last known status' : 'Status'}: ${statusLabel}`}
         >
           <Text
             style={[styles.statusText, { color: pillStyle.textColor }]}
@@ -440,8 +470,16 @@ export const AidDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
         </Text>
         <StepProgress status={details.status} colors={colors} />
         <Text style={styles.statusCaption}>
-          Current status: {statusLabel}
+          {isVerificationStatusStale ? 'Last known status' : 'Current status'}: {statusLabel}
         </Text>
+        {isVerificationStatusStale ? (
+          <Text
+            style={styles.statusCaption}
+            accessibilityRole="alert"
+          >
+            Last known as of {formatDateTime(lastUpdated!)}; may be outdated.
+          </Text>
+        ) : null}
       </View>
 
       <ClaimStatusTimeline details={details} colors={colors} styles={styles} />

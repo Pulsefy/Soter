@@ -11,6 +11,7 @@ import { EncryptionModule } from '../common/encryption/encryption.module';
 import { BudgetService } from '../common/budget/budget.service';
 import { CommonServicesModule } from '../common/services/common-services.module';
 import { VerificationModule } from '../verification/verification.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { VerificationModule } from '../verification/verification.module';
     EncryptionModule,
     CommonServicesModule,
     VerificationModule,
+    AnalyticsModule,
   ],
   controllers: [ClaimsController],
   providers: [ClaimsService, CancelAndReissueService, BudgetService],

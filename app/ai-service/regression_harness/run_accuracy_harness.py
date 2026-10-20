@@ -65,6 +65,7 @@ def run_suite(
             aid_claim=inp["aid_claim"],
             supporting_evidence=inp.get("supporting_evidence"),
             context_factors=inp.get("context_factors"),
+            language=case.get("language"),
         )
         expected = case["expected"]
         predicted = prediction["label"]

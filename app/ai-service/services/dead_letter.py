@@ -23,11 +23,23 @@ from threading import Lock
 from typing import Any, Dict, List, Literal, Optional
 
 from config import settings
+from logging_redaction import redact
 
 logger = logging.getLogger(__name__)
 
 DeadLetterKind = Literal["callback", "async_job"]
 DeadLetterStatus = Literal["pending", "succeeded", "exhausted"]
+
+
+def _redact_value(value: Any) -> Any:
+    """Recursively apply ``logging_redaction.redact`` to every string in *value*."""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {str(k): _redact_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_value(v) for v in value]
+    return value
 
 
 class DeadLetterError(Exception):
@@ -50,7 +62,7 @@ class ReplayAttempt:
             "actor": self.actor,
             "outcome": self.outcome,
             "timestamp": self.timestamp,
-            "error": self.error,
+            "error": _redact_value(self.error),
         }
 
 
@@ -78,8 +90,8 @@ class DeadLetterEntry:
             "kind": self.kind,
             "task_id": self.task_id,
             "task_type": self.task_type,
-            "payload": self.payload,
-            "error": self.error,
+            "payload": _redact_value(self.payload),
+            "error": _redact_value(self.error),
             "status": self.status,
             "attempts": self.attempts,
             "max_attempts": self.max_attempts,
@@ -100,7 +112,9 @@ class DeadLetterQueue:
         self._lock = Lock()
 
     @staticmethod
-    def make_id(kind: DeadLetterKind, task_id: str, event_id: Optional[str] = None) -> str:
+    def make_id(
+        kind: DeadLetterKind, task_id: str, event_id: Optional[str] = None
+    ) -> str:
         """Deterministic ID so re-adding the same failed event updates it in place."""
         entry_id = f"{kind}:{task_id}"
         return f"{entry_id}:{event_id}" if event_id else entry_id
@@ -120,8 +134,8 @@ class DeadLetterQueue:
             existing = self._entries.get(entry_id)
             now = time.time()
             if existing is not None:
-                existing.error = error
-                existing.payload = payload
+                existing.error = _redact_value(error)
+                existing.payload = _redact_value(payload)
                 existing.task_type = task_type or existing.task_type
                 existing.status = "pending"
                 existing.updated_at = now
@@ -139,8 +153,8 @@ class DeadLetterQueue:
                 id=entry_id,
                 kind=kind,
                 task_id=task_id,
-                payload=payload,
-                error=error,
+                payload=_redact_value(payload),
+                error=_redact_value(error),
                 task_type=task_type,
                 max_attempts=self.max_attempts,
             )
@@ -209,7 +223,7 @@ class DeadLetterQueue:
                     actor=actor,
                     outcome="succeeded" if success else "failed",
                     timestamp=now,
-                    error=None if success else error,
+                    error=None if success else _redact_value(error),
                 )
             )
 

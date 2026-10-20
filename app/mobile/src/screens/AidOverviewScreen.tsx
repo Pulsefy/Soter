@@ -16,6 +16,7 @@ import { AidPackage, getAidPackages } from '../services/api';
 import { cacheAidList, loadCachedAidList, getCacheTimestamp } from '../services/aidCache';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { OfflineBanner } from '../components/OfflineBanner';
+import { ConnectionQualityBanner } from '../components/ConnectionQualityBanner';
 import { useTheme } from '../theme/ThemeContext';
 import { useTranslation } from '../i18n/useTranslation';
 import { AppColors } from '../theme/useAppTheme';
@@ -92,7 +93,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
     setSyncing(false);
   }, [isCached, loadData]);
 
-  const { isConnected } = useNetworkStatus(handleReconnect);
+  const { isConnected, networkQuality } = useNetworkStatus(handleReconnect);
 
   useEffect(() => {
     loadData();
@@ -164,6 +165,7 @@ export const AidOverviewScreen: React.FC<Props> = ({ navigation }) => {
     <SafeAreaView style={styles.container}>
       <SaverModeBanner visible={saverModeActive} source={saverModeSource} />
       <OfflineBanner visible={!isConnected} cachedAt={cachedAt} pendingCount={pendingCount} />
+      <ConnectionQualityBanner visible={isConnected && networkQuality === 'degraded'} />
       <DataFreshnessIndicator isCached={isCached} isConnected={isConnected} cachedAt={cachedAt} refreshing={refreshing} refreshMessage={refreshMessage} onRefresh={() => loadData(true)} />
 
       {/* Resolved sync banner: dynamic condition + accessibility */}

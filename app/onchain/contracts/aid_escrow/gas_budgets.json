@@ -10,6 +10,7 @@
     "refund": { "cpu_instructions": 83260, "memory_bytes": 9995 },
     "claim_with_proof": { "cpu_instructions": 214434, "memory_bytes": 29171 },
     "fund": { "cpu_instructions": 114631, "memory_bytes": 16791 },
+    "reassign_package": { "cpu_instructions": 132000, "memory_bytes": 22000 },
     "get_package": { "cpu_instructions": 256, "memory_bytes": 1024 },
     "get_aggregates": { "cpu_instructions": 256, "memory_bytes": 1024 },
     "batch_create_packages_10": { "cpu_instructions": 686211, "memory_bytes": 135948 },

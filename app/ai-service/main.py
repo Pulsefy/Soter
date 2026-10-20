@@ -40,6 +40,7 @@ import tasks
 from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
 from schemas.anonymization import AnonymizeRequest, AnonymizeResponse
 from services.pii_scrubber import PIIScrubberService
+from services.providers import close_provider_http_clients
 from schemas.humanitarian import (
     HumanitarianVerificationRequest,
     HumanitarianVerificationResponse,
@@ -109,6 +110,9 @@ _LEGACY_PREFIX_MAP: list = [
     ("/ai/jobs/", "/v1/ai/jobs/"),
     ("/ai/task/", "/v1/ai/task/"),
 ]
+
+# The uploaded document count is only available after FastAPI parses the form.
+_WEIGHTED_RATE_LIMIT_PATHS = {"/ai/ocr/batch", "/v1/ai/ocr/batch"}
 
 
 @asynccontextmanager
@@ -214,6 +218,8 @@ async def lifespan(app: FastAPI):
         logger.warning(
             f"Drain timeout ({drain_timeout}s) reached with {app.state.active_requests} active requests."
         )
+
+    close_provider_http_clients()
 
 
 app = FastAPI(
@@ -527,7 +533,11 @@ async def monitor_requests(request: Request, call_next):
 
     from services.rate_limiter import evaluate_rate_limit
 
-    rate_limit_response = evaluate_rate_limit(request)
+    rate_limit_response = (
+        None
+        if request.method == "POST" and path in _WEIGHTED_RATE_LIMIT_PATHS
+        else evaluate_rate_limit(request)
+    )
     if rate_limit_response is not None:
         return rate_limit_response
 

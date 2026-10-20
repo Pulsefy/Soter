@@ -14,6 +14,7 @@ import { randomUUID } from 'crypto';
 import { StellarLedgerSource } from './stellar-ledger-source';
 import { AuditService } from '../audit/audit.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import { LedgerReconciliationAlertService } from './ledger-reconciliation-alert.service';
 import {
   CampaignTokenTotals,
   ONCHAIN_ADAPTER_TOKEN,
@@ -176,6 +177,7 @@ export class LedgerReconciliationService {
     private readonly metricsService: MetricsService,
     private readonly ledgerSource: StellarLedgerSource,
     @Optional() private readonly auditService?: AuditService,
+    @Optional() private readonly alerts?: LedgerReconciliationAlertService,
   ) {}
 
   /**
@@ -541,6 +543,7 @@ export class LedgerReconciliationService {
     if (!dryRun) {
       await this.persistDiscrepancies(report);
       this.publishMetrics(report);
+      await this.notifyOperators(report);
     }
 
     this.logReport(report);
@@ -964,6 +967,28 @@ export class LedgerReconciliationService {
       LEDGER_RECONCILIATION_DURATION_METRIC,
       report.durationMs / 1000,
     );
+  }
+
+  /**
+   * Alert operators when the pass crossed the configured threshold. A failing
+   * notification must not fail the reconciliation itself, so errors are logged
+   * and swallowed.
+   */
+  private async notifyOperators(
+    report: LedgerBalanceReconciliationReport,
+  ): Promise<void> {
+    if (!this.alerts) {
+      return;
+    }
+    try {
+      await this.alerts.notifyIfThresholdExceeded(report);
+    } catch (error) {
+      this.logger.error(
+        `Failed to notify operators about reconciliation ${report.runId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   private logReport(report: LedgerBalanceReconciliationReport): void {

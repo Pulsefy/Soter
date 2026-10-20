@@ -1,0 +1,142 @@
+[
+  {
+    "id": "ar_approve_001",
+    "language": "ar",
+    "input": {
+      "aid_claim": "سلّمت فرق الإغاثة 2000 حقيبة نظافة إلى جميع الأسر المسجلة في القطاع باء الأسبوع الماضي.",
+      "supporting_evidence": [
+        "قائمة التوزيع رقم B-17 موقعة من مراقبَين ميدانيَّين",
+        "بيان شحن المستودع رقم WM-221",
+        "نماذج استلام المستفيدين، أُعيد منها 196 من أصل 200"
+      ],
+      "context_factors": {
+        "security_status": "stable",
+        "weather": "clear"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "ar_approve_002",
+    "language": "ar",
+    "input": {
+      "aid_claim": "عالجت عيادة متنقلة 340 مريضاً في المجتمعات المتضررة من الفيضانات على مدى ثلاثة أسابيع.",
+      "supporting_evidence": [
+        "سجل المرضى موقّع من مشرفة التمريض",
+        "تقرير مطابقة مخزون الأدوية",
+        "النموذج الأسبوعي المرسل إلى مكتب الصحة في المنطقة"
+      ],
+      "context_factors": {
+        "disaster_type": "flood",
+        "health_access": "limited"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "ar_approve_003",
+    "language": "ar",
+    "input": {
+      "aid_claim": "وصلت المساعدة الغذائية الشهرية إلى 1500 أسرة عبر سلال التموين في مخيم النازحين.",
+      "supporting_evidence": [
+        "بيان التوزيع موقّع من إدارة المخيم",
+        "بطاقات التموين مطابقة لسجل المخيم",
+        "إيصال استلام من وكالة الأغذية الشريكة"
+      ],
+      "context_factors": {
+        "displacement_level": "high"
+      }
+    },
+    "expected": "approve"
+  },
+  {
+    "id": "ar_reject_001",
+    "language": "ar",
+    "input": {
+      "aid_claim": "يُزعم أنه جرى توزيع 5000 حقيبة مأوى، لكن لا يوجد سجل شراء ولا قائمة مستفيدين.",
+      "supporting_evidence": [
+        "رسالة نصية مجهولة تذكر التوزيع",
+        "لا توجد فاتورة شراء متاحة"
+      ],
+      "context_factors": {
+        "security_status": "unstable"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "ar_reject_002",
+    "language": "ar",
+    "input": {
+      "aid_claim": "يفيد التقرير بتوزيع الغذاء على 10000 شخص في قرية يبلغ عدد سكانها 800 بحسب التعداد.",
+      "supporting_evidence": [
+        "صورة بلا تاريخ أو موقع",
+        "التعداد المحلي يناقض الرقم المعلن"
+      ],
+      "context_factors": {
+        "displacement_level": "low"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "ar_reject_003",
+    "language": "ar",
+    "input": {
+      "aid_claim": "تدّعي منظمة أنها بنت 50 مرحاضاً، لكن معاينة الموقع لم تجد أي منشأة.",
+      "supporting_evidence": [
+        "تقرير معاينة لم يرصد أي منشآت",
+        "فواتير تحمل توقيعات مكررة"
+      ],
+      "context_factors": {
+        "season": "dry"
+      }
+    },
+    "expected": "reject"
+  },
+  {
+    "id": "ar_ambiguous_001",
+    "language": "ar",
+    "input": {
+      "aid_claim": "أُفيد بتسليم مياه الشرب إلى عدة مجتمعات، دون أرقام أو تواريخ محددة.",
+      "supporting_evidence": [
+        "مذكرة قصيرة من المنسق المحلي",
+        "لا توجد سجلات تسليم مرفقة"
+      ],
+      "context_factors": {
+        "water_access": "limited"
+      }
+    },
+    "expected": "ambiguous"
+  },
+  {
+    "id": "ar_ambiguous_002",
+    "language": "ar",
+    "input": {
+      "aid_claim": "يقول شريك محلي إنه جرى علاج مرضى في عيادة مؤقتة، لكن السجل غير مكتمل.",
+      "supporting_evidence": [
+        "سجل جزئي تنقصه صفحات",
+        "إفادة شفهية من عامل صحي"
+      ],
+      "context_factors": {
+        "health_access": "limited"
+      }
+    },
+    "expected": "ambiguous"
+  },
+  {
+    "id": "ar_ambiguous_003",
+    "language": "ar",
+    "input": {
+      "aid_claim": "يُقال إن بعض الأسر تسلمت بطانيات، لكن قائمة المستفيدين تغطي جزءاً فقط من الأسر.",
+      "supporting_evidence": [
+        "قائمة مستفيدين جزئية",
+        "صور بطانيات بلا إشارة إلى الموقع"
+      ],
+      "context_factors": {
+        "weather": "cold"
+      }
+    },
+    "expected": "ambiguous"
+  }
+]

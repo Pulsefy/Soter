@@ -88,6 +88,43 @@ describe('computePhaseDurations', () => {
     expect(result.totalToInteractiveMs).toBe(2000); // (997000+5000) - 1000000
   });
 
+  it('uses a fresh navigation clock offset to account for clock changes during startup', () => {
+    const result = computePhaseDurations({
+      timestamps: {
+        jsStart: 996000,
+        appRenderStart: 996300,
+        navigationReady: 997000,
+      },
+      launchWallClockMs: 1000000,
+      deviceToHostOffsetMs: 5000,
+      navigationDeviceToHostOffsetMs: 9000,
+    });
+
+    expect(result.nativeLaunchToJsStartMs).toBe(1000);
+    expect(result.jsStartToAppRenderStartMs).toBe(300);
+    expect(result.appRenderStartToInteractiveMs).toBe(700);
+    expect(result.totalToInteractiveMs).toBe(6000);
+  });
+
+  it('excludes a measurement with negative durations from aggregation', () => {
+    const result = computePhaseDurations({
+      timestamps: {
+        jsStart: 1001000,
+        appRenderStart: 1001300,
+        navigationReady: 999000,
+      },
+      launchWallClockMs: 1000000,
+    });
+
+    expect(result.totalToInteractiveMs).toBeNull();
+    expect(result.invalidReason).toMatch(/negative duration/);
+    expect(aggregateMeasurements([result])).toMatchObject({
+      sampleCount: 1,
+      usableCount: 0,
+      medians: null,
+    });
+  });
+
   it('reports missing phases and nulls out durations that depend on them', () => {
     const result = computePhaseDurations({
       timestamps: { jsStart: 1700000001000 },

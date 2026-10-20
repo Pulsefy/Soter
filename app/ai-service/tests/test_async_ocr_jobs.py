@@ -9,6 +9,7 @@ from PIL import Image
 import main
 import tasks
 from config import settings
+from services.rate_limiter import rate_limiter
 
 
 @pytest.fixture(autouse=True)
@@ -132,16 +133,18 @@ def test_retry_policy_is_defined_on_heavy_task():
 
 @pytest.fixture(autouse=True)
 def reset_rate_limits():
-    """Clear the slowapi counters shared by this module's endpoints.
+    """Clear the rate-limit counters shared by this module's endpoints.
 
-    The OCR endpoints are rate limited (10/minute by default); without a
-    per-test reset, requests made by earlier tests in this file would trip
-    the limit for later ones.
+    Without a per-test reset, requests made by earlier tests in this file
+    could trip the limits for later ones.
     """
     from api.v1.ocr import limiter as ocr_limiter
 
     ocr_limiter.reset()
+    rate_limiter.reset()
     yield
+    ocr_limiter.reset()
+    rate_limiter.reset()
 
 
 def _queueing_stub():
@@ -201,6 +204,41 @@ def test_batch_submission_reports_batch_id_and_document_outcomes(client, monkeyp
         f"/v1/ai/ocr/batch/{data['batch_id']}/documents/"
         f"{failed_doc['document_id']}/retry"
     )
+
+
+def test_batch_ocr_rate_limit_charges_one_unit_per_document(client, monkeypatch):
+    created_tasks, fake_create_task = _queueing_stub()
+    monkeypatch.setattr(tasks, "create_task", fake_create_task)
+    rate_limiter.set_endpoint_override("/v1/ai/ocr/batch", "4/minute")
+    headers = {"X-API-Key": "weighted-batch-caller"}
+
+    single_item = client.post(
+        "/v1/ai/ocr/batch",
+        files=[("files", ("single.png", _png_bytes(), "image/png"))],
+        headers=headers,
+    )
+    assert single_item.status_code == 202
+    assert single_item.headers["X-RateLimit-Remaining"] == "3"
+
+    three_items = client.post(
+        "/v1/ai/ocr/batch",
+        files=[
+            ("files", (f"document-{index}.png", _png_bytes(), "image/png"))
+            for index in range(3)
+        ],
+        headers=headers,
+    )
+    assert three_items.status_code == 202
+    assert three_items.headers["X-RateLimit-Remaining"] == "0"
+
+    over_budget = client.post(
+        "/v1/ai/ocr/batch",
+        files=[("files", ("over-budget.png", _png_bytes(), "image/png"))],
+        headers=headers,
+    )
+    assert over_budget.status_code == 429
+    assert over_budget.json()["error"]["code"] == "RATE_LIMIT_EXCEEDED"
+    assert len(created_tasks) == 4
 
 
 def test_batch_status_separates_mixed_outcomes_and_partial_failure(client, monkeypatch):

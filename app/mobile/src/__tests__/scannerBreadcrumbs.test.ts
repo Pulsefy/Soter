@@ -1,7 +1,9 @@
 import * as Sentry from '@sentry/react-native';
 import { initCrashReporting } from '../services/crashReporting';
 import {
+  getScannerDiagnosticsSnapshot,
   recordItemDeduped,
+  recordItemDedupedCrossSession,
   recordItemFailed,
   recordItemQueued,
   recordScanReceived,
@@ -36,6 +38,7 @@ describe('scanner crash-reporting breadcrumbs', () => {
     recordScanStarted('bulk');
     recordScanReceived('bulk', { scanned: 1 });
     recordItemDeduped('bulk', { scanned: 1, skipped: 1 });
+    recordItemDedupedCrossSession('bulk', { scanned: 1, skipped: 1 });
     recordItemQueued('bulk', { scanned: 1, verified: 1 });
 
     const crumbs = recordedCrumbs();
@@ -43,10 +46,11 @@ describe('scanner crash-reporting breadcrumbs', () => {
       'bulk:scan_started',
       'bulk:scan_received',
       'bulk:item_deduped',
+      'bulk:item_deduped_cross_session',
       'bulk:item_queued',
     ]);
     expect(crumbs.every((crumb) => crumb.category === 'scanner')).toBe(true);
-    expect(addBreadcrumbMock).toHaveBeenCalledTimes(4);
+    expect(addBreadcrumbMock).toHaveBeenCalledTimes(5);
   });
 
   it('excludes raw scanned content and keeps only numeric counters', () => {
@@ -71,6 +75,27 @@ describe('scanner crash-reporting breadcrumbs', () => {
       scanned: 1,
     });
     expect(JSON.stringify(recordedCrumbs())).not.toContain('aid-secret-123');
+  });
+
+  it('tracks aggregate decode diagnostics and failure cause categories', () => {
+    const snapshot = getScannerDiagnosticsSnapshot();
+    expect(snapshot.attempts).toBeGreaterThanOrEqual(0);
+    expect(snapshot.failureRate).toBeGreaterThanOrEqual(0);
+    expect(snapshot.byCause).toEqual({
+      no_barcode_detected: 0,
+      format_unsupported: 0,
+      low_confidence: 0,
+    });
+
+    recordScanReceived('single', { scanned: 1 });
+    recordItemFailed('single', { scanned: 1, failed: 1, cause: 'format_unsupported' });
+    recordItemFailed('single', { scanned: 2, failed: 2, cause: 'no_barcode_detected' });
+
+    const nextSnapshot = getScannerDiagnosticsSnapshot();
+    expect(nextSnapshot.attempts).toBeGreaterThanOrEqual(2);
+    expect(nextSnapshot.byCause.format_unsupported).toBeGreaterThanOrEqual(1);
+    expect(nextSnapshot.byCause.no_barcode_detected).toBeGreaterThanOrEqual(1);
+    expect(nextSnapshot.failureRate).toBeGreaterThanOrEqual(0);
   });
 
   it('carries the breadcrumb trail into a simulated crash report', () => {

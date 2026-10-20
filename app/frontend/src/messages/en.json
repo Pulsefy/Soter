@@ -127,7 +127,16 @@
     "transactionHistory": "Transaction History",
     "networkMismatch": "Network mismatch — your wallet is on {walletNetwork} but this app requires {expectedNetwork}. Open Freighter and switch to the correct network to continue.",
     "networkMismatchShort": "Wrong network — switch to {expectedNetwork} in Freighter.",
-    "submitBlocked": "Cannot submit: wallet is on the wrong network."
+    "submitBlocked": "Cannot submit: wallet is on the wrong network.",
+    "refreshSession": "I switched — refresh",
+    "refreshingSession": "Refreshing…",
+    "refreshSessionLabel": "Re-read network from Freighter after switching",
+    "disconnectAndReconnect": "Disconnect & reconnect",
+    "disconnectToReconnectLabel": "Disconnect wallet so you can reconnect on the correct network"
+  },
+  "offline": {
+    "banner": "You're offline — showing cached data from your last connection.",
+    "unreachable": "Can't reach the server — showing cached data. Reconnecting automatically."
   },
   "errors": {
     "generic": "An unexpected error occurred. Please try again.",

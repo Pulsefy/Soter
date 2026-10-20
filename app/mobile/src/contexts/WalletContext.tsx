@@ -1,5 +1,7 @@
 import React, { PropsWithChildren, createContext, useContext, useEffect, useState } from 'react';
+import { Alert } from 'react-native';
 import * as ExpoLinking from 'expo-linking';
+import { useTranslation } from '../i18n/useTranslation';
 import {
   ConnectedWalletSession,
   WalletConnectionStatus,
@@ -15,6 +17,7 @@ import {
   migrateFromAsyncStorage,
   secureClearAll,
 } from '../services/secureStorage';
+import { formatWalletSwapWarning, shouldWarnAboutWalletSwap } from '../services/walletReconnectWarning';
 
 /**
  * Lifecycle state of the session-restore bootstrap.
@@ -81,6 +84,7 @@ const idleState = {
 };
 
 export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<WalletConnectionStatus>('idle');
   const [restoreStatus, setRestoreStatus] = useState<RestoreStatus>('restoring');
   const [secureStorageUnavailable, setSecureStorageUnavailable] = useState(false);
@@ -226,6 +230,26 @@ export const WalletProvider: React.FC<PropsWithChildren> = ({ children }) => {
 
       try {
         const session = await approval();
+
+        if (shouldWarnAboutWalletSwap(publicKey, session.publicKey)) {
+          const shouldContinue = await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              t('wallet.differentWalletDetected'),
+              formatWalletSwapWarning(publicKey, session.publicKey, t),
+              [
+                { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
+                { text: t('common.continue'), onPress: () => resolve(true) },
+              ],
+            );
+          });
+
+          if (!shouldContinue) {
+            setStatus('idle');
+            setError(null);
+            return;
+          }
+        }
+
         setTopic(session.topic);
         setPublicKey(session.publicKey);
         setWalletName(session.walletName);

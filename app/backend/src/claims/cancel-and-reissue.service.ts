@@ -1,5 +1,5 @@
 import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
@@ -17,6 +17,7 @@ import {
   ClaimCancelledEvent,
   ClaimReissuedEvent,
 } from './claim.events';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 /** Statuses from which a claim may be cancelled. */
 const CANCELLABLE_STATUSES: ClaimStatus[] = [
@@ -34,6 +35,7 @@ export class CancelAndReissueService {
     private readonly auditService: AuditService,
     private readonly encryptionService: EncryptionService,
     private readonly metricsService: MetricsService,
+    @Optional() private readonly analyticsService?: AnalyticsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -124,6 +126,7 @@ export class CancelAndReissueService {
     };
 
     await this.emitEvent(event);
+    await this.analyticsService?.invalidateCache('claim_updated');
 
     this.metricsService.incrementClaimsCancelled(
       claim.campaignId,
@@ -280,6 +283,7 @@ export class CancelAndReissueService {
       this.emitEvent(cancelEvent),
       this.emitEvent(reissueEvent),
     ]);
+    await this.analyticsService?.invalidateCache('claim_updated');
 
     this.metricsService.incrementClaimsCancelled(
       original.campaignId,

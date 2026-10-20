@@ -277,3 +277,41 @@ export class ExtendAidPackageExpiryDto {
   @Min(1)
   newExpiresAt: number;
 }
+
+// --- Delegate Operation DTOs ---
+
+/**
+ * DTO for setting a delegate on a package
+ */
+export class SetDelegateDto {
+  @ApiProperty({
+    description: 'Stellar address of the delegate to assign',
+    example: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+  })
+  @IsString()
+  delegateAddress: string;
+
+  @ApiProperty({
+    description:
+      'Optional unix timestamp when this delegation expires. Omit for a permanent (until revoked) delegation.',
+    example: 1735689600,
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  expiresAt?: number;
+}
+
+/**
+ * DTO for querying an aid package by ID (used for GET param binding)
+ */
+export class GetPackageDelegateDto {
+  @ApiProperty({
+    description: 'Package ID to look up the delegate for',
+    example: 'pkg_123456789',
+  })
+  @IsString()
+  packageId: string;
+}

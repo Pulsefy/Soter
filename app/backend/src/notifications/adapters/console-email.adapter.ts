@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { DeliveryAdapter, DeliveryResult } from './delivery-adapter.interface';
+import {
+  DeliveryAdapter,
+  DeliveryResult,
+  ProviderReachabilityResult,
+} from './delivery-adapter.interface';
 
 /**
  * Console-based email adapter for development and testing (issue #941).
@@ -11,7 +15,18 @@ import { DeliveryAdapter, DeliveryResult } from './delivery-adapter.interface';
 @Injectable()
 export class ConsoleEmailAdapter implements DeliveryAdapter {
   readonly channel = 'email' as const;
+  readonly provider = 'console';
   private readonly logger = new Logger(ConsoleEmailAdapter.name);
+
+  async checkReachability(): Promise<ProviderReachabilityResult> {
+    await Promise.resolve();
+    return {
+      provider: this.provider,
+      reachable: true,
+      latencyMs: 0,
+      skipped: true,
+    };
+  }
 
   async send(params: {
     recipient: string;
