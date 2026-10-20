@@ -452,6 +452,7 @@ model Organization {
   verificationRequests VerificationRequest[]
   evidenceQueueItems EvidenceQueueItem[] @relation("OrganizationEvidenceQueueItems")
   deviceNotificationTokens DeviceNotificationToken[]
+  notificationOutbox NotificationOutbox[]
 
   @@index([deletedAt])
 }
@@ -711,6 +712,12 @@ model NotificationOutbox {
   sentAt        DateTime?
   jobId         String?
   metadata      String?
+  /// Owning organisation. Null for platform-level notifications (for example
+  /// verification codes, whose caller has no org context) and for rows that
+  /// predate org attribution. Only `null`-tolerant platform admins can see
+  /// these; org-scoped callers never can.
+  orgId         String?
+  organization  Organization?            @relation(fields: [orgId], references: [id], onDelete: SetNull)
   createdAt     DateTime                 @default(now())
   updatedAt     DateTime                 @updatedAt
 
@@ -720,6 +727,7 @@ model NotificationOutbox {
   @@index([recipient])
   @@index([scheduledFor])
   @@index([createdAt])
+  @@index([orgId])
 }
 
 /// Records every individual delivery attempt for a NotificationOutbox

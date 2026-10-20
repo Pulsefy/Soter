@@ -26,6 +26,7 @@ describe('NotificationsService', () => {
       update: jest.Mock;
       updateMany: jest.Mock;
       findUnique: jest.Mock;
+      findFirst: jest.Mock;
       findMany: jest.Mock;
       count: jest.Mock;
     };
@@ -73,6 +74,7 @@ describe('NotificationsService', () => {
         }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUnique: jest.fn().mockResolvedValue(mockOutbox),
+        findFirst: jest.fn().mockResolvedValue(mockOutbox),
         findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn().mockResolvedValue(0),
       },
@@ -164,6 +166,27 @@ describe('NotificationsService', () => {
           scheduledFor: expect.any(Date),
         }),
       });
+    });
+
+    it('should persist the owning organisation on the outbox record', async () => {
+      await service.sendEmail(
+        'test@example.com',
+        'Subject',
+        'Message',
+        undefined,
+        'org-a',
+      );
+
+      expect(prismaMock.notificationOutbox.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ orgId: 'org-a' }),
+      });
+    });
+
+    it('should leave orgId unset for platform-level notifications', async () => {
+      await service.sendEmail('test@example.com', 'Subject', 'Message');
+
+      const createArgs = prismaMock.notificationOutbox.create.mock.calls[0][0];
+      expect(createArgs.data).not.toHaveProperty('orgId');
     });
 
     it('should enqueue job with outboxId in data', async () => {
@@ -360,22 +383,48 @@ describe('NotificationsService', () => {
     it('should return the outbox record for a valid id', async () => {
       const result = await service.getOutboxRecord('outbox-123');
 
-      expect(prismaMock.notificationOutbox.findUnique).toHaveBeenCalledWith({
+      expect(prismaMock.notificationOutbox.findFirst).toHaveBeenCalledWith({
         where: { id: 'outbox-123' },
       });
       expect(result).toEqual(mockOutbox);
     });
 
     it('should return null for a non-existent id', async () => {
-      prismaMock.notificationOutbox.findUnique.mockResolvedValueOnce(null);
+      prismaMock.notificationOutbox.findFirst.mockResolvedValueOnce(null);
 
       const result = await service.getOutboxRecord('non-existent');
 
       expect(result).toBeNull();
     });
+
+    it('should scope the lookup to the caller organisation when orgId is given', async () => {
+      await service.getOutboxRecord('outbox-123', 'org-a');
+
+      expect(prismaMock.notificationOutbox.findFirst).toHaveBeenCalledWith({
+        where: { id: 'outbox-123', orgId: 'org-a' },
+      });
+    });
+
+    it('should not filter by organisation for platform admins', async () => {
+      await service.getOutboxRecord('outbox-123', undefined);
+
+      expect(prismaMock.notificationOutbox.findFirst).toHaveBeenCalledWith({
+        where: { id: 'outbox-123' },
+      });
+    });
   });
 
   describe('getStuckOutboxRecords', () => {
+    it('should scope the query to the caller organisation when orgId is given', async () => {
+      await service.getStuckOutboxRecords('org-a');
+
+      expect(prismaMock.notificationOutbox.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ orgId: 'org-a' }),
+        }),
+      );
+    });
+
     it('should return empty array when no stuck records exist', async () => {
       prismaMock.notificationOutbox.findMany.mockResolvedValueOnce([]);
 
@@ -442,8 +491,39 @@ describe('NotificationsService', () => {
       );
     });
 
+    it('lists only the caller organisation dead-lettered records', async () => {
+      prismaMock.notificationOutbox.findMany.mockResolvedValueOnce([]);
+      prismaMock.notificationOutbox.count.mockResolvedValueOnce(0);
+
+      await service.getDeadLetterNotifications(1, 50, 'org-a');
+
+      expect(prismaMock.notificationOutbox.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { status: 'dead_letter', orgId: 'org-a' },
+        }),
+      );
+      expect(prismaMock.notificationOutbox.count).toHaveBeenCalledWith({
+        where: { status: 'dead_letter', orgId: 'org-a' },
+      });
+    });
+
+    it('does not replay a dead-letter record owned by another organisation', async () => {
+      // The org-scoped lookup cannot see the foreign record at all.
+      prismaMock.notificationOutbox.findFirst.mockResolvedValueOnce(null);
+
+      await expect(
+        service.replayDeadLetterNotification('foreign-1', 'op-1', 'org-a'),
+      ).rejects.toThrow('not found');
+
+      expect(prismaMock.notificationOutbox.findFirst).toHaveBeenCalledWith({
+        where: { id: 'foreign-1', orgId: 'org-a' },
+      });
+      expect(prismaMock.notificationOutbox.updateMany).not.toHaveBeenCalled();
+      expect(queueMock.add).not.toHaveBeenCalled();
+    });
+
     it('claims a dead-letter record once and re-enqueues it', async () => {
-      prismaMock.notificationOutbox.findUnique.mockResolvedValueOnce({
+      prismaMock.notificationOutbox.findFirst.mockResolvedValueOnce({
         ...mockOutbox,
         status: 'dead_letter',
       });
@@ -468,7 +548,7 @@ describe('NotificationsService', () => {
     });
 
     it('does not enqueue when another replay already claimed the record', async () => {
-      prismaMock.notificationOutbox.findUnique.mockResolvedValueOnce({
+      prismaMock.notificationOutbox.findFirst.mockResolvedValueOnce({
         ...mockOutbox,
         status: 'dead_letter',
       });

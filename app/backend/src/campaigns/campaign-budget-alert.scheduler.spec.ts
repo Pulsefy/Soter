@@ -113,6 +113,9 @@ describe('CampaignBudgetAlertScheduler', () => {
         'admin-one@example.com',
         expect.stringContaining('85%'),
         expect.stringContaining('Flood Relief'),
+        undefined,
+        // Outbox rows are attributed to the campaign's organisation.
+        'org-1',
       );
       // Each outbox record is tagged with the dedup key for future runs.
       expect(prisma.notificationOutbox.update).toHaveBeenCalledWith({
@@ -226,6 +229,8 @@ describe('CampaignBudgetAlertScheduler', () => {
         'admin@example.com',
         expect.stringContaining('Ok Campaign'),
         expect.any(String),
+        undefined,
+        'org-1',
       );
     });
   });
