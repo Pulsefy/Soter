@@ -78,6 +78,21 @@ describe('AdminTransferController', () => {
         { newAdminAddress: NEW_ADMIN },
       );
     });
+
+    it('propagates the middleware correlation ID to the operation service', async () => {
+      await controller.propose(
+        { newAdminAddress: NEW_ADMIN },
+        {
+          user: { id: 'user-1' },
+          headers: { 'x-correlation-id': 'corr-transfer-1' },
+        },
+      );
+
+      expect(service.propose).toHaveBeenCalledWith(
+        { actorId: 'user-1', correlationId: 'corr-transfer-1' },
+        { newAdminAddress: NEW_ADMIN },
+      );
+    });
   });
 
   describe('accept and cancel', () => {

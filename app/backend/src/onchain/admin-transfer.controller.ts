@@ -19,6 +19,11 @@ import {
 } from '@nestjs/swagger';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
+import {
+  AdminActionRequest,
+  getAdminActionActor,
+  getAdminActionCorrelationId,
+} from '../audit/admin-action-logger.service';
 import { AdminTransferService } from './admin-transfer.service';
 import { ProposeAdminTransferDto } from './dto/admin-transfer.dto';
 
@@ -26,28 +31,11 @@ import { ProposeAdminTransferDto } from './dto/admin-transfer.dto';
  * Shape populated by ApiKeyGuard on `request.user`. API-key callers are
  * identified by `apiKeyId`; JWT callers carry `id`/`sub`.
  */
-interface AdminTransferRequest {
-  user?: { id?: string; sub?: string; apiKeyId?: string };
-}
-
 @Controller('admin/transfer')
 @ApiTags('Admin Transfer')
 @ApiBearerAuth('JWT-auth')
 export class AdminTransferController {
   constructor(private readonly adminTransferService: AdminTransferService) {}
-
-  /**
-   * Resolve the audit actor. Mirrors the fallback chain used by
-   * LoggingInterceptor so API-key and JWT callers are both attributable.
-   */
-  private actorId(request: AdminTransferRequest): string {
-    return (
-      request.user?.sub ??
-      request.user?.id ??
-      request.user?.apiKeyId ??
-      'unknown'
-    );
-  }
 
   @Get('state')
   @Version('1')
@@ -116,10 +104,14 @@ export class AdminTransferController {
   })
   async propose(
     @Body() dto: ProposeAdminTransferDto,
-    @Req() request: AdminTransferRequest,
+    @Req() request: AdminActionRequest,
   ) {
+    const correlationId = getAdminActionCorrelationId(request);
     return this.adminTransferService.propose(
-      { actorId: this.actorId(request) },
+      {
+        actorId: getAdminActionActor(request),
+        ...(correlationId ? { correlationId } : {}),
+      },
       dto,
     );
   }
@@ -149,9 +141,11 @@ export class AdminTransferController {
   @ApiConflictResponse({
     description: 'The contract still reports a pending admin after acceptance.',
   })
-  async accept(@Req() request: AdminTransferRequest) {
+  async accept(@Req() request: AdminActionRequest) {
+    const correlationId = getAdminActionCorrelationId(request);
     return this.adminTransferService.accept({
-      actorId: this.actorId(request),
+      actorId: getAdminActionActor(request),
+      ...(correlationId ? { correlationId } : {}),
     });
   }
 
@@ -180,9 +174,11 @@ export class AdminTransferController {
     description:
       'The contract still reports a pending admin after cancellation.',
   })
-  async cancel(@Req() request: AdminTransferRequest) {
+  async cancel(@Req() request: AdminActionRequest) {
+    const correlationId = getAdminActionCorrelationId(request);
     return this.adminTransferService.cancel({
-      actorId: this.actorId(request),
+      actorId: getAdminActionActor(request),
+      ...(correlationId ? { correlationId } : {}),
     });
   }
 }

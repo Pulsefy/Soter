@@ -3,7 +3,6 @@ import {
   Inject,
   Injectable,
   Logger,
-  Optional,
 } from '@nestjs/common';
 import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import { ConfigService } from '@nestjs/config';
@@ -21,7 +20,7 @@ import {
   SetDelegateDto,
 } from './dto/aid-escrow.dto';
 import { BudgetService } from '../common/budget/budget.service';
-import { AuditService } from '../audit/audit.service';
+import { AdminActionLogger } from '../audit/admin-action-logger.service';
 import {
   GetTransactionStatusResult,
   SetDelegateResult,
@@ -46,8 +45,7 @@ export class AidEscrowService {
     private readonly onchainAdapter: OnchainAdapter,
     private readonly budgetService: BudgetService,
     private readonly configService: ConfigService,
-    @Optional()
-    private readonly auditService?: AuditService,
+    private readonly adminActionLogger: AdminActionLogger,
   ) {
     this.network = this.configService.get<string>('SOROBAN_NETWORK', 'testnet');
   }
@@ -135,57 +133,93 @@ export class AidEscrowService {
    * Create a single aid package
    * Performs token balance check before creation
    */
-  async createAidPackage(dto: CreateAidPackageDto, operatorAddress: string) {
+  async createAidPackage(
+    dto: CreateAidPackageDto,
+    operatorAddress: string,
+    actorId: string = operatorAddress,
+    correlationId: string | null = null,
+  ) {
     this.logger.debug('Creating aid package:', {
       packageId: dto.packageId,
       recipient: dto.recipientAddress,
       tokenAddress: dto.tokenAddress,
     });
 
-    // Check token balance before creating package
-    const balanceCheck = await this.checkTokenBalance(
-      dto.tokenAddress,
-      operatorAddress,
-      dto.amount,
+    let transactionHash: string | null = null;
+    const result = await this.adminActionLogger.execute(
+      {
+        actor: actorId,
+        action: 'aid_package.create',
+        target: { type: 'aid_package', id: dto.packageId },
+        before: null,
+        details: () => (transactionHash ? { transactionHash } : null),
+        correlationId,
+      },
+      async () => {
+        const balanceCheck = await this.checkTokenBalance(
+          dto.tokenAddress,
+          operatorAddress,
+          dto.amount,
+        );
+
+        if (!balanceCheck.sufficient) {
+          throw new AppException(
+            ERROR_CODES.BAD_REQUEST,
+            400,
+            `Insufficient token balance for ${dto.tokenAddress}. ` +
+              `Required: ${balanceCheck.required}, Available: ${balanceCheck.balance}`,
+          );
+        }
+
+        const campaignId = dto.metadata?.campaign_ref;
+        if (campaignId) {
+          const amountNum = Number(dto.amount);
+          if (isNaN(amountNum)) {
+            throw new AppException(
+              ERROR_CODES.BAD_REQUEST,
+              400,
+              'Invalid amount for funding cap check',
+            );
+          }
+          await this.budgetService.assertWithinBudget(campaignId, amountNum);
+        }
+
+        const created = await this.onchainAdapter.createAidPackage({
+          operatorAddress,
+          packageId: dto.packageId,
+          recipientAddress: dto.recipientAddress,
+          amount: dto.amount,
+          tokenAddress: dto.tokenAddress,
+          expiresAt: dto.expiresAt,
+        });
+        transactionHash = created.transactionHash;
+        return created;
+      },
+      async value => {
+        if (value.status !== 'success') return null;
+        const state = await this.onchainAdapter.getAidPackage({
+          packageId: value.packageId,
+        });
+        return {
+          packageId: state.package.id,
+          status: state.package.status,
+          amount: state.package.amount,
+          token: state.package.token,
+          expiresAt: state.package.expiresAt,
+        };
+      },
+      value => value.status === 'success',
     );
 
-    if (!balanceCheck.sufficient) {
-      throw new AppException(
-        ERROR_CODES.BAD_REQUEST,
-        400,
-        `Insufficient token balance for ${dto.tokenAddress}. ` +
-          `Required: ${balanceCheck.required}, Available: ${balanceCheck.balance}`,
-      );
-    }
-
-    // Enforce campaign funding cap if campaign_ref is present in metadata
-    const campaignId = dto.metadata?.campaign_ref;
-    if (campaignId) {
-      const amountNum = Number(dto.amount);
-      if (isNaN(amountNum)) {
-        throw new AppException(
-          ERROR_CODES.BAD_REQUEST,
-          400,
-          'Invalid amount for funding cap check',
-        );
-      }
-      await this.budgetService.assertWithinBudget(campaignId, amountNum);
-    }
-
-    const result = await this.onchainAdapter.createAidPackage({
-      operatorAddress,
-      packageId: dto.packageId,
-      recipientAddress: dto.recipientAddress,
-      amount: dto.amount,
-      tokenAddress: dto.tokenAddress,
-      expiresAt: dto.expiresAt,
-    });
-
-    this.logger.debug('Aid package created successfully:', {
-      packageId: result.packageId,
-      transactionHash: result.transactionHash,
-      tokenAddress: dto.tokenAddress,
-    });
+    this.logger.debug(
+      result.status === 'success'
+        ? 'Aid package transaction confirmed'
+        : 'Aid package transaction failed',
+      {
+        packageId: result.packageId,
+        tokenAddress: dto.tokenAddress,
+      },
+    );
 
     return this.withTxExplorerUrl(result);
   }
@@ -322,53 +356,92 @@ export class AidEscrowService {
   async batchCreateAidPackages(
     dto: BatchCreateAidPackagesDto,
     operatorAddress: string,
+    actorId: string = operatorAddress,
+    correlationId: string | null = null,
   ) {
     this.logger.debug('Batch creating aid packages:', {
       count: dto.recipientAddresses.length,
       tokenAddress: dto.tokenAddress,
     });
 
-    if (dto.recipientAddresses.length !== dto.amounts.length) {
-      throw new Error(
-        'Recipients and amounts arrays must have the same length',
-      );
-    }
+    let transactionHash: string | null = null;
+    const result = await this.adminActionLogger.execute(
+      {
+        actor: actorId,
+        action: 'aid_package.batch_create',
+        target: { type: 'aid_package_batch', id: dto.tokenAddress },
+        before: null,
+        details: () => (transactionHash ? { transactionHash } : null),
+        correlationId,
+      },
+      async () => {
+        if (dto.recipientAddresses.length !== dto.amounts.length) {
+          throw new AppException(
+            ERROR_CODES.BAD_REQUEST,
+            400,
+            'Recipients and amounts arrays must have the same length',
+          );
+        }
 
-    // Calculate total amount required for all packages
-    const totalAmount = dto.amounts.reduce(
-      (sum, amount) => sum + BigInt(amount),
-      BigInt(0),
+        const totalAmount = dto.amounts.reduce(
+          (sum, amount) => sum + BigInt(amount),
+          BigInt(0),
+        );
+        const balanceCheck = await this.checkTokenBalance(
+          dto.tokenAddress,
+          operatorAddress,
+          totalAmount.toString(),
+        );
+
+        if (!balanceCheck.sufficient) {
+          throw new AppException(
+            ERROR_CODES.BAD_REQUEST,
+            400,
+            `Insufficient token balance for batch creation. Token: ${dto.tokenAddress}, ` +
+              `Required: ${balanceCheck.required}, Available: ${balanceCheck.balance}`,
+          );
+        }
+
+        const created = await this.onchainAdapter.batchCreateAidPackages({
+          operatorAddress,
+          recipientAddresses: dto.recipientAddresses,
+          amounts: dto.amounts,
+          tokenAddress: dto.tokenAddress,
+          expiresIn: dto.expiresIn,
+        });
+        transactionHash = created.transactionHash;
+        return created;
+      },
+      async value => {
+        if (value.status !== 'success') return null;
+        const packages = await Promise.all(
+          value.packageIds.map(async packageId => {
+            const state = await this.onchainAdapter.getAidPackage({
+              packageId,
+            });
+            return {
+              packageId: state.package.id,
+              status: state.package.status,
+              amount: state.package.amount,
+              token: state.package.token,
+              expiresAt: state.package.expiresAt,
+            };
+          }),
+        );
+        return { packages };
+      },
+      value => value.status === 'success',
     );
 
-    // Check token balance for total amount
-    const balanceCheck = await this.checkTokenBalance(
-      dto.tokenAddress,
-      operatorAddress,
-      totalAmount.toString(),
+    this.logger.debug(
+      result.status === 'success'
+        ? 'Batch aid package transaction confirmed'
+        : 'Batch aid package transaction failed',
+      {
+        packageCount: result.packageIds.length,
+        tokenAddress: dto.tokenAddress,
+      },
     );
-
-    if (!balanceCheck.sufficient) {
-      throw new AppException(
-        ERROR_CODES.BAD_REQUEST,
-        400,
-        `Insufficient token balance for batch creation. Token: ${dto.tokenAddress}, ` +
-          `Required: ${balanceCheck.required}, Available: ${balanceCheck.balance}`,
-      );
-    }
-
-    const result = await this.onchainAdapter.batchCreateAidPackages({
-      operatorAddress,
-      recipientAddresses: dto.recipientAddresses,
-      amounts: dto.amounts,
-      tokenAddress: dto.tokenAddress,
-      expiresIn: dto.expiresIn,
-    });
-
-    this.logger.debug('Batch aid packages created successfully:', {
-      packageCount: result.packageIds.length,
-      transactionHash: result.transactionHash,
-      tokenAddress: dto.tokenAddress,
-    });
 
     return this.withTxExplorerUrl(result);
   }
@@ -403,21 +476,59 @@ export class AidEscrowService {
   async disburseAidPackage(
     dto: DisburseAidPackageDto,
     operatorAddress: string,
+    actorId: string = operatorAddress,
+    correlationId: string | null = null,
   ) {
     this.logger.debug('Disbursing aid package:', {
       packageId: dto.packageId,
       operator: operatorAddress,
     });
 
-    const result = await this.onchainAdapter.disburseAidPackage({
-      packageId: dto.packageId,
-      operatorAddress,
-    });
+    let before: { status: string; remainingAmount?: string } | null = null;
+    let transactionHash: string | null = null;
+    const result = await this.adminActionLogger.execute(
+      {
+        actor: actorId,
+        action: 'aid_package.disburse',
+        target: { type: 'aid_package', id: dto.packageId },
+        before: () => before,
+        details: () => (transactionHash ? { transactionHash } : null),
+        correlationId,
+      },
+      async () => {
+        const existing = await this.onchainAdapter.getAidPackage({
+          packageId: dto.packageId,
+        });
+        before = {
+          status: existing.package.status,
+          remainingAmount: existing.package.remainingAmount,
+        };
+        const disbursed = await this.onchainAdapter.disburseAidPackage({
+          packageId: dto.packageId,
+          operatorAddress,
+        });
+        transactionHash = disbursed.transactionHash;
+        return disbursed;
+      },
+      async value => {
+        if (value.status !== 'success') return null;
+        const state = await this.onchainAdapter.getAidPackage({
+          packageId: dto.packageId,
+        });
+        return {
+          status: state.package.status,
+          remainingAmount: state.package.remainingAmount ?? null,
+        };
+      },
+      value => value.status === 'success',
+    );
 
-    this.logger.debug('Aid package disbursed successfully:', {
-      packageId: result.packageId,
-      amountDisbursed: result.amountDisbursed,
-    });
+    this.logger.debug(
+      result.status === 'success'
+        ? 'Aid package disbursement confirmed'
+        : 'Aid package disbursement failed',
+      { packageId: result.packageId },
+    );
 
     return this.withTxExplorerUrl(result);
   }
@@ -430,6 +541,8 @@ export class AidEscrowService {
   async extendAidPackageExpiry(
     dto: ExtendAidPackageExpiryDto & { packageId: string },
     operatorAddress: string,
+    actorId: string = operatorAddress,
+    correlationId: string | null = null,
   ) {
     this.logger.debug('Extending aid package expiry:', {
       packageId: dto.packageId,
@@ -438,49 +551,57 @@ export class AidEscrowService {
     });
 
     let oldExpiresAt: number | undefined;
-    try {
-      const existing = await this.onchainAdapter.getAidPackage({
-        packageId: dto.packageId,
-      });
-      if (existing?.package) {
-        oldExpiresAt = existing.package.expiresAt;
-        if (existing.package.status === 'Claimed') {
-          throw new BadRequestException('Aid package is already claimed');
+    let transactionHash: string | null = null;
+    const result = await this.adminActionLogger.execute(
+      {
+        actor: actorId,
+        action: 'extend_expiry',
+        target: { type: 'aid_package', id: dto.packageId },
+        before: () =>
+          oldExpiresAt === undefined ? null : { expiresAt: oldExpiresAt },
+        details: () => (transactionHash ? { transactionHash } : null),
+        correlationId,
+      },
+      async () => {
+        try {
+          const existing = await this.onchainAdapter.getAidPackage({
+            packageId: dto.packageId,
+          });
+          if (existing?.package) {
+            oldExpiresAt = existing.package.expiresAt;
+            if (existing.package.status === 'Claimed') {
+              throw new BadRequestException('Aid package is already claimed');
+            }
+            if (existing.package.status !== 'Created') {
+              throw new BadRequestException(
+                `Aid package is in status ${existing.package.status}`,
+              );
+            }
+          }
+        } catch (error) {
+          if (error instanceof BadRequestException) throw error;
+          // Continue and allow adapter/contract to validate.
         }
-        if (existing.package.status !== 'Created') {
-          throw new BadRequestException(
-            `Aid package is in status ${existing.package.status}`,
-          );
-        }
-      }
-    } catch (err) {
-      if (err instanceof BadRequestException) {
-        throw err;
-      }
-      // Continue and allow adapter/contract to validate
-    }
 
-    const result = await this.onchainAdapter.extendAidPackageExpiry({
-      packageId: dto.packageId,
-      newExpiresAt: dto.newExpiresAt,
-      operatorAddress,
-    });
+        const extended = await this.onchainAdapter.extendAidPackageExpiry({
+          packageId: dto.packageId,
+          newExpiresAt: dto.newExpiresAt,
+          operatorAddress,
+        });
+        transactionHash = extended.transactionHash;
+        return extended;
+      },
+      async value => {
+        if (value.status !== 'success') return null;
+        const state = await this.onchainAdapter.getAidPackage({
+          packageId: dto.packageId,
+        });
+        return { expiresAt: state.package.expiresAt };
+      },
+      value => value.status === 'success',
+    );
 
     const finalOldExpiresAt = result.oldExpiresAt ?? oldExpiresAt;
-
-    if (this.auditService) {
-      await this.auditService.record({
-        actorId: operatorAddress,
-        entity: 'aid_package',
-        entityId: dto.packageId,
-        action: 'extend_expiry',
-        metadata: {
-          oldExpiresAt: finalOldExpiresAt,
-          newExpiresAt: result.newExpiresAt ?? dto.newExpiresAt,
-          transactionHash: result.transactionHash,
-        },
-      });
-    }
 
     return this.withTxExplorerUrl({
       ...result,
@@ -553,6 +674,8 @@ export class AidEscrowService {
     packageId: string,
     dto: SetDelegateDto,
     adminAddress: string,
+    actorId: string = adminAddress,
+    correlationId: string | null = null,
   ): Promise<SetDelegateResult & { explorerUrl?: string }> {
     this.logger.debug('Setting delegate:', {
       packageId,
@@ -561,26 +684,44 @@ export class AidEscrowService {
       admin: adminAddress,
     });
 
-    const result = await this.onchainAdapter.setDelegate({
-      adminAddress,
-      packageId,
-      delegateAddress: dto.delegateAddress,
-      expiresAt: dto.expiresAt,
-    });
-
-    if (this.auditService) {
-      await this.auditService.record({
-        actorId: adminAddress,
-        entity: 'aid_package',
-        entityId: packageId,
+    let before: GetDelegateResult | null = null;
+    let transactionHash: string | null = null;
+    const result = await this.adminActionLogger.execute(
+      {
+        actor: actorId,
         action: 'set_delegate',
-        metadata: {
+        target: { type: 'aid_package', id: packageId },
+        before: () =>
+          before
+            ? {
+                delegateAddress: before.delegateAddress ?? null,
+                expiresAt: before.expiresAt ?? null,
+              }
+            : null,
+          details: () => (transactionHash ? { transactionHash } : null),
+        correlationId,
+      },
+      async () => {
+        before = await this.onchainAdapter.getDelegate({ packageId });
+        const updated = await this.onchainAdapter.setDelegate({
+          adminAddress,
+          packageId,
           delegateAddress: dto.delegateAddress,
           expiresAt: dto.expiresAt,
-          transactionHash: result.transactionHash,
-        },
-      });
-    }
+        });
+        transactionHash = updated.transactionHash;
+        return updated;
+      },
+      async value => {
+        if (value.status !== 'success') return null;
+        const state = await this.onchainAdapter.getDelegate({ packageId });
+        return {
+          delegateAddress: state.delegateAddress ?? null,
+          expiresAt: state.expiresAt ?? null,
+        };
+      },
+      value => value.status === 'success',
+    );
 
     return this.withTxExplorerUrl(result);
   }
@@ -591,23 +732,47 @@ export class AidEscrowService {
   async revokeDelegate(
     packageId: string,
     adminAddress: string,
+    actorId: string = adminAddress,
+    correlationId: string | null = null,
   ): Promise<RevokeDelegateResult & { explorerUrl?: string }> {
     this.logger.debug('Revoking delegate:', { packageId, admin: adminAddress });
 
-    const result = await this.onchainAdapter.revokeDelegate({
-      adminAddress,
-      packageId,
-    });
-
-    if (this.auditService) {
-      await this.auditService.record({
-        actorId: adminAddress,
-        entity: 'aid_package',
-        entityId: packageId,
+    let before: GetDelegateResult | null = null;
+  let transactionHash: string | null = null;
+    const result = await this.adminActionLogger.execute(
+      {
+        actor: actorId,
         action: 'revoke_delegate',
-        metadata: { transactionHash: result.transactionHash },
-      });
-    }
+        target: { type: 'aid_package', id: packageId },
+        before: () =>
+          before
+            ? {
+                delegateAddress: before.delegateAddress ?? null,
+                expiresAt: before.expiresAt ?? null,
+              }
+            : null,
+          details: () => (transactionHash ? { transactionHash } : null),
+        correlationId,
+      },
+      async () => {
+        before = await this.onchainAdapter.getDelegate({ packageId });
+        const revoked = await this.onchainAdapter.revokeDelegate({
+          adminAddress,
+          packageId,
+        });
+        transactionHash = revoked.transactionHash;
+        return revoked;
+      },
+      async value => {
+        if (value.status !== 'success') return null;
+        const state = await this.onchainAdapter.getDelegate({ packageId });
+        return {
+          delegateAddress: state.delegateAddress ?? null,
+          expiresAt: state.expiresAt ?? null,
+        };
+      },
+      value => value.status === 'success',
+    );
 
     return this.withTxExplorerUrl(result);
   }

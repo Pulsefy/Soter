@@ -11,6 +11,7 @@ import {
   HttpStatus,
   NotFoundException,
   BadRequestException,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -32,6 +33,13 @@ import { SorobanTransactionLifecycleService } from './soroban-transaction-lifecy
 import { SorobanCorrelationTraceService } from './soroban-correlation-trace.service';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
+import {
+  AdminActionLogger,
+  AdminActionRequest,
+  AdminActionState,
+  getAdminActionActor,
+  getAdminActionCorrelationId,
+} from '../audit/admin-action-logger.service';
 
 @ApiTags('Ledger Admin')
 @Controller('admin/ledger')
@@ -41,6 +49,7 @@ export class LedgerAdminController {
     private readonly reconciliationService: LedgerReconciliationService,
     private readonly sorobanTransactionLifecycleService: SorobanTransactionLifecycleService,
     private readonly sorobanCorrelationTraceService: SorobanCorrelationTraceService,
+    private readonly adminActionLogger: AdminActionLogger,
   ) {}
 
   @Post('backfill')
@@ -159,6 +168,7 @@ export class LedgerAdminController {
       triggeredBy?: string;
       dryRun?: boolean;
     },
+    @Req() request: AdminActionRequest,
   ) {
     const {
       startLedger,
@@ -169,17 +179,39 @@ export class LedgerAdminController {
       dryRun = false,
     } = body;
 
-    if (startLedger > endLedger) {
-      throw new Error('startLedger must be less than or equal to endLedger');
-    }
-
-    return this.backfillService.triggerBackfill(
-      startLedger,
-      endLedger,
-      campaignId,
-      batchSize,
-      triggeredBy,
-      dryRun,
+    const correlationId = getAdminActionCorrelationId(request);
+    return this.adminActionLogger.execute(
+      {
+        actor: getAdminActionActor(request),
+        action: dryRun ? 'ledger.backfill.preview' : 'ledger.backfill.start',
+        target: {
+          type: 'ledger_range',
+          id: `${startLedger}-${endLedger}${campaignId ? `:${campaignId}` : ''}`,
+        },
+        before: null,
+        correlationId,
+      },
+      () => {
+        if (startLedger > endLedger) {
+          throw new Error('startLedger must be less than or equal to endLedger');
+        }
+        return this.backfillService.triggerBackfill(
+          startLedger,
+          endLedger,
+          campaignId,
+          batchSize,
+          triggeredBy,
+          dryRun,
+        );
+      },
+      result =>
+        'jobId' in result
+          ? {
+              jobId: result.jobId,
+              checkpointId: 'checkpointId' in result ? result.checkpointId : null,
+              status: result.status,
+            }
+          : null,
     );
   }
 
@@ -260,8 +292,32 @@ export class LedgerAdminController {
   @ApiForbiddenResponse({
     description: 'Access denied - admin role required.',
   })
-  async cancelBackfill(@Param('checkpointId') checkpointId: string) {
-    await this.backfillService.cancelBackfill(checkpointId);
+  async cancelBackfill(
+    @Param('checkpointId') checkpointId: string,
+    @Req() request: AdminActionRequest,
+  ) {
+    let before: AdminActionState | null = null;
+    await this.adminActionLogger.execute(
+      {
+        actor: getAdminActionActor(request),
+        action: 'ledger.backfill.cancel',
+        target: { type: 'backfill_checkpoint', id: checkpointId },
+        before: () => before,
+        correlationId: getAdminActionCorrelationId(request),
+      },
+      async () => {
+        const checkpoint = await this.backfillService.getCheckpoint(checkpointId);
+        before = checkpoint
+          ? { status: checkpoint.status, lastProcessedLedger: checkpoint.lastProcessedLedger }
+          : null;
+        await this.backfillService.cancelBackfill(checkpointId);
+        const updated = await this.backfillService.getCheckpoint(checkpointId);
+        return updated
+          ? { status: updated.status, lastProcessedLedger: updated.lastProcessedLedger }
+          : null;
+      },
+      result => result,
+    );
   }
 
   @Get('backfill/:jobId')
@@ -367,18 +423,33 @@ export class LedgerAdminController {
       campaignId?: string;
       thresholdPercent?: number;
     },
+    @Req() request: AdminActionRequest,
   ) {
     const { startLedger, endLedger, campaignId, thresholdPercent = 5 } = body;
 
-    if (startLedger > endLedger) {
-      throw new Error('startLedger must be less than or equal to endLedger');
-    }
-
-    return this.reconciliationService.triggerReconciliation(
-      startLedger,
-      endLedger,
-      campaignId,
-      thresholdPercent,
+    return this.adminActionLogger.execute(
+      {
+        actor: getAdminActionActor(request),
+        action: 'ledger.reconciliation.start',
+        target: {
+          type: 'ledger_range',
+          id: `${startLedger}-${endLedger}${campaignId ? `:${campaignId}` : ''}`,
+        },
+        before: null,
+        correlationId: getAdminActionCorrelationId(request),
+      },
+      () => {
+        if (startLedger > endLedger) {
+          throw new Error('startLedger must be less than or equal to endLedger');
+        }
+        return this.reconciliationService.triggerReconciliation(
+          startLedger,
+          endLedger,
+          campaignId,
+          thresholdPercent,
+        );
+      },
+      result => ({ jobId: result.jobId, status: result.status }),
     );
   }
 
@@ -456,16 +527,36 @@ export class LedgerAdminController {
       toleranceAbsolute?: string;
       campaigns?: Array<{ campaignId: string; tokenAddress: string }>;
     } = {},
+    @Req() request: AdminActionRequest,
   ) {
-    return this.reconciliationService.reconcileBalances({
-      dryRun: body.dryRun === true,
-      source: 'manual',
-      campaignId: body.campaignId,
-      tokenAddress: body.tokenAddress,
-      tolerancePercent: body.tolerancePercent,
-      toleranceAbsolute: body.toleranceAbsolute,
-      campaigns: body.campaigns,
-    });
+    return this.adminActionLogger.execute(
+      {
+        actor: getAdminActionActor(request),
+        action: 'ledger.balance_reconciliation.run',
+        target: body.campaignId
+          ? { type: 'campaign', id: body.campaignId }
+          : body.tokenAddress
+            ? { type: 'token', id: body.tokenAddress }
+            : { type: 'ledger_balance_set', id: 'all' },
+        before: null,
+        correlationId: getAdminActionCorrelationId(request),
+      },
+      () =>
+        this.reconciliationService.reconcileBalances({
+          dryRun: body.dryRun === true,
+          source: 'manual',
+          campaignId: body.campaignId,
+          tokenAddress: body.tokenAddress,
+          tolerancePercent: body.tolerancePercent,
+          toleranceAbsolute: body.toleranceAbsolute,
+          campaigns: body.campaigns,
+        }),
+      result => ({
+        runId: result.runId,
+        dryRun: result.dryRun,
+        discrepancyCount: result.discrepancies.length,
+      }),
+    );
   }
 
   @Get('reconcile/:jobId')

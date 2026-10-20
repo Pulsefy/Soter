@@ -3,9 +3,11 @@ import {
   ConflictException,
   Inject,
   Injectable,
-  Logger,
 } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service';
+import {
+  AdminActionLogger,
+  AdminActionState,
+} from '../audit/admin-action-logger.service';
 import {
   ONCHAIN_ADAPTER_TOKEN,
   OnchainAdapter,
@@ -30,6 +32,7 @@ export const SURPLUS_WITHDRAWAL_AUDIT_ACTIONS = {
 export interface SurplusWithdrawalActor {
   actorId: string;
   contractId?: string;
+  correlationId?: string | null;
 }
 
 /**
@@ -48,12 +51,10 @@ export interface SurplusWithdrawalActor {
  */
 @Injectable()
 export class SurplusWithdrawalService {
-  private readonly logger = new Logger(SurplusWithdrawalService.name);
-
   constructor(
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
-    private readonly auditService: AuditService,
+    private readonly adminActionLogger: AdminActionLogger,
   ) {}
 
   /**
@@ -83,65 +84,62 @@ export class SurplusWithdrawalService {
     actor: SurplusWithdrawalActor,
     dto: ProposeSurplusWithdrawalDto,
   ): Promise<SurplusWithdrawalStatus> {
-    const before = await this.onchainAdapter.getPendingWithdrawal({
-      contractId: actor.contractId,
-    });
-
-    if (before) {
-      throw new ConflictException(
-        `A surplus withdrawal is already pending: ${before.amount} of ${before.token} to ${before.to}, executable at ledger timestamp ${before.executableAt}. Cancel it before proposing another.`,
-      );
-    }
-
-    const result = await this.onchainAdapter.proposeSurplusWithdrawal({
-      contractId: actor.contractId,
-      to: dto.to,
-      amount: dto.amount,
-      token: dto.token,
-    });
-
-    const pending = result.pendingWithdrawal;
-    if (!pending) {
-      throw new ConflictException(
-        'Contract did not record a pending surplus withdrawal after propose',
-      );
-    }
-    if (
-      pending.to !== dto.to ||
-      pending.token !== dto.token ||
-      pending.amount !== dto.amount
-    ) {
-      throw new ConflictException(
-        `Contract recorded a different proposal than submitted (reported: ${pending.amount} of ${pending.token} to ${pending.to})`,
-      );
-    }
-
-    await this.auditService.record({
-      actorId: actor.actorId,
-      entity: 'SurplusWithdrawal',
-      entityId: result.contractId,
-      action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.proposed,
-      metadata: {
-        to: pending.to,
-        token: pending.token,
-        amount: pending.amount,
-        executableAt: pending.executableAt,
-        timelockRemainingSeconds: timelockRemainingSeconds(pending),
-        transactionHash: result.transactionHash,
-        onChainTimestamp: result.timestamp.toISOString(),
+    let before: PendingWithdrawal | null = null;
+    let contractId = actor.contractId;
+    let transactionHash: string | null = null;
+    return this.adminActionLogger.execute(
+      {
+        actor: actor.actorId,
+        action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.proposed,
+        target: () =>
+          contractId ? { type: 'SurplusWithdrawal', id: contractId } : null,
+        before: () => this.pendingState(before),
+        details: () => (transactionHash ? { transactionHash } : null),
+        correlationId: actor.correlationId ?? null,
       },
-    });
+      async () => {
+        before = await this.onchainAdapter.getPendingWithdrawal({
+          contractId: actor.contractId,
+        });
+        if (before) {
+          throw new ConflictException(
+            `A surplus withdrawal is already pending: ${before.amount} of ${before.token} to ${before.to}, executable at ledger timestamp ${before.executableAt}. Cancel it before proposing another.`,
+          );
+        }
 
-    this.logger.log(
-      `Surplus withdrawal proposed for ${result.contractId}: ${pending.amount} of ${pending.token} to ${pending.to}, executable at ${pending.executableAt} (actor=${actor.actorId})`,
+        const result = await this.onchainAdapter.proposeSurplusWithdrawal({
+          contractId: actor.contractId,
+          to: dto.to,
+          amount: dto.amount,
+          token: dto.token,
+        });
+        contractId = result.contractId;
+        transactionHash = result.transactionHash;
+        const pending = result.pendingWithdrawal;
+        if (!pending) {
+          throw new ConflictException(
+            'Contract did not record a pending surplus withdrawal after propose',
+          );
+        }
+        if (
+          pending.to !== dto.to ||
+          pending.token !== dto.token ||
+          pending.amount !== dto.amount
+        ) {
+          throw new ConflictException(
+            `Contract recorded a different proposal than submitted (reported: ${pending.amount} of ${pending.token} to ${pending.to})`,
+          );
+        }
+
+        return {
+          contractId: result.contractId,
+          pendingWithdrawal: pending,
+          timelockRemainingSeconds: timelockRemainingSeconds(pending),
+          timestamp: result.timestamp,
+        };
+      },
+      result => this.pendingState(result.pendingWithdrawal),
     );
-
-    return {
-      contractId: result.contractId,
-      pendingWithdrawal: pending,
-      timelockRemainingSeconds: timelockRemainingSeconds(pending),
-      timestamp: result.timestamp,
-    };
   }
 
   /**
@@ -150,51 +148,49 @@ export class SurplusWithdrawalService {
   async cancel(
     actor: SurplusWithdrawalActor,
   ): Promise<SurplusWithdrawalStatus> {
-    const before = await this.onchainAdapter.getPendingWithdrawal({
-      contractId: actor.contractId,
-    });
-
-    if (!before) {
-      throw new BadRequestException(
-        'SurplusWithdrawalNotPending: no surplus withdrawal proposal is awaiting execution',
-      );
-    }
-
-    const result = await this.onchainAdapter.cancelSurplusWithdrawal({
-      contractId: actor.contractId,
-    });
-
-    if (result.pendingWithdrawal) {
-      throw new ConflictException(
-        `Contract still reports ${result.pendingWithdrawal.amount} to ${result.pendingWithdrawal.to} as pending after cancellation`,
-      );
-    }
-
-    await this.auditService.record({
-      actorId: actor.actorId,
-      entity: 'SurplusWithdrawal',
-      entityId: result.contractId,
-      action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.cancelled,
-      metadata: {
-        cancelledTo: before.to,
-        cancelledToken: before.token,
-        cancelledAmount: before.amount,
-        cancelledExecutableAt: before.executableAt,
-        transactionHash: result.transactionHash,
-        onChainTimestamp: result.timestamp.toISOString(),
+    let before: PendingWithdrawal | null = null;
+    let contractId = actor.contractId;
+    let transactionHash: string | null = null;
+    return this.adminActionLogger.execute(
+      {
+        actor: actor.actorId,
+        action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.cancelled,
+        target: () =>
+          contractId ? { type: 'SurplusWithdrawal', id: contractId } : null,
+        before: () => this.pendingState(before),
+        details: () => (transactionHash ? { transactionHash } : null),
+        correlationId: actor.correlationId ?? null,
       },
-    });
+      async () => {
+        before = await this.onchainAdapter.getPendingWithdrawal({
+          contractId: actor.contractId,
+        });
+        if (!before) {
+          throw new BadRequestException(
+            'SurplusWithdrawalNotPending: no surplus withdrawal proposal is awaiting execution',
+          );
+        }
 
-    this.logger.log(
-      `Surplus withdrawal cancelled for ${result.contractId}: ${before.amount} of ${before.token} to ${before.to} (actor=${actor.actorId})`,
+        const result = await this.onchainAdapter.cancelSurplusWithdrawal({
+          contractId: actor.contractId,
+        });
+        contractId = result.contractId;
+        transactionHash = result.transactionHash;
+        if (result.pendingWithdrawal) {
+          throw new ConflictException(
+            `Contract still reports ${result.pendingWithdrawal.amount} to ${result.pendingWithdrawal.to} as pending after cancellation`,
+          );
+        }
+
+        return {
+          contractId: result.contractId,
+          pendingWithdrawal: null,
+          timelockRemainingSeconds: 0,
+          timestamp: result.timestamp,
+        };
+      },
+      result => this.pendingState(result.pendingWithdrawal),
     );
-
-    return {
-      contractId: result.contractId,
-      pendingWithdrawal: null,
-      timelockRemainingSeconds: 0,
-      timestamp: result.timestamp,
-    };
   }
 
   /**
@@ -206,63 +202,76 @@ export class SurplusWithdrawalService {
   async execute(
     actor: SurplusWithdrawalActor,
   ): Promise<SurplusWithdrawalStatus> {
-    const before = await this.onchainAdapter.getPendingWithdrawal({
-      contractId: actor.contractId,
-    });
-
-    if (!before) {
-      throw new BadRequestException(
-        'SurplusWithdrawalNotPending: no surplus withdrawal proposal is awaiting execution',
-      );
-    }
-
-    const remaining = timelockRemainingSeconds(before);
-    if (remaining > 0) {
-      throw this.timelockConflict(before, remaining);
-    }
-
-    let result;
-    try {
-      result = await this.onchainAdapter.executeSurplusWithdrawal({
-        contractId: actor.contractId,
-      });
-    } catch (error) {
-      if (error instanceof SurplusWithdrawalTimelockNotElapsedError) {
-        throw this.timelockConflict(before, remaining);
-      }
-      throw error;
-    }
-
-    if (result.pendingWithdrawal) {
-      throw new ConflictException(
-        `Contract still reports ${result.pendingWithdrawal.amount} to ${result.pendingWithdrawal.to} as pending after execution`,
-      );
-    }
-
-    await this.auditService.record({
-      actorId: actor.actorId,
-      entity: 'SurplusWithdrawal',
-      entityId: result.contractId,
-      action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.executed,
-      metadata: {
-        executedTo: before.to,
-        executedToken: before.token,
-        executedAmount: before.amount,
-        transactionHash: result.transactionHash,
-        onChainTimestamp: result.timestamp.toISOString(),
+    let before: PendingWithdrawal | null = null;
+    let contractId = actor.contractId;
+    let transactionHash: string | null = null;
+    return this.adminActionLogger.execute(
+      {
+        actor: actor.actorId,
+        action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.executed,
+        target: () =>
+          contractId ? { type: 'SurplusWithdrawal', id: contractId } : null,
+        before: () => this.pendingState(before),
+        details: () => (transactionHash ? { transactionHash } : null),
+        correlationId: actor.correlationId ?? null,
       },
-    });
+      async () => {
+        before = await this.onchainAdapter.getPendingWithdrawal({
+          contractId: actor.contractId,
+        });
+        if (!before) {
+          throw new BadRequestException(
+            'SurplusWithdrawalNotPending: no surplus withdrawal proposal is awaiting execution',
+          );
+        }
 
-    this.logger.log(
-      `Surplus withdrawal executed for ${result.contractId}: ${before.amount} of ${before.token} to ${before.to} (actor=${actor.actorId})`,
+        const remaining = timelockRemainingSeconds(before);
+        if (remaining > 0) {
+          throw this.timelockConflict(before, remaining);
+        }
+
+        let result;
+        try {
+          result = await this.onchainAdapter.executeSurplusWithdrawal({
+            contractId: actor.contractId,
+          });
+        } catch (error) {
+          if (error instanceof SurplusWithdrawalTimelockNotElapsedError) {
+            throw this.timelockConflict(before, remaining);
+          }
+          throw error;
+        }
+
+        contractId = result.contractId;
+        transactionHash = result.transactionHash;
+        if (result.pendingWithdrawal) {
+          throw new ConflictException(
+            `Contract still reports ${result.pendingWithdrawal.amount} to ${result.pendingWithdrawal.to} as pending after execution`,
+          );
+        }
+
+        return {
+          contractId: result.contractId,
+          pendingWithdrawal: null,
+          timelockRemainingSeconds: 0,
+          timestamp: result.timestamp,
+        };
+      },
+      result => this.pendingState(result.pendingWithdrawal),
     );
+  }
 
-    return {
-      contractId: result.contractId,
-      pendingWithdrawal: null,
-      timelockRemainingSeconds: 0,
-      timestamp: result.timestamp,
-    };
+  private pendingState(
+    pending: PendingWithdrawal | null,
+  ): AdminActionState | null {
+    return pending
+      ? {
+          to: pending.to,
+          token: pending.token,
+          amount: pending.amount,
+          executableAt: pending.executableAt,
+        }
+      : null;
   }
 
   /**

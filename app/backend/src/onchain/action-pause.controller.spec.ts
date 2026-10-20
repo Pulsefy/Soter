@@ -57,4 +57,16 @@ describe('ActionPauseController', () => {
       'refund',
     );
   });
+
+  it('passes the request correlation ID with pause operations', async () => {
+    await controller.pause('claim', {
+      user: { id: 'admin-2' },
+      headers: { 'x-correlation-id': 'corr-pause-2' },
+    });
+
+    expect(service.pause).toHaveBeenCalledWith(
+      { actorId: 'admin-2', correlationId: 'corr-pause-2' },
+      'claim',
+    );
+  });
 });

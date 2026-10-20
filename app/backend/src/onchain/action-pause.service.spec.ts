@@ -5,6 +5,7 @@ import {
 } from './action-pause.service';
 import { MockOnchainAdapter } from './onchain.adapter.mock';
 import { AppException } from '../common/constants/integration-error-codes';
+import { AdminActionLogger } from '../audit/admin-action-logger.service';
 
 const PACKAGE = {
   operatorAddress: `G${'A'.repeat(55)}`,
@@ -23,7 +24,10 @@ describe('ActionPauseService', () => {
   beforeEach(() => {
     adapter = new MockOnchainAdapter();
     auditService = { record: jest.fn().mockResolvedValue({ id: 'audit-1' }) };
-    service = new ActionPauseService(adapter, auditService as never);
+    service = new ActionPauseService(
+      adapter,
+      new AdminActionLogger(auditService as never),
+    );
   });
 
   describe('pausing one action', () => {
@@ -83,12 +87,24 @@ describe('ActionPauseService', () => {
         entity: 'ContractActionPause',
         entityId: 'refund',
         action: ACTION_PAUSE_AUDIT_ACTIONS.paused,
-        metadata: { action: 'refund', effectivelyPaused: true },
+        metadata: {
+          target: { type: 'contract_action', id: 'refund' },
+          before: { isPaused: false, globallyPaused: false },
+          after: { isPaused: true, globallyPaused: false },
+          correlationId: null,
+          outcome: 'success',
+          severity: 'info',
+        },
       });
       expect(auditService.record.mock.calls[1][0]).toMatchObject({
         actorId: 'ops-2',
         action: ACTION_PAUSE_AUDIT_ACTIONS.unpaused,
-        metadata: { action: 'refund', effectivelyPaused: false },
+        metadata: {
+          before: { isPaused: true, globallyPaused: false },
+          after: { isPaused: false, globallyPaused: false },
+          outcome: 'success',
+          severity: 'info',
+        },
       });
     });
   });
@@ -130,7 +146,16 @@ describe('ActionPauseService', () => {
         service.pause({ actorId: 'ops-1' }, 'disburse'),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(spy).not.toHaveBeenCalled();
-      expect(auditService.record).not.toHaveBeenCalled();
+      expect(auditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: ACTION_PAUSE_AUDIT_ACTIONS.paused,
+          metadata: expect.objectContaining({
+            outcome: 'rejected',
+            severity: 'warn',
+            after: null,
+          }),
+        }),
+      );
     });
 
     it('refuses to report a pause the contract did not record', async () => {
@@ -144,7 +169,15 @@ describe('ActionPauseService', () => {
       await expect(
         service.pause({ actorId: 'ops-1' }, 'claim'),
       ).rejects.toBeInstanceOf(ConflictException);
-      expect(auditService.record).not.toHaveBeenCalled();
+      expect(auditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: ACTION_PAUSE_AUDIT_ACTIONS.paused,
+          metadata: expect.objectContaining({
+            outcome: 'rejected',
+            after: null,
+          }),
+        }),
+      );
     });
 
     it('refuses to report an unpause the contract ignored', async () => {
@@ -158,7 +191,15 @@ describe('ActionPauseService', () => {
       await expect(
         service.unpause({ actorId: 'ops-1' }, 'claim'),
       ).rejects.toBeInstanceOf(ConflictException);
-      expect(auditService.record).not.toHaveBeenCalled();
+      expect(auditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: ACTION_PAUSE_AUDIT_ACTIONS.unpaused,
+          metadata: expect.objectContaining({
+            outcome: 'rejected',
+            after: null,
+          }),
+        }),
+      );
     });
   });
 });

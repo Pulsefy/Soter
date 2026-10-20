@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { AuditService } from '../audit/audit.service';
+import { AdminActionLogger } from '../audit/admin-action-logger.service';
 import { ONCHAIN_ADAPTER_TOKEN, PendingWithdrawal } from './onchain.adapter';
 import {
   SURPLUS_WITHDRAWAL_AUDIT_ACTIONS,
@@ -64,7 +64,10 @@ describe('SurplusWithdrawalService', () => {
       providers: [
         SurplusWithdrawalService,
         { provide: ONCHAIN_ADAPTER_TOKEN, useValue: mockAdapter },
-        { provide: AuditService, useValue: mockAudit },
+        {
+          provide: AdminActionLogger,
+          useValue: new AdminActionLogger(mockAudit as never),
+        },
       ],
     }).compile();
 
@@ -126,7 +129,18 @@ describe('SurplusWithdrawalService', () => {
       expect(mockAudit.record).toHaveBeenCalledWith(
         expect.objectContaining({
           action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.proposed,
-          metadata: expect.objectContaining({ amount: '1000', token: 'USDC' }),
+          metadata: expect.objectContaining({
+            before: null,
+            after: {
+              to: 'GTO',
+              token: 'USDC',
+              amount: '1000',
+              executableAt: pending.executableAt,
+            },
+            correlationId: null,
+            outcome: 'success',
+            severity: 'info',
+          }),
         }),
       );
       expect(status.pendingWithdrawal).toEqual(pending);
@@ -139,6 +153,15 @@ describe('SurplusWithdrawalService', () => {
         ConflictException,
       );
       expect(mockAdapter.proposeSurplusWithdrawal).not.toHaveBeenCalled();
+      expect(mockAudit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.proposed,
+          metadata: expect.objectContaining({
+            outcome: 'rejected',
+            after: null,
+          }),
+        }),
+      );
     });
 
     it('fails when the contract records nothing', async () => {
@@ -152,7 +175,16 @@ describe('SurplusWithdrawalService', () => {
       await expect(service.propose(actor, dto)).rejects.toThrow(
         /did not record a pending/,
       );
-      expect(mockAudit.record).not.toHaveBeenCalled();
+      expect(mockAudit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.proposed,
+          metadata: expect.objectContaining({
+            outcome: 'rejected',
+            severity: 'warn',
+            after: null,
+          }),
+        }),
+      );
     });
 
     it('fails when the contract recorded a different proposal', async () => {
@@ -166,7 +198,12 @@ describe('SurplusWithdrawalService', () => {
       await expect(service.propose(actor, dto)).rejects.toThrow(
         /different proposal/,
       );
-      expect(mockAudit.record).not.toHaveBeenCalled();
+      expect(mockAudit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.proposed,
+          metadata: expect.objectContaining({ outcome: 'rejected', after: null }),
+        }),
+      );
     });
   });
 
@@ -191,7 +228,12 @@ describe('SurplusWithdrawalService', () => {
       expect(mockAudit.record).toHaveBeenCalledWith(
         expect.objectContaining({
           action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.cancelled,
-          metadata: expect.objectContaining({ cancelledAmount: '1000' }),
+          metadata: expect.objectContaining({
+            before: expect.objectContaining({ amount: '1000' }),
+            after: null,
+            outcome: 'success',
+            severity: 'info',
+          }),
         }),
       );
       expect(status.pendingWithdrawal).toBeNull();
@@ -200,6 +242,15 @@ describe('SurplusWithdrawalService', () => {
     it('rejects cancelling when nothing is pending', async () => {
       await expect(service.cancel(actor)).rejects.toThrow(BadRequestException);
       expect(mockAdapter.cancelSurplusWithdrawal).not.toHaveBeenCalled();
+      expect(mockAudit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.cancelled,
+          metadata: expect.objectContaining({
+            outcome: 'rejected',
+            after: null,
+          }),
+        }),
+      );
     });
 
     it('fails when the contract still reports the proposal as pending', async () => {
@@ -212,7 +263,12 @@ describe('SurplusWithdrawalService', () => {
       });
 
       await expect(service.cancel(actor)).rejects.toThrow(ConflictException);
-      expect(mockAudit.record).not.toHaveBeenCalled();
+      expect(mockAudit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.cancelled,
+          metadata: expect.objectContaining({ outcome: 'rejected', after: null }),
+        }),
+      );
     });
   });
 
@@ -237,7 +293,12 @@ describe('SurplusWithdrawalService', () => {
       expect(mockAudit.record).toHaveBeenCalledWith(
         expect.objectContaining({
           action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.executed,
-          metadata: expect.objectContaining({ executedAmount: '1000' }),
+          metadata: expect.objectContaining({
+            before: expect.objectContaining({ amount: '1000' }),
+            after: null,
+            outcome: 'success',
+            severity: 'info',
+          }),
         }),
       );
       expect(status.pendingWithdrawal).toBeNull();
@@ -254,8 +315,22 @@ describe('SurplusWithdrawalService', () => {
       expect(error.getResponse()).toMatchObject({
         code: 'SURPLUS_WITHDRAWAL_TIMELOCK_ACTIVE',
       });
+      expect(mockAudit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.executed,
+          metadata: expect.objectContaining({
+            outcome: 'rejected',
+            after: null,
+          }),
+        }),
+      );
       expect(mockAdapter.executeSurplusWithdrawal).not.toHaveBeenCalled();
-      expect(mockAudit.record).not.toHaveBeenCalled();
+      expect(mockAudit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.executed,
+          metadata: expect.objectContaining({ outcome: 'rejected', after: null }),
+        }),
+      );
     });
 
     it('surfaces a contract-level timelock rejection as the same conflict', async () => {
@@ -279,6 +354,15 @@ describe('SurplusWithdrawalService', () => {
     it('rejects executing when nothing is pending', async () => {
       await expect(service.execute(actor)).rejects.toThrow(BadRequestException);
       expect(mockAdapter.executeSurplusWithdrawal).not.toHaveBeenCalled();
+      expect(mockAudit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.executed,
+          metadata: expect.objectContaining({
+            outcome: 'rejected',
+            after: null,
+          }),
+        }),
+      );
     });
 
     it('fails when the contract still reports the proposal as pending', async () => {
@@ -293,7 +377,15 @@ describe('SurplusWithdrawalService', () => {
       });
 
       await expect(service.execute(actor)).rejects.toThrow(ConflictException);
-      expect(mockAudit.record).not.toHaveBeenCalled();
+      expect(mockAudit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: SURPLUS_WITHDRAWAL_AUDIT_ACTIONS.executed,
+          metadata: expect.objectContaining({
+            outcome: 'rejected',
+            after: null,
+          }),
+        }),
+      );
     });
 
     it('does not swallow an unrelated contract failure', async () => {

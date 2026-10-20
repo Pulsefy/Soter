@@ -5,6 +5,7 @@ import {
 } from './admin-transfer.service';
 import { AdminTransferResult, OnchainAdapter } from './onchain.adapter';
 import { MockOnchainAdapter } from './onchain.adapter.mock';
+import { AdminActionLogger } from '../audit/admin-action-logger.service';
 
 const CURRENT_ADMIN =
   'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
@@ -20,7 +21,10 @@ describe('AdminTransferService', () => {
   beforeEach(() => {
     adapter = new MockOnchainAdapter();
     auditService = { record: jest.fn().mockResolvedValue({ id: 'audit-1' }) };
-    service = new AdminTransferService(adapter, auditService as never);
+    service = new AdminTransferService(
+      adapter,
+      new AdminActionLogger(auditService as never),
+    );
   });
 
   describe('propose-then-accept', () => {
@@ -58,9 +62,17 @@ describe('AdminTransferService', () => {
         action: ADMIN_TRANSFER_AUDIT_ACTIONS.proposed,
       });
       expect(proposalEntry.metadata).toMatchObject({
-        pendingAdminAddress: NEW_ADMIN,
-        previousAdminAddress: proposed.adminAddress,
-        transactionHash: proposed.transactionHash,
+        before: {
+          adminAddress: proposed.adminAddress,
+          pendingAdminAddress: null,
+        },
+        after: {
+          adminAddress: proposed.adminAddress,
+          pendingAdminAddress: NEW_ADMIN,
+        },
+        correlationId: null,
+        outcome: 'success',
+        severity: 'info',
       });
 
       const acceptanceEntry = auditService.record.mock.calls[1][0];
@@ -71,8 +83,16 @@ describe('AdminTransferService', () => {
         action: ADMIN_TRANSFER_AUDIT_ACTIONS.accepted,
       });
       expect(acceptanceEntry.metadata).toMatchObject({
-        newAdminAddress: NEW_ADMIN,
-        transactionHash: accepted.transactionHash,
+        before: {
+          adminAddress: proposed.adminAddress,
+          pendingAdminAddress: NEW_ADMIN,
+        },
+        after: {
+          adminAddress: NEW_ADMIN,
+          pendingAdminAddress: null,
+        },
+        outcome: 'success',
+        severity: 'info',
       });
     });
   });
@@ -109,8 +129,16 @@ describe('AdminTransferService', () => {
         action: ADMIN_TRANSFER_AUDIT_ACTIONS.cancelled,
       });
       expect(cancellationEntry.metadata).toMatchObject({
-        cancelledPendingAdminAddress: NEW_ADMIN,
-        remainingAdminAddress: initial.adminAddress,
+        before: {
+          adminAddress: initial.adminAddress,
+          pendingAdminAddress: NEW_ADMIN,
+        },
+        after: {
+          adminAddress: initial.adminAddress,
+          pendingAdminAddress: null,
+        },
+        outcome: 'success',
+        severity: 'info',
       });
     });
   });
@@ -121,7 +149,16 @@ describe('AdminTransferService', () => {
         service.accept({ actorId: 'actor', contractId: CONTRACT_ID }),
       ).rejects.toBeInstanceOf(BadRequestException);
 
-      expect(auditService.record).not.toHaveBeenCalled();
+      expect(auditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: ADMIN_TRANSFER_AUDIT_ACTIONS.accepted,
+          metadata: expect.objectContaining({
+            outcome: 'rejected',
+            severity: 'warn',
+            after: null,
+          }),
+        }),
+      );
     });
 
     it('rejects cancellation when no transfer is pending', async () => {
@@ -129,7 +166,12 @@ describe('AdminTransferService', () => {
         service.cancel({ actorId: 'actor', contractId: CONTRACT_ID }),
       ).rejects.toBeInstanceOf(BadRequestException);
 
-      expect(auditService.record).not.toHaveBeenCalled();
+      expect(auditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: ADMIN_TRANSFER_AUDIT_ACTIONS.cancelled,
+          metadata: expect.objectContaining({ outcome: 'rejected', after: null }),
+        }),
+      );
     });
 
     it('rejects proposing the address that is already admin', async () => {
@@ -142,7 +184,12 @@ describe('AdminTransferService', () => {
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
 
-      expect(auditService.record).not.toHaveBeenCalled();
+      expect(auditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: ADMIN_TRANSFER_AUDIT_ACTIONS.proposed,
+          metadata: expect.objectContaining({ outcome: 'rejected', after: null }),
+        }),
+      );
     });
 
     it('does not audit a proposal the contract failed to record', async () => {
@@ -165,7 +212,7 @@ describe('AdminTransferService', () => {
 
       const guarded = new AdminTransferService(
         misleading,
-        auditService as never,
+        new AdminActionLogger(auditService as never),
       );
 
       await expect(
@@ -175,7 +222,16 @@ describe('AdminTransferService', () => {
         ),
       ).rejects.toBeInstanceOf(ConflictException);
 
-      expect(auditService.record).not.toHaveBeenCalled();
+      expect(auditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: ADMIN_TRANSFER_AUDIT_ACTIONS.proposed,
+          metadata: expect.objectContaining({
+            outcome: 'rejected',
+            severity: 'warn',
+            after: null,
+          }),
+        }),
+      );
     });
   });
 });

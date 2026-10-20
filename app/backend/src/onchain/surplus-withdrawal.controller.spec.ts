@@ -83,6 +83,20 @@ describe('SurplusWithdrawalController', () => {
       );
     });
 
+    it('propagates the request correlation ID on propose', async () => {
+      mockService.propose.mockResolvedValue({});
+
+      await controller.propose(dto, {
+        user: { sub: 'admin_1' },
+        correlationId: 'corr-withdrawal-1',
+      });
+
+      expect(mockService.propose).toHaveBeenCalledWith(
+        { actorId: 'admin_1', correlationId: 'corr-withdrawal-1' },
+        dto,
+      );
+    });
+
     it('falls back to the API key id so key callers stay attributable', async () => {
       mockService.cancel.mockResolvedValue({});
       mockService.execute.mockResolvedValue({});

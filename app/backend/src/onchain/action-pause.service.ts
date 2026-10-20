@@ -3,9 +3,11 @@ import {
   ConflictException,
   Inject,
   Injectable,
-  Logger,
 } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service';
+import {
+  AdminActionLogger,
+  AdminActionState,
+} from '../audit/admin-action-logger.service';
 import {
   ActionPauseResult,
   isPausableAction,
@@ -23,6 +25,7 @@ export const ACTION_PAUSE_AUDIT_ACTIONS = {
 
 export interface ActionPauseActor {
   actorId: string;
+  correlationId?: string | null;
 }
 
 export interface ActionPauseOutcome extends ActionPauseResult {
@@ -51,12 +54,10 @@ export interface ActionPauseStatus {
  */
 @Injectable()
 export class ActionPauseService {
-  private readonly logger = new Logger(ActionPauseService.name);
-
   constructor(
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
-    private readonly auditService: AuditService,
+    private readonly adminActionLogger: AdminActionLogger,
   ) {}
 
   async getStatus(): Promise<ActionPauseStatus> {
@@ -80,40 +81,88 @@ export class ActionPauseService {
     actor: ActionPauseActor,
     action: string,
   ): Promise<ActionPauseOutcome> {
-    const pausable = this.parseAction(action);
-    const result = await this.onchainAdapter.pauseAction(pausable);
+    let pausable: PausableAction | null = null;
+    let before: AdminActionState | null = null;
+    let transactionHash: string | null = null;
+    return this.adminActionLogger.execute(
+      {
+        actor: actor.actorId,
+        action: ACTION_PAUSE_AUDIT_ACTIONS.paused,
+        target: () =>
+          pausable ? { type: 'ContractActionPause', id: pausable } : null,
+        before: () => before,
+        details: () => (transactionHash ? { transactionHash } : null),
+        correlationId: actor.correlationId ?? null,
+      },
+      async () => {
+        pausable = this.parseAction(action);
+        const [{ isPaused: globallyPaused }, isPaused] = await Promise.all([
+          this.onchainAdapter.getPauseState(),
+          this.onchainAdapter.isActionPaused(pausable),
+        ]);
+        before = { isPaused, globallyPaused };
 
-    if (!result.isPaused) {
-      throw new ConflictException(
-        `Contract did not record the "${pausable}" action as paused`,
-      );
-    }
+        const result = await this.onchainAdapter.pauseAction(pausable);
+        if (!result.isPaused) {
+          throw new ConflictException(
+            `Contract did not record the "${pausable}" action as paused`,
+          );
+        }
+        transactionHash = result.transactionHash;
 
-    return this.recordChange(actor, ACTION_PAUSE_AUDIT_ACTIONS.paused, result);
+        const { isPaused: nextGloballyPaused } =
+          await this.onchainAdapter.getPauseState();
+        return { ...result, globallyPaused: nextGloballyPaused };
+      },
+      result => ({
+        isPaused: result.isPaused,
+        globallyPaused: result.globallyPaused,
+      }),
+    );
   }
 
   async unpause(
     actor: ActionPauseActor,
     action: string,
   ): Promise<ActionPauseOutcome> {
-    const pausable = this.parseAction(action);
-    const result = await this.onchainAdapter.unpauseAction(pausable);
-    const { isPaused: globallyPaused } =
-      await this.onchainAdapter.getPauseState();
+    let pausable: PausableAction | null = null;
+    let before: AdminActionState | null = null;
+    let transactionHash: string | null = null;
+    return this.adminActionLogger.execute(
+      {
+        actor: actor.actorId,
+        action: ACTION_PAUSE_AUDIT_ACTIONS.unpaused,
+        target: () =>
+          pausable ? { type: 'ContractActionPause', id: pausable } : null,
+        before: () => before,
+        details: () => (transactionHash ? { transactionHash } : null),
+        correlationId: actor.correlationId ?? null,
+      },
+      async () => {
+        pausable = this.parseAction(action);
+        const [{ isPaused: globallyPaused }, isPaused] = await Promise.all([
+          this.onchainAdapter.getPauseState(),
+          this.onchainAdapter.isActionPaused(pausable),
+        ]);
+        before = { isPaused, globallyPaused };
 
-    // A global pause legitimately keeps the action blocked; anything else
-    // means the contract ignored the unpause.
-    if (result.isPaused && !globallyPaused) {
-      throw new ConflictException(
-        `Contract still reports the "${pausable}" action as paused after unpausing`,
-      );
-    }
+        const result = await this.onchainAdapter.unpauseAction(pausable);
+        transactionHash = result.transactionHash;
+        const { isPaused: nextGloballyPaused } =
+          await this.onchainAdapter.getPauseState();
 
-    return this.recordChange(
-      actor,
-      ACTION_PAUSE_AUDIT_ACTIONS.unpaused,
-      result,
-      globallyPaused,
+        if (result.isPaused && !nextGloballyPaused) {
+          throw new ConflictException(
+            `Contract still reports the "${pausable}" action as paused after unpausing`,
+          );
+        }
+
+        return { ...result, globallyPaused: nextGloballyPaused };
+      },
+      result => ({
+        isPaused: result.isPaused,
+        globallyPaused: result.globallyPaused,
+      }),
     );
   }
 
@@ -126,33 +175,4 @@ export class ActionPauseService {
     return action;
   }
 
-  private async recordChange(
-    actor: ActionPauseActor,
-    auditAction: string,
-    result: ActionPauseResult,
-    globallyPaused?: boolean,
-  ): Promise<ActionPauseOutcome> {
-    const isGloballyPaused =
-      globallyPaused ?? (await this.onchainAdapter.getPauseState()).isPaused;
-
-    await this.auditService.record({
-      actorId: actor.actorId,
-      entity: 'ContractActionPause',
-      entityId: result.action,
-      action: auditAction,
-      metadata: {
-        action: result.action,
-        effectivelyPaused: result.isPaused,
-        globallyPaused: isGloballyPaused,
-        transactionHash: result.transactionHash,
-        onChainTimestamp: result.timestamp.toISOString(),
-      },
-    });
-
-    this.logger.log(
-      `${auditAction} action=${result.action} effectivelyPaused=${result.isPaused} globallyPaused=${isGloballyPaused} (actor=${actor.actorId})`,
-    );
-
-    return { ...result, globallyPaused: isGloballyPaused };
-  }
 }

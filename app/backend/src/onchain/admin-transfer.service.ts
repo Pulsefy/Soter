@@ -3,9 +3,8 @@ import {
   ConflictException,
   Inject,
   Injectable,
-  Logger,
 } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service';
+import { AdminActionLogger } from '../audit/admin-action-logger.service';
 import {
   AdminState,
   AdminTransferResult,
@@ -27,6 +26,7 @@ export const ADMIN_TRANSFER_AUDIT_ACTIONS = {
 export interface AdminTransferActor {
   actorId: string;
   contractId?: string;
+  correlationId?: string | null;
 }
 
 /**
@@ -49,12 +49,10 @@ export interface AdminTransferActor {
  */
 @Injectable()
 export class AdminTransferService {
-  private readonly logger = new Logger(AdminTransferService.name);
-
   constructor(
     @Inject(ONCHAIN_ADAPTER_TOKEN)
     private readonly onchainAdapter: OnchainAdapter,
-    private readonly auditService: AuditService,
+    private readonly adminActionLogger: AdminActionLogger,
   ) {}
 
   async getState(contractId?: string): Promise<AdminState> {
@@ -69,133 +67,157 @@ export class AdminTransferService {
     actor: AdminTransferActor,
     dto: ProposeAdminTransferDto,
   ): Promise<AdminTransferResult> {
-    const before = await this.onchainAdapter.getAdminState({
-      contractId: actor.contractId,
-    });
-
-    if (before.adminAddress && dto.newAdminAddress === before.adminAddress) {
-      throw new BadRequestException(
-        'InvalidPendingAdmin: the nominated address is already the current admin',
-      );
-    }
-
-    const result = await this.onchainAdapter.transferAdmin({
-      contractId: actor.contractId,
-      newAdminAddress: dto.newAdminAddress,
-    });
-
-    if (result.pendingAdminAddress !== dto.newAdminAddress) {
-      throw new ConflictException(
-        `Contract did not record ${dto.newAdminAddress} as the pending admin (reported: ${result.pendingAdminAddress ?? 'none'})`,
-      );
-    }
-
-    await this.auditService.record({
-      actorId: actor.actorId,
-      entity: 'AdminTransfer',
-      entityId: result.contractId,
-      action: ADMIN_TRANSFER_AUDIT_ACTIONS.proposed,
-      metadata: {
-        previousAdminAddress: before.adminAddress,
-        pendingAdminAddress: result.pendingAdminAddress,
-        transactionHash: result.transactionHash,
-        onChainTimestamp: result.timestamp.toISOString(),
+    let before: AdminState | null = null;
+    let contractId = actor.contractId;
+    let transactionHash: string | null = null;
+    return this.adminActionLogger.execute(
+      {
+        actor: actor.actorId,
+        action: ADMIN_TRANSFER_AUDIT_ACTIONS.proposed,
+        target: () =>
+          contractId ? { type: 'AdminTransfer', id: contractId } : null,
+        before: () =>
+          before
+            ? {
+                adminAddress: before.adminAddress,
+                pendingAdminAddress: before.pendingAdminAddress,
+              }
+            : null,
+          details: () => (transactionHash ? { transactionHash } : null),
+        correlationId: actor.correlationId ?? null,
       },
-    });
+      async () => {
+        before = await this.onchainAdapter.getAdminState({
+          contractId: actor.contractId,
+        });
+        if (before.adminAddress && dto.newAdminAddress === before.adminAddress) {
+          throw new BadRequestException(
+            'InvalidPendingAdmin: the nominated address is already the current admin',
+          );
+        }
 
-    this.logger.log(
-      `Admin transfer proposed for ${result.contractId}: ${before.adminAddress} -> ${result.pendingAdminAddress} (actor=${actor.actorId})`,
+        const result = await this.onchainAdapter.transferAdmin({
+          contractId: actor.contractId,
+          newAdminAddress: dto.newAdminAddress,
+        });
+        contractId = result.contractId;
+        transactionHash = result.transactionHash;
+
+        if (result.pendingAdminAddress !== dto.newAdminAddress) {
+          throw new ConflictException(
+            `Contract did not record ${dto.newAdminAddress} as the pending admin (reported: ${result.pendingAdminAddress ?? 'none'})`,
+          );
+        }
+        return result;
+      },
+      result => ({
+        adminAddress: result.adminAddress,
+        pendingAdminAddress: result.pendingAdminAddress,
+      }),
     );
-
-    return result;
   }
 
   /**
    * Step two: the pending admin takes the role, completing the rotation.
    */
   async accept(actor: AdminTransferActor): Promise<AdminTransferResult> {
-    const before = await this.onchainAdapter.getAdminState({
-      contractId: actor.contractId,
-    });
-
-    if (!before.pendingAdminAddress) {
-      throw new BadRequestException(
-        'NoPendingTransfer: no admin transfer is awaiting acceptance',
-      );
-    }
-
-    const result = await this.onchainAdapter.acceptAdmin({
-      contractId: actor.contractId,
-    });
-
-    if (result.pendingAdminAddress !== null) {
-      throw new ConflictException(
-        `Contract still reports ${result.pendingAdminAddress} as pending admin after acceptance`,
-      );
-    }
-
-    await this.auditService.record({
-      actorId: actor.actorId,
-      entity: 'AdminTransfer',
-      entityId: result.contractId,
-      action: ADMIN_TRANSFER_AUDIT_ACTIONS.accepted,
-      metadata: {
-        previousAdminAddress: before.adminAddress,
-        newAdminAddress: result.adminAddress,
-        transactionHash: result.transactionHash,
-        onChainTimestamp: result.timestamp.toISOString(),
+    let before: AdminState | null = null;
+    let contractId = actor.contractId;
+    let transactionHash: string | null = null;
+    return this.adminActionLogger.execute(
+      {
+        actor: actor.actorId,
+        action: ADMIN_TRANSFER_AUDIT_ACTIONS.accepted,
+        target: () =>
+          contractId ? { type: 'AdminTransfer', id: contractId } : null,
+        before: () =>
+          before
+            ? {
+                adminAddress: before.adminAddress,
+                pendingAdminAddress: before.pendingAdminAddress,
+              }
+            : null,
+          details: () => (transactionHash ? { transactionHash } : null),
+        correlationId: actor.correlationId ?? null,
       },
-    });
+      async () => {
+        before = await this.onchainAdapter.getAdminState({
+          contractId: actor.contractId,
+        });
+        if (!before.pendingAdminAddress) {
+          throw new BadRequestException(
+            'NoPendingTransfer: no admin transfer is awaiting acceptance',
+          );
+        }
 
-    this.logger.log(
-      `Admin transfer accepted for ${result.contractId}: ${before.adminAddress} -> ${result.adminAddress} (actor=${actor.actorId})`,
+        const result = await this.onchainAdapter.acceptAdmin({
+          contractId: actor.contractId,
+        });
+        contractId = result.contractId;
+        transactionHash = result.transactionHash;
+        if (result.pendingAdminAddress !== null) {
+          throw new ConflictException(
+            `Contract still reports ${result.pendingAdminAddress} as pending admin after acceptance`,
+          );
+        }
+        return result;
+      },
+      result => ({
+        adminAddress: result.adminAddress,
+        pendingAdminAddress: result.pendingAdminAddress,
+      }),
     );
-
-    return result;
   }
 
   /**
    * Abandon a proposal, leaving the current admin in place.
    */
   async cancel(actor: AdminTransferActor): Promise<AdminTransferResult> {
-    const before = await this.onchainAdapter.getAdminState({
-      contractId: actor.contractId,
-    });
-
-    if (!before.pendingAdminAddress) {
-      throw new BadRequestException(
-        'NoPendingTransfer: no admin transfer is awaiting acceptance',
-      );
-    }
-
-    const result = await this.onchainAdapter.cancelAdminTransfer({
-      contractId: actor.contractId,
-    });
-
-    if (result.pendingAdminAddress !== null) {
-      throw new ConflictException(
-        `Contract still reports ${result.pendingAdminAddress} as pending admin after cancellation`,
-      );
-    }
-
-    await this.auditService.record({
-      actorId: actor.actorId,
-      entity: 'AdminTransfer',
-      entityId: result.contractId,
-      action: ADMIN_TRANSFER_AUDIT_ACTIONS.cancelled,
-      metadata: {
-        previousAdminAddress: before.adminAddress,
-        cancelledPendingAdminAddress: before.pendingAdminAddress,
-        remainingAdminAddress: result.adminAddress,
-        transactionHash: result.transactionHash,
-        onChainTimestamp: result.timestamp.toISOString(),
+    let before: AdminState | null = null;
+    let contractId = actor.contractId;
+    let transactionHash: string | null = null;
+    return this.adminActionLogger.execute(
+      {
+        actor: actor.actorId,
+        action: ADMIN_TRANSFER_AUDIT_ACTIONS.cancelled,
+        target: () =>
+          contractId ? { type: 'AdminTransfer', id: contractId } : null,
+        before: () =>
+          before
+            ? {
+                adminAddress: before.adminAddress,
+                pendingAdminAddress: before.pendingAdminAddress,
+              }
+            : null,
+          details: () => (transactionHash ? { transactionHash } : null),
+        correlationId: actor.correlationId ?? null,
       },
-    });
+      async () => {
+        before = await this.onchainAdapter.getAdminState({
+          contractId: actor.contractId,
+        });
+        if (!before.pendingAdminAddress) {
+          throw new BadRequestException(
+            'NoPendingTransfer: no admin transfer is awaiting acceptance',
+          );
+        }
 
-    this.logger.log(
-      `Admin transfer cancelled for ${result.contractId}; ${result.adminAddress} remains admin (actor=${actor.actorId})`,
+        const result = await this.onchainAdapter.cancelAdminTransfer({
+          contractId: actor.contractId,
+        });
+        contractId = result.contractId;
+        transactionHash = result.transactionHash;
+        if (result.pendingAdminAddress !== null) {
+          throw new ConflictException(
+            `Contract still reports ${result.pendingAdminAddress} as pending admin after cancellation`,
+          );
+        }
+        return result;
+      },
+      result => ({
+        adminAddress: result.adminAddress,
+        pendingAdminAddress: result.pendingAdminAddress,
+      }),
     );
-
-    return result;
   }
 }

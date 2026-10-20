@@ -19,6 +19,11 @@ import {
 } from '@nestjs/swagger';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
+import {
+  AdminActionRequest,
+  getAdminActionActor,
+  getAdminActionCorrelationId,
+} from '../audit/admin-action-logger.service';
 import { SurplusWithdrawalService } from './surplus-withdrawal.service';
 import { ProposeSurplusWithdrawalDto } from './dto/surplus-withdrawal.dto';
 
@@ -26,10 +31,6 @@ import { ProposeSurplusWithdrawalDto } from './dto/surplus-withdrawal.dto';
  * Shape populated by ApiKeyGuard on `request.user`. API-key callers are
  * identified by `apiKeyId`; JWT callers carry `id`/`sub`.
  */
-interface SurplusWithdrawalRequest {
-  user?: { id?: string; sub?: string; apiKeyId?: string };
-}
-
 @Controller('admin/surplus-withdrawal')
 @ApiTags('Surplus Withdrawal')
 @ApiBearerAuth('JWT-auth')
@@ -37,19 +38,6 @@ export class SurplusWithdrawalController {
   constructor(
     private readonly surplusWithdrawalService: SurplusWithdrawalService,
   ) {}
-
-  /**
-   * Resolve the audit actor. Mirrors the fallback chain used by
-   * LoggingInterceptor so API-key and JWT callers are both attributable.
-   */
-  private actorId(request: SurplusWithdrawalRequest): string {
-    return (
-      request.user?.sub ??
-      request.user?.id ??
-      request.user?.apiKeyId ??
-      'unknown'
-    );
-  }
 
   @Get('status')
   @Version('1')
@@ -114,10 +102,14 @@ export class SurplusWithdrawalController {
   })
   async propose(
     @Body() dto: ProposeSurplusWithdrawalDto,
-    @Req() request: SurplusWithdrawalRequest,
+    @Req() request: AdminActionRequest,
   ) {
+    const correlationId = getAdminActionCorrelationId(request);
     return this.surplusWithdrawalService.propose(
-      { actorId: this.actorId(request) },
+      {
+        actorId: getAdminActionActor(request),
+        ...(correlationId ? { correlationId } : {}),
+      },
       dto,
     );
   }
@@ -143,9 +135,11 @@ export class SurplusWithdrawalController {
   @ApiForbiddenResponse({
     description: 'Access denied - admin role required.',
   })
-  async cancel(@Req() request: SurplusWithdrawalRequest) {
+  async cancel(@Req() request: AdminActionRequest) {
+    const correlationId = getAdminActionCorrelationId(request);
     return this.surplusWithdrawalService.cancel({
-      actorId: this.actorId(request),
+      actorId: getAdminActionActor(request),
+      ...(correlationId ? { correlationId } : {}),
     });
   }
 
@@ -176,9 +170,11 @@ export class SurplusWithdrawalController {
     description:
       'The timelock has not elapsed, or the contract still reports the proposal as pending after execution.',
   })
-  async execute(@Req() request: SurplusWithdrawalRequest) {
+  async execute(@Req() request: AdminActionRequest) {
+    const correlationId = getAdminActionCorrelationId(request);
     return this.surplusWithdrawalService.execute({
-      actorId: this.actorId(request),
+      actorId: getAdminActionActor(request),
+      ...(correlationId ? { correlationId } : {}),
     });
   }
 }

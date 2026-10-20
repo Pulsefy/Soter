@@ -38,6 +38,11 @@ import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { CacheResponse } from '../common/decorators/cache-response.decorator';
 import { getCacheTTL } from '../common/config/cache.config';
 import { SorobanEventCorrelationService } from './soroban-event-correlation.service';
+import {
+  AdminActionRequest,
+  getAdminActionActor,
+  getAdminActionCorrelationId,
+} from '../audit/admin-action-logger.service';
 
 /**
  * AidEscrowController
@@ -102,13 +107,21 @@ export class AidEscrowController {
   })
   async createAidPackage(
     @Body() dto: CreateAidPackageDto,
-    @Req() req: Request & { user?: { address?: string } },
+    @Req() req: Request & AdminActionRequest,
   ): Promise<any> {
     try {
-      const operatorAddress = req.user?.address || 'admin';
-      return await this.aidEscrowService.createAidPackage(dto, operatorAddress);
+      const operatorAddress = req.user?.address ?? 'admin';
+      return await this.aidEscrowService.createAidPackage(
+        dto,
+        operatorAddress,
+        getAdminActionActor(req),
+        getAdminActionCorrelationId(req),
+      );
     } catch (error: unknown) {
-      this.logger.error('Failed to create aid package:', error);
+      this.logger.error(
+        'Failed to create aid package',
+        error instanceof Error ? error.name : 'UnknownError',
+      );
       this.errorMapper.throwMappedError(error);
     }
   }
@@ -184,24 +197,21 @@ export class AidEscrowController {
   })
   async batchCreateAidPackages(
     @Body() dto: BatchCreateAidPackagesDto,
-    @Req() req: Request & { user?: { address?: string } },
+    @Req() req: Request & AdminActionRequest,
   ): Promise<any> {
-    if (dto.recipientAddresses.length !== dto.amounts.length) {
-      throw new AppException(
-        ERROR_CODES.BAD_REQUEST,
-        400,
-        'Recipients and amounts arrays must have the same length',
-      );
-    }
-
-    const operatorAddress = req.user?.address || 'admin';
+    const operatorAddress = req.user?.address ?? 'admin';
     try {
       return await this.aidEscrowService.batchCreateAidPackages(
         dto,
         operatorAddress,
+        getAdminActionActor(req),
+        getAdminActionCorrelationId(req),
       );
     } catch (error: unknown) {
-      this.logger.error('Failed to batch create aid packages:', error);
+      this.logger.error(
+        'Failed to batch create aid packages',
+        error instanceof Error ? error.name : 'UnknownError',
+      );
       this.errorMapper.throwMappedError(error);
     }
   }
@@ -300,16 +310,21 @@ export class AidEscrowController {
   })
   async disburseAidPackage(
     @Param('id') packageId: string,
-    @Req() req: Request & { user?: { address?: string } },
+    @Req() req: Request & AdminActionRequest,
   ): Promise<any> {
     try {
       const operatorAddress = req.user?.address || 'admin';
       return await this.aidEscrowService.disburseAidPackage(
         { packageId },
         operatorAddress,
+        getAdminActionActor(req),
+        getAdminActionCorrelationId(req),
       );
     } catch (error: unknown) {
-      this.logger.error('Failed to disburse aid package:', error);
+      this.logger.error(
+        'Failed to disburse aid package',
+        error instanceof Error ? error.name : 'UnknownError',
+      );
       this.errorMapper.throwMappedError(error);
     }
   }
@@ -355,16 +370,22 @@ export class AidEscrowController {
   async extendAidPackageExpiry(
     @Param('id') packageId: string,
     @Body() dto: ExtendAidPackageExpiryDto,
-    @Req() req: Request & { user?: { address?: string; id?: string } },
+    @Req() req: Request & AdminActionRequest,
   ): Promise<any> {
     try {
+      const actor = getAdminActionActor(req);
       const operatorAddress = req.user?.address || req.user?.id || 'admin';
       return await this.aidEscrowService.extendAidPackageExpiry(
         { ...dto, packageId },
         operatorAddress,
+        actor,
+        getAdminActionCorrelationId(req),
       );
     } catch (error) {
-      this.logger.error('Failed to extend aid package expiry:', error);
+      this.logger.error(
+        'Failed to extend aid package expiry',
+        error instanceof Error ? error.name : 'UnknownError',
+      );
       this.errorMapper.throwMappedError(error);
     }
   }
@@ -760,7 +781,7 @@ export class AidEscrowController {
   async setDelegate(
     @Param('id') packageId: string,
     @Body() dto: SetDelegateDto,
-    @Req() req: Request & { user?: { address?: string } },
+    @Req() req: Request & AdminActionRequest,
   ): Promise<any> {
     try {
       const adminAddress = req.user?.address || 'admin';
@@ -768,9 +789,14 @@ export class AidEscrowController {
         packageId,
         dto,
         adminAddress,
+        getAdminActionActor(req),
+        getAdminActionCorrelationId(req),
       );
     } catch (error: unknown) {
-      this.logger.error('Failed to set delegate:', error);
+      this.logger.error(
+        'Failed to set delegate',
+        error instanceof Error ? error.name : 'UnknownError',
+      );
       this.errorMapper.throwMappedError(error);
     }
   }
@@ -806,16 +832,21 @@ export class AidEscrowController {
   })
   async revokeDelegate(
     @Param('id') packageId: string,
-    @Req() req: Request & { user?: { address?: string } },
+    @Req() req: Request & AdminActionRequest,
   ): Promise<any> {
     try {
       const adminAddress = req.user?.address || 'admin';
       return await this.aidEscrowService.revokeDelegate(
         packageId,
         adminAddress,
+        getAdminActionActor(req),
+        getAdminActionCorrelationId(req),
       );
     } catch (error: unknown) {
-      this.logger.error('Failed to revoke delegate:', error);
+      this.logger.error(
+        'Failed to revoke delegate',
+        error instanceof Error ? error.name : 'UnknownError',
+      );
       this.errorMapper.throwMappedError(error);
     }
   }

@@ -21,6 +21,11 @@ import {
 } from '@nestjs/swagger';
 import { Roles } from '../auth/roles.decorator';
 import { AppRole } from '../auth/app-role.enum';
+import {
+  AdminActionRequest,
+  getAdminActionActor,
+  getAdminActionCorrelationId,
+} from '../audit/admin-action-logger.service';
 import { ActionPauseService } from './action-pause.service';
 import { PAUSABLE_ACTIONS } from './onchain.adapter';
 
@@ -28,10 +33,6 @@ import { PAUSABLE_ACTIONS } from './onchain.adapter';
  * Shape populated by ApiKeyGuard on `request.user`. API-key callers are
  * identified by `apiKeyId`; JWT callers carry `id`/`sub`.
  */
-interface ActionPauseRequest {
-  user?: { id?: string; sub?: string; apiKeyId?: string };
-}
-
 const ACTION_PARAM = {
   name: 'action',
   enum: PAUSABLE_ACTIONS,
@@ -43,19 +44,6 @@ const ACTION_PARAM = {
 @ApiBearerAuth('JWT-auth')
 export class ActionPauseController {
   constructor(private readonly actionPauseService: ActionPauseService) {}
-
-  /**
-   * Resolve the audit actor. Mirrors the fallback chain used by
-   * LoggingInterceptor so API-key and JWT callers are both attributable.
-   */
-  private actorId(request: ActionPauseRequest): string {
-    return (
-      request.user?.sub ??
-      request.user?.id ??
-      request.user?.apiKeyId ??
-      'unknown'
-    );
-  }
 
   @Get()
   @Version('1')
@@ -123,10 +111,14 @@ export class ActionPauseController {
   })
   async pause(
     @Param('action') action: string,
-    @Req() request: ActionPauseRequest,
+    @Req() request: AdminActionRequest,
   ) {
+    const correlationId = getAdminActionCorrelationId(request);
     return this.actionPauseService.pause(
-      { actorId: this.actorId(request) },
+      {
+        actorId: getAdminActionActor(request),
+        ...(correlationId ? { correlationId } : {}),
+      },
       action,
     );
   }
@@ -160,10 +152,14 @@ export class ActionPauseController {
   })
   async unpause(
     @Param('action') action: string,
-    @Req() request: ActionPauseRequest,
+    @Req() request: AdminActionRequest,
   ) {
+    const correlationId = getAdminActionCorrelationId(request);
     return this.actionPauseService.unpause(
-      { actorId: this.actorId(request) },
+      {
+        actorId: getAdminActionActor(request),
+        ...(correlationId ? { correlationId } : {}),
+      },
       action,
     );
   }
