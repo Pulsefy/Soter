@@ -28,6 +28,7 @@ _PKG_STUBS = [
     "celery",
     "celery.result",
     "celery.schedules",
+    "celery.states",
     "redis",
     "spacy",
     "spacy.language",
@@ -39,10 +40,19 @@ _PKG_STUBS = [
     "groq",
     "anthropic",
     "numpy",
+    "psutil",
+    "pythonjsonlogger",
+    "slowapi",
+    "slowapi.errors",
+    "slowapi.util",
+    "sklearn",
+    "sklearn.preprocessing",
 ]
 
 import importlib.util
+from importlib.abc import MetaPathFinder, Loader
 
+_UNAVAILABLE_ROOTS = set()
 for _mod in _PKG_STUBS:
     root = _mod.split(".")[0]
     try:
@@ -52,8 +62,39 @@ for _mod in _PKG_STUBS:
         has_pkg = False
 
     if not has_pkg:
+        _UNAVAILABLE_ROOTS.add(root)
         if _mod not in sys.modules:
             sys.modules[_mod] = _make_pkg(_mod)
+
+class StubFinder(MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        root = fullname.split(".")[0]
+        if root in _UNAVAILABLE_ROOTS:
+            return importlib.util.spec_from_loader(fullname, StubLoader(fullname))
+        return None
+
+class StubLoader(Loader):
+    def __init__(self, fullname):
+        self.fullname = fullname
+
+    def create_module(self, spec):
+        mod = _make_pkg(self.fullname)
+        sys.modules[self.fullname] = mod
+        return mod
+
+    def exec_module(self, module):
+        pass
+
+sys.meta_path.insert(0, StubFinder())
+
+# Configure slowapi stubs if mocked
+if "slowapi" in sys.modules and isinstance(sys.modules["slowapi"], MagicMock):
+    sys.modules["slowapi"].Limiter = MagicMock()
+    sys.modules["slowapi"]._rate_limit_exceeded_handler = MagicMock()
+if "slowapi.errors" in sys.modules and isinstance(sys.modules["slowapi.errors"], MagicMock):
+    class RateLimitExceeded(Exception):
+        pass
+    sys.modules["slowapi.errors"].RateLimitExceeded = RateLimitExceeded
 
 # proof_of_life raises RuntimeError at import time when cv2 is mocked.
 _pol = _make_pkg("proof_of_life")

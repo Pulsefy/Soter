@@ -71,8 +71,8 @@ functions**. The count is based on `#[contractimpl]` in `src/lib.rs` and the
 | `get_aggregates` | Wired | `getAidPackageCount` reads token aggregates through this entrypoint. |
 | `get_campaign_package_count` | Not wired | No backend campaign reporting endpoint currently reads package counts. |
 | `get_campaign_claim_count` | Not wired | No backend campaign reporting endpoint currently reads claim counts. |
-| `get_recipient_package_count` | Not wired | The read service currently falls back to zero; paginated recipient listing is a documented future enhancement. |
-| `list_recipient_packages` | Not wired | Pagination is a documented future enhancement, but the production adapter has no implementation and the read service returns an empty page. |
+| `get_recipient_package_count` | Wired | `getRecipientPackageCount` reads the package count assigned to a recipient. |
+| `list_recipient_packages` | Wired | `listRecipientPackages` reads paginated package IDs assigned to a recipient with cursor and limit controls. |
 | `set_delegate` | Not wired | No backend service or endpoint currently supports setting a package delegate. |
 | `set_delegate_with_expiry` | Not wired | No backend service or endpoint currently supports setting a delegate expiry. |
 | `revoke_delegate` | Not wired | No backend service or endpoint currently supports revoking a package delegate. |

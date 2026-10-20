@@ -59,6 +59,10 @@ import {
   GetDelegateHistoryParams,
   GetDelegateHistoryResult,
   DelegateHistoryEntry,
+  ListRecipientPackagesPagination,
+  ListRecipientPackagesParams,
+  ListRecipientPackagesResult,
+  GetRecipientPackageCountParams,
 } from './onchain.adapter';
 import {
   parsePendingWithdrawal,
@@ -823,6 +827,75 @@ export class SorobanOnchainAdapter implements OnchainAdapter {
       history,
       timestamp: new Date(),
     };
+  }
+
+  async listRecipientPackages(
+    recipientOrParams: string | ListRecipientPackagesParams,
+    pagination?: ListRecipientPackagesPagination,
+  ): Promise<ListRecipientPackagesResult> {
+    const recipient =
+      typeof recipientOrParams === 'string'
+        ? recipientOrParams
+        : recipientOrParams.recipient ||
+          (recipientOrParams as any).recipientAddress ||
+          '';
+
+    const rawCursor =
+      typeof recipientOrParams === 'object' &&
+      recipientOrParams.cursor !== undefined
+        ? recipientOrParams.cursor
+        : (pagination?.cursor ?? 0);
+
+    const rawLimit =
+      typeof recipientOrParams === 'object' &&
+      recipientOrParams.limit !== undefined
+        ? recipientOrParams.limit
+        : (pagination?.limit ?? 50);
+
+    const cursor = Math.max(0, rawCursor);
+    const limit = Math.min(Math.max(1, rawLimit), 50);
+
+    this.logger.log(
+      `listRecipientPackages recipient=${recipient} cursor=${cursor} limit=${limit}`,
+    );
+
+    const result = await this.invokeContract('list_recipient_packages', [
+      recipient,
+      cursor,
+      limit,
+    ]);
+
+    const rawList = Array.isArray(result) ? result : [];
+    const packageIds = rawList.map(id => String(id));
+
+    return {
+      packageIds,
+      cursor,
+      limit,
+      hasMore: packageIds.length >= limit,
+      timestamp: new Date(),
+    };
+  }
+
+  async getRecipientPackageCount(
+    recipientOrParams: string | GetRecipientPackageCountParams,
+  ): Promise<number> {
+    const recipient =
+      typeof recipientOrParams === 'string'
+        ? recipientOrParams
+        : recipientOrParams.recipient ||
+          (recipientOrParams as any).recipientAddress ||
+          '';
+
+    this.logger.log(`getRecipientPackageCount recipient=${recipient}`);
+
+    const result = await this.invokeContract('get_recipient_package_count', [
+      recipient,
+    ]);
+
+    return typeof result === 'bigint' || typeof result === 'number'
+      ? Number(result)
+      : 0;
   }
 }
 

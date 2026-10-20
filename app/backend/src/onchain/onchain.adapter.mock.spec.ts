@@ -720,4 +720,205 @@ describe('MockOnchainAdapter', () => {
       expect(result.history[1].previousDelegate).toBe(DELEGATE_ADDRESS);
     });
   });
+
+  describe('recipient packages and counts', () => {
+    const ADMIN_ADDRESS =
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+    const TOKEN_ADDRESS =
+      'GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
+    const RECIPIENT_A =
+      'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ';
+
+    it('getRecipientPackageCount returns 0 for recipient with no packages', async () => {
+      const count = await adapter.getRecipientPackageCount(RECIPIENT_A);
+      expect(count).toBe(0);
+    });
+
+    it('listRecipientPackages returns empty page when recipient has no packages', async () => {
+      const page = await adapter.listRecipientPackages(RECIPIENT_A, {
+        cursor: 0,
+        limit: 10,
+      });
+
+      expect(page.packageIds).toEqual([]);
+      expect(page.cursor).toBe(0);
+      expect(page.limit).toBe(10);
+      expect(page.hasMore).toBe(false);
+      expect(page.totalCount).toBe(0);
+    });
+
+    it('single-page recipient: returns all packages when count <= limit', async () => {
+      const recipient = 'G_SINGLE_PAGE_RECIPIENT';
+      for (let i = 0; i < 3; i++) {
+        await adapter.createAidPackage({
+          operatorAddress: ADMIN_ADDRESS,
+          packageId: `single-pkg-${i}`,
+          recipientAddress: recipient,
+          amount: '1000',
+          tokenAddress: TOKEN_ADDRESS,
+          expiresAt: Math.floor(Date.now() / 1000) + 86400,
+        });
+      }
+
+      const count = await adapter.getRecipientPackageCount(recipient);
+      expect(count).toBe(3);
+
+      const page = await adapter.listRecipientPackages(recipient, {
+        cursor: 0,
+        limit: 50,
+      });
+
+      expect(page.packageIds).toEqual([
+        'single-pkg-0',
+        'single-pkg-1',
+        'single-pkg-2',
+      ]);
+      expect(page.totalCount).toBe(3);
+      expect(page.hasMore).toBe(false);
+    });
+
+    it('multi-page recipient: paginates correctly across multiple pages', async () => {
+      const recipient = 'G_MULTI_PAGE_RECIPIENT';
+      const totalPackages = 7;
+      for (let i = 0; i < totalPackages; i++) {
+        await adapter.createAidPackage({
+          operatorAddress: ADMIN_ADDRESS,
+          packageId: `multi-pkg-${i}`,
+          recipientAddress: recipient,
+          amount: '500',
+          tokenAddress: TOKEN_ADDRESS,
+          expiresAt: Math.floor(Date.now() / 1000) + 86400,
+        });
+      }
+
+      const total = await adapter.getRecipientPackageCount(recipient);
+      expect(total).toBe(7);
+
+      // Page 1: 0..3 (limit 3)
+      const page1 = await adapter.listRecipientPackages(recipient, {
+        cursor: 0,
+        limit: 3,
+      });
+      expect(page1.packageIds).toEqual([
+        'multi-pkg-0',
+        'multi-pkg-1',
+        'multi-pkg-2',
+      ]);
+      expect(page1.hasMore).toBe(true);
+
+      // Page 2: 3..6 (limit 3)
+      const page2 = await adapter.listRecipientPackages(recipient, {
+        cursor: 3,
+        limit: 3,
+      });
+      expect(page2.packageIds).toEqual([
+        'multi-pkg-3',
+        'multi-pkg-4',
+        'multi-pkg-5',
+      ]);
+      expect(page2.hasMore).toBe(true);
+
+      // Page 3: 6..7 (limit 3)
+      const page3 = await adapter.listRecipientPackages(recipient, {
+        cursor: 6,
+        limit: 3,
+      });
+      expect(page3.packageIds).toEqual(['multi-pkg-6']);
+      expect(page3.hasMore).toBe(false);
+
+      // All pages collected
+      const allIds = [
+        ...page1.packageIds,
+        ...page2.packageIds,
+        ...page3.packageIds,
+      ];
+      expect(allIds).toHaveLength(7);
+    });
+
+    it('out-of-range cursor returns empty result without error', async () => {
+      const recipient = 'G_OUT_OF_RANGE_RECIPIENT';
+      await adapter.createAidPackage({
+        operatorAddress: ADMIN_ADDRESS,
+        packageId: 'out-of-range-pkg',
+        recipientAddress: recipient,
+        amount: '100',
+        tokenAddress: TOKEN_ADDRESS,
+        expiresAt: Math.floor(Date.now() / 1000) + 86400,
+      });
+
+      const page = await adapter.listRecipientPackages(recipient, {
+        cursor: 999,
+        limit: 10,
+      });
+
+      expect(page.packageIds).toEqual([]);
+      expect(page.hasMore).toBe(false);
+      expect(page.totalCount).toBe(1);
+    });
+
+    it('enforces maximum limit of 50', async () => {
+      const recipient = 'G_MAX_LIMIT_RECIPIENT';
+      const page = await adapter.listRecipientPackages(recipient, {
+        cursor: 0,
+        limit: 100,
+      });
+      expect(page.limit).toBe(50);
+    });
+
+    it('supports calling with params object signature', async () => {
+      const recipient = 'G_PARAMS_OBJ_RECIPIENT';
+      await adapter.createAidPackage({
+        operatorAddress: ADMIN_ADDRESS,
+        packageId: 'params-sig-pkg',
+        recipientAddress: recipient,
+        amount: '100',
+        tokenAddress: TOKEN_ADDRESS,
+        expiresAt: Math.floor(Date.now() / 1000) + 86400,
+      });
+
+      const count = await adapter.getRecipientPackageCount({
+        recipient,
+      });
+      expect(count).toBe(1);
+
+      const page = await adapter.listRecipientPackages({
+        recipient,
+        cursor: 0,
+        limit: 10,
+      });
+      expect(page.packageIds).toEqual(['params-sig-pkg']);
+    });
+
+    it('isolates packages between different recipients', async () => {
+      const recipientX = 'G_RECIPIENT_X';
+      const recipientY = 'G_RECIPIENT_Y';
+
+      await adapter.createAidPackage({
+        operatorAddress: ADMIN_ADDRESS,
+        packageId: 'pkg-x-1',
+        recipientAddress: recipientX,
+        amount: '100',
+        tokenAddress: TOKEN_ADDRESS,
+        expiresAt: Math.floor(Date.now() / 1000) + 86400,
+      });
+
+      await adapter.createAidPackage({
+        operatorAddress: ADMIN_ADDRESS,
+        packageId: 'pkg-y-1',
+        recipientAddress: recipientY,
+        amount: '100',
+        tokenAddress: TOKEN_ADDRESS,
+        expiresAt: Math.floor(Date.now() / 1000) + 86400,
+      });
+
+      expect(await adapter.getRecipientPackageCount(recipientX)).toBe(1);
+      expect(await adapter.getRecipientPackageCount(recipientY)).toBe(1);
+
+      const pageX = await adapter.listRecipientPackages(recipientX);
+      expect(pageX.packageIds).toEqual(['pkg-x-1']);
+
+      const pageY = await adapter.listRecipientPackages(recipientY);
+      expect(pageY.packageIds).toEqual(['pkg-y-1']);
+    });
+  });
 });

@@ -40,3 +40,50 @@ def test_valid_configuration_boots_and_serves():
     # reset they would start seeing 503 "draining" responses regardless of
     # test order.
     main.app.state.is_shutting_down = False
+
+
+def test_invalid_prompt_registry_active_version_prevents_startup(monkeypatch):
+    reg = main.humanitarian_verification_service.prompt_registry
+    monkeypatch.setitem(reg._active_versions, "humanitarian_primary", "v999_invalid")
+
+    with pytest.raises(ValueError, match="humanitarian_primary.*v999_invalid"):
+        with TestClient(main.app):
+            pass
+
+    main.app.state.is_shutting_down = False
+
+
+def test_prompt_registry_misconfiguration_reports_degraded_health(monkeypatch):
+    reg = main.humanitarian_verification_service.prompt_registry
+    monkeypatch.setitem(reg._active_versions, "humanitarian_primary", "v_typo")
+
+    client = TestClient(main.app)
+    response = client.get("/health")
+    assert response.status_code == 503
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert "humanitarian_primary" in data["error"]
+    assert any("humanitarian_primary" in detail for detail in data["details"])
+
+
+def test_prompt_registry_misconfiguration_reports_degraded_dependencies(monkeypatch):
+    reg = main.humanitarian_verification_service.prompt_registry
+    monkeypatch.setitem(reg._active_versions, "humanitarian_fallback", "v_broken")
+
+    client = TestClient(main.app)
+    response = client.get("/health/dependencies")
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert data["checks"]["prompt_registry"]["ok"] is False
+    assert "humanitarian_fallback" in data["checks"]["prompt_registry"]["error"]
+
+
+def test_prompt_registry_valid_health_check():
+    client = TestClient(main.app)
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
+
+    dep_response = client.get("/health/dependencies")
+    assert dep_response.json()["checks"]["prompt_registry"]["ok"] is True
+

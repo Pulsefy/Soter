@@ -191,3 +191,66 @@ class PromptRegistry:
         if version is not None:
             return version in self._prompts[name]
         return True
+
+    def validate_active_versions(
+        self, expected_names: Optional[List[str]] = None
+    ) -> List[str]:
+        """Validate that every expected prompt name has a valid active version configured.
+
+        Args:
+            expected_names: Optional list of prompt names to check. Defaults to
+                            KNOWN_PROMPT_NAMES or all registered prompt names.
+
+        Returns:
+            List of error strings naming any prompt with a missing or invalid active version.
+            Empty list if all prompts are valid.
+        """
+        targets = (
+            expected_names
+            if expected_names is not None
+            else (list(self._prompts.keys()) or KNOWN_PROMPT_NAMES)
+        )
+        errors = []
+
+        for name in targets:
+            if name not in self._prompts:
+                errors.append(f"Prompt '{name}' is not registered in the prompt registry")
+                continue
+
+            active_v = self._active_versions.get(name)
+            if not active_v:
+                errors.append(f"Prompt '{name}' has no active version configured")
+                continue
+
+            if active_v not in self._prompts[name]:
+                available = sorted(list(self._prompts[name].keys()))
+                errors.append(
+                    f"Prompt '{name}' active version '{active_v}' is not registered (available: {available})"
+                )
+
+        return errors
+
+    def verify_active_versions(
+        self, expected_names: Optional[List[str]] = None
+    ) -> None:
+        """Verify that every expected prompt name has a valid active version configured.
+
+        Args:
+            expected_names: Optional list of prompt names to check.
+
+        Raises:
+            ValueError: If any expected prompt is missing or has an invalid active version,
+                        naming the affected prompt.
+        """
+        errors = self.validate_active_versions(expected_names)
+        if errors:
+            raise ValueError(
+                f"Prompt registry verification failed: {'; '.join(errors)}"
+            )
+
+
+# Default prompt names expected by the service
+KNOWN_PROMPT_NAMES: List[str] = [
+    "humanitarian_primary",
+    "humanitarian_fallback",
+]

@@ -687,4 +687,115 @@ describe('AidEscrow Integration Tests', () => {
       ).rejects.toThrow();
     });
   });
+
+  describe('Recipient package listing endpoints', () => {
+    const RECIPIENT =
+      'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ';
+    const TOKEN = 'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN';
+
+    it('returns empty result when recipient has no packages', async () => {
+      const result = await controller.listRecipientPackages(
+        RECIPIENT,
+        '0',
+        '10',
+      );
+
+      expect(result.recipient).toBe(RECIPIENT);
+      expect(result.packageIds).toEqual([]);
+      expect(result.totalCount).toBe(0);
+      expect(result.hasMore).toBe(false);
+      expect(result.cursor).toBe(0);
+      expect(result.limit).toBe(10);
+    });
+
+    it('returns count 0 when recipient has no packages', async () => {
+      const result = await controller.getRecipientPackageCount(RECIPIENT);
+      expect(result.recipient).toBe(RECIPIENT);
+      expect(result.count).toBe(0);
+    });
+
+    it('single-page recipient: returns all packages and correct totalCount', async () => {
+      const recipient = 'G_INTEG_SINGLE_RECIPIENT';
+      for (let i = 0; i < 3; i++) {
+        await mockAdapter.createAidPackage({
+          operatorAddress: 'G_OP',
+          packageId: `integ-pkg-${i}`,
+          recipientAddress: recipient,
+          amount: '1000',
+          tokenAddress: TOKEN,
+          expiresAt: Math.floor(Date.now() / 1000) + 86400,
+        });
+      }
+
+      const countResult = await controller.getRecipientPackageCount(recipient);
+      expect(countResult.count).toBe(3);
+
+      const listResult = await controller.listRecipientPackages(
+        recipient,
+        '0',
+        '10',
+      );
+      expect(listResult.packageIds).toEqual([
+        'integ-pkg-0',
+        'integ-pkg-1',
+        'integ-pkg-2',
+      ]);
+      expect(listResult.totalCount).toBe(3);
+      expect(listResult.hasMore).toBe(false);
+    });
+
+    it('multi-page recipient: paginates correctly across pages', async () => {
+      const recipient = 'G_INTEG_MULTI_RECIPIENT';
+      for (let i = 0; i < 5; i++) {
+        await mockAdapter.createAidPackage({
+          operatorAddress: 'G_OP',
+          packageId: `multi-integ-pkg-${i}`,
+          recipientAddress: recipient,
+          amount: '500',
+          tokenAddress: TOKEN,
+          expiresAt: Math.floor(Date.now() / 1000) + 86400,
+        });
+      }
+
+      // Page 1: 0..2
+      const page1 = await controller.listRecipientPackages(recipient, '0', '2');
+      expect(page1.packageIds).toEqual([
+        'multi-integ-pkg-0',
+        'multi-integ-pkg-1',
+      ]);
+      expect(page1.hasMore).toBe(true);
+      expect(page1.totalCount).toBe(5);
+
+      // Page 2: 2..4
+      const page2 = await controller.listRecipientPackages(recipient, '2', '2');
+      expect(page2.packageIds).toEqual([
+        'multi-integ-pkg-2',
+        'multi-integ-pkg-3',
+      ]);
+      expect(page2.hasMore).toBe(true);
+
+      // Page 3: 4..6
+      const page3 = await controller.listRecipientPackages(recipient, '4', '2');
+      expect(page3.packageIds).toEqual(['multi-integ-pkg-4']);
+      expect(page3.hasMore).toBe(false);
+    });
+
+    it('handles default cursor and limit parameters when not provided', async () => {
+      const recipient = 'G_DEFAULT_PARAMS_RECIPIENT';
+      await mockAdapter.createAidPackage({
+        operatorAddress: 'G_OP',
+        packageId: 'default-param-pkg',
+        recipientAddress: recipient,
+        amount: '100',
+        tokenAddress: TOKEN,
+        expiresAt: Math.floor(Date.now() / 1000) + 86400,
+      });
+
+      const result = await controller.listRecipientPackages(recipient);
+      expect(result.cursor).toBe(0);
+      expect(result.limit).toBe(50);
+      expect(result.packageIds).toEqual(['default-param-pkg']);
+      expect(result.totalCount).toBe(1);
+    });
+  });
 });

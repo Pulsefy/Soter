@@ -70,20 +70,26 @@ class HumanitarianVerificationService:
         self.cost_ceiling = cost_ceiling or ProviderCostCeiling()
 
     def _apply_settings_prompt_versions(self) -> None:
-        """Apply active prompt versions configured in settings if registered."""
+        """Apply active prompt versions configured in settings."""
         if hasattr(settings, "humanitarian_primary_prompt_version"):
             primary_v = settings.humanitarian_primary_prompt_version
-            if self.prompt_registry.has("humanitarian_primary", primary_v):
-                self.prompt_registry.set_active_version(
-                    "humanitarian_primary", primary_v
-                )
+            if primary_v:
+                if self.prompt_registry.has("humanitarian_primary", primary_v):
+                    self.prompt_registry.set_active_version(
+                        "humanitarian_primary", primary_v
+                    )
+                else:
+                    self.prompt_registry._active_versions["humanitarian_primary"] = primary_v
 
         if hasattr(settings, "humanitarian_fallback_prompt_version"):
             fallback_v = settings.humanitarian_fallback_prompt_version
-            if self.prompt_registry.has("humanitarian_fallback", fallback_v):
-                self.prompt_registry.set_active_version(
-                    "humanitarian_fallback", fallback_v
-                )
+            if fallback_v:
+                if self.prompt_registry.has("humanitarian_fallback", fallback_v):
+                    self.prompt_registry.set_active_version(
+                        "humanitarian_fallback", fallback_v
+                    )
+                else:
+                    self.prompt_registry._active_versions["humanitarian_fallback"] = fallback_v
 
     def _get_breaker(self, provider_name: str) -> CircuitBreaker:
         if provider_name not in self.breakers:

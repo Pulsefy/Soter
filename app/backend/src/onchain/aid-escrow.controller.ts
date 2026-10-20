@@ -902,4 +902,141 @@ export class AidEscrowController {
       this.errorMapper.throwMappedError(error);
     }
   }
+
+  /**
+   * List packages assigned to a recipient
+   * GET /onchain/aid-escrow/recipients/:recipient/packages
+   */
+  @Get('recipients/:recipient/packages')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'List packages assigned to a recipient',
+    description:
+      'Returns a paginated list of on-chain package IDs and total count assigned to a recipient.',
+  })
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    type: Number,
+    description: 'Starting position for pagination (0-indexed, default 0)',
+    example: 0,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Maximum number of items to return (capped at 50, default 50)',
+    example: 10,
+  })
+  @ApiOkResponse({
+    description: 'Recipient packages retrieved successfully.',
+    schema: {
+      example: {
+        recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        packageIds: ['1', '2', '3'],
+        cursor: 0,
+        limit: 10,
+        hasMore: false,
+        totalCount: 3,
+        timestamp: '2026-03-30T12:30:00.000Z',
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid query parameters.' })
+  @ApiInternalServerErrorResponse({
+    description: 'Failed to retrieve recipient packages.',
+  })
+  async listRecipientPackages(
+    @Param('recipient') recipient: string,
+    @Query('cursor') rawCursor?: string,
+    @Query('limit') rawLimit?: string,
+  ): Promise<any> {
+    try {
+      if (!recipient) {
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          'Recipient address is required',
+        );
+      }
+
+      const cursor = rawCursor !== undefined ? parseInt(rawCursor, 10) : 0;
+      const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : 50;
+
+      const safeCursor = isNaN(cursor) || cursor < 0 ? 0 : cursor;
+      const safeLimit = isNaN(limit) || limit < 1 ? 50 : Math.min(limit, 50);
+
+      const [listResult, totalCount] = await Promise.all([
+        this.aidEscrowService.listRecipientPackages(
+          recipient,
+          safeCursor,
+          safeLimit,
+        ),
+        this.aidEscrowService.getRecipientPackageCount(recipient),
+      ]);
+
+      return {
+        recipient,
+        packageIds: listResult.packageIds,
+        cursor: safeCursor,
+        limit: safeLimit,
+        hasMore: listResult.hasMore,
+        totalCount,
+        timestamp: listResult.timestamp ?? new Date(),
+      };
+    } catch (error: unknown) {
+      this.logger.error('Failed to list recipient packages:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Get count of packages assigned to a recipient
+   * GET /onchain/aid-escrow/recipients/:recipient/packages/count
+   */
+  @Get('recipients/:recipient/packages/count')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get total package count for a recipient',
+    description:
+      'Returns the total number of packages assigned to a recipient from on-chain truth.',
+  })
+  @ApiOkResponse({
+    description: 'Recipient package count retrieved successfully.',
+    schema: {
+      example: {
+        recipient: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+        count: 5,
+        timestamp: '2026-03-30T12:30:00.000Z',
+      },
+    },
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Failed to retrieve recipient package count.',
+  })
+  async getRecipientPackageCount(
+    @Param('recipient') recipient: string,
+  ): Promise<any> {
+    try {
+      if (!recipient) {
+        throw new AppException(
+          ERROR_CODES.BAD_REQUEST,
+          400,
+          'Recipient address is required',
+        );
+      }
+
+      const count =
+        await this.aidEscrowService.getRecipientPackageCount(recipient);
+
+      return {
+        recipient,
+        count,
+        timestamp: new Date(),
+      };
+    } catch (error: unknown) {
+      this.logger.error('Failed to get recipient package count:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
 }
