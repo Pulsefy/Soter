@@ -22,6 +22,8 @@ from services.pii_scrubber import PIIScrubberService
 from services.humanitarian_verification import HumanitarianVerificationService
 from services.ocr_job import run_ocr_from_base64
 from services.dead_letter import dead_letter_queue
+from services.claim_budget import ClaimBudget
+from exceptions import ClaimBudgetExceededError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -158,7 +160,13 @@ def handle_task_retries_exhausted(
     replay it later without waiting on another transient-failure window.
     """
     update_task_status(task_id, "failed", error=error_msg)
-    send_webhook_notification(task_id, "failed", error=error_msg)
+    send_webhook_notification(
+        task_id,
+        "failed",
+        error=error_msg,
+        webhook_url=payload.get("webhook_url"),
+        task_type=payload.get("type"),
+    )
     dead_letter_queue.add(
         kind="async_job",
         task_id=task_id,
@@ -202,11 +210,16 @@ def update_task_status(
 
 
 def send_webhook_notification(
-    task_id: str, status: str, result: Any = None, error: str = None
+    task_id: str,
+    status: str,
+    result: Any = None,
+    error: str = None,
+    webhook_url: Optional[str] = None,
+    task_type: Optional[str] = None,
 ) -> None:
     """
-    Send a signed webhook notification to the NestJS backend when a task
-    transitions to a terminal state.
+    Send a signed webhook notification to the configured backend or a
+    task-specific callback URL.
 
     The payload is serialised using :class:`~schemas.callback.AiCallbackPayload`
     (the canonical contract) and signed with HMAC-SHA256 if ``AI_WEBHOOK_SECRET``
@@ -216,11 +229,15 @@ def send_webhook_notification(
 
     Args:
         task_id: Unique identifier of the completed/failed task.
-        status:  Terminal status string ("completed" or "failed").
+        status:  Callback lifecycle status ("processing", "completed", or "failed").
         result:  Task output dict (required when status="completed").
         error:   Error message string (required when status="failed").
+        webhook_url: Optional task-specific URL; otherwise use the configured
+            backend webhook URL.
+        task_type: Optional task type included in the callback contract.
     """
-    if not settings.backend_webhook_url:
+    destination = webhook_url or settings.backend_webhook_url
+    if not destination:
         logger.warning("Backend webhook URL not configured, skipping notification")
         return
 
@@ -230,6 +247,7 @@ def send_webhook_notification(
             status=CallbackStatus(status),
             result=result,
             error=error,
+            task_type=task_type,
         )
     except Exception as exc:
         logger.error(f"Failed to build callback payload for task {task_id}: {exc}")
@@ -252,15 +270,22 @@ def send_webhook_notification(
 
         def send_notification() -> None:
             try:
-                deliver_webhook(body_bytes, headers)
+                deliver_webhook(body_bytes, headers, webhook_url=str(destination))
                 logger.info(f"Webhook notification sent for task {task_id}")
             except Exception as exc:
                 logger.error(f"Failed to send webhook notification: {exc}")
                 dead_letter_queue.add(
                     kind="callback",
                     task_id=task_id,
-                    payload={"status": status, "result": result, "error": error},
+                    payload={
+                        "status": status,
+                        "result": result,
+                        "error": error,
+                        "task_type": task_type,
+                        "webhook_url": str(destination),
+                    },
                     error=str(exc),
+                    event_id=status if status == "processing" else None,
                 )
                 metrics.DEAD_LETTER_ITEMS_TOTAL.labels(kind="callback").inc()
 
@@ -270,17 +295,26 @@ def send_webhook_notification(
         logger.error(f"Error setting up webhook notification thread: {exc}")
 
 
-def deliver_webhook(body_bytes: bytes, headers: Dict[str, str]) -> None:
+def deliver_webhook(
+    body_bytes: bytes,
+    headers: Dict[str, str],
+    webhook_url: Optional[str] = None,
+) -> None:
     """
-    Synchronously POST a webhook body to the configured backend URL.
+    Synchronously POST a webhook body to the supplied URL or configured
+    backend URL.
 
     Raises on any non-2xx response or connection failure. Shared by the
     fire-and-forget notification path and dead-letter replay so both
     paths agree on what counts as a delivery failure.
     """
+    destination = webhook_url or settings.backend_webhook_url
+    if not destination:
+        raise RuntimeError("Webhook URL is not configured")
+
     with httpx.Client(timeout=10.0) as client:
         response = client.post(
-            str(settings.backend_webhook_url),
+            str(destination),
             content=body_bytes,
             headers=headers,
         )
@@ -302,7 +336,8 @@ def replay_callback_delivery(task_id: str, payload: Dict[str, Any]) -> None:
     Raises:
         RuntimeError: If the webhook URL is not configured or delivery fails.
     """
-    if not settings.backend_webhook_url:
+    webhook_url = payload.get("webhook_url")
+    if not webhook_url and not settings.backend_webhook_url:
         raise RuntimeError("Backend webhook URL not configured, cannot replay callback")
 
     callback_payload = AiCallbackPayload.build(
@@ -310,6 +345,7 @@ def replay_callback_delivery(task_id: str, payload: Dict[str, Any]) -> None:
         status=CallbackStatus(payload.get("status")),
         result=payload.get("result"),
         error=payload.get("error"),
+        task_type=payload.get("task_type"),
     )
 
     body_bytes = callback_payload.to_json_bytes()
@@ -317,7 +353,7 @@ def replay_callback_delivery(task_id: str, payload: Dict[str, Any]) -> None:
     if settings.ai_webhook_secret:
         headers["X-Signature-256"] = callback_payload.sign(settings.ai_webhook_secret)
 
-    deliver_webhook(body_bytes, headers)
+    deliver_webhook(body_bytes, headers, webhook_url=webhook_url)
 
 
 def replay_async_job(task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -356,6 +392,14 @@ def process_heavy_inference_impl(
 
         # Extract task type from payload
         task_type = payload.get("type", "inference")
+        webhook_url = payload.get("webhook_url")
+        if webhook_url:
+            send_webhook_notification(
+                task_id,
+                "processing",
+                webhook_url=webhook_url,
+                task_type=task_type,
+            )
 
         start_inference = time.time()
 
@@ -375,6 +419,8 @@ def process_heavy_inference_impl(
             result = _process_humanitarian_verification(payload)
         elif task_type == "batch_processing":
             result = _process_batch(payload)
+        elif task_type == "claim_pipeline":
+            result = _process_claim_pipeline(task_id, payload)
         else:
             result = _process_default_inference(payload)
 
@@ -382,7 +428,13 @@ def process_heavy_inference_impl(
         update_task_status(task_id, "completed", result)
 
         # Send webhook notification to backend
-        send_webhook_notification(task_id, "completed", result)
+        send_webhook_notification(
+            task_id,
+            "completed",
+            result,
+            webhook_url=webhook_url,
+            task_type=task_type,
+        )
 
         inference_latency = time.time() - start_inference
         # task_type originates from the client-supplied payload["type"]; bound
@@ -555,6 +607,147 @@ def _process_humanitarian_verification(payload: Dict[str, Any]) -> Dict[str, Any
         "status": "success",
         "result": verification,
     }
+
+
+def _process_claim_pipeline(task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a full claim pipeline: OCR → humanitarian verification → fraud scoring.
+
+    This is the primary multi-step entry point for issue #1416.  Every step is
+    gated by a shared :class:`~services.claim_budget.ClaimBudget` so that the
+    *cumulative* wall-clock cost of the pipeline is bounded, not just each
+    individual step.
+
+    When the budget is exhausted mid-pipeline the completed steps are returned
+    immediately together with:
+    - ``needs_manual_review=True`` so the caller can queue the claim for human
+      follow-up.
+    - ``incomplete_steps`` listing what was skipped.
+    - ``elapsed_seconds`` / ``budget_seconds`` for operator observability.
+
+    The metric ``CLAIM_BUDGET_EXCEEDED_TOTAL`` is incremented so alerting rules
+    can fire when many claims hit the ceiling.
+
+    Args:
+        task_id: The task identifier (used only for logging).
+        payload: Must contain a ``"data"`` dict with at minimum an
+            ``"aid_claim"`` string.  Optional keys: ``"image_base64"``
+            (triggers the OCR step), ``"supporting_evidence"``,
+            ``"context_factors"``, ``"provider_preference"``,
+            ``"fraud_claims"`` (list of
+            :class:`~schemas.fraud.ClaimMetadata`-compatible dicts).
+
+    Returns:
+        A dict with ``"type": "claim_pipeline"`` and either a full
+        ``"steps"`` map (all three steps completed) or a ``"partial_steps"``
+        map plus ``"needs_manual_review": True``.
+    """
+    data = payload.get("data", {})
+    aid_claim = data.get("aid_claim")
+    if not aid_claim:
+        raise ValueError("'aid_claim' is required for claim_pipeline tasks")
+
+    budget = ClaimBudget(
+        budget_seconds=settings.claim_processing_budget_seconds,
+        task_type="claim_pipeline",
+    )
+
+    try:
+        with budget:
+            steps: Dict[str, Any] = {}
+
+            # ---- Step 1: OCR (optional – only if an image was supplied) ----
+            image_base64 = data.get("image_base64")
+            if image_base64:
+                budget.check(
+                    "ocr",
+                    pending=["humanitarian_verification", "fraud_scoring"],
+                )
+                ocr_result = _process_ocr({"image_base64": image_base64, "data": data})
+                budget.record("ocr", ocr_result)
+                steps["ocr"] = ocr_result
+
+            # ---- Step 2: Humanitarian verification -------------------------
+            budget.check("humanitarian_verification", pending=["fraud_scoring"])
+            verification_result = humanitarian_verification_service.verify_claim(
+                aid_claim=aid_claim,
+                supporting_evidence=data.get("supporting_evidence", []),
+                context_factors=data.get("context_factors", {}),
+                provider_preference=data.get("provider_preference", "auto"),
+                prompt_version=data.get("prompt_version"),
+            )
+            budget.record("humanitarian_verification", verification_result)
+            steps["humanitarian_verification"] = verification_result
+
+            # ---- Step 3: Fraud scoring -------------------------------------
+            budget.check("fraud_scoring")
+            from services.fraud_detection import detect_fraud
+            from schemas.fraud import ClaimMetadata
+
+            fraud_claims_raw = data.get("fraud_claims")
+            if fraud_claims_raw:
+                fraud_claims = [ClaimMetadata(**c) for c in fraud_claims_raw]
+            else:
+                # Synthesise a single minimal claim so fraud scoring always
+                # runs; the caller can supply a richer batch when available.
+                fraud_claims = [
+                    ClaimMetadata(
+                        claim_id=task_id,
+                        ip_address=None,
+                        evidence_hash=None,
+                        location=data.get("location"),
+                        amount=float(data.get("amount", 0.0)),
+                    )
+                ]
+            fraud_results = detect_fraud(fraud_claims)
+            fraud_result = [r.model_dump() for r in fraud_results]
+            budget.record("fraud_scoring", fraud_result)
+            steps["fraud_scoring"] = fraud_result
+
+        # All steps completed within the budget.
+        return {
+            "type": "claim_pipeline",
+            "status": "success",
+            "steps": steps,
+            "needs_manual_review": False,
+            "elapsed_seconds": budget.elapsed,
+            "budget_seconds": settings.claim_processing_budget_seconds,
+        }
+
+    except ClaimBudgetExceededError as exc:
+        # Budget exhausted – return whatever completed so far and flag for
+        # manual follow-up.  The task is still marked "completed" (not
+        # "failed") because we have a usable partial result.
+        logger.warning(
+            "claim_pipeline_budget_exceeded task_id=%s elapsed=%.2fs "
+            "budget=%.2fs completed=%d pending=%s",
+            task_id,
+            exc.elapsed,
+            exc.budget,
+            len(exc.completed_steps),
+            exc.pending_steps,
+        )
+        metrics.CLAIM_BUDGET_EXCEEDED_TOTAL.labels(
+            task_type=metrics.bounded_task_type("claim_pipeline")
+        ).inc()
+
+        # Convert completed_steps list (from ClaimBudget.results) to a dict
+        # keyed by step name for easier consumption downstream.
+        partial: Dict[str, Any] = {
+            entry["step"]: entry["result"] for entry in exc.completed_steps
+        }
+        return {
+            "type": "claim_pipeline",
+            "status": "partial",
+            "partial_steps": partial,
+            "incomplete_steps": exc.pending_steps,
+            "needs_manual_review": True,
+            "manual_review_reason": (
+                "Claim processing budget exceeded; incomplete steps require "
+                "manual follow-up."
+            ),
+            "elapsed_seconds": exc.elapsed,
+            "budget_seconds": exc.budget,
+        }
 
 
 def get_task_status(task_id: str) -> Dict[str, Any]:

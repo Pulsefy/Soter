@@ -161,6 +161,12 @@ JOB_IDLE_TIMEOUT_TOTAL = Counter(
     "Total jobs marked timed out after waiting for a worker past the idle window",
     ["task_type"],
 )
+CLAIM_BUDGET_EXCEEDED_TOTAL = Counter(
+    "claim_budget_exceeded_total",
+    "Total claims that exceeded the per-claim processing time budget (issue #1416); "
+    "carries partial results and is flagged for manual review rather than silently dropped",
+    ["task_type"],
+)
 
 # Cache invalidation metrics
 CACHE_INVALIDATION_TOTAL = Counter(
@@ -305,6 +311,7 @@ _KNOWN_TASK_TYPES = frozenset(
         "humanitarian_verification",
         "batch_processing",
         "proof_of_life",
+        "claim_pipeline",
     }
 )
 
