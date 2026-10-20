@@ -4,6 +4,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { ScheduleModule } from '@nestjs/schedule';
 import { OnchainAdapter, ONCHAIN_ADAPTER_TOKEN } from './onchain.adapter';
 export { ONCHAIN_ADAPTER_TOKEN };
+import { OnchainCircuitBreakerService } from './onchain-circuit-breaker.service';
 import { MockOnchainAdapter } from './onchain.adapter.mock';
 import { SorobanAdapter } from './soroban.adapter';
 import { OnchainProcessor } from './onchain.processor';
@@ -39,6 +40,7 @@ const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
  */
 export const createOnchainAdapter = (
   configService: ConfigService,
+  circuitBreaker?: OnchainCircuitBreakerService,
 ): OnchainAdapter => {
   const adapterType =
     configService.get<string>('ONCHAIN_ADAPTER')?.toLowerCase() || 'mock';
@@ -46,8 +48,10 @@ export const createOnchainAdapter = (
   switch (adapterType) {
     case 'mock':
       return new MockOnchainAdapter();
-    case 'soroban':
-      return new SorobanAdapter(configService);
+    case 'soroban': {
+      const adapter = new SorobanAdapter(configService);
+      return circuitBreaker ? circuitBreaker.protect(adapter) : adapter;
+    }
     default:
       throw new Error(
         `Unknown ONCHAIN_ADAPTER: ${adapterType}. Supported values: mock, soroban`,
@@ -58,7 +62,7 @@ export const createOnchainAdapter = (
 const onchainAdapterProvider: Provider = {
   provide: ONCHAIN_ADAPTER_TOKEN,
   useFactory: createOnchainAdapter,
-  inject: [ConfigService],
+  inject: [ConfigService, OnchainCircuitBreakerService],
 };
 
 @Module({
@@ -112,6 +116,7 @@ const onchainAdapterProvider: Provider = {
     MockOnchainAdapter,
     SorobanAdapter,
     onchainAdapterProvider,
+    OnchainCircuitBreakerService,
     OnchainProcessor,
     OnchainService,
     StellarLedgerSource,
@@ -130,6 +135,7 @@ const onchainAdapterProvider: Provider = {
   ],
   exports: [
     ONCHAIN_ADAPTER_TOKEN,
+    OnchainCircuitBreakerService,
     OnchainService,
     StellarLedgerSource,
     LedgerBackfillService,

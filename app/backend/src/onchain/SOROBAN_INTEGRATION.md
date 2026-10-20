@@ -220,7 +220,18 @@ ONCHAIN_ADAPTER=soroban          # or "mock" for development
 STELLAR_RPC_URL=https://soroban-testnet.stellar.org
 STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
 SOROBAN_CONTRACT_ID=CBAA...      # Set after contract deployment
+ONCHAIN_CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
+ONCHAIN_CIRCUIT_BREAKER_WINDOW_MS=30000
+ONCHAIN_CIRCUIT_BREAKER_RESET_TIMEOUT_MS=30000
 ```
+
+The Soroban adapter opens its circuit after the configured number of failures
+within the failure window. Calls then fail fast with `onchain RPC unavailable`.
+After the reset timeout, one request is allowed as a recovery probe; a
+successful probe closes the circuit. Readiness reports the current circuit
+snapshot in `checks.onchainAdapter.details.circuitBreaker`, and the
+`onchain_rpc_circuit_state` gauge uses `0` for closed, `0.5` for half-open, and
+`1` for open.
 
 ### Adapter Selection
 
