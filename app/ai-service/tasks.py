@@ -22,6 +22,8 @@ from services.pii_scrubber import PIIScrubberService
 from services.humanitarian_verification import HumanitarianVerificationService
 from services.ocr_job import run_ocr_from_base64
 from services.dead_letter import dead_letter_queue
+from services.claim_budget import ClaimBudget
+from exceptions import ClaimBudgetExceededError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -417,6 +419,8 @@ def process_heavy_inference_impl(
             result = _process_humanitarian_verification(payload)
         elif task_type == "batch_processing":
             result = _process_batch(payload)
+        elif task_type == "claim_pipeline":
+            result = _process_claim_pipeline(task_id, payload)
         else:
             result = _process_default_inference(payload)
 
@@ -603,6 +607,147 @@ def _process_humanitarian_verification(payload: Dict[str, Any]) -> Dict[str, Any
         "status": "success",
         "result": verification,
     }
+
+
+def _process_claim_pipeline(task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a full claim pipeline: OCR → humanitarian verification → fraud scoring.
+
+    This is the primary multi-step entry point for issue #1416.  Every step is
+    gated by a shared :class:`~services.claim_budget.ClaimBudget` so that the
+    *cumulative* wall-clock cost of the pipeline is bounded, not just each
+    individual step.
+
+    When the budget is exhausted mid-pipeline the completed steps are returned
+    immediately together with:
+    - ``needs_manual_review=True`` so the caller can queue the claim for human
+      follow-up.
+    - ``incomplete_steps`` listing what was skipped.
+    - ``elapsed_seconds`` / ``budget_seconds`` for operator observability.
+
+    The metric ``CLAIM_BUDGET_EXCEEDED_TOTAL`` is incremented so alerting rules
+    can fire when many claims hit the ceiling.
+
+    Args:
+        task_id: The task identifier (used only for logging).
+        payload: Must contain a ``"data"`` dict with at minimum an
+            ``"aid_claim"`` string.  Optional keys: ``"image_base64"``
+            (triggers the OCR step), ``"supporting_evidence"``,
+            ``"context_factors"``, ``"provider_preference"``,
+            ``"fraud_claims"`` (list of
+            :class:`~schemas.fraud.ClaimMetadata`-compatible dicts).
+
+    Returns:
+        A dict with ``"type": "claim_pipeline"`` and either a full
+        ``"steps"`` map (all three steps completed) or a ``"partial_steps"``
+        map plus ``"needs_manual_review": True``.
+    """
+    data = payload.get("data", {})
+    aid_claim = data.get("aid_claim")
+    if not aid_claim:
+        raise ValueError("'aid_claim' is required for claim_pipeline tasks")
+
+    budget = ClaimBudget(
+        budget_seconds=settings.claim_processing_budget_seconds,
+        task_type="claim_pipeline",
+    )
+
+    try:
+        with budget:
+            steps: Dict[str, Any] = {}
+
+            # ---- Step 1: OCR (optional – only if an image was supplied) ----
+            image_base64 = data.get("image_base64")
+            if image_base64:
+                budget.check(
+                    "ocr",
+                    pending=["humanitarian_verification", "fraud_scoring"],
+                )
+                ocr_result = _process_ocr({"image_base64": image_base64, "data": data})
+                budget.record("ocr", ocr_result)
+                steps["ocr"] = ocr_result
+
+            # ---- Step 2: Humanitarian verification -------------------------
+            budget.check("humanitarian_verification", pending=["fraud_scoring"])
+            verification_result = humanitarian_verification_service.verify_claim(
+                aid_claim=aid_claim,
+                supporting_evidence=data.get("supporting_evidence", []),
+                context_factors=data.get("context_factors", {}),
+                provider_preference=data.get("provider_preference", "auto"),
+                prompt_version=data.get("prompt_version"),
+            )
+            budget.record("humanitarian_verification", verification_result)
+            steps["humanitarian_verification"] = verification_result
+
+            # ---- Step 3: Fraud scoring -------------------------------------
+            budget.check("fraud_scoring")
+            from services.fraud_detection import detect_fraud
+            from schemas.fraud import ClaimMetadata
+
+            fraud_claims_raw = data.get("fraud_claims")
+            if fraud_claims_raw:
+                fraud_claims = [ClaimMetadata(**c) for c in fraud_claims_raw]
+            else:
+                # Synthesise a single minimal claim so fraud scoring always
+                # runs; the caller can supply a richer batch when available.
+                fraud_claims = [
+                    ClaimMetadata(
+                        claim_id=task_id,
+                        ip_address=None,
+                        evidence_hash=None,
+                        location=data.get("location"),
+                        amount=float(data.get("amount", 0.0)),
+                    )
+                ]
+            fraud_results = detect_fraud(fraud_claims)
+            fraud_result = [r.model_dump() for r in fraud_results]
+            budget.record("fraud_scoring", fraud_result)
+            steps["fraud_scoring"] = fraud_result
+
+        # All steps completed within the budget.
+        return {
+            "type": "claim_pipeline",
+            "status": "success",
+            "steps": steps,
+            "needs_manual_review": False,
+            "elapsed_seconds": budget.elapsed,
+            "budget_seconds": settings.claim_processing_budget_seconds,
+        }
+
+    except ClaimBudgetExceededError as exc:
+        # Budget exhausted – return whatever completed so far and flag for
+        # manual follow-up.  The task is still marked "completed" (not
+        # "failed") because we have a usable partial result.
+        logger.warning(
+            "claim_pipeline_budget_exceeded task_id=%s elapsed=%.2fs "
+            "budget=%.2fs completed=%d pending=%s",
+            task_id,
+            exc.elapsed,
+            exc.budget,
+            len(exc.completed_steps),
+            exc.pending_steps,
+        )
+        metrics.CLAIM_BUDGET_EXCEEDED_TOTAL.labels(
+            task_type=metrics.bounded_task_type("claim_pipeline")
+        ).inc()
+
+        # Convert completed_steps list (from ClaimBudget.results) to a dict
+        # keyed by step name for easier consumption downstream.
+        partial: Dict[str, Any] = {
+            entry["step"]: entry["result"] for entry in exc.completed_steps
+        }
+        return {
+            "type": "claim_pipeline",
+            "status": "partial",
+            "partial_steps": partial,
+            "incomplete_steps": exc.pending_steps,
+            "needs_manual_review": True,
+            "manual_review_reason": (
+                "Claim processing budget exceeded; incomplete steps require "
+                "manual follow-up."
+            ),
+            "elapsed_seconds": exc.elapsed,
+            "budget_seconds": exc.budget,
+        }
 
 
 def get_task_status(task_id: str) -> Dict[str, Any]:

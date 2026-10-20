@@ -70,3 +70,39 @@ class LoadShedError(Exception):
         self.message = message
         self.details = details or {}
         super().__init__(message)
+
+
+class ClaimBudgetExceededError(Exception):
+    """Raised when a claim's total processing time budget is exceeded.
+
+    Carries whatever partial results were collected before the deadline so
+    the caller can return them alongside a flag for manual follow-up rather
+    than silently discarding incomplete work.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        elapsed: float,
+        budget: float,
+        completed_steps: Optional[Any] = None,
+        pending_steps: Optional[Any] = None,
+    ):
+        super().__init__(message)
+        self.message = message
+        self.elapsed = elapsed
+        self.budget = budget
+        #: Results collected before the budget was exceeded.  May be empty
+        #: (a ``list``) when the very first step exhausted the budget, or a
+        #: ``dict`` when a single step returned a result before the deadline.
+        self.completed_steps: Any = (
+            completed_steps if completed_steps is not None else []
+        )
+        #: Step names (strings) that were not attempted before the deadline.
+        self.pending_steps: Any = pending_steps if pending_steps is not None else []
+
+    def __str__(self) -> str:
+        return (
+            f"[CLAIM_BUDGET_EXCEEDED] {self.message} "
+            f"(elapsed={self.elapsed:.2f}s budget={self.budget:.2f}s)"
+        )
