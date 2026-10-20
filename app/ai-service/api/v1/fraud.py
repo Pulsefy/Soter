@@ -167,6 +167,11 @@ async def detect_fraud_endpoint(
         # decision can be reconstructed later.
         _write_audit_records(http_request, request, results)
 
+        # Fraud already carries per-claim standardized explanation codes
+        # (``result.code``) surfaced in each ``ClaimFraudResult``, so the
+        # envelope-level ``confidence_explanation`` is intentionally left unset
+        # here -- the score's drivers come from the rule codes rather than a
+        # model's reasoning output.
         return ResultEnvelope[List[ClaimFraudResult]](
             result=results,
             confidence=confidence,

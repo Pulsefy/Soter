@@ -2,31 +2,133 @@
   {
     "verdict": "credible",
     "confidence": 0.74,
-    "summary": "The claim is well-supported by the provided evidence and aligns with humanitarian distribution records."
+    "summary": "The claim is well-supported by the provided evidence and aligns with humanitarian distribution records.",
+    "criteria_assessment": [
+      {
+        "criterion": "Food assistance adequacy",
+        "status": "met",
+        "reason": "Stated quantities match standard ration sizes for a family of five."
+      },
+      {
+        "criterion": "Independent corroboration",
+        "status": "partially_met",
+        "reason": "Evidence includes a field report but no second independent source."
+      },
+      {
+        "criterion": "Distribution reach to vulnerable groups",
+        "status": "met",
+        "reason": "Claim targets a household already registered as displaced."
+      }
+    ]
   },
   {
     "verdict": "credible",
     "confidence": 0.68,
-    "summary": "Claim is consistent with field reports and monitoring data from the region."
+    "summary": "Claim is consistent with field reports and monitoring data from the region.",
+    "criteria_assessment": [
+      {
+        "criterion": "Consistency with regional monitoring data",
+        "status": "met",
+        "reason": "Reported flood displacement matches the monitoring snapshot for the district."
+      },
+      {
+        "criterion": "Evidence recency",
+        "status": "partially_met",
+        "reason": "Supporting evidence predates the most recent distribution cycle."
+      },
+      {
+        "criterion": "Beneficiary identification",
+        "status": "unknown",
+        "reason": "No registry identifier was supplied with the claim."
+      }
+    ]
   },
   {
     "verdict": "inconclusive",
     "confidence": 0.45,
-    "summary": "Insufficient evidence to confirm or refute the claim. Additional documentation is required."
+    "summary": "Insufficient evidence to confirm or refute the claim. Additional documentation is required.",
+    "criteria_assessment": [
+      {
+        "criterion": "Supporting documentation",
+        "status": "not_met",
+        "reason": "No damage assessment or distribution record was attached."
+      },
+      {
+        "criterion": "Independent corroboration",
+        "status": "unknown",
+        "reason": "Second source could not be verified from the supplied context."
+      },
+      {
+        "criterion": "Claim specificity",
+        "status": "partially_met",
+        "reason": "Location is given at district level only."
+      }
+    ]
   },
   {
     "verdict": "not_credible",
     "confidence": 0.72,
-    "summary": "Claim contradicts verified distribution records and witness statements."
+    "summary": "Claim contradicts verified distribution records and witness statements.",
+    "criteria_assessment": [
+      {
+        "criterion": "Consistency with distribution records",
+        "status": "not_met",
+        "reason": "Records show the household already received assistance this cycle."
+      },
+      {
+        "criterion": "Witness corroboration",
+        "status": "not_met",
+        "reason": "Local witnesses report no additional delivery to the claimed location."
+      },
+      {
+        "criterion": "Claim specificity",
+        "status": "met",
+        "reason": "Claim names a specific site and timeframe."
+      }
+    ]
   },
   {
     "verdict": "credible",
     "confidence": 0.91,
-    "summary": "Strong corroborating evidence from multiple independent sources supports this claim."
+    "summary": "Strong corroborating evidence from multiple independent sources supports this claim.",
+    "criteria_assessment": [
+      {
+        "criterion": "Multiple independent sources",
+        "status": "met",
+        "reason": "Field report, community focal point, and registry entry all agree."
+      },
+      {
+        "criterion": "Evidence recency",
+        "status": "met",
+        "reason": "All supporting evidence is from the current reporting week."
+      },
+      {
+        "criterion": "Consistency with regional monitoring data",
+        "status": "met",
+        "reason": "Claim aligns with the ongoing flood response figures."
+      }
+    ]
   },
   {
     "verdict": "inconclusive",
     "confidence": 0.30,
-    "summary": "Limited evidence available. Further investigation and site visits are recommended."
+    "summary": "Limited evidence available. Further investigation and site visits are recommended.",
+    "criteria_assessment": [
+      {
+        "criterion": "Supporting documentation",
+        "status": "not_met",
+        "reason": "Only an unverified photograph was provided."
+      },
+      {
+        "criterion": "Independent corroboration",
+        "status": "unknown",
+        "reason": "No local source could be contacted within the claim context."
+      },
+      {
+        "criterion": "Site verification",
+        "status": "not_met",
+        "reason": "No site visit or remote check has confirmed the reported conditions."
+      }
+    ]
   }
 ]

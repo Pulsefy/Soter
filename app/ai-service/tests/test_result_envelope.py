@@ -3,11 +3,12 @@ Tests for the standardized result envelope across AI endpoints (Issue #609).
 
 Every successful AI inference response must conform to:
   {
-    "result":          <endpoint-specific payload>,
-    "confidence":      float | null,
-    "reasons":         list[str] | null,
-    "anchor_metadata": object | null,
-    "trace_id":        str | null,
+    "result":                 <endpoint-specific payload>,
+    "confidence":             float | null,
+    "confidence_explanation": list[str] | null,
+    "reasons":                list[str] | null,
+    "anchor_metadata":        object | null,
+    "trace_id":               str | null,
   }
 """
 
@@ -35,6 +36,9 @@ def assert_envelope(data: Dict[str, Any]) -> None:
     """Assert that *data* is a well-formed ResultEnvelope."""
     assert "result" in data, f"Missing 'result' key: {data}"
     assert "confidence" in data, f"Missing 'confidence' key: {data}"
+    assert (
+        "confidence_explanation" in data
+    ), f"Missing 'confidence_explanation' key: {data}"
     assert "reasons" in data, f"Missing 'reasons' key: {data}"
     assert "anchor_metadata" in data, f"Missing 'anchor_metadata' key: {data}"
     assert "trace_id" in data, f"Missing 'trace_id' key: {data}"
@@ -48,6 +52,18 @@ def assert_envelope(data: Dict[str, Any]) -> None:
         assert (
             0.0 <= data["confidence"] <= 1.0
         ), f"confidence out of range: {data['confidence']}"
+
+    # confidence_explanation is either null (provider response carried no
+    # derivable factors) or a non-empty short list of strings
+    if data["confidence_explanation"] is not None:
+        assert isinstance(
+            data["confidence_explanation"], list
+        ), f"confidence_explanation must be list, got {type(data['confidence_explanation'])}"
+        assert len(data["confidence_explanation"]) > 0, "explanation must not be empty"
+        for factor in data["confidence_explanation"]:
+            assert isinstance(
+                factor, str
+            ), f"Each confidence factor must be a string, got {type(factor)}"
 
     # reasons is either null or a non-empty list of strings
     if data["reasons"] is not None:

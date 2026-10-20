@@ -2058,6 +2058,27 @@
             ],
             "title": "Confidence"
           },
+          "confidence_explanation": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Top factors contributing to the confidence score, derived from the model's own reasoning output. Null when the provider response does not support explanations.",
+            "examples": [
+              [
+                "Distribution records: not_met \u2014 no record for the claimed district",
+                "Independent corroboration: partially_met \u2014 single source only"
+              ]
+            ],
+            "title": "Confidence Explanation"
+          },
           "prompt_version": {
             "anyOf": [
               {
@@ -2146,6 +2167,27 @@
               0.92
             ],
             "title": "Confidence"
+          },
+          "confidence_explanation": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Top factors contributing to the confidence score, derived from the model's own reasoning output. Null when the provider response does not support explanations.",
+            "examples": [
+              [
+                "Distribution records: not_met \u2014 no record for the claimed district",
+                "Independent corroboration: partially_met \u2014 single source only"
+              ]
+            ],
+            "title": "Confidence Explanation"
           },
           "prompt_version": {
             "anyOf": [
@@ -2236,6 +2278,27 @@
               0.92
             ],
             "title": "Confidence"
+          },
+          "confidence_explanation": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Top factors contributing to the confidence score, derived from the model's own reasoning output. Null when the provider response does not support explanations.",
+            "examples": [
+              [
+                "Distribution records: not_met \u2014 no record for the claimed district",
+                "Independent corroboration: partially_met \u2014 single source only"
+              ]
+            ],
+            "title": "Confidence Explanation"
           },
           "prompt_version": {
             "anyOf": [
@@ -2330,6 +2393,27 @@
             ],
             "title": "Confidence"
           },
+          "confidence_explanation": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Top factors contributing to the confidence score, derived from the model's own reasoning output. Null when the provider response does not support explanations.",
+            "examples": [
+              [
+                "Distribution records: not_met \u2014 no record for the claimed district",
+                "Independent corroboration: partially_met \u2014 single source only"
+              ]
+            ],
+            "title": "Confidence Explanation"
+          },
           "prompt_version": {
             "anyOf": [
               {
@@ -2419,6 +2503,27 @@
             ],
             "title": "Confidence"
           },
+          "confidence_explanation": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Top factors contributing to the confidence score, derived from the model's own reasoning output. Null when the provider response does not support explanations.",
+            "examples": [
+              [
+                "Distribution records: not_met \u2014 no record for the claimed district",
+                "Independent corroboration: partially_met \u2014 single source only"
+              ]
+            ],
+            "title": "Confidence Explanation"
+          },
           "prompt_version": {
             "anyOf": [
               {
@@ -2507,6 +2612,27 @@
               0.92
             ],
             "title": "Confidence"
+          },
+          "confidence_explanation": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Top factors contributing to the confidence score, derived from the model's own reasoning output. Null when the provider response does not support explanations.",
+            "examples": [
+              [
+                "Distribution records: not_met \u2014 no record for the claimed district",
+                "Independent corroboration: partially_met \u2014 single source only"
+              ]
+            ],
+            "title": "Confidence Explanation"
           },
           "prompt_version": {
             "anyOf": [

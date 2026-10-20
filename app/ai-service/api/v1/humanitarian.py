@@ -22,6 +22,7 @@ from schemas.humanitarian import (
 from services.cache import cached_response
 from services.verification_cooldown import verification_cooldown
 from services.artifact_access import ArtifactAccessError
+from services.confidence_explanation import derive_confidence_explanation
 from services.decision_audit import get_store as get_decision_audit_store
 from services.humanitarian_prompt import HUMANITARIAN_PROMPT_VERSION
 from services.evidence_access_control import (
@@ -192,6 +193,11 @@ def _build_verification_envelope(
             reasons = [str(reason) for reason in raw_reason]
             break
 
+    # Derived from the model's own reasoning output; None (and therefore an
+    # omitted field) when the response carried no structured factors to
+    # derive from -- the response must not fabricate an explanation.
+    confidence_explanation = derive_confidence_explanation(verification)
+
     eligible = verification.get("eligible")
     if isinstance(raw, dict) and raw.get("manual_review") is True:
         outcome = "manual_review"
@@ -212,6 +218,7 @@ def _build_verification_envelope(
         reasons=reasons,
         metadata={
             "verification": verification,
+            "confidence_explanation": confidence_explanation,
             "model_version": model_version,
             "artifact_tag": artifact_tag,
             "user_id": user_id,
@@ -226,6 +233,7 @@ def _build_verification_envelope(
     return ResultEnvelope[Dict[str, Any]](
         result=raw,
         confidence=confidence,
+        confidence_explanation=confidence_explanation,
         reasons=reasons,
         anchor_metadata=request.anchor_metadata,
         trace_id=correlation_id or None,

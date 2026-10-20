@@ -109,6 +109,20 @@ class HumanitarianVerificationResponse(BaseModel):
             }
         ],
     )
+    confidence_explanation: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Top factors contributing to the verification confidence score, "
+            "derived from the model's own reasoning output. Omitted when the "
+            "provider response carries no structured reasoning to explain."
+        ),
+        examples=[
+            [
+                "Distribution records: not_met — no record for the claimed district",
+                "Missing information: no independent witness statement",
+            ]
+        ],
+    )
     error: Optional[str] = Field(None, examples=["Provider timed out"])
     anchor_metadata: Optional[AnchorMetadata] = None
     flagged_for_manual_review: bool = Field(

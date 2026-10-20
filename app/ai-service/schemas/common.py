@@ -42,14 +42,18 @@ class ResultEnvelope(BaseModel, Generic[T]):
 
     Fields
     ------
-    result          The endpoint-specific payload (type varies by endpoint).
-    confidence      Aggregate confidence score in [0, 1], when meaningful.
-    reasons         Human-readable list of reasons / explanations.
-    anchor_metadata Pass-through of the caller-supplied correlation metadata.
-    trace_id        Request-scoped correlation ID echoed from the
-                    X-Correlation-Id / X-Request-Id header for distributed
-                    tracing.
-    prompt_version  Version of the prompt template used for verification/inference.
+    result                 The endpoint-specific payload (type varies by endpoint).
+    confidence             Aggregate confidence score in [0, 1], when meaningful.
+    confidence_explanation  Short list of the top factors contributing to the
+                           confidence score, derived from the model's own
+                           reasoning output. Omitted (null) when the response
+                           carries no structured reasoning to derive it from.
+    reasons                Human-readable list of reasons / explanations.
+    anchor_metadata        Pass-through of the caller-supplied correlation metadata.
+    trace_id               Request-scoped correlation ID echoed from the
+                           X-Correlation-Id / X-Request-Id header for distributed
+                           tracing.
+    prompt_version         Version of the prompt template used for verification/inference.
     """
 
     result: T
@@ -59,6 +63,20 @@ class ResultEnvelope(BaseModel, Generic[T]):
         le=1.0,
         description="Aggregate confidence score in [0, 1].",
         examples=[0.92],
+    )
+    confidence_explanation: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Top factors contributing to the confidence score, derived from "
+            "the model's own reasoning output. Null when the provider "
+            "response does not support explanations."
+        ),
+        examples=[
+            [
+                "Distribution records: not_met — no record for the claimed district",
+                "Independent corroboration: partially_met — single source only",
+            ]
+        ],
     )
     reasons: Optional[List[str]] = Field(
         None,
