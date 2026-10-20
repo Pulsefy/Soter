@@ -48,29 +48,39 @@ async function runSaturationTest(): Promise<void> {
   });
 
   try {
-    await prisma.$connect();
-    const holder = await pool.connect();
-    const queries = Array.from(
-      { length: 10 },
-      () => prisma.$queryRaw`SELECT 1`,
-    );
-    try {
-      await delay(100);
-      if ((await waitingConnections.get()).values[0]?.value !== 10) {
-        throw new Error(
-          'Expected all 10 Prisma queries to be queued behind the held connection',
-        );
-      }
-      if (
-        (await size.get()).values[0]?.value !== 1 ||
-        (await connectionsInUse.get()).values[0]?.value !== 1
-      ) {
-        throw new Error('Expected the one-connection pool to be fully in use');
-      }
-    } finally {
-      holder.release();
+  await prisma.$connect();
+  const holder = await pool.connect();
+
+  // async wrapper forces Prisma to actually dispatch each query now
+  const queries = Array.from({ length: 10 }, async () => {
+    await prisma.$queryRaw`SELECT 1`;
+  });
+
+  try {
+    const deadline = Date.now() + 10_000;
+    let waiting = 0;
+    while (Date.now() < deadline) {
+      waiting = (await waitingConnections.get()).values[0]?.value ?? 0;
+      if (waiting === 10) break;
+      await delay(50);
     }
-    await Promise.all(queries);
+    if (waiting !== 10) {
+      throw new Error(
+        `Expected 10 Prisma queries queued behind the held connection, observed ${waiting}`,
+      );
+    }
+    if (
+      (await size.get()).values[0]?.value !== 1 ||
+      (await connectionsInUse.get()).values[0]?.value !== 1
+    ) {
+      throw new Error('Expected the one-connection pool to be fully in use');
+    }
+  } finally {
+    holder.release();
+  }
+
+  await Promise.all(queries);
+  // ...keep the existing histogram check and logging below
 
     const waitMetrics = (await waitDuration.get()).values;
     const durationSamples = waitMetrics.find(value =>
