@@ -30,6 +30,8 @@ import {
   DryRunAidPackageResultDto,
   ExtendAidPackageExpiryDto,
   SetDelegateDto,
+  BatchAdminActionDto,
+  BatchAdminResponseDto,
 } from './dto/aid-escrow.dto';
 import { CONTRACT_ERROR_CATALOG } from './utils/contract-error-catalog';
 import { Roles } from '../auth/roles.decorator';
@@ -899,6 +901,72 @@ export class AidEscrowController {
       return { ...result, total: result.history.length };
     } catch (error: unknown) {
       this.logger.error('Failed to get delegate history:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Batch revoke packages (admin only)
+   * POST /onchain/aid-escrow/packages/batch-revoke
+   */
+  @Post('packages/batch-revoke')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Batch revoke aid packages',
+    description:
+      'Unwinds multiple aid packages in one transaction. Returns per-package BatchAdminActionResult.',
+  })
+  @ApiOkResponse({
+    description: 'Batch revoke processed.',
+    type: BatchAdminResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'Invalid input or batch too large.' })
+  @ApiInternalServerErrorResponse({
+    description: 'Blockchain transaction failed.',
+  })
+  async batchRevoke(
+    @Body() dto: BatchAdminActionDto,
+    @Req() req: Request & { user?: { address?: string } },
+  ): Promise<any> {
+    try {
+      const adminAddress = req.user?.address || 'admin';
+      return await this.aidEscrowService.batchRevoke(dto, adminAddress);
+    } catch (error: unknown) {
+      this.logger.error('Failed to batch revoke packages:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  /**
+   * Batch refund packages (admin only)
+   * POST /onchain/aid-escrow/packages/batch-refund
+   */
+  @Post('packages/batch-refund')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Batch refund expired or cancelled aid packages',
+    description:
+      'Refunds multiple expired or cancelled aid packages in one transaction. Returns per-package BatchAdminActionResult.',
+  })
+  @ApiOkResponse({
+    description: 'Batch refund processed.',
+    type: BatchAdminResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'Invalid input or batch too large.' })
+  @ApiInternalServerErrorResponse({
+    description: 'Blockchain transaction failed.',
+  })
+  async batchRefund(
+    @Body() dto: BatchAdminActionDto,
+    @Req() req: Request & { user?: { address?: string } },
+  ): Promise<any> {
+    try {
+      const adminAddress = req.user?.address || 'admin';
+      return await this.aidEscrowService.batchRefund(dto, adminAddress);
+    } catch (error: unknown) {
+      this.logger.error('Failed to batch refund packages:', error);
       this.errorMapper.throwMappedError(error);
     }
   }

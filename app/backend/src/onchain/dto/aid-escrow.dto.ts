@@ -315,3 +315,74 @@ export class GetPackageDelegateDto {
   @IsString()
   packageId: string;
 }
+
+/**
+ * DTO for bounded batch administrative operations (revoke / refund)
+ */
+export class BatchAdminActionDto {
+  @ApiProperty({
+    description: 'Array of package IDs (bounded up to 25 items)',
+    example: ['1', '2', '3'],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  ids: string[];
+}
+
+export class BatchAdminActionResultDto {
+  @ApiProperty({
+    description: 'Package ID',
+    example: '1',
+  })
+  packageId: string;
+
+  @ApiProperty({
+    description: 'Result status for this package',
+    example: 'Success',
+    enum: [
+      'Success',
+      'NotFound',
+      'InvalidState',
+      'Expired',
+      'NotExpired',
+      'CampaignPaused',
+      'TransferFailed',
+    ],
+  })
+  status: string;
+
+  @ApiProperty({
+    description: 'Amount transferred or unlocked',
+    example: '1000000000',
+  })
+  amount: string;
+}
+
+export class BatchAdminResponseDto {
+  @ApiProperty({ type: [BatchAdminActionResultDto] })
+  results: BatchAdminActionResultDto[];
+
+  @ApiProperty({
+    description: 'On-chain transaction hash',
+    example: 'ABC123DEF456ABC123DEF456ABC123DEF456ABC123DEF456ABC123DEF456ABCD',
+  })
+  transactionHash: string;
+
+  @ApiProperty({
+    description: 'Execution timestamp',
+    example: '2026-03-30T12:30:00.000Z',
+  })
+  timestamp: Date;
+
+  @ApiProperty({
+    description: 'Status of overall batch transaction',
+    example: 'success',
+  })
+  status: 'success' | 'failed';
+
+  @ApiProperty({
+    description: 'Optional metadata',
+    required: false,
+  })
+  metadata?: Record<string, any>;
+}

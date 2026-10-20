@@ -455,6 +455,39 @@ export interface GetDelegateHistoryResult {
   timestamp: Date;
 }
 
+export type BatchAdminActionStatus =
+  | 'Success'
+  | 'NotFound'
+  | 'InvalidState'
+  | 'Expired'
+  | 'NotExpired'
+  | 'CampaignPaused'
+  | 'TransferFailed';
+
+export interface BatchAdminActionResult {
+  packageId: string;
+  status: BatchAdminActionStatus;
+  amount: string;
+}
+
+export interface BatchRevokeParams {
+  ids: string[];
+  adminAddress?: string;
+}
+
+export interface BatchRefundParams {
+  ids: string[];
+  adminAddress?: string;
+}
+
+export interface BatchAdminOperationResult {
+  results: BatchAdminActionResult[];
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  metadata?: Record<string, any>;
+}
+
 /**
  * Interface for on-chain operations with Soroban AidEscrow contract
  */
@@ -658,4 +691,20 @@ export interface OnchainAdapter {
   getDelegateHistory(
     params: GetDelegateHistoryParams,
   ): Promise<GetDelegateHistoryResult>;
+
+  /**
+   * Batch revoke multiple packages in one transaction.
+   */
+  batchRevoke(
+    ids: string[],
+    adminAddress?: string,
+  ): Promise<BatchAdminOperationResult>;
+
+  /**
+   * Batch refund multiple expired or cancelled packages in one transaction.
+   */
+  batchRefund(
+    ids: string[],
+    adminAddress?: string,
+  ): Promise<BatchAdminOperationResult>;
 }

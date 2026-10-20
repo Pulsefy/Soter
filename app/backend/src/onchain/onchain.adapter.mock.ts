@@ -56,6 +56,8 @@ import {
   GetDelegateHistoryParams,
   GetDelegateHistoryResult,
   DelegateHistoryEntry,
+  BatchAdminActionResult,
+  BatchAdminOperationResult,
 } from './onchain.adapter';
 import { createHash } from 'crypto';
 import {
@@ -1093,6 +1095,128 @@ export class MockOnchainAdapter implements OnchainAdapter {
       packageId: params.packageId,
       history,
       timestamp: new Date(),
+    };
+  }
+
+  async batchRevoke(
+    ids: string[],
+    adminAddress?: string,
+  ): Promise<BatchAdminOperationResult> {
+    await Promise.resolve();
+    if (ids.length > 25) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'BatchTooLarge',
+      );
+    }
+
+    const transactionHash = this.generateMockHash(
+      "batch-revoke-" + ids.join(",") + "-" + Date.now(),
+    );
+
+    const results: BatchAdminActionResult[] = ids.map(id => {
+      const pkg = this.mockPackages.get(id);
+      if (!pkg) {
+        return {
+          packageId: id,
+          status: 'NotFound',
+          amount: '0',
+        };
+      }
+
+      if (pkg.status !== 'Created') {
+        return {
+          packageId: id,
+          status: 'InvalidState',
+          amount: '0',
+        };
+      }
+
+      const amount = pkg.amount;
+      pkg.status = 'Cancelled';
+      return {
+        packageId: id,
+        status: 'Success',
+        amount,
+      };
+    });
+
+    return {
+      results,
+      transactionHash,
+      timestamp: new Date(),
+      status: 'success',
+      metadata: {
+        adminAddress: adminAddress ?? this.mockEscrowAddress,
+        total: ids.length,
+      },
+    };
+  }
+
+  async batchRefund(
+    ids: string[],
+    adminAddress?: string,
+  ): Promise<BatchAdminOperationResult> {
+    await Promise.resolve();
+    this.assertActionNotPaused('refund');
+    if (ids.length > 25) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'BatchTooLarge',
+      );
+    }
+
+    const transactionHash = this.generateMockHash(
+      "batch-refund-" + ids.join(",") + "-" + Date.now(),
+    );
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const results: BatchAdminActionResult[] = ids.map(id => {
+      const pkg = this.mockPackages.get(id);
+      if (!pkg) {
+        return {
+          packageId: id,
+          status: 'NotFound',
+          amount: '0',
+        };
+      }
+
+      if (pkg.status === 'Created') {
+        if (pkg.expiresAt === 0 || nowSec <= pkg.expiresAt) {
+          return {
+            packageId: id,
+            status: 'NotExpired',
+            amount: '0',
+          };
+        }
+      } else if (pkg.status !== 'Expired' && pkg.status !== 'Cancelled') {
+        return {
+          packageId: id,
+          status: 'InvalidState',
+          amount: '0',
+        };
+      }
+
+      const amount = pkg.amount;
+      pkg.status = 'Refunded';
+      return {
+        packageId: id,
+        status: 'Success',
+        amount,
+      };
+    });
+
+    return {
+      results,
+      transactionHash,
+      timestamp: new Date(),
+      status: 'success',
+      metadata: {
+        adminAddress: adminAddress ?? this.mockEscrowAddress,
+        total: ids.length,
+      },
     };
   }
 }

@@ -719,5 +719,143 @@ describe('MockOnchainAdapter', () => {
       expect(result.history[1].newDelegate).toBe(DELEGATE2);
       expect(result.history[1].previousDelegate).toBe(DELEGATE_ADDRESS);
     });
+    });
+  });
+
+  describe('batchRevoke and batchRefund', () => {
+    it('batchRevoke: fully-successful batch where all packages are Created', async () => {
+      await adapter.createAidPackage({
+        operatorAddress: ADMIN_ADDRESS,
+        packageId: 'revoke-1',
+        recipientAddress: RECIPIENT_ADDRESS,
+        amount: '1000',
+        tokenAddress: TOKEN_ADDRESS,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      });
+
+      await adapter.createAidPackage({
+        operatorAddress: ADMIN_ADDRESS,
+        packageId: 'revoke-2',
+        recipientAddress: RECIPIENT_ADDRESS,
+        amount: '2000',
+        tokenAddress: TOKEN_ADDRESS,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      });
+
+      const res = await adapter.batchRevoke(['revoke-1', 'revoke-2']);
+      expect(res.status).toBe('success');
+      expect(res.transactionHash).toHaveLength(64);
+      expect(res.results).toEqual([
+        { packageId: 'revoke-1', status: 'Success', amount: '1000' },
+        { packageId: 'revoke-2', status: 'Success', amount: '2000' },
+      ]);
+
+      const pkg1 = await adapter.getAidPackage({ packageId: 'revoke-1' });
+      expect(pkg1.package.status).toBe('Cancelled');
+      const pkg2 = await adapter.getAidPackage({ packageId: 'revoke-2' });
+      expect(pkg2.package.status).toBe('Cancelled');
+    });
+
+    it('batchRevoke: batch with at least one rejected id (unknown id, already cancelled, already claimed)', async () => {
+      await adapter.createAidPackage({
+        operatorAddress: ADMIN_ADDRESS,
+        packageId: 'revoke-valid',
+        recipientAddress: RECIPIENT_ADDRESS,
+        amount: '500',
+        tokenAddress: TOKEN_ADDRESS,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      });
+
+      await adapter.createAidPackage({
+        operatorAddress: ADMIN_ADDRESS,
+        packageId: 'revoke-claimed',
+        recipientAddress: RECIPIENT_ADDRESS,
+        amount: '600',
+        tokenAddress: TOKEN_ADDRESS,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      });
+      await adapter.claimAidPackage({
+        packageId: 'revoke-claimed',
+        recipientAddress: RECIPIENT_ADDRESS,
+      });
+
+      const res = await adapter.batchRevoke([
+        'revoke-valid',
+        'non-existent-id',
+        'revoke-claimed',
+      ]);
+
+      expect(res.status).toBe('success');
+      expect(res.results).toEqual([
+        { packageId: 'revoke-valid', status: 'Success', amount: '500' },
+        { packageId: 'non-existent-id', status: 'NotFound', amount: '0' },
+        { packageId: 'revoke-claimed', status: 'InvalidState', amount: '0' },
+      ]);
+    });
+
+    it('batchRevoke: rejects batches exceeding maximum limit', async () => {
+      const overLimitIds = Array.from({ length: 26 }, (_, i) => pkg-721);
+      await expect(adapter.batchRevoke(overLimitIds)).rejects.toThrow(
+        'BatchTooLarge',
+      );
+    });
+
+    it('batchRefund: fully-successful batch with expired and cancelled packages', async () => {
+      const pastTime = Math.floor(Date.now() / 1000) - 100;
+      await adapter.createAidPackage({
+        operatorAddress: ADMIN_ADDRESS,
+        packageId: 'refund-expired',
+        recipientAddress: RECIPIENT_ADDRESS,
+        amount: '1500',
+        tokenAddress: TOKEN_ADDRESS,
+        expiresAt: pastTime,
+      });
+
+      await adapter.createAidPackage({
+        operatorAddress: ADMIN_ADDRESS,
+        packageId: 'refund-cancelled',
+        recipientAddress: RECIPIENT_ADDRESS,
+        amount: '2500',
+        tokenAddress: TOKEN_ADDRESS,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      });
+      await adapter.batchRevoke(['refund-cancelled']);
+
+      const res = await adapter.batchRefund([
+        'refund-expired',
+        'refund-cancelled',
+      ]);
+      expect(res.status).toBe('success');
+      expect(res.results).toEqual([
+        { packageId: 'refund-expired', status: 'Success', amount: '1500' },
+        { packageId: 'refund-cancelled', status: 'Success', amount: '2500' },
+      ]);
+
+      const pkg1 = await adapter.getAidPackage({ packageId: 'refund-expired' });
+      expect(pkg1.package.status).toBe('Refunded');
+      const pkg2 = await adapter.getAidPackage({
+        packageId: 'refund-cancelled',
+      });
+      expect(pkg2.package.status).toBe('Refunded');
+    });
+
+    it('batchRefund: batch with at least one rejected id (live/not-expired, not-found, already-claimed)', async () => {
+      const futureTime = Math.floor(Date.now() / 1000) + 3600;
+      await adapter.createAidPackage({
+        operatorAddress: ADMIN_ADDRESS,
+        packageId: 'refund-live',
+        recipientAddress: RECIPIENT_ADDRESS,
+        amount: '1000',
+        tokenAddress: TOKEN_ADDRESS,
+        expiresAt: futureTime,
+      });
+
+      const res = await adapter.batchRefund(['refund-live', 'non-existent-refund']);
+      expect(res.status).toBe('success');
+      expect(res.results).toEqual([
+        { packageId: 'refund-live', status: 'NotExpired', amount: '0' },
+        { packageId: 'non-existent-refund', status: 'NotFound', amount: '0' },
+      ]);
+    });
   });
 });

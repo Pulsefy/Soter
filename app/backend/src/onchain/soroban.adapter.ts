@@ -66,6 +66,9 @@ import {
   GetDelegateHistoryParams,
   GetDelegateHistoryResult,
   DelegateHistoryEntry,
+  BatchAdminActionResult,
+  BatchAdminActionStatus,
+  BatchAdminOperationResult,
 } from './onchain.adapter';
 import { SorobanErrorMapper } from './utils/soroban-error.mapper';
 import { withRetryTimeout } from './utils/retry-with-timeout';
@@ -1467,5 +1470,104 @@ export class SorobanAdapter implements OnchainAdapter {
       history,
       timestamp: new Date(),
     };
+  }
+
+  async batchRevoke(
+    ids: string[],
+    adminAddress?: string,
+  ): Promise<BatchAdminOperationResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] batchRevoke count=${ids.length}`);
+
+    const u64Vec = this.scvVec(ids.map(id => this.scvU64(parseInt(id, 10))));
+    const { hash, result } = await this.submitContractOp(
+      'batch_revoke',
+      [u64Vec],
+      cid,
+    );
+
+    const parsedResults = this.parseBatchAdminResults(result, ids);
+    return {
+      results: parsedResults,
+      transactionHash: hash,
+      timestamp: new Date(),
+      status: 'success',
+      metadata: {
+        adminAddress,
+        count: ids.length,
+      },
+    };
+  }
+
+  async batchRefund(
+    ids: string[],
+    adminAddress?: string,
+  ): Promise<BatchAdminOperationResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(`[${cid}] batchRefund count=${ids.length}`);
+
+    const u64Vec = this.scvVec(ids.map(id => this.scvU64(parseInt(id, 10))));
+    const { hash, result } = await this.submitContractOp(
+      'batch_refund',
+      [u64Vec],
+      cid,
+    );
+
+    const parsedResults = this.parseBatchAdminResults(result, ids);
+    return {
+      results: parsedResults,
+      transactionHash: hash,
+      timestamp: new Date(),
+      status: 'success',
+      metadata: {
+        adminAddress,
+        count: ids.length,
+      },
+    };
+  }
+
+  private parseBatchAdminResults(
+    raw: unknown,
+    requestedIds: string[],
+  ): BatchAdminActionResult[] {
+    const STATUS_MAP: Record<number, BatchAdminActionStatus> = {
+      0: 'Success',
+      1: 'NotFound',
+      2: 'InvalidState',
+      3: 'Expired',
+      4: 'NotExpired',
+      5: 'CampaignPaused',
+      6: 'TransferFailed',
+    };
+
+    if (Array.isArray(raw)) {
+      return raw.map((item: any, index: number) => {
+        let status: BatchAdminActionStatus = 'InvalidState';
+        if (typeof item?.status === 'number' && item.status in STATUS_MAP) {
+          status = STATUS_MAP[item.status];
+        } else if (typeof item?.status === 'string') {
+          status = item.status as BatchAdminActionStatus;
+        }
+
+        const packageId =
+          item?.package_id != null
+            ? String(item.package_id)
+            : (requestedIds[index] ?? '');
+
+        return {
+          packageId,
+          status,
+          amount: String(item?.amount ?? '0'),
+        };
+      });
+    }
+
+    return requestedIds.map(id => ({
+      packageId: id,
+      status: 'NotFound',
+      amount: '0',
+    }));
   }
 }

@@ -19,6 +19,7 @@ import {
   DryRunAidPackageResultDto,
   DryRunValidationErrorDto,
   SetDelegateDto,
+  BatchAdminActionDto,
 } from './dto/aid-escrow.dto';
 import { BudgetService } from '../common/budget/budget.service';
 import { AuditService } from '../audit/audit.service';
@@ -28,6 +29,7 @@ import {
   RevokeDelegateResult,
   GetDelegateResult,
   GetDelegateHistoryResult,
+  BatchAdminOperationResult,
 } from './onchain.adapter';
 import { explorerTxUrl } from '../common/utils/explorer-url.util';
 
@@ -628,5 +630,105 @@ export class AidEscrowService {
   ): Promise<GetDelegateHistoryResult> {
     this.logger.debug('Getting delegate history:', { packageId });
     return this.onchainAdapter.getDelegateHistory({ packageId });
+  }
+
+  /**
+   * Batch revoke multiple packages in one transaction (admin only).
+   */
+  async batchRevoke(
+    dto: BatchAdminActionDto,
+    adminAddress: string,
+  ): Promise<BatchAdminOperationResult & { explorerUrl?: string }> {
+    this.logger.debug("Batch revoking packages:", {
+      ids: dto.ids,
+      admin: adminAddress,
+    });
+
+    if (!dto.ids || dto.ids.length === 0) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'At least one package ID must be provided',
+      );
+    }
+
+    if (dto.ids.length > 25) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Batch size cannot exceed 25 package IDs',
+      );
+    }
+
+    const result = await this.onchainAdapter.batchRevoke(
+      dto.ids,
+      adminAddress,
+    );
+
+    if (this.auditService) {
+      await this.auditService.record({
+        actorId: adminAddress,
+        entity: 'aid_package',
+        entityId: 'batch',
+        action: 'batch_revoke',
+        metadata: {
+          requestedCount: dto.ids.length,
+          transactionHash: result.transactionHash,
+          results: result.results,
+        },
+      });
+    }
+
+    return this.withTxExplorerUrl(result);
+  }
+
+  /**
+   * Batch refund multiple expired/cancelled packages in one transaction (admin only).
+   */
+  async batchRefund(
+    dto: BatchAdminActionDto,
+    adminAddress: string,
+  ): Promise<BatchAdminOperationResult & { explorerUrl?: string }> {
+    this.logger.debug("Batch refunding packages:", {
+      ids: dto.ids,
+      admin: adminAddress,
+    });
+
+    if (!dto.ids || dto.ids.length === 0) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'At least one package ID must be provided',
+      );
+    }
+
+    if (dto.ids.length > 25) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        'Batch size cannot exceed 25 package IDs',
+      );
+    }
+
+    const result = await this.onchainAdapter.batchRefund(
+      dto.ids,
+      adminAddress,
+    );
+
+    if (this.auditService) {
+      await this.auditService.record({
+        actorId: adminAddress,
+        entity: 'aid_package',
+        entityId: 'batch',
+        action: 'batch_refund',
+        metadata: {
+          requestedCount: dto.ids.length,
+          transactionHash: result.transactionHash,
+          results: result.results,
+        },
+      });
+    }
+
+    return this.withTxExplorerUrl(result);
   }
 }
