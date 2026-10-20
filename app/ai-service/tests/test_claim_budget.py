@@ -258,9 +258,23 @@ class TestClaimPipelineOverBudget:
         }
 
     def _budget_exhausted_immediately(self):
-        """Return a ClaimBudget whose deadline has already passed."""
+        """Return a ClaimBudget whose deadline has already passed.
+
+        We pre-set ``_start`` to 1 second in the past so that ``elapsed``
+        already exceeds ``budget_seconds`` before any step runs.  We also
+        override ``__enter__`` so that the ``with budget:`` block inside
+        ``_process_claim_pipeline`` does NOT reset ``_start`` to the current
+        time (which would wipe out the pre-expired state).
+        """
         budget = ClaimBudget(budget_seconds=0.001, task_type="claim_pipeline")
-        budget._start = time.monotonic() - 1.0  # pretend 1s has elapsed
+        past = time.monotonic() - 1.0  # pretend 1s has already elapsed
+        budget._start = past
+
+        # Prevent __enter__ from resetting the clock.
+        def _noop_enter():
+            return budget
+
+        budget.__enter__ = _noop_enter
         return budget
 
     def test_returns_partial_status_when_budget_exceeded(self, monkeypatch):
