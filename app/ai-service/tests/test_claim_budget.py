@@ -257,46 +257,40 @@ class TestClaimPipelineOverBudget:
             }
         }
 
-    def _budget_exhausted_immediately(self):
-        """Return a ClaimBudget whose deadline has already passed.
+    def _raise_on_first_check(self, step_name, *, pending=None):
+        """ClaimBudget.check() replacement that raises immediately on the first step.
 
-        We pre-set ``_start`` to 1 second in the past so that ``elapsed``
-        already exceeds ``budget_seconds`` before any step runs.  We also
-        override ``__enter__`` so that the ``with budget:`` block inside
-        ``_process_claim_pipeline`` does NOT reset ``_start`` to the current
-        time (which would wipe out the pre-expired state).
+        Python's ``with`` statement looks up ``__enter__``/``__exit__`` on the
+        *type*, not the instance, so patching those at the instance level does
+        not work.  Patching ``check()`` at the class level is the reliable way
+        to simulate "budget already expired before the first step runs".
         """
-        budget = ClaimBudget(budget_seconds=0.001, task_type="claim_pipeline")
-        past = time.monotonic() - 1.0  # pretend 1s has already elapsed
-        budget._start = past
-
-        # Prevent __enter__ from resetting the clock.
-        def _noop_enter():
-            return budget
-
-        budget.__enter__ = _noop_enter
-        return budget
+        raise ClaimBudgetExceededError(
+            f"budget exceeded before {step_name}",
+            elapsed=1.0,
+            budget=0.001,
+            completed_steps=[],
+            pending_steps=list(pending or []),
+        )
 
     def test_returns_partial_status_when_budget_exceeded(self, monkeypatch):
         """When the budget expires before any step, status is 'partial'."""
-        # Patch ClaimBudget.__enter__ to return a pre-expired budget.
-        exhausted = self._budget_exhausted_immediately()
-
-        with patch("tasks.ClaimBudget", return_value=exhausted):
+        monkeypatch.setattr(settings, "claim_processing_budget_seconds", 60.0)
+        with patch.object(ClaimBudget, "check", self._raise_on_first_check):
             result = tasks._process_claim_pipeline("task-x", self._make_payload())
 
         assert result["status"] == "partial"
         assert result["type"] == "claim_pipeline"
 
     def test_needs_manual_review_set_on_over_budget(self, monkeypatch):
-        exhausted = self._budget_exhausted_immediately()
-        with patch("tasks.ClaimBudget", return_value=exhausted):
+        monkeypatch.setattr(settings, "claim_processing_budget_seconds", 60.0)
+        with patch.object(ClaimBudget, "check", self._raise_on_first_check):
             result = tasks._process_claim_pipeline("task-x", self._make_payload())
         assert result["needs_manual_review"] is True
 
     def test_manual_review_reason_present(self, monkeypatch):
-        exhausted = self._budget_exhausted_immediately()
-        with patch("tasks.ClaimBudget", return_value=exhausted):
+        monkeypatch.setattr(settings, "claim_processing_budget_seconds", 60.0)
+        with patch.object(ClaimBudget, "check", self._raise_on_first_check):
             result = tasks._process_claim_pipeline("task-x", self._make_payload())
         assert "manual_review_reason" in result
         assert isinstance(result["manual_review_reason"], str)
@@ -353,11 +347,11 @@ class TestClaimPipelineOverBudget:
 
     def test_metric_incremented_on_over_budget(self, monkeypatch):
         """CLAIM_BUDGET_EXCEEDED_TOTAL is incremented exactly once when budget is hit."""
-        exhausted = self._budget_exhausted_immediately()
+        monkeypatch.setattr(settings, "claim_processing_budget_seconds", 60.0)
         counter_before = _read_counter(
             metrics.CLAIM_BUDGET_EXCEEDED_TOTAL, task_type="claim_pipeline"
         )
-        with patch("tasks.ClaimBudget", return_value=exhausted):
+        with patch.object(ClaimBudget, "check", self._raise_on_first_check):
             tasks._process_claim_pipeline("task-m", self._make_payload())
         counter_after = _read_counter(
             metrics.CLAIM_BUDGET_EXCEEDED_TOTAL, task_type="claim_pipeline"
@@ -377,8 +371,8 @@ class TestClaimPipelineOverBudget:
         assert counter_after == counter_before
 
     def test_elapsed_and_budget_seconds_present_in_partial_result(self, monkeypatch):
-        exhausted = self._budget_exhausted_immediately()
-        with patch("tasks.ClaimBudget", return_value=exhausted):
+        monkeypatch.setattr(settings, "claim_processing_budget_seconds", 60.0)
+        with patch.object(ClaimBudget, "check", self._raise_on_first_check):
             result = tasks._process_claim_pipeline("task-q", self._make_payload())
         assert "elapsed_seconds" in result
         assert "budget_seconds" in result
@@ -389,8 +383,7 @@ class TestClaimPipelineOverBudget:
         monkeypatch.setattr(settings, "claim_processing_budget_seconds", 60.0)
         monkeypatch.setattr(tasks, "send_webhook_notification", MagicMock())
 
-        exhausted = self._budget_exhausted_immediately()
-        with patch("tasks.ClaimBudget", return_value=exhausted):
+        with patch.object(ClaimBudget, "check", self._raise_on_first_check):
             task_id = str(uuid.uuid4())
             tasks.update_task_status(task_id, "pending")
             payload = {"type": "claim_pipeline", "data": {"aid_claim": "test"}}
