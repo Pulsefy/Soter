@@ -41,6 +41,27 @@ export const metricsProviders = [
   }),
 
   // Database Metrics
+  makeGaugeProvider({
+    name: 'prisma_pool_size',
+    help: 'Maximum number of connections configured for the Prisma PostgreSQL pool',
+    labelNames: [],
+  }),
+  makeGaugeProvider({
+    name: 'prisma_pool_connections_in_use',
+    help: 'Current number of connections checked out from the Prisma PostgreSQL pool',
+    labelNames: [],
+  }),
+  makeGaugeProvider({
+    name: 'prisma_pool_waiting_connections',
+    help: 'Current number of connection requests waiting for the Prisma PostgreSQL pool',
+    labelNames: [],
+  }),
+  makeHistogramProvider({
+    name: 'prisma_pool_wait_duration_seconds',
+    help: 'Time spent waiting for an available Prisma PostgreSQL pool connection',
+    labelNames: [],
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+  }),
   makeHistogramProvider({
     name: 'db_query_duration_seconds',
     help: 'Duration of database queries in seconds',
