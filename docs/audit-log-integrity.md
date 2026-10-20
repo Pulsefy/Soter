@@ -165,6 +165,42 @@ damaged regions of a chain are visible in one run.
 
 ---
 
+### 3.3 Paginated queries and partial-range verification
+
+`GET /v1/audit` is paginated: `page` (1-based, default 1) and `limit`
+(default 50, values above 200 are clamped to 200). The response body is the
+page of rows; `X-Total-Count`, `X-Page`, `X-Limit` and `X-Total-Pages` carry the
+paging metadata. Rows are ordered `timestamp DESC, id DESC`; the `id`
+tiebreaker keeps pages stable when many entries share a timestamp.
+
+Pagination does not affect verification: `GET /v1/audit/chain/status` reads the
+chain directly and never depends on which page a client fetched. Verifying the
+rows a client holds is done by `sequence`, with an optional **inclusive** range:
+
+```
+GET /v1/audit/chain/status?fromSequence=1000&toSequence=1999
+```
+
+Semantics for a partial range:
+
+- Rows inside the range are fully verified (hash, canonical metadata, links).
+- The first in-range row must link to the stored `entryHash` of the nearest
+  sealed row below `fromSequence` (the *anchor*). The anchor is trusted as-is
+  and is **not** re-verified; include it in a range to check it. If no sealed row
+  exists below `fromSequence`, the anchor is genesis.
+- `X-Expected-Chain-Head` is only enforced when the range reaches the chain head
+  (`toSequence` omitted or at/above the head). A range that stops short cannot
+  see truncation, so the anchor is ignored for it.
+- Damage outside the range is not detected. The result has `partial: true` and
+  `range`, and `valid` is a statement about that range only; `sealedCount`
+  counts rows inside it. `legacyCount` / `backfillPending` always describe the
+  whole table.
+- `fromSequence`/`toSequence` must be positive integers with
+  `fromSequence <= toSequence`, otherwise the API answers `400`.
+
+Verifying consecutive ranges that tile `1..head` is equivalent to one full
+verification, and isolates damage to the range that contains it.
+
 ## 4. Admin endpoints
 
 Both endpoints are admin-only (`@Roles(AppRole.admin)`), versioned `/v1`,

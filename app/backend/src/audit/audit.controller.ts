@@ -12,6 +12,7 @@ import {
 import { Response } from 'express';
 import { AuditService, AuditQuery, ExportAuditQuery } from './audit.service';
 import { AuditChainService } from './audit-chain.service';
+import { ChainStatusQuery } from './dto/chain-status-query.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -59,7 +60,8 @@ export class AuditController {
   @ApiQuery({
     name: 'limit',
     required: false,
-    description: 'Items per page (default: 50, max: 200)',
+    description:
+      'Items per page (default: 50). Values above 200 are clamped to 200; the effective value is returned in X-Limit.',
   })
   async getLogs(
     @Query() query: AuditQuery,
@@ -70,6 +72,7 @@ export class AuditController {
     res.setHeader('X-Total-Count', String(result.total));
     res.setHeader('X-Page', String(result.page));
     res.setHeader('X-Limit', String(result.limit));
+    res.setHeader('X-Total-Pages', String(result.totalPages));
 
     return result.data;
   }
@@ -160,7 +163,9 @@ export class AuditController {
       'entries, and — when a previously anchored head hash is supplied via ' +
       'the `X-Expected-Chain-Head` header — truncation of the newest ' +
       'entries. Unsealed (legacy) rows are reported via `backfillPending` ' +
-      'until POST /audit/chain/backfill seals them.',
+      'until POST /audit/chain/backfill seals them. Pass fromSequence and/or ' +
+      'toSequence to verify only an inclusive range; the result is then ' +
+      'marked `partial` (see docs/audit-log-integrity.md section 3.2).',
   })
   @ApiOkResponse({ description: 'Audit chain integrity status.' })
   @ApiUnauthorizedResponse({
@@ -174,9 +179,15 @@ export class AuditController {
   })
   async getChainStatus(
     @Headers('x-expected-chain-head') expectedHeadHash?: string,
+    @Query() range?: ChainStatusQuery,
   ) {
+    const options = {
+      ...(expectedHeadHash ? { expectedHeadHash } : {}),
+      ...(range?.fromSequence ? { fromSequence: range.fromSequence } : {}),
+      ...(range?.toSequence ? { toSequence: range.toSequence } : {}),
+    };
     return this.chainService.verifyChain(
-      expectedHeadHash ? { expectedHeadHash } : undefined,
+      Object.keys(options).length > 0 ? options : undefined,
     );
   }
 

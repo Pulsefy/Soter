@@ -161,10 +161,18 @@ describe('AuditChainService', () => {
 
     // findFirst: chain head lookup (orderBy sequence desc).
     mockPrisma.auditLog.findFirst.mockImplementation(
-      ({ orderBy }: { orderBy?: { sequence: string } }) => {
+      ({
+        orderBy,
+        where,
+      }: {
+        orderBy?: { sequence: string };
+        where?: { sequence?: { lt?: bigint } };
+      }) => {
         if (orderBy?.sequence === 'desc') {
+          const below = where?.sequence?.lt;
           const sealed = rows
             .filter(r => r.entryHash !== null && r.sequence !== null)
+            .filter(r => below === undefined || (r.sequence as bigint) < below)
             .sort((a, b) =>
               (b.sequence as bigint) < (a.sequence as bigint) ? -1 : 1,
             );
@@ -182,7 +190,10 @@ describe('AuditChainService', () => {
     // findMany: paged walk in sequence order, or legacy batch fetch.
     mockPrisma.auditLog.findMany.mockImplementation(
       (args: {
-        where?: { entryHash?: { not: null } | null };
+        where?: {
+          entryHash?: { not: null } | null;
+          sequence?: { gte?: bigint; lte?: bigint };
+        };
         orderBy?: object | object[];
         cursor?: { sequence: bigint };
         skip?: number;
@@ -193,9 +204,13 @@ describe('AuditChainService', () => {
           args.where?.entryHash !== null &&
           typeof args.where?.entryHash === 'object' &&
           'not' in args.where.entryHash;
-        let pool = rows.filter(r =>
-          wantSealed ? r.entryHash !== null : r.entryHash === null,
-        );
+        const { gte, lte } = args.where?.sequence ?? {};
+        let pool = rows
+          .filter(r =>
+            wantSealed ? r.entryHash !== null : r.entryHash === null,
+          )
+          .filter(r => gte === undefined || (r.sequence ?? 0n) >= gte)
+          .filter(r => lte === undefined || (r.sequence ?? 0n) <= lte);
 
         pool = pool.sort((a, b) => {
           const sa = a.sequence ?? 0n;
@@ -213,12 +228,26 @@ describe('AuditChainService', () => {
     );
 
     mockPrisma.auditLog.count.mockImplementation(
-      ({ where }: { where?: { entryHash?: { not: null } | null } }) => {
+      ({
+        where,
+      }: {
+        where?: {
+          entryHash?: { not: null } | null;
+          sequence?: { gte?: bigint; lte?: bigint };
+        };
+      }) => {
         if (where?.entryHash === null) {
           return Promise.resolve(rows.filter(r => r.entryHash === null).length);
         }
         if (where?.entryHash && typeof where.entryHash === 'object') {
-          return Promise.resolve(rows.filter(r => r.entryHash !== null).length);
+          const { gte, lte } = where.sequence ?? {};
+          return Promise.resolve(
+            rows
+              .filter(r => r.entryHash !== null)
+              .filter(r => gte === undefined || (r.sequence ?? 0n) >= gte)
+              .filter(r => lte === undefined || (r.sequence ?? 0n) <= lte)
+              .length,
+          );
         }
         return Promise.resolve(rows.length);
       },
@@ -515,6 +544,170 @@ describe('AuditChainService', () => {
       expect(result.backfillPending).toBe(true);
       expect(result.legacyCount).toBe(1);
       expect(result.sealedCount).toBe(0);
+    });
+  });
+
+  describe('verifyChain over partial ranges', () => {
+    async function seed(length: number) {
+      for (let i = 0; i < length; i++) {
+        await service.appendToChain({
+          actorId: `user-${i}`,
+          entity: 'campaign',
+          entityId: `c-${i}`,
+          action: 'update',
+          metadata: { i },
+        });
+      }
+    }
+
+    it('verifies only the requested range and marks the result partial', async () => {
+      await seed(10);
+      const result = await service.verifyChain({
+        fromSequence: 4,
+        toSequence: 7,
+      });
+
+      expect(result.valid).toBe(true);
+      expect(result.partial).toBe(true);
+      expect(result.range).toEqual({ fromSequence: '4', toSequence: '7' });
+      expect(result.sealedCount).toBe(4);
+      expect(result.headSequence).toBe('7');
+      expect(result.headHash).toBe(rows[6].entryHash);
+    });
+
+    it('does not mark full verification as partial', async () => {
+      await seed(3);
+      const result = await service.verifyChain();
+      expect(result.partial).toBeUndefined();
+      expect(result.range).toBeUndefined();
+    });
+
+    it('detects tampering inside the range', async () => {
+      await seed(10);
+      rows[5].action = 'forged-action'; // sequence 6
+
+      const result = await service.verifyChain({
+        fromSequence: 4,
+        toSequence: 8,
+      });
+      expect(result.valid).toBe(false);
+      expect(result.issues[0].id).toBe(rows[5].id);
+    });
+
+    it('does not see tampering outside the range (documented limit)', async () => {
+      await seed(10);
+      rows[1].action = 'forged-action'; // sequence 2
+
+      const partial = await service.verifyChain({
+        fromSequence: 5,
+        toSequence: 8,
+      });
+      expect(partial.valid).toBe(true);
+
+      const full = await service.verifyChain();
+      expect(full.valid).toBe(false);
+    });
+
+    it('links the first in-range row to the stored hash below the range', async () => {
+      await seed(10);
+      // Break the link between sequence 4 and 5 by rewriting prevHash.
+      rows[4].prevHash = 'f'.repeat(64);
+
+      const result = await service.verifyChain({
+        fromSequence: 5,
+        toSequence: 8,
+      });
+      expect(result.valid).toBe(false);
+      expect(result.issues[0].id).toBe(rows[4].id);
+    });
+
+    it('supports open-ended ranges', async () => {
+      await seed(10);
+
+      const tail = await service.verifyChain({ fromSequence: 8 });
+      expect(tail.valid).toBe(true);
+      expect(tail.sealedCount).toBe(3);
+      expect(tail.range).toEqual({ fromSequence: '8', toSequence: null });
+
+      const head = await service.verifyChain({ toSequence: 3 });
+      expect(head.valid).toBe(true);
+      expect(head.sealedCount).toBe(3);
+      expect(head.range).toEqual({ fromSequence: null, toSequence: '3' });
+    });
+
+    it('reports a range beyond the chain head as empty and valid', async () => {
+      await seed(5);
+      const result = await service.verifyChain({ fromSequence: 50 });
+
+      expect(result.valid).toBe(true);
+      expect(result.sealedCount).toBe(0);
+      expect(result.partial).toBe(true);
+    });
+
+    it('verifying consecutive pages covers the whole chain and isolates damage to its page', async () => {
+      await seed(25);
+      rows[12].action = 'forged-action'; // sequence 13, in page 2
+
+      const pages = [
+        { fromSequence: 1, toSequence: 10 },
+        { fromSequence: 11, toSequence: 20 },
+        { fromSequence: 21, toSequence: 25 },
+      ];
+      const results = [];
+      for (const page of pages) results.push(await service.verifyChain(page));
+
+      expect(results.reduce((n, r) => n + r.sealedCount, 0)).toBe(25);
+      expect(results.map(r => r.valid)).toEqual([true, false, true]);
+    });
+
+    describe('expectedHeadHash with ranges', () => {
+      const WRONG_ANCHOR = 'e'.repeat(64);
+
+      it('is ignored when the range stops short of the chain head', async () => {
+        await seed(10);
+        const result = await service.verifyChain({
+          fromSequence: 3,
+          toSequence: 5,
+          expectedHeadHash: WRONG_ANCHOR,
+        });
+        expect(result.valid).toBe(true);
+      });
+
+      it('is enforced when the range reaches the chain head', async () => {
+        await seed(10);
+        for (const range of [
+          { fromSequence: 8 },
+          { fromSequence: 8, toSequence: 10 },
+          { toSequence: 99 },
+        ]) {
+          const result = await service.verifyChain({
+            ...range,
+            expectedHeadHash: WRONG_ANCHOR,
+          });
+          expect(result.valid).toBe(false);
+          expect(result.issues.at(-1)?.reason).toContain('chain head mismatch');
+        }
+      });
+
+      it('passes when the anchor matches the head of a range that reaches it', async () => {
+        await seed(10);
+        const result = await service.verifyChain({
+          fromSequence: 8,
+          expectedHeadHash: rows[9].entryHash as string,
+        });
+        expect(result.valid).toBe(true);
+      });
+    });
+
+    it.each([
+      ['a zero fromSequence', { fromSequence: 0 }],
+      ['a negative toSequence', { toSequence: -3 }],
+      ['a non-numeric fromSequence', { fromSequence: 'abc' }],
+      ['an inverted range', { fromSequence: 9, toSequence: 2 }],
+    ])('rejects %s with a 400', async (_label, options) => {
+      await expect(service.verifyChain(options)).rejects.toMatchObject({
+        statusCode: 400,
+      });
     });
   });
 

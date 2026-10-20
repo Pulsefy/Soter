@@ -99,6 +99,21 @@ describe('AuditController', () => {
       expect(res.setHeader).toHaveBeenCalledWith('X-Page', '1');
       expect(res.setHeader).toHaveBeenCalledWith('X-Limit', '50');
     });
+
+    it('reports the total number of pages', async () => {
+      const res = { setHeader: jest.fn() } as any;
+      (service.findLogs as jest.Mock).mockResolvedValueOnce({
+        data: [],
+        total: 120,
+        page: 2,
+        limit: 50,
+        totalPages: 3,
+      });
+
+      await controller.getLogs({ page: 2, limit: 50 }, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith('X-Total-Pages', '3');
+    });
   });
 
   describe('exportLogs', () => {
@@ -149,6 +164,29 @@ describe('AuditController', () => {
       expect(service.exportLogs).toHaveBeenCalledWith({
         from: '2024-01-01',
         to: '2024-12-31',
+      });
+    });
+  });
+
+  describe('getChainStatus ranges', () => {
+    it('passes a sequence range through to verifyChain', async () => {
+      await controller.getChainStatus(undefined, {
+        fromSequence: '5',
+        toSequence: '9',
+      });
+
+      expect(mockChainService.verifyChain).toHaveBeenCalledWith({
+        fromSequence: '5',
+        toSequence: '9',
+      });
+    });
+
+    it('combines the anchor header with a range', async () => {
+      await controller.getChainStatus('a'.repeat(64), { fromSequence: '5' });
+
+      expect(mockChainService.verifyChain).toHaveBeenCalledWith({
+        expectedHeadHash: 'a'.repeat(64),
+        fromSequence: '5',
       });
     });
   });

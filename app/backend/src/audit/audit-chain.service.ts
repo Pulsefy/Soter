@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MetricsService } from './metrics.service';
+import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import {
   GENESIS_PREV_HASH,
   computeEntryHash,
@@ -33,6 +34,16 @@ export interface ChainIssue {
   reason: string;
 }
 
+/** Options for {@link AuditChainService.verifyChain}. */
+export interface ChainVerifyOptions {
+  /** Previously anchored head hash (detects truncation of the newest rows). */
+  expectedHeadHash?: string | null;
+  /** First `sequence` to verify, inclusive. Omit to start at the chain start. */
+  fromSequence?: bigint | number | string;
+  /** Last `sequence` to verify, inclusive. Omit to run to the chain head. */
+  toSequence?: bigint | number | string;
+}
+
 export interface ChainVerificationResult {
   /** `true` when every sealed entry is intact and correctly linked. */
   valid: boolean;
@@ -54,6 +65,13 @@ export interface ChainVerificationResult {
   headSequence: string | null;
   /** Hash of the highest sealed entry, or null when the chain is empty. */
   headHash: string | null;
+  /**
+   * Present (`true`) only when a sequence range was requested. `valid` then
+   * covers just that range; see {@link AuditChainService.verifyChain}.
+   */
+  partial?: true;
+  /** The requested inclusive range; `null` marks an open end. */
+  range?: { fromSequence: string | null; toSequence: string | null };
 }
 
 export interface ChainBackfillResult {
@@ -190,10 +208,24 @@ export class AuditChainService {
    * truncation of the newest entries (deletion of the chain head). Without
    * an anchor, head deletion is undetectable from the table alone — the
    * surviving chain is internally consistent.
+   *
+   * Partial ranges (`fromSequence` / `toSequence`, inclusive):
+   * - Rows inside the range are fully verified (hash, metadata, links).
+   * - The first in-range row must link to the stored `entryHash` of the
+   *   nearest sealed row below `fromSequence` (the anchor). The anchor is
+   *   trusted as-is and NOT re-verified; verify a range that includes it to
+   *   check it. With no row below `fromSequence`, the anchor is genesis.
+   * - `expectedHeadHash` is only enforced when the range reaches the chain
+   *   head (`toSequence` omitted or >= the head sequence); a range that stops
+   *   short cannot observe truncation, so the anchor is ignored there.
+   * - Tampering outside the range is not detected. The result carries
+   *   `partial: true` and `range`; `valid` is a statement about that range
+   *   only, and `sealedCount` counts rows inside it.
+   * - `legacyCount` / `backfillPending` always describe the whole table.
    */
-  async verifyChain(options?: {
-    expectedHeadHash?: string | null;
-  }): Promise<ChainVerificationResult> {
+  async verifyChain(
+    options?: ChainVerifyOptions,
+  ): Promise<ChainVerificationResult> {
     const end = this.metrics.dbQueryDuration.startTimer({
       operation: 'chain_verify',
       entity: 'AuditLog',
@@ -212,12 +244,34 @@ export class AuditChainService {
     }
   }
 
-  private async verify(options?: {
-    expectedHeadHash?: string | null;
-  }): Promise<ChainVerificationResult> {
+  private async verify(
+    options?: ChainVerifyOptions,
+  ): Promise<ChainVerificationResult> {
     const issues: ChainIssue[] = [];
+    const { from, to, isPartial } = parseSequenceRange(options);
+    const sealedWhere: Prisma.AuditLogWhereInput = {
+      entryHash: { not: null },
+      ...(isPartial
+        ? {
+            sequence: {
+              ...(from !== undefined ? { gte: from } : {}),
+              ...(to !== undefined ? { lte: to } : {}),
+            },
+          }
+        : {}),
+    };
+    const rangeInfo: Pick<ChainVerificationResult, 'partial' | 'range'> =
+      isPartial
+        ? {
+            partial: true,
+            range: {
+              fromSequence: from?.toString() ?? null,
+              toSequence: to?.toString() ?? null,
+            },
+          }
+        : {};
     const sealedTotal = await this.prisma.auditLog.count({
-      where: { entryHash: { not: null } },
+      where: sealedWhere,
     });
     const legacyCount = await this.prisma.auditLog.count({
       where: { entryHash: null },
@@ -233,10 +287,20 @@ export class AuditChainService {
         issues,
         headSequence: null,
         headHash: null,
+        ...rangeInfo,
       };
     }
 
     let expectedPrevHash: string | null = GENESIS_PREV_HASH;
+    if (from !== undefined) {
+      // Anchor: the nearest sealed row below the range start. Trusted as-is.
+      const anchor = await this.prisma.auditLog.findFirst({
+        where: { entryHash: { not: null }, sequence: { lt: from } },
+        orderBy: { sequence: 'desc' },
+        select: { entryHash: true },
+      });
+      if (anchor?.entryHash) expectedPrevHash = anchor.entryHash;
+    }
     let sealedCount = 0;
     let skippedAnonymized = 0;
     let headSequence: string | null = null;
@@ -250,7 +314,7 @@ export class AuditChainService {
     let processed = 0;
     while (processed < sealedTotal && issues.length < MAX_ISSUES) {
       const pageArgs: Prisma.AuditLogFindManyArgs = {
-        where: { entryHash: { not: null } },
+        where: sealedWhere,
         orderBy: { sequence: 'asc' },
         ...(lastSequence !== null
           ? { skip: 1, cursor: { sequence: lastSequence } }
@@ -327,8 +391,18 @@ export class AuditChainService {
     }
 
     const expectedHeadHash = options?.expectedHeadHash;
+    let reachesChainHead = true;
+    if (expectedHeadHash && to !== undefined) {
+      const chainHead = await this.prisma.auditLog.findFirst({
+        where: { entryHash: { not: null } },
+        orderBy: { sequence: 'desc' },
+        select: { sequence: true },
+      });
+      reachesChainHead = !chainHead?.sequence || chainHead.sequence <= to;
+    }
     if (
       expectedHeadHash &&
+      reachesChainHead &&
       headHash !== null &&
       headHash !== expectedHeadHash
     ) {
@@ -348,6 +422,7 @@ export class AuditChainService {
       issues,
       headSequence,
       headHash,
+      ...rangeInfo,
     };
   }
 
@@ -477,6 +552,45 @@ export class AuditChainService {
       throw error;
     }
   }
+}
+
+/**
+ * Parses and validates the optional inclusive sequence range. Throws a 400
+ * for non-positive/non-integer bounds or an inverted range.
+ */
+function parseSequenceRange(options?: ChainVerifyOptions): {
+  from?: bigint;
+  to?: bigint;
+  isPartial: boolean;
+} {
+  const parse = (name: string, value: bigint | number | string | undefined) => {
+    if (value === undefined) return undefined;
+    let parsed: bigint;
+    try {
+      parsed = BigInt(value);
+    } catch {
+      parsed = 0n;
+    }
+    if (parsed < 1n) {
+      throw new AppException(
+        ERROR_CODES.BAD_REQUEST,
+        400,
+        `${name} must be a positive integer sequence number`,
+      );
+    }
+    return parsed;
+  };
+
+  const from = parse('fromSequence', options?.fromSequence);
+  const to = parse('toSequence', options?.toSequence);
+  if (from !== undefined && to !== undefined && from > to) {
+    throw new AppException(
+      ERROR_CODES.BAD_REQUEST,
+      400,
+      'fromSequence must be less than or equal to toSequence',
+    );
+  }
+  return { from, to, isPartial: from !== undefined || to !== undefined };
 }
 
 /** Fields read from AuditLog during chain verification. */

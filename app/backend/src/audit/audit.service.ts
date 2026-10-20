@@ -2,7 +2,14 @@ import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { MetricsService } from 'src/audit/metrics.service';
@@ -16,14 +23,51 @@ export interface AuditLogParams {
   metadata?: Record<string, any>;
 }
 
-export interface AuditQuery {
+/** Page size used when `limit` is omitted or not a usable number. */
+export const AUDIT_DEFAULT_PAGE_SIZE = 50;
+/** Hard ceiling for `limit`; larger values are clamped to this. */
+export const AUDIT_MAX_PAGE_SIZE = 200;
+
+export class AuditQuery {
+  @IsOptional()
+  @IsString()
   entity?: string;
+
+  @IsOptional()
+  @IsString()
   entityId?: string;
+
+  @IsOptional()
+  @IsString()
   actorId?: string;
+
+  @IsOptional()
+  @IsString()
   action?: string;
+
+  @IsOptional()
+  @IsDateString()
   startTime?: string;
+
+  @IsOptional()
+  @IsDateString()
   endTime?: string;
+
+  /** 1-based page number (default 1). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   page?: number;
+
+  /**
+   * Items per page (default 50). Values above 200 are clamped to 200; the
+   * effective value is echoed in the `X-Limit` response header.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   limit?: number;
 }
 
@@ -101,8 +145,15 @@ export class AuditService {
   }
 
   async findLogs(query: AuditQuery) {
-    const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(200, Math.max(1, query.limit ?? 50));
+    const page = Number.isFinite(Number(query.page))
+      ? Math.max(1, Math.floor(Number(query.page)))
+      : 1;
+    const limit = Number.isFinite(Number(query.limit))
+      ? Math.min(
+          AUDIT_MAX_PAGE_SIZE,
+          Math.max(1, Math.floor(Number(query.limit))),
+        )
+      : AUDIT_DEFAULT_PAGE_SIZE;
     const skip = (page - 1) * limit;
 
     const where: Prisma.AuditLogWhereInput = {};
@@ -126,14 +177,22 @@ export class AuditService {
       const [rows, total] = await this.prisma.$transaction([
         this.prisma.auditLog.findMany({
           where,
-          orderBy: { timestamp: 'desc' },
+          // `id` breaks timestamp ties so offset pages never repeat or skip
+          // rows when many entries share a timestamp.
+          orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
           skip,
           take: limit,
         }),
         this.prisma.auditLog.count({ where }),
       ]);
       end();
-      return { data: rows, total, page, limit };
+      return {
+        data: rows,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      };
     } catch (error) {
       this.metrics.dbErrorsTotal.inc({
         operation: 'findMany',
