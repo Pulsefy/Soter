@@ -98,7 +98,7 @@ export class DlqService {
     };
   }
 
-  async replayJob(id: string, actorId: string) {
+  async replayJob(id: string, actorId: string, delayMs = 0) {
     const job = await this.dlqQueue.getJob(id);
     if (!job) {
       throw new AppException(
@@ -125,10 +125,17 @@ export class DlqService {
       );
     }
 
-    const replayedJob = await targetQueue.add(
-      job.data?.originalId || 'replayed-job',
-      job.data.data,
-    );
+    const replayedJob =
+      delayMs > 0
+        ? await targetQueue.add(
+            job.data?.originalId || 'replayed-job',
+            job.data.data,
+            { delay: delayMs },
+          )
+        : await targetQueue.add(
+            job.data?.originalId || 'replayed-job',
+            job.data.data,
+          );
 
     await job.remove();
 
@@ -141,9 +148,53 @@ export class DlqService {
         originalQueue: originalQueueName,
         originalId: job.data.originalId,
         newJobId: replayedJob.id,
+        delayMs,
       },
     });
 
     return { success: true, replayedJobId: replayedJob.id };
+  }
+
+  /**
+   * Schedule a batch of replays at a configurable interval. Replay jobs are
+   * delayed on their destination queues, leaving those queues' normal work
+   * eligible to run between replays.
+   */
+  async replayJobs(ids: string[], actorId: string) {
+    const configuredInterval = Number.parseInt(
+      process.env.DLQ_REPLAY_INTERVAL_MS ?? '1000',
+      10,
+    );
+    const intervalMs =
+      Number.isFinite(configuredInterval) && configuredInterval > 0
+        ? configuredInterval
+        : 1000;
+
+    const results: Array<{
+      id: string;
+      success: boolean;
+      replayedJobId?: string | number;
+      error?: string;
+    }> = [];
+
+    for (const [index, id] of ids.entries()) {
+      try {
+        const result = await this.replayJob(id, actorId, index * intervalMs);
+        results.push({ id, ...result });
+      } catch (error) {
+        results.push({
+          id,
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return {
+      requested: ids.length,
+      replayed: results.filter(result => result.success).length,
+      intervalMs,
+      results,
+    };
   }
 }

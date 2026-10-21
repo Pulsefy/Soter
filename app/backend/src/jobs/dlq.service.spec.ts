@@ -99,6 +99,51 @@ describe('DlqService', () => {
       );
     });
 
+    it('paces a batch using delayed jobs on the destination queue', async () => {
+      const makeJob = (id: string) => ({
+        id,
+        data: { originalId: `source-${id}`, originalQueue: 'verification', data: { id } },
+        remove: jest.fn().mockResolvedValue(undefined),
+      }) as unknown as Job;
+      const first = makeJob('dlq-1');
+      const second = makeJob('dlq-2');
+      const previousInterval = process.env.DLQ_REPLAY_INTERVAL_MS;
+      process.env.DLQ_REPLAY_INTERVAL_MS = '250';
+      dlqQueue.getJob
+        .mockResolvedValueOnce(first)
+        .mockResolvedValueOnce(second);
+      verificationQueue.add
+        .mockResolvedValueOnce({ id: 'replay-1' })
+        .mockResolvedValueOnce({ id: 'replay-2' });
+
+      try {
+        const result = await service.replayJobs(['dlq-1', 'dlq-2'], 'admin-1');
+
+        expect(result).toMatchObject({
+          requested: 2,
+          replayed: 2,
+          intervalMs: 250,
+        });
+        expect(verificationQueue.add).toHaveBeenNthCalledWith(
+          1,
+          'source-dlq-1',
+          { id: 'dlq-1' },
+        );
+        expect(verificationQueue.add).toHaveBeenNthCalledWith(
+          2,
+          'source-dlq-2',
+          { id: 'dlq-2' },
+          { delay: 250 },
+        );
+      } finally {
+        if (previousInterval === undefined) {
+          delete process.env.DLQ_REPLAY_INTERVAL_MS;
+        } else {
+          process.env.DLQ_REPLAY_INTERVAL_MS = previousInterval;
+        }
+      }
+    });
+
     it('should throw NotFoundException if job not found in DLQ', async () => {
       dlqQueue.getJob.mockResolvedValue(null);
       await expect(service.replayJob('unknown', 'admin-1')).rejects.toThrow(
