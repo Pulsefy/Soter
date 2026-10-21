@@ -181,6 +181,26 @@ CIRCUIT_BREAKER_ALERTS_TOTAL = Counter(
     ["provider", "event", "outcome"],
 )
 
+# --- Per-provider response latency SLA metrics ---
+#
+# Labels are bounded: `provider` is the same fixed, code-defined provider
+# registry used by circuit_breaker_state (see providers.KNOWN_LLM_PROVIDERS
+# and KNOWN_OCR_PROVIDERS). Never label by model, endpoint, or any
+# request-derived string here — this metric intentionally provides a
+# *provider-level* latency signal complementary to the per-endpoint
+# REQUEST_LATENCY histogram and the pass/fail circuit breaker.
+PROVIDER_RESPONSE_LATENCY_SECONDS = Histogram(
+    "provider_response_latency_seconds",
+    "Per-provider response latency for LLM/OCR calls",
+    ["provider"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0, 60.0),
+)
+PROVIDER_LATENCY_SLA_BREACHES_TOTAL = Counter(
+    "provider_latency_sla_breaches_total",
+    "Provider responses exceeding the configured latency SLA threshold",
+    ["provider"],
+)
+
 
 def check_system_resources(memory_threshold_percent: float = 90.0) -> bool:
     """
@@ -415,6 +435,31 @@ def estimate_llm_cost_usd(
     return (prompt_tokens / 1000.0) * prompt_rate + (
         completion_tokens / 1000.0
     ) * completion_rate
+
+
+def record_provider_latency(provider: str, latency_seconds: float) -> None:
+    """Records per-provider response latency and checks the SLA threshold.
+
+    Observes ``latency_seconds`` into the ``PROVIDER_RESPONSE_LATENCY_SECONDS``
+    histogram. If the latency exceeds the operator-configured
+    ``provider_latency_sla_threshold_seconds``, increments the
+    ``PROVIDER_LATENCY_SLA_BREACHES_TOTAL`` counter and emits a warning log.
+
+    ``provider`` must be a code-defined provider name (bounded label).
+    """
+    PROVIDER_RESPONSE_LATENCY_SECONDS.labels(provider=provider).observe(
+        latency_seconds
+    )
+    threshold = settings.provider_latency_sla_threshold_seconds
+    if threshold > 0 and latency_seconds > threshold:
+        PROVIDER_LATENCY_SLA_BREACHES_TOTAL.labels(provider=provider).inc()
+        logger.warning(
+            "provider_latency_sla_breach provider=%s latency_seconds=%.3f "
+            "threshold_seconds=%.3f",
+            provider,
+            latency_seconds,
+            threshold,
+        )
 
 
 def record_llm_usage(
