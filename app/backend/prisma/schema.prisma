@@ -749,12 +749,15 @@ model NotificationDeliveryAttempt {
   @@index([startedAt])
 }
 
-/// Stores idempotency keys to prevent duplicate requests
+/// Stores idempotency keys to prevent duplicate requests. `expiresAt` is the
+/// validity boundary enforced by request-time database lookups; the scheduled
+/// purge only reclaims expired rows and is not part of replay protection.
 model IdempotencyKey {
   id             String   @id @default(cuid())
   key            String   @unique
   responseStatus Int
   responseBody   String
+  /// Expired rows are ignored even if the retention purge has not removed them.
   expiresAt      DateTime
   createdAt      DateTime @default(now())
 
