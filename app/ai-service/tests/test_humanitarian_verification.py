@@ -18,6 +18,16 @@ import metrics
 from unittest.mock import patch, MagicMock
 
 
+def counter_value(counter, **labels):
+    data = counter.collect()[0]
+    for sample in data.samples:
+        if sample.name.endswith("_total") and all(
+            sample.labels.get(k) == v for k, v in labels.items()
+        ):
+            return sample.value
+    return None
+
+
 class StubLLMProvider(ModelProvider):
     """Minimal LLM provider for testing."""
 
@@ -546,6 +556,7 @@ class TestHumanitarianVerificationService:
             endpoint="humanitarian_verification",
             prompt_tokens=123,
             completion_tokens=45,
+            attempt_outcome="success",
         )
 
     def test_verify_claim_passes_through_unavailable_usage(self, monkeypatch):
@@ -581,6 +592,7 @@ class TestHumanitarianVerificationService:
             endpoint="humanitarian_verification",
             prompt_tokens=None,
             completion_tokens=None,
+            attempt_outcome="success",
         )
 
     def test_verify_claim_recovers_from_malformed_output_via_repair(self, monkeypatch):
@@ -622,6 +634,138 @@ class TestHumanitarianVerificationService:
         breaker = self.service._get_breaker("openai")
         assert breaker.allow_request() is True
 
+    def test_verify_claim_repair_retry_tracks_both_attempts_for_cost(self, monkeypatch):
+        """Verify that repair retries track both failed and successful attempts for cost attribution."""
+        # Mock cost settings in the service's metrics module
+        monkeypatch.setattr(
+            "services.humanitarian_verification.metrics.settings.llm_model_cost_per_1k_tokens",
+            {"gpt-4o-mini": {"prompt": 0.001, "completion": 0.002}},
+        )
+
+        provider = MagicMock(spec=ModelProvider)
+        provider.name = "openai"
+
+        # First attempt: truncated JSON (malformed) with token counts
+        # Second attempt (repair): valid JSON with token counts
+        provider.llm_chat.side_effect = [
+            LLMResponse(
+                content='{"verdict":"credible", "confi',
+                provider="openai",
+                model="gpt-4o-mini",
+                prompt_tokens=100,
+                completion_tokens=50,
+            ),
+            LLMResponse(
+                content='{"verdict":"credible","confidence":0.88,"summary":"Repaired successfully"}',
+                provider="openai",
+                model="gpt-4o-mini",
+                prompt_tokens=120,
+                completion_tokens=60,
+            ),
+        ]
+
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda p: "gpt-4o-mini"
+        )
+
+        # Get baseline metrics
+        before_failure_attempts = (
+            counter_value(
+                metrics.LLM_ATTEMPT_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                attempt_outcome="failure",
+            )
+            or 0
+        )
+        before_success_attempts = (
+            counter_value(
+                metrics.LLM_ATTEMPT_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                attempt_outcome="success",
+            )
+            or 0
+        )
+        before_failure_cost = (
+            counter_value(
+                metrics.LLM_COST_USD_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                attempt_outcome="failure",
+            )
+            or 0
+        )
+        before_success_cost = (
+            counter_value(
+                metrics.LLM_COST_USD_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                attempt_outcome="success",
+            )
+            or 0
+        )
+
+        result = self.service.verify_claim(
+            aid_claim="Shelter kits distributed to 200 families.",
+            supporting_evidence=[],
+            context_factors={},
+            provider_preference="openai",
+        )
+
+        assert result["verification"]["verdict"] == "credible"
+        assert provider.llm_chat.call_count == 2
+
+        # Verify both attempts were tracked separately
+        after_failure_attempts = counter_value(
+            metrics.LLM_ATTEMPT_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            attempt_outcome="failure",
+        )
+        after_success_attempts = counter_value(
+            metrics.LLM_ATTEMPT_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            attempt_outcome="success",
+        )
+        after_failure_cost = counter_value(
+            metrics.LLM_COST_USD_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            attempt_outcome="failure",
+        )
+        after_success_cost = counter_value(
+            metrics.LLM_COST_USD_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            attempt_outcome="success",
+        )
+
+        # One failed attempt (the malformed one)
+        assert after_failure_attempts == before_failure_attempts + 1
+        # One successful attempt (the repaired one)
+        assert after_success_attempts == before_success_attempts + 1
+
+        # Failed attempt cost: (100/1000)*0.001 + (50/1000)*0.002 = 0.0002
+        expected_failure_cost = before_failure_cost + 0.0002
+        assert after_failure_cost == pytest.approx(expected_failure_cost)
+
+        # Success attempt cost: (120/1000)*0.001 + (60/1000)*0.002 = 0.00024
+        expected_success_cost = before_success_cost + 0.00024
+        assert after_success_cost == pytest.approx(expected_success_cost)
+
     def test_verify_claim_refusal_raises_distinct_error_without_repair(
         self, monkeypatch
     ):
@@ -656,6 +800,88 @@ class TestHumanitarianVerificationService:
         # Circuit breaker should NOT record failure for content refusals
         breaker = self.service._get_breaker("openai")
         assert breaker.failure_count == 0
+
+    def test_verify_claim_refusal_tracks_as_failed_attempt(self, monkeypatch):
+        """Verify that provider refusals are tracked as failed attempts for cost attribution."""
+        # Mock cost settings in the service's metrics module
+        monkeypatch.setattr(
+            "services.humanitarian_verification.metrics.settings.llm_model_cost_per_1k_tokens",
+            {"gpt-4o-mini": {"prompt": 0.001, "completion": 0.002}},
+        )
+
+        provider = MagicMock(spec=ModelProvider)
+        provider.name = "openai"
+        provider.llm_chat.return_value = LLMResponse(
+            content="I cannot assist with this request as an AI language model.",
+            provider="openai",
+            model="gpt-4o-mini",
+            prompt_tokens=80,
+            completion_tokens=40,
+        )
+
+        mock_registry = MagicMock(spec=ProviderRegistry)
+        mock_registry.resolve_llm.return_value = [("openai", provider)]
+        monkeypatch.setattr(self.service, "registry", mock_registry)
+        monkeypatch.setattr(
+            self.service, "_get_model_for_provider", lambda p: "gpt-4o-mini"
+        )
+
+        # Get baseline metrics
+        before_failure_attempts = (
+            counter_value(
+                metrics.LLM_ATTEMPT_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                attempt_outcome="failure",
+            )
+            or 0
+        )
+        before_failure_cost = (
+            counter_value(
+                metrics.LLM_COST_USD_TOTAL,
+                provider="openai",
+                model="gpt-4o-mini",
+                endpoint="humanitarian_verification",
+                attempt_outcome="failure",
+            )
+            or 0
+        )
+
+        with pytest.raises(ProviderExhaustedError) as exc_info:
+            self.service.verify_claim(
+                aid_claim="Aid claim",
+                supporting_evidence=[],
+                context_factors={},
+                provider_preference="openai",
+            )
+
+        assert "declined to answer" in str(exc_info.value)
+        # Two attempts (primary + fallback prompt), both refused
+        assert provider.llm_chat.call_count == 2
+
+        # Verify both refusal attempts were tracked as failures
+        after_failure_attempts = counter_value(
+            metrics.LLM_ATTEMPT_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            attempt_outcome="failure",
+        )
+        after_failure_cost = counter_value(
+            metrics.LLM_COST_USD_TOTAL,
+            provider="openai",
+            model="gpt-4o-mini",
+            endpoint="humanitarian_verification",
+            attempt_outcome="failure",
+        )
+
+        # Two failed attempts (both refusals)
+        assert after_failure_attempts == before_failure_attempts + 2
+
+        # Cost for two refusal attempts: 2 * ((80/1000)*0.001 + (40/1000)*0.002) = 2 * 0.00016 = 0.00032
+        expected_cost = before_failure_cost + 0.00032
+        assert after_failure_cost == pytest.approx(expected_cost)
 
     def test_verify_claim_persistent_malformed_output_exhausts(self, monkeypatch):
         """When provider consistently returns malformed JSON, retries are exhausted and error recorded without tripping breaker."""
