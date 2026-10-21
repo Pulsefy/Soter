@@ -226,6 +226,10 @@ class HumanitarianVerificationService:
                             prompt_tokens=response.prompt_tokens,
                             completion_tokens=response.completion_tokens,
                         )
+                        metrics.record_provider_latency(
+                            provider=provider_name,
+                            latency_seconds=response.latency_ms / 1000.0,
+                        )
                         cost_usd = None
                         if (
                             response.prompt_tokens is not None

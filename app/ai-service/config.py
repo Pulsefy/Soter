@@ -181,6 +181,12 @@ class Settings(BaseSettings):
     # channel. Set to 0 to disable de-duplication.
     circuit_breaker_alert_dedup_seconds: float = 300.0
 
+    # Provider response latency SLA threshold in seconds.
+    # When a single provider call exceeds this duration, a
+    # ``provider_latency_sla_breaches_total`` counter is incremented and a
+    # warning is logged. Set to 0 to disable SLA breach counting.
+    provider_latency_sla_threshold_seconds: float = 5.0
+
     # Provider fallback ordering.
     # Explicit, operator-controlled ordering used when a request must fall back
     # across providers (e.g. under ``provider_preference="auto"``). Comma-
