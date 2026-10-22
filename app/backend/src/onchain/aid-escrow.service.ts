@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
   Optional,
 } from '@nestjs/common';
 import { AppException, ERROR_CODES } from '../common/dto/error-response.dto';
@@ -485,6 +486,63 @@ export class AidEscrowService {
     return this.withTxExplorerUrl({
       ...result,
       oldExpiresAt: finalOldExpiresAt,
+    });
+  }
+
+  async reassignPackage(
+    packageId: string,
+    newRecipient: string,
+    operatorAddress: string,
+  ) {
+    const existing = await this.onchainAdapter.getAidPackage({ packageId });
+    const pkg = existing.package;
+    if (!pkg.recipient) {
+      throw new NotFoundException('Aid package not found');
+    }
+    if (pkg.status === 'Claimed') {
+      throw new BadRequestException(
+        'Aid package is already claimed and cannot be reassigned',
+      );
+    }
+    if (
+      pkg.status === 'Expired' ||
+      pkg.expiresAt <= Math.floor(Date.now() / 1000)
+    ) {
+      throw new BadRequestException(
+        'Aid package has expired and cannot be reassigned',
+      );
+    }
+    if (pkg.status === 'Cancelled' || pkg.status === 'Refunded') {
+      throw new BadRequestException(
+        'Aid package has been revoked and cannot be reassigned',
+      );
+    }
+    if (pkg.status !== 'Created') {
+      throw new BadRequestException(
+        `Aid package is in status ${pkg.status} and cannot be reassigned`,
+      );
+    }
+
+    const result = await this.onchainAdapter.reassignPackage(
+      packageId,
+      newRecipient,
+    );
+    await this.auditService?.record({
+      actorId: operatorAddress,
+      entity: 'aid_package',
+      entityId: packageId,
+      action: 'reassign_package',
+      metadata: {
+        oldRecipient: pkg.recipient,
+        newRecipient,
+        transactionHash: result.transactionHash,
+      },
+    });
+
+    return this.withTxExplorerUrl({
+      ...result,
+      oldRecipient: pkg.recipient,
+      newRecipient,
     });
   }
 

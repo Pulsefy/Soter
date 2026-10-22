@@ -1,4 +1,12 @@
-import { IsString, IsOptional, IsNumber, IsArray, Min } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsArray,
+  Min,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -276,6 +284,20 @@ export class ExtendAidPackageExpiryDto {
   @IsNumber()
   @Min(1)
   newExpiresAt: number;
+}
+
+export class ReassignAidPackageDto {
+  @ApiProperty({
+    description: "Stellar address of the package's new recipient",
+    example: 'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ',
+  })
+  @IsString()
+  @MaxLength(56)
+  @Matches(/^[GCM][A-Z0-9]{55}$/, {
+    message:
+      'newRecipient must be a 56-character Stellar address starting with G, C, or M',
+  })
+  newRecipient: string;
 }
 
 // --- Delegate Operation DTOs ---

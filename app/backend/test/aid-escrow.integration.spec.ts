@@ -11,6 +11,7 @@ import {
   BatchCreateAidPackagesDto,
   ClaimAidPackageDto,
   ExtendAidPackageExpiryDto,
+  ReassignAidPackageDto,
 } from '../src/onchain/dto/aid-escrow.dto';
 import { ONCHAIN_ADAPTER_TOKEN } from '../src/onchain/onchain.adapter';
 import { SorobanEventCorrelationService } from '../src/onchain/soroban-event-correlation.service';
@@ -485,7 +486,109 @@ describe('AidEscrow Integration Tests', () => {
     });
   });
 
+  describe('Service: reassignPackage', () => {
+    const oldRecipient =
+      'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ';
+    const newRecipient =
+      'GA5ZSEJYB37JRC5AVCIA5MOP4GZ5DA47EL5QRUVLYEK2OOABEXVR5CV7';
+    const operatorAddress = 'GOPERATOR123';
+
+    it('reassigns an active package and audits both recipients', async () => {
+      const packageId = 'pkg-reassign-active';
+      await service.createAidPackage(
+        {
+          packageId,
+          recipientAddress: oldRecipient,
+          amount: '1000',
+          tokenAddress:
+            'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+          expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        },
+        operatorAddress,
+      );
+
+      const result = await service.reassignPackage(
+        packageId,
+        newRecipient,
+        operatorAddress,
+      );
+
+      expect(result.oldRecipient).toBe(oldRecipient);
+      expect(result.newRecipient).toBe(newRecipient);
+      expect((await mockAdapter.getAidPackage({ packageId })).package.recipient)
+        .toBe(newRecipient);
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: operatorAddress,
+          entity: 'aid_package',
+          entityId: packageId,
+          action: 'reassign_package',
+          metadata: expect.objectContaining({ oldRecipient, newRecipient }),
+        }),
+      );
+    });
+
+    it.each([
+      ['claimed', 'Claimed', 'Aid package is already claimed'],
+      ['revoked', 'Cancelled', 'Aid package has been revoked'],
+      ['expired', 'Expired', 'Aid package has expired'],
+    ] as const)(
+      'rejects reassignment of a %s package',
+      async (_state, status, errorMessage) => {
+        jest.spyOn(mockAdapter, 'getAidPackage').mockResolvedValueOnce({
+          package: {
+            id: 'pkg-reassign-rejected',
+            recipient: oldRecipient,
+            amount: '1000',
+            token: 'token',
+            status,
+            createdAt: Math.floor(Date.now() / 1000) - 60,
+            expiresAt: Math.floor(Date.now() / 1000) + 3600,
+          },
+          timestamp: new Date(),
+        });
+
+        await expect(
+          service.reassignPackage(
+            'pkg-reassign-rejected',
+            newRecipient,
+            operatorAddress,
+          ),
+        ).rejects.toThrow(errorMessage);
+        expect(mockAuditService.record).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   describe('Controller: REST endpoints', () => {
+    it('should handle admin POST /packages/:id/reassign', async () => {
+      const packageId = 'pkg-ctrl-reassign';
+      const oldRecipient =
+        'GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRSE53XSTE23JMCVOCJGXVSVZ';
+      await mockAdapter.createAidPackage({
+        operatorAddress: 'admin',
+        packageId,
+        recipientAddress: oldRecipient,
+        amount: '1000',
+        tokenAddress:
+          'GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ5LKG3FZTSZ3NYNEJBBENSN',
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      });
+      const dto: ReassignAidPackageDto = {
+        newRecipient:
+          'GA5ZSEJYB37JRC5AVCIA5MOP4GZ5DA47EL5QRUVLYEK2OOABEXVR5CV7',
+      };
+
+      const result = await controller.reassignPackage(
+        packageId,
+        dto,
+        createMockRequest('GADMIN123') as Request,
+      );
+
+      expect(result.newRecipient).toBe(dto.newRecipient);
+      expect(result.oldRecipient).toBe(oldRecipient);
+    });
+
     it('should handle POST /packages', async () => {
       const dto: CreateAidPackageDto = {
         packageId: 'pkg-001',
