@@ -57,6 +57,7 @@ __all__ = [
     "AUDIT_RECORD_SCHEMA_VERSION",
     "DecisionAuditRecord",
     "DecisionAuditStore",
+    "FraudOutcomeFeedback",
     "build_store_from_settings",
     "get_store",
     "set_store",
@@ -69,6 +70,10 @@ AUDIT_RECORD_SCHEMA_VERSION = "1"
 #: Number of appends between opportunistic retention sweeps. Pruning rewrites
 #: the whole log, so it must not run on every single write.
 _PRUNE_EVERY_N_WRITES = 100
+
+#: Decision type used for reviewer feedback records so they can be queried
+#: separately from the automated fraud/verification decisions they reference.
+FRAUD_FEEDBACK_DECISION_TYPE = "fraud_outcome_feedback"
 
 _SECONDS_PER_DAY = 86400.0
 
@@ -155,6 +160,46 @@ class DecisionAuditRecord:
     def from_dict(cls, data: Dict[str, Any]) -> "DecisionAuditRecord":
         known = set(cls.__dataclass_fields__)  # type: ignore[attr-defined]
         return cls(**{k: v for k, v in data.items() if k in known})
+
+
+@dataclass
+class FraudOutcomeFeedback:
+    """A reviewer's final decision on a flagged fraud claim.
+
+    This is a thin, sensitive-content-free view over the feedback audit
+    record: it references the original automated decision by ``record_id``
+    (the decision audit entry) rather than duplicating claim content, and
+    carries the predicted score/band alongside the human outcome so a
+    rolling-window report can compare predicted bands to actual outcomes.
+    """
+
+    feedback_id: str
+    decision_record_id: str
+    claim_id: Optional[str]
+    predicted_band: str
+    predicted_score: Optional[float]
+    actual_outcome: str
+    reviewer_id: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: float = field(default_factory=time.time)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_record(cls, record: DecisionAuditRecord) -> "FraudOutcomeFeedback":
+        meta = record.metadata or {}
+        return cls(
+            feedback_id=record.record_id,
+            decision_record_id=str(meta.get("decision_record_id", "")),
+            claim_id=record.claim_id,
+            predicted_band=str(meta.get("predicted_band", "")),
+            predicted_score=meta.get("predicted_score"),
+            actual_outcome=str(meta.get("actual_outcome", record.outcome)),
+            reviewer_id=meta.get("reviewer_id"),
+            notes=meta.get("notes"),
+            created_at=record.created_at,
+        )
 
 
 class DecisionAuditStore:
@@ -434,6 +479,111 @@ class DecisionAuditStore:
             if limit and limit > 0:
                 matches = matches[:limit]
             return matches
+
+    # -- fraud feedback loop ---------------------------------------------
+
+    def record_fraud_feedback(
+        self,
+        *,
+        decision_record_id: str,
+        actual_outcome: str,
+        reviewer_id: Optional[str] = None,
+        notes: Optional[str] = None,
+        claim_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        campaign_ref: Optional[str] = None,
+    ) -> Optional[DecisionAuditRecord]:
+        """Capture a reviewer's final decision on a flagged claim.
+
+        The feedback record *references* the original automated decision
+        audit entry by ``decision_record_id`` and copies only the score/band
+        needed for the rolling-window report. Claim content is never
+        duplicated here - it lives solely on the referenced decision record.
+        Returns ``None`` if the referenced decision is unknown or auditing is
+        disabled.
+        """
+        if not self.enabled:
+            return None
+        original = self.get(decision_record_id)
+        if original is None:
+            logger.warning(
+                "fraud_feedback_unknown_decision: %s",
+                decision_record_id,
+                extra={"event": "fraud_feedback_unknown_decision"},
+            )
+            return None
+
+        original_meta = original.metadata or {}
+        predicted_band = original_meta.get("band") or original.outcome
+        predicted_score = original_meta.get("score")
+        if predicted_score is None:
+            predicted_score = original.confidence
+
+        return self.record(
+            decision_type=FRAUD_FEEDBACK_DECISION_TYPE,
+            outcome=actual_outcome,
+            trace_id=trace_id or original.trace_id,
+            claim_id=claim_id or original.claim_id,
+            campaign_ref=campaign_ref or original.campaign_ref,
+            package_id=original.package_id,
+            org_id=original.org_id,
+            reasons=[f"reviewer_outcome:{actual_outcome}"],
+            metadata={
+                "decision_record_id": decision_record_id,
+                "predicted_band": predicted_band,
+                "predicted_score": predicted_score,
+                "actual_outcome": actual_outcome,
+                "reviewer_id": reviewer_id,
+                "notes": notes,
+            },
+        )
+
+    def fraud_feedback_report(
+        self,
+        *,
+        window_days: float = 30.0,
+        now: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Compare predicted fraud bands to actual reviewer outcomes.
+
+        Distinct from the fixture-based calibration report: this summarises
+        real-world outcomes captured via :meth:`record_fraud_feedback` over a
+        rolling window ending at *now* (defaults to wall-clock time).
+        """
+        end = now if now is not None else time.time()
+        start = end - (window_days * _SECONDS_PER_DAY)
+        feedback_records = self.query(
+            decision_type=FRAUD_FEEDBACK_DECISION_TYPE,
+            created_after=start,
+            created_before=end,
+            limit=0,
+        )
+
+        matrix: Dict[str, Dict[str, int]] = {}
+        band_totals: Dict[str, int] = {}
+        agreement = 0
+        total = 0
+        for record in feedback_records:
+            feedback = FraudOutcomeFeedback.from_record(record)
+            band = feedback.predicted_band or "unknown"
+            outcome = feedback.actual_outcome or "unknown"
+            matrix.setdefault(band, {})
+            matrix[band][outcome] = matrix[band].get(outcome, 0) + 1
+            band_totals[band] = band_totals.get(band, 0) + 1
+            total += 1
+            if band == outcome:
+                agreement += 1
+
+        return {
+            "window_days": window_days,
+            "window_start": start,
+            "window_end": end,
+            "total_feedback": total,
+            "agreement_count": agreement,
+            "agreement_rate": (agreement / total) if total else None,
+            "band_totals": band_totals,
+            "confusion": matrix,
+        }
 
     def __len__(self) -> int:
         with self._lock:
