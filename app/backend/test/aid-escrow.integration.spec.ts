@@ -515,8 +515,9 @@ describe('AidEscrow Integration Tests', () => {
 
       expect(result.oldRecipient).toBe(oldRecipient);
       expect(result.newRecipient).toBe(newRecipient);
-      expect((await mockAdapter.getAidPackage({ packageId })).package.recipient)
-        .toBe(newRecipient);
+      expect(
+        (await mockAdapter.getAidPackage({ packageId })).package.recipient,
+      ).toBe(newRecipient);
       expect(mockAuditService.record).toHaveBeenCalledWith(
         expect.objectContaining({
           actorId: operatorAddress,
