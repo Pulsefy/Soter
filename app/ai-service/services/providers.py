@@ -137,6 +137,11 @@ KNOWN_LLM_PROVIDERS = frozenset({"openai", "groq", "test"})
 KNOWN_OCR_PROVIDERS = frozenset({"test", "tesseract"})
 KNOWN_CAPABILITIES = frozenset({"llm", "ocr"})
 
+# Bounded wait (seconds) that a coalesced follower will wait for the leader's
+# result before giving up and retrying independently. Keeps a failed/slow
+# leader from blocking a waiting request indefinitely (issue #615).
+DEDUP_WAIT_TIMEOUT_SECONDS = 30.0
+
 
 def is_authentication_error(status_code: int) -> bool:
     """Determine if an HTTP error is an authentication failure (issue #1411).
@@ -303,6 +308,88 @@ class ModelProvider(ABC):
 
 
 # ---------------------------------------------------------------------------
+# Request deduplication
+# ---------------------------------------------------------------------------
+
+
+class _InFlightCall:
+    """Tracks a single in-flight provider call so followers can await it."""
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.result: Optional[Any] = None
+        self.error: Optional[BaseException] = None
+
+
+class RequestDeduplicator:
+    """Coalesce near-simultaneous identical provider calls.
+
+    Concurrent callers that present the same key will share a single
+    underlying provider invocation: the first caller (the "leader") performs
+    the call while subsequent callers (the "followers") wait for and receive
+    the leader's result. If the leader fails, followers are released and
+    retry independently rather than blocking indefinitely.
+    """
+
+    def __init__(self, wait_timeout: float = DEDUP_WAIT_TIMEOUT_SECONDS) -> None:
+        self._lock = threading.Lock()
+        self._in_flight: Dict[Any, _InFlightCall] = {}
+        self._wait_timeout = wait_timeout
+
+    def execute(self, key: Any, func: Any) -> Any:
+        """Run ``func`` deduplicated by ``key``.
+
+        The first caller for ``key`` runs ``func`` and publishes its result
+        (or exception) to any waiters. Waiters receive the leader's result;
+        if the leader raised, waiters retry ``func`` themselves. A waiter
+        that times out waiting also retries independently.
+        """
+        with self._lock:
+            call = self._in_flight.get(key)
+            if call is None:
+                call = _InFlightCall()
+                self._in_flight[key] = call
+                is_leader = True
+            else:
+                is_leader = False
+
+        if is_leader:
+            try:
+                result = func()
+            except BaseException as exc:  # noqa: BLE001 - propagate to waiters
+                call.error = exc
+                call.event.set()
+                with self._lock:
+                    self._in_flight.pop(key, None)
+                raise
+            call.result = result
+            call.event.set()
+            with self._lock:
+                self._in_flight.pop(key, None)
+            return result
+
+        # Follower: wait for the leader, bounded so a hung leader can't
+        # block us forever. On timeout or leader failure, retry independently.
+        if call.event.wait(self._wait_timeout):
+            if call.error is None:
+                return call.result
+            logger.warning(
+                "Deduplicated provider call failed; follower retrying: %s",
+                call.error,
+            )
+        else:
+            logger.warning(
+                "Deduplicated provider call timed out after %ss; retrying",
+                self._wait_timeout,
+            )
+        return func()
+
+
+# Module-level deduplicator shared across provider calls.
+_request_deduplicator = RequestDeduplicator()
+
+
+# ---------------------------------------------------------------------------
 # OpenAI provider
 # ---------------------------------------------------------------------------
 
@@ -325,14 +412,24 @@ class OpenAIProvider(ModelProvider):
         if not settings.openai_api_key:
             raise RuntimeError("OpenAI API key is not configured")
         resolved_model = model or settings.openai_model
-        return self._call_chat_completion(
-            base_url="https://api.openai.com/v1/chat/completions",
-            api_key=settings.openai_api_key,
-            fallback_api_key=settings.openai_fallback_api_key,
-            model=resolved_model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            timeout=timeout,
+        dedup_key = (
+            "llm",
+            self.name,
+            resolved_model,
+            system_prompt,
+            user_prompt,
+        )
+        return _request_deduplicator.execute(
+            dedup_key,
+            lambda: self._call_chat_completion(
+                base_url="https://api.openai.com/v1/chat/completions",
+                api_key=settings.openai_api_key,
+                fallback_api_key=settings.openai_fallback_api_key,
+                model=resolved_model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                timeout=timeout,
+            ),
         )
 
     def llm_chat_stream(
@@ -610,14 +707,24 @@ class GroqProvider(ModelProvider):
         if not settings.groq_api_key:
             raise RuntimeError("Groq API key is not configured")
         resolved_model = model or settings.groq_model
-        return OpenAIProvider._call_chat_completion(
-            base_url="https://api.groq.com/openai/v1/chat/completions",
-            api_key=settings.groq_api_key,
-            fallback_api_key=settings.groq_fallback_api_key,
-            model=resolved_model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            timeout=timeout,
+        dedup_key = (
+            "llm",
+            self.name,
+            resolved_model,
+            system_prompt,
+            user_prompt,
+        )
+        return _request_deduplicator.execute(
+            dedup_key,
+            lambda: OpenAIProvider._call_chat_completion(
+                base_url="https://api.groq.com/openai/v1/chat/completions",
+                api_key=settings.groq_api_key,
+                fallback_api_key=settings.groq_fallback_api_key,
+                model=resolved_model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                timeout=timeout,
+            ),
         )
 
     def llm_chat_stream(

@@ -18,8 +18,8 @@ def _clear_inflight_state():
     """Reset module-level single-flight tracking dicts between tests.
 
     ``_inflight_computations``, ``_inflight_results`` and
-    ``_inflight_errors`` are module-level singletons in
-    ``services.cache``.  Without explicit cleanup, stale entries from a
+    ``_inflight_errors`c are module-level singletons in
+    `services.cache`.  Without explicit cleanup, stale entries from a
     previous test can trick the single-flight suppression logic into
     thinking a concurrent computation is already in flight, causing the
     wrapped function to never be called (call_count stays 0).
@@ -238,3 +238,76 @@ class TestCacheStampedePrevention:
             assert results[1] == "result_value2"
             assert results[2] == "result_value1"
             assert results[3] == "result_value2"
+
+    @pytest.mark.asyncio
+    async def test_near_simultaneous_identical_requests_single_provider_call(self):
+        """Two near-simultaneous identical requests must coalesce into a single provider call.
+
+        This models a double-submit from a flaky mobile client retry: both
+        requests arrive before either completes, so both would otherwise pass
+        the cache-miss check and duplicate the provider call.
+        """
+        mock_cache = Mock()
+        mock_cache.enabled = True
+        mock_cache.get = Mock(return_value=None)
+        mock_cache._generate_key = Mock(return_value="same_artifact_key")
+        mock_cache.set = Mock(return_value=True)
+
+        provider_calls = 0
+
+        @cached_response(prefix="artifact", ttl_seconds=60)
+        async def fetch_artifact(artifact_id):
+            nonlocal provider_calls
+            provider_calls += 1
+            await asyncio.sleep(0.05)
+            return f"artifact_body_{artifact_id}"
+
+        with patch("main.app") as mock_app:
+            mock_app.state.cache = mock_cache
+
+            # Fire two identical requests without awaiting between them.
+            task1 = asyncio.create_task(fetch_artifact(artifact_id="art-123"))
+            task2 = asyncio.create_task(fetch_artifact(artifact_id="art-123"))
+
+            result1, result2 = await asyncio.gather(task1, task2)
+
+            assert provider_calls == 1, f"Expected 1 provider call, got {provider_calls}"
+            assert result1 == "artifact_body_art-123"
+            assert result2 == "artifact_body_art-123"
+            assert mock_cache.set.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_leader_does_not_block_waiter_indefinitely(self):
+        """A failure in the leading request must not block the waiting request
+        indefinitely; the waiter retries independently after a bounded wait.
+        """
+        mock_cache = Mock()
+        mock_cache.enabled = True
+        mock_cache.get = Mock(return_value=None)
+        mock_cache._generate_key = Mock(return_value="same_artifact_key")
+        mock_cache.set = Mock(return_value=True)
+
+        provider_calls = 0
+
+        @cached_response(prefix="artifact", ttl_seconds=60)
+        async def fetch_artifact(artifact_id):
+            nonlocal provider_calls
+            provider_calls += 1
+            if provider_calls == 1:
+                await asyncio.sleep(0.05)
+                raise RuntimeError("provider blew up")
+            return f"artifact_body_{artifact_id}"
+
+        with patch("main.app") as mock_app:
+            mock_app.state.cache = mock_cache
+
+            task1 = asyncio.create_task(fetch_artifact(artifact_id="art-456"))
+            task2 = asyncio.create_task(fetch_artifact(artifact_id="art-456"))
+
+            results = await asyncio.gather(task1, task2, return_exceptions=True)
+
+            # The leader failed; the waiter must not hang or receive the
+            # leader's exception -- it should retry independently and succeed.
+            assert isinstance(results[0], RuntimeError)
+            assert results[1] == "artifact_body_art-456"
+            assert provider_calls == 2
