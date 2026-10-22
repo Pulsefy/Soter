@@ -24,7 +24,7 @@ The OCR Regression Harness is a tool designed to prevent extraction accuracy reg
    export PYTHONPATH=.
    python regression_harness/cli.py
    ```
-   *Note: On Windows, use `set PYTHONPATH=.`*
+   * Note: On Windows, use `set PYTHONPATH=`.**
 
 ### CLI Options
 
@@ -55,11 +55,11 @@ The OCR Regression Harness is a tool designed to prevent extraction accuracy reg
 ## Error Classification
 
 Failures are categorized into one of these groups:
-- **Missing field**: A required field was not detected by the OCR service.
-- **Incorrect value**: The field was detected but the value didn't match the ground truth.
-- **Unexpected field**: OCR extracted a field that wasn't defined in the ground truth.
-- **Low confidence**: The field matched but OCR engine's confidence was below the threshold.
-- **Image not found**: The specified image path in ground truth is invalid.
+- `Missing field`: A required field was not detected by the OCR service.
+- `Incorrect value`: The field was detected but the value didn't match the ground truth.
+- `Unexpected field`: OCR extracted a field that wasn't defined in the ground truth.
+- `Low confidence`: The field matched but OCR engine's confidence was below the threshold.
+- `Image not found`: The specified image path in ground truth is invalid.
 
 ## CI Integration
 
@@ -142,7 +142,7 @@ Then commit the updated `baseline_metrics.json` together with the change that ca
 
 Accuracy alone does not say whether the service *knows* when it is right. The same harness run also produces a **confidence calibration report**: every golden case is bucketed by the confidence the service reported for its predicted verdict, and each bucket's mean stated confidence is compared against its measured accuracy.
 
-- A band whose accuracy is far from its stated confidence is **flagged** as miscalibrated (overconfident or underconfident), not merely tabulated.
+- A band whose accuracy is far from its stated confidence is **lagged** as miscalibrated (overconfident or underconfident), not merely tabulated.
 - The report is written automatically on every harness run to `reports/confidence_calibration.md` (repo root), alongside the existing `reports/fraud_threshold_calibration.md`, and the full calibration JSON is embedded in the `--output` report under the `calibration` key.
 - The case-weighted expected calibration error and the maximum band error are reported as aggregate numbers; a band is flagged when `abs(mean_confidence - accuracy)` exceeds the tolerance (default `0.2`).
 
@@ -159,9 +159,53 @@ python regression_harness/run_accuracy_harness.py --calibration-report /tmp/cali
 
 Re-run the harness after any change to the verification logic or the golden set, and commit the regenerated `reports/confidence_calibration.md` with the change. By default miscalibration is reported and flagged but does not change the exit code, so the scheduled regression job keeps failing only on accuracy regressions; pass `--fail-on-miscalibration` where a hard gate is wanted.
 
+## Dry-Run Mode for Prompt Changes
+
+When you are actively iterating on a prompt change, you often want to see "here's what changed in the model's output for these N representative cases" without running the full regression suite and waiting for the scheduled comparison. The dry-run mode runs a **draft** (not-yet-active) prompt version against a small representative subset of the golden fixtures and diffs the results against the currently-active prompt version's results.
+
+### How to Run a Dry-Run
+
+From the `app/ai-service` directory:
+
+```bash
+python regression_harness/run_prompt_dry_tool.py --draft-prompt <path-to-draft-prompt>
+```
+
+The draft prompt is run against the representative subset and the active prompt is run against the same subset; the tool then prints a per-case diff. Exit codes are consistent with the accuracy harness:
+
+- `0`: No verdict changes detected.
+- `2`: Invalid fixtures, arguments, or draft prompt.
+
+Optional flags:
+
+- `--draft-prompt <path>`: Path to the draft prompt version to evaluate (required).
+- `--fixtures <path>`: Path to the golden-set JSON file (default: `fixtures/golden_fixtures.json`).
+- `--subset <path>`: Path to a JSON file listing the representative case IDs to run (default: a representative subset derived from the golden set).
+- `--output <path>`: Write a machine-readable JSON report of the draft vs. active diff to the given path.
+
+### Understanding the Diff Output
+
+The diff highlights cases where the **verdict itself changed** (`approve`, `reject`, or `ambiguous`), not just minor score drift. Each case is labelled as one of the following:
+
+- `VERDICT CHANGED: <active> -> <draft>`: The vocabulary label changed. These are the cases to inspect first.
+- `score drift`: The verdict is unchanged but the confidence score moved beyond the configured tolerance.
+- `unchanged`: Neither the verdict nor the score moved meaningfully.
+
+A case whose verdict changed is always reported at the top of the output, so a contributor can quickly judge whether the prompt change is behaving as intended.
+
+### Representative Subset
+
+By default the dry-run uses a small representative subset of the golden set (at least one case per verdict category) so it runs in seconds. Pass `--subset` to point at a custom JSON file containing an array of case IDs, e.g.:
+
+```json
+["approve_001", "reject_001", "ambiguous_001"]
+```
+
+The dry-run is intended for fast iteration during development. Once the diff looks right, run the full accuracy harness (and the scheduled regression job) to confirm no regressions before merging.
+
 ## Scheduled Regression Runs
 
-`.github/workflows/ai-regression.yml` runs the harness daily at 06:00 UTC and also supports manual dispatch.
+.github/workflows/ai-regression.yml` runs the harness daily at 06:00 UTC and also supports manual dispatch.
 It executes the current `HumanitarianPromptEngine` code with the deterministic fixture provider, so scheduled runs are offline and reproducible while still exercising the active prompt-building implementation.
 
 Each run writes `regression-report.json`, compares it with the committed baseline, adds the result to the GitHub Actions job summary, and uploads the report as a 90-day artifact named `ai-regression-<run-id>`.
