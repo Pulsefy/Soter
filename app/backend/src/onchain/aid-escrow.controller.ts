@@ -10,6 +10,7 @@ import {
   Req,
   Query,
   Logger,
+  HttpException,
 } from '@nestjs/common';
 import { Request } from 'express';
 import {
@@ -29,6 +30,7 @@ import {
   BatchCreateAidPackagesDto,
   DryRunAidPackageResultDto,
   ExtendAidPackageExpiryDto,
+  ReassignAidPackageDto,
   SetDelegateDto,
 } from './dto/aid-escrow.dto';
 import { CONTRACT_ERROR_CATALOG } from './utils/contract-error-catalog';
@@ -365,6 +367,44 @@ export class AidEscrowController {
       );
     } catch (error) {
       this.logger.error('Failed to extend aid package expiry:', error);
+      this.errorMapper.throwMappedError(error);
+    }
+  }
+
+  @Post('packages/:id/reassign')
+  @Roles(AppRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reassign an aid package recipient',
+    description:
+      'Moves an unclaimed, unrevoked, unexpired package to a new recipient while preserving its on-chain identity and history. Admin only.',
+  })
+  @ApiOkResponse({ description: 'Package recipient reassigned successfully.' })
+  @ApiBadRequestResponse({
+    description:
+      'Package is claimed, revoked, or expired and cannot be reassigned.',
+  })
+  @ApiNotFoundResponse({ description: 'Package does not exist.' })
+  @ApiInternalServerErrorResponse({
+    description: 'Blockchain transaction failed.',
+  })
+  async reassignPackage(
+    @Param('id') packageId: string,
+    @Body() dto: ReassignAidPackageDto,
+    @Req() req: Request & { user?: { address?: string; id?: string } },
+  ) {
+    try {
+      const operatorAddress = req.user?.address || req.user?.id || 'admin';
+      return await this.aidEscrowService.reassignPackage(
+        packageId,
+        dto.newRecipient,
+        operatorAddress,
+      );
+    } catch (error) {
+      this.logger.error('Failed to reassign aid package:', error);
+      if (error instanceof HttpException) {
+        throw error;
+      }
       this.errorMapper.throwMappedError(error);
     }
   }

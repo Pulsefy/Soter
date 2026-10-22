@@ -28,6 +28,7 @@ import {
   DisburseAidPackageResult,
   ExtendAidPackageExpiryParams,
   ExtendAidPackageExpiryResult,
+  ReassignPackageResult,
   GetAidPackageParams,
   GetAidPackageResult,
   GetAidPackageCountParams,
@@ -638,6 +639,32 @@ export class SorobanAdapter implements OnchainAdapter {
         oldExpiresAt,
         newExpiresAt: params.newExpiresAt,
       },
+    };
+  }
+
+  async reassignPackage(
+    packageId: string,
+    newRecipient: string,
+  ): Promise<ReassignPackageResult> {
+    this.ensureConfigured();
+    const cid = this.correlationId();
+    this.logger.log(
+      `[${cid}] reassignPackage id=${packageId} newRecipient=${newRecipient}`,
+    );
+
+    const { hash } = await this.submitContractOp(
+      'reassign_package',
+      [this.scvU64(parseInt(packageId, 10)), this.scvAddress(newRecipient)],
+      cid,
+    );
+
+    return {
+      packageId,
+      transactionHash: hash,
+      timestamp: new Date(),
+      status: 'success',
+      newRecipient,
+      metadata: { contractId: this.contractId },
     };
   }
 

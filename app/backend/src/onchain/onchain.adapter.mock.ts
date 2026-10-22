@@ -18,6 +18,7 @@ import {
   DisburseAidPackageResult,
   ExtendAidPackageExpiryParams,
   ExtendAidPackageExpiryResult,
+  ReassignPackageResult,
   GetAidPackageParams,
   GetAidPackageResult,
   GetAidPackageCountParams,
@@ -467,6 +468,49 @@ export class MockOnchainAdapter implements OnchainAdapter {
         operatorAddress: params.operatorAddress,
         adapter: 'mock',
       },
+    };
+  }
+
+  async reassignPackage(
+    packageId: string,
+    newRecipient: string,
+  ): Promise<ReassignPackageResult> {
+    await Promise.resolve();
+    const pkg = this.mockPackages.get(packageId);
+    if (!pkg) {
+      throw new BadRequestException('Aid package not found');
+    }
+    if (pkg.status === 'Claimed') {
+      throw new BadRequestException(
+        'Aid package is already claimed and cannot be reassigned',
+      );
+    }
+    if (
+      pkg.status === 'Expired' ||
+      pkg.expiresAt <= Math.floor(Date.now() / 1000)
+    ) {
+      pkg.status = 'Expired';
+      throw new BadRequestException(
+        'Aid package has expired and cannot be reassigned',
+      );
+    }
+    if (pkg.status !== 'Created') {
+      throw new BadRequestException(
+        'Aid package has been revoked and cannot be reassigned',
+      );
+    }
+
+    pkg.recipient = newRecipient;
+    const transactionHash = this.generateMockHash(
+      `reassign-package-${packageId}-${newRecipient}-${Date.now()}`,
+    );
+    return {
+      packageId,
+      transactionHash,
+      timestamp: new Date(),
+      status: 'success',
+      newRecipient,
+      metadata: { adapter: 'mock' },
     };
   }
 

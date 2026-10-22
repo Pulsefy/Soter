@@ -299,6 +299,15 @@ export interface ExtendAidPackageExpiryResult {
   metadata?: Record<string, any>;
 }
 
+export interface ReassignPackageResult {
+  packageId: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  newRecipient: string;
+  metadata?: Record<string, any>;
+}
+
 export interface AdminState {
   adminAddress: string;
   pendingAdminAddress: string | null;
@@ -506,6 +515,12 @@ export interface OnchainAdapter {
   extendAidPackageExpiry(
     params: ExtendAidPackageExpiryParams,
   ): Promise<ExtendAidPackageExpiryResult>;
+
+  /** Reassign an unclaimed, unexpired package to a new recipient. */
+  reassignPackage(
+    packageId: string,
+    newRecipient: string,
+  ): Promise<ReassignPackageResult>;
 
   /**
    * Get details of an aid package
