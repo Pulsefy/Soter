@@ -117,3 +117,15 @@ Lifecycle ─archive()/expiry─────────▶ status: archived
 - Cancel/reissue events: `app/backend/src/claims/claim.events.ts`, `cancel-and-reissue.service.ts`
 - Verification pipeline: `app/backend/src/verification/verification.processor.ts`, `verification.service.ts`, `verification-flow.service.ts`
 - Integration test of the wiring: `app/backend/src/claims/claims-verification.integration.spec.ts`
+
+
+## Replaying verification for one claim
+
+An admin can re-run verification for a single claim with
+`POST /claims/:id/reverify` (body: `{ "reason": string, "override"?: boolean }`).
+The endpoint re-enqueues the same verification job used at claim creation and
+writes an audit entry (`entity: 'claim'`, `action: 'reverify'`) containing the
+reason, actor, previous status and whether the override flag was used. Claims
+in a terminal state (`disbursed`, `archived`, `cancelled`) are rejected with
+`409 Conflict` unless `override: true` is sent; the override is recorded in the
+audit entry. The claim's status is not changed by the replay itself.

@@ -48,6 +48,7 @@ import { CreateInternalNoteDto } from 'src/common/dto/create-internal-note.dto';
 import { InternalNoteResponseDto } from 'src/common/dto/internal-note-response.dto';
 import { SorobanEventCorrelationService } from '../onchain/soroban-event-correlation.service';
 import { streamCsvResponse } from '../common/csv/stream-csv-response';
+import { ReverifyClaimDto } from './dto/reverify-claim.dto';
 
 @ApiTags('Onchain Proxy')
 @ApiBearerAuth('JWT-auth')

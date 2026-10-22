@@ -31,6 +31,14 @@ import { streamCursorPaginated } from '../common/streaming/cursor-paginate';
 import { VerificationService } from '../verification/verification.service';
 import { readPersistedVerificationResult } from '../verification/verification-result.persistence';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { ReverifyClaimDto } from './dto/reverify-claim.dto';
+
+/** Claims in these states are finished; replaying verification needs an explicit override. */
+const REVERIFY_TERMINAL_STATUSES: ClaimStatus[] = [
+  ClaimStatus.disbursed,
+  ClaimStatus.archived,
+  ClaimStatus.cancelled,
+];
 
 export interface ClaimExportRow {
   id: string;
@@ -259,6 +267,46 @@ export class ClaimsService {
    * score did not clear the threshold - cannot be marked verified.
    */
   async verify(id: string) {
+
+      /**
+   * Admin replay: re-enqueue verification for one claim and record who/why.
+   * Claims in a terminal state are rejected unless `override` is set; the
+   * override is written to the audit log.
+   */
+  async reverifyClaim(claimId: string, dto: ReverifyClaimDto, actorId: string) {
+    const claim = await this.prisma.claim.findUnique({ where: { id: claimId } }); // CHECK: same prisma field name other methods use
+
+    if (!claim) {
+      throw new NotFoundException(`Claim ${claimId} not found`);
+    }
+
+    const override = dto.override === true;
+    const terminal = REVERIFY_TERMINAL_STATUSES.includes(claim.status);
+
+    if (terminal && !override) {
+      throw new ConflictException(
+        `Claim ${claimId} is ${claim.status}; set override=true to re-verify a terminal claim`,
+      );
+    }
+
+    await this.enqueueVerificationForClaim(claim.id); // CHECK: signature from Step 3 (id vs object, unique jobId for replays)
+
+    await this.auditService.record({
+      // CHECK: service/method/field names from Step 3
+      actorId,
+      entity: 'claim',
+      entityId: claim.id,
+      action: 'reverify',
+      metadata: {
+        reason: dto.reason,
+        override,
+        previousStatus: claim.status,
+      },
+    });
+
+    return { claimId: claim.id, status: claim.status, queued: true };
+  }
+  
     const claim = await this.prisma.claim.findUnique({ where: { id } });
     if (!claim) {
       throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');

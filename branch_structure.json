@@ -1,0 +1,21 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "feat/reverify-claim-endpoint",
+    "fix/issue-1389-add-an-endpoint-to-replay-a-single-claim",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "feat/reverify-claim-endpoint": "main",
+    "fix/issue-1389-add-an-endpoint-to-replay-a-single-claim": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "feat/reverify-claim-endpoint",
+    "fix/issue-1389-add-an-endpoint-to-replay-a-single-claim",
+    "origin"
+  ]
+}
