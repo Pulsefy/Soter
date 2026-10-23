@@ -3,11 +3,14 @@ v1 inference endpoints (task queue).
 """
 
 import logging
+import hashlib
+import json
+import time
 from typing import Any, Dict, Optional
 from datetime import datetime
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Header
 from pydantic import BaseModel, Field, HttpUrl, validator
 
 import tasks
@@ -16,6 +19,9 @@ from services.cache import cached_response
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+# Bounded window (seconds) during which an idempotency key is honored.
+IDEMPOTENCY_WINDOW_SECONDS = 24 * 60 * 60
 
 router = APIRouter(tags=["inference"])
 
@@ -103,10 +109,53 @@ class TaskStatusResponse(BaseModel):
     metadata: Optional[ContractMetadata] = None
 
 
+# In-memory idempotency store: key -> {"fingerprint": str, "response": dict, "expires_at": float}
+_IDEMPOTENCY_STORE: Dict[str, Dict[str, Any]] = {}
+
+
+def _fingerprint_request(request: "InferenceRequest") -> str:
+    """Compute a stable fingerprint of the request payload for conflict detection."""
+    canonical = json.dumps(
+        request.dict(exclude_none=True),
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _lookup_idempotent(key: str, fingerprint: str) -> Optional[Dict[str, Any]]:
+    """Return cached response for a matching key, or raise on conflict. None if absent/expired."""
+    entry = _IDEMPOTENCY_STORE.get(key)
+    if entry is None:
+        return None
+    if entry["expires_at"] <= time.time():
+        _IDEMPOTENCY_STORE.pop(key, None)
+        return None
+    if entry["fingerprint"] != fingerprint:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Idempotency key conflict: the same key was used with a "
+                "different request payload."
+            ),
+        )
+    return entry["response"]
+
+
+def _store_idempotent(key: str, fingerprint: str, response: Dict[str, Any]) -> None:
+    """Persist the response for a key within the bounded window."""
+    _IDEMPOTENCY_STORE[key] = {
+        "fingerprint": fingerprint,
+        "response": response,
+        "expires_at": time.time() + IDEMPOTENCY_WINDOW_SECONDS,
+    }
+
+
 @router.post("/ai/inference")
 async def create_inference_task(
     request: InferenceRequest,
     background_tasks: BackgroundTasks,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
     """
     Create a background task for heavy AI inference.
@@ -118,8 +167,21 @@ async def create_inference_task(
 
     Contract-aware metadata fields are used to anchor verification results
     to on-chain events during Testnet demos.
+
+    An optional ``Idempotency-Key`` header may be supplied. A resubmission
+    with the same key and payload within the bounded window returns the
+    original result; a resubmission with the same key but a different
+    payload is rejected with ``409 Conflict``.
     """
     logger.info(f"Creating inference task of type: {request.type}")
+
+    fingerprint: Optional[str] = None
+    if idempotency_key:
+        fingerprint = _fingerprint_request(request)
+        cached = _lookup_idempotent(idempotency_key, fingerprint)
+        if cached is not None:
+            logger.info(f"Idempotent replay for key: {idempotency_key}")
+            return cached
 
     # Validate metadata if provided
     metadata_errors = []
@@ -171,7 +233,7 @@ async def create_inference_task(
             payload=payload,
         )
 
-        return {
+        response = {
             "success": True,
             "task_id": task_id,
             "status": "pending",
@@ -179,6 +241,11 @@ async def create_inference_task(
             "status_url": f"/v1/ai/status/{task_id}",
             "metadata": payload.get("metadata"),
         }
+
+        if idempotency_key and fingerprint is not None:
+            _store_idempotent(idempotency_key, fingerprint, response)
+
+        return response
 
     except LoadShedError:
         raise

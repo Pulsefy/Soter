@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1434-add-a-replay-safe-idempotency-key-to-inference",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-1434-add-a-replay-safe-idempotency-key-to-inference": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1434-add-a-replay-safe-idempotency-key-to-inference",
+    "origin"
+  ]
+}
