@@ -546,3 +546,395 @@ mod simultaneous_claims {
         );
     }
 }
+
+// ===========================================================================
+// Batch operations under partial failure.
+//
+// `batch_revoke` and `batch_refund` are partial: every requested id is
+// evaluated independently and the per-id `BatchAdminActionResult` reports
+// whether that item succeeded, was not found, was in the wrong state, etc.
+// `batch_create_packages` is all-or-nothing: a single invalid entry aborts
+// the whole call.
+//
+// In every case the aggregate ledgers (`get_total_locked`,
+// `get_total_claimed`) must move by exactly the amounts of the ids that
+// actually took effect — never by the full requested batch — and the per-id
+// results must flag which ids failed and why.
+// ===========================================================================
+
+mod batch_partial_failure {
+    use super::*;
+    use aid_escrow::{BatchAdminActionResult, BatchAdminActionStatus, Error, PackageStatus};
+    use soroban_sdk::{testutils::Ledger, Vec};
+
+    /// Shared fixture: one admin-funded escrow and one 7-decimal token.
+    struct Fixture {
+        env: Env,
+        client: AidEscrowClient<'static>,
+        admin: Address,
+        token: Address,
+    }
+
+    impl Fixture {
+        fn new(funded_units: i128) -> Self {
+            let env = Env::default();
+            env.mock_all_auths();
+
+            let admin = Address::generate(&env);
+            let token_admin = Address::generate(&env);
+            let token_contract = env.register_stellar_asset_contract_v2(token_admin);
+            let token = token_contract.address();
+            let token_admin_client = StellarAssetClient::new(&env, &token);
+
+            let contract_id = env.register(AidEscrow, ());
+            let client = AidEscrowClient::new(&env, &contract_id);
+            client.init(&admin);
+
+            let funded = funded_units * UNIT;
+            token_admin_client.mint(&admin, &funded);
+            client.fund(&token, &admin, &funded);
+
+            Fixture {
+                env,
+                client,
+                admin,
+                token,
+            }
+        }
+
+        /// Creates `count` equal packages with auto-incremented ids via the
+        /// batch entry point.
+        fn create_batch(&self, count: u32, expires_in: u64) -> Vec<u64> {
+            let mut recipients = Vec::new(&self.env);
+            let mut amounts = Vec::new(&self.env);
+            let mut metadatas = Vec::new(&self.env);
+            for _ in 0..count {
+                recipients.push_back(Address::generate(&self.env));
+                amounts.push_back(UNIT);
+                metadatas.push_back(Map::new(&self.env));
+            }
+            self.client.batch_create_packages(
+                &self.admin,
+                &recipients,
+                &amounts,
+                &self.token,
+                &expires_in,
+                &metadatas,
+            )
+        }
+
+        /// Creates one package with an explicit id and absolute expiry.
+        fn create_at(&self, id: u64, expires_at: u64) -> u64 {
+            self.client.create_package(
+                &self.admin,
+                &id,
+                &Address::generate(&self.env),
+                &UNIT,
+                &self.token,
+                &expires_at,
+                &Map::new(&self.env),
+            )
+        }
+
+        fn locked(&self) -> i128 {
+            self.client.get_total_locked(&self.token)
+        }
+
+        fn claimed(&self) -> i128 {
+            self.client.get_total_claimed(&self.token)
+        }
+
+        fn admin_balance(&self) -> i128 {
+            TokenClient::new(&self.env, &self.token).balance(&self.admin)
+        }
+    }
+
+    /// Asserts one per-id result echoes the requested id, reports the expected
+    /// status, and carries a payout only when it succeeded.
+    fn assert_result(
+        result: &BatchAdminActionResult,
+        expected_id: u64,
+        expected_status: BatchAdminActionStatus,
+    ) {
+        assert_eq!(
+            result.package_id, expected_id,
+            "the per-id result must echo the requested id"
+        );
+        assert_eq!(
+            result.status, expected_status,
+            "unexpected status for id {expected_id}"
+        );
+        if expected_status == BatchAdminActionStatus::Success {
+            assert_eq!(
+                result.amount, UNIT,
+                "a successful item must report the amount it moved"
+            );
+        } else {
+            assert_eq!(
+                result.amount, 0,
+                "a failed item must not report a payout (id {expected_id})"
+            );
+        }
+    }
+
+    /// `batch_revoke` with an already-claimed package in the mix: the
+    /// claimed id is rejected, so only the genuinely revoked ids unlock
+    /// funds. `total_locked` must drop by the successful subset alone and
+    /// `total_claimed` must be untouched.
+    #[test]
+    fn batch_revoke_aggregates_reflect_only_successful_subset() {
+        let f = Fixture::new(4);
+
+        // Four equal packages, ids 0..=3.
+        let ids = f.create_batch(4, 3_600);
+        assert_eq!(f.locked(), 4 * UNIT);
+
+        // Claim id 0 so it is no longer revocable: a deliberate invalid id.
+        f.client.claim(&ids.get(0).unwrap());
+        let locked_before = f.locked();
+        let claimed_before = f.claimed();
+        assert_eq!(locked_before, 3 * UNIT);
+        assert_eq!(claimed_before, UNIT);
+
+        // Mix valid (1, 2), already-claimed (0), and unknown (777) ids.
+        let missing = 777u64;
+        let mut requested = Vec::new(&f.env);
+        requested.push_back(ids.get(0).unwrap()); // Claimed -> InvalidState
+        requested.push_back(ids.get(1).unwrap()); // Created -> Success
+        requested.push_back(missing); //              unknown -> NotFound
+        requested.push_back(ids.get(2).unwrap()); // Created -> Success
+
+        let results = f.client.batch_revoke(&requested);
+        assert_eq!(results.len(), 4);
+        assert_result(
+            &results.get(0).unwrap(),
+            ids.get(0).unwrap(),
+            BatchAdminActionStatus::InvalidState,
+        );
+        assert_result(
+            &results.get(1).unwrap(),
+            ids.get(1).unwrap(),
+            BatchAdminActionStatus::Success,
+        );
+        assert_result(
+            &results.get(2).unwrap(),
+            missing,
+            BatchAdminActionStatus::NotFound,
+        );
+        assert_result(
+            &results.get(3).unwrap(),
+            ids.get(2).unwrap(),
+            BatchAdminActionStatus::Success,
+        );
+
+        // Only the two successful revokes unlock funds; the claimed id must
+        // not be double-counted and the unknown id contributes nothing.
+        let locked_after = f.locked();
+        assert_eq!(
+            locked_after,
+            locked_before - 2 * UNIT,
+            "locked must fall by exactly the successful subset"
+        );
+        assert_ne!(
+            locked_after,
+            locked_before - 3 * UNIT,
+            "the claimed id must not unlock any funds"
+        );
+        assert_ne!(
+            locked_after,
+            locked_before - 4 * UNIT,
+            "the full requested batch must not unlock funds"
+        );
+        assert_eq!(
+            f.claimed(),
+            claimed_before,
+            "revoke must not touch total claimed"
+        );
+
+        // Terminal statuses line up with the per-id results.
+        assert_eq!(
+            f.client.get_package(&ids.get(0).unwrap()).status,
+            PackageStatus::Claimed
+        );
+        assert_eq!(
+            f.client.get_package(&ids.get(1).unwrap()).status,
+            PackageStatus::Cancelled
+        );
+        assert_eq!(
+            f.client.get_package(&ids.get(2).unwrap()).status,
+            PackageStatus::Cancelled
+        );
+        assert_eq!(
+            f.client.get_package(&ids.get(3).unwrap()).status,
+            PackageStatus::Created
+        );
+
+        // The aggregates mirror the same successful subset.
+        let agg = f.client.get_aggregates(&f.token);
+        assert_eq!(agg.total_committed, UNIT, "only the untouched id 3 remains");
+        assert_eq!(agg.total_claimed, UNIT, "only the claimed id 0");
+        assert_eq!(
+            agg.total_expired_cancelled,
+            2 * UNIT,
+            "only the two revoked ids 1 and 2"
+        );
+    }
+
+    /// `batch_refund` with a mix of expired, live, already-cancelled, and
+    /// unknown ids. Only the ids that actually moved funds may change the
+    /// aggregates; in particular a cancelled id was already unlocked by
+    /// `revoke` and must not unlock again.
+    #[test]
+    fn batch_refund_aggregates_reflect_only_successful_subset() {
+        let f = Fixture::new(4);
+
+        let now = f.env.ledger().timestamp();
+        // Two packages that will have expired by the refund time.
+        let expiring_a = f.create_at(0, now + 100);
+        let expiring_b = f.create_at(1, now + 100);
+        // A package that stays live, so its refund is rejected as NotExpired.
+        let live = f.create_at(2, now + 100_000);
+        // A package cancelled before expiry.
+        let cancelled = f.create_at(3, now + 100);
+        assert_eq!(f.locked(), 4 * UNIT);
+
+        f.client.revoke(&cancelled);
+        let locked_before = f.locked();
+        assert_eq!(locked_before, 3 * UNIT);
+        let claimed_before = f.claimed();
+        let admin_before = f.admin_balance();
+
+        // Advance past the short expiry but not the long one.
+        f.env.ledger().set_timestamp(now + 200);
+
+        let missing = 999u64;
+        let mut requested = Vec::new(&f.env);
+        requested.push_back(expiring_a); // expired Created   -> Success
+        requested.push_back(live); //       still live        -> NotExpired
+        requested.push_back(missing); //    unknown           -> NotFound
+        requested.push_back(cancelled); //  already Cancelled -> Success
+        requested.push_back(expiring_b); // expired Created   -> Success
+
+        let results = f.client.batch_refund(&requested);
+        assert_eq!(results.len(), 5);
+        assert_result(
+            &results.get(0).unwrap(),
+            expiring_a,
+            BatchAdminActionStatus::Success,
+        );
+        assert_result(
+            &results.get(1).unwrap(),
+            live,
+            BatchAdminActionStatus::NotExpired,
+        );
+        assert_result(
+            &results.get(2).unwrap(),
+            missing,
+            BatchAdminActionStatus::NotFound,
+        );
+        assert_result(
+            &results.get(3).unwrap(),
+            cancelled,
+            BatchAdminActionStatus::Success,
+        );
+        assert_result(
+            &results.get(4).unwrap(),
+            expiring_b,
+            BatchAdminActionStatus::Success,
+        );
+
+        // Only the two live-but-expired ids were still locked; the cancelled
+        // id was already unlocked by `revoke`, so it must not decrement again.
+        let locked_after = f.locked();
+        assert_eq!(
+            locked_after,
+            locked_before - 2 * UNIT,
+            "locked must fall by exactly the ids that were still locked"
+        );
+        assert_ne!(
+            locked_after,
+            locked_before - 3 * UNIT,
+            "the cancelled id must not unlock funds a second time"
+        );
+        assert_eq!(locked_after, UNIT, "the live package must remain locked");
+        assert_eq!(
+            f.claimed(),
+            claimed_before,
+            "refund must not touch total claimed"
+        );
+
+        // Every successful refund (expired Created and Cancelled alike) paid
+        // the admin exactly once; the failed ids paid nothing.
+        let paid = f.admin_balance() - admin_before;
+        assert_eq!(paid, 3 * UNIT, "only three refunds paid out");
+        assert_eq!(
+            f.client.get_package(&live).status,
+            PackageStatus::Created,
+            "the rejected live package must be untouched"
+        );
+
+        // The aggregates mirror the same successful subset.
+        let agg = f.client.get_aggregates(&f.token);
+        assert_eq!(agg.total_committed, UNIT, "only the live id remains");
+        assert_eq!(agg.total_claimed, 0);
+        assert_eq!(
+            agg.total_expired_cancelled,
+            3 * UNIT,
+            "only the three refunded ids"
+        );
+    }
+
+    /// `batch_create_packages` is all-or-nothing: a batch with one invalid
+    /// entry must roll back completely, leaving no packages behind and no
+    /// aggregate movement. (It returns no per-id result list precisely
+    /// because there is no partial success to report.)
+    #[test]
+    fn batch_create_packages_with_a_mixed_batch_is_atomic() {
+        let f = Fixture::new(3);
+
+        let locked_before = f.locked();
+        let claimed_before = f.claimed();
+        assert_eq!(locked_before, 0);
+
+        // Three valid recipients and one deliberately invalid (negative) amount.
+        let mut recipients = Vec::new(&f.env);
+        let mut amounts = Vec::new(&f.env);
+        let mut metadatas = Vec::new(&f.env);
+        for i in 0..4 {
+            recipients.push_back(Address::generate(&f.env));
+            amounts.push_back(if i == 2 { -UNIT } else { UNIT });
+            metadatas.push_back(Map::new(&f.env));
+        }
+
+        let result = f.client.try_batch_create_packages(
+            &f.admin,
+            &recipients,
+            &amounts,
+            &f.token,
+            &3_600,
+            &metadatas,
+        );
+        assert_eq!(result, Err(Ok(Error::InvalidAmount)));
+
+        // The whole batch rolled back: no aggregate moved, no package was
+        // written, and the auto-incrementing id counter did not advance.
+        assert_eq!(f.locked(), locked_before);
+        assert_eq!(f.claimed(), claimed_before);
+        assert_eq!(f.client.get_aggregates(&f.token).total_committed, 0);
+        assert_eq!(
+            f.client.try_get_package(&0),
+            Err(Ok(Error::PackageNotFound))
+        );
+        assert_eq!(
+            f.client.try_get_package(&1),
+            Err(Ok(Error::PackageNotFound))
+        );
+
+        // A following, fully valid batch still starts at id 0.
+        let ids = f.create_batch(2, 3_600);
+        assert_eq!(ids.get(0).unwrap(), 0);
+        assert_eq!(ids.get(1).unwrap(), 1);
+        assert_eq!(f.locked(), 2 * UNIT);
+        assert_eq!(f.claimed(), 0);
+    }
+}

@@ -106,6 +106,9 @@ Batch refund transfers successful package amounts to the admin.
 | `cancel_surplus_withdrawal` | none -> `Result<(), Error>` | Current admin must authorize. | `NotInitialized`, `NotAuthorized`, `SurplusWithdrawalNotPending` | No pause gate; `surplus_withdrawal_cancelled`. |
 | `execute_surplus_withdrawal` | none -> `Result<(), Error>` | Current admin must authorize. | `ContractPaused`, `NotInitialized`, `NotAuthorized`, `SurplusWithdrawalNotPending`, `SurplusWithdrawalTimelockActive`, `InvalidToken`, `InsufficientSurplus`, `TokenTransferFailed` | Global + `withdraw`; `surplus_withdrawn_event`. Rechecks available surplus at execution time. |
 | `get_pending_withdrawal` | none -> `Option<PendingWithdrawal>` | Public. | None | None. |
+| `set_surplus_staleness_secs` | `staleness_secs: u64` -> `Result<(), Error>` | Current admin must authorize. Value must exceed the 86,400-second execution timelock. | `NotInitialized`, `InvalidSurplusWithdrawalStaleness` | No pause gate; no event. |
+| `get_surplus_staleness_secs` | none -> `u64` | Public. Defaults to 2,592,000 seconds (30 days). | None | None. |
+| `sweep_stale_surplus_withdrawal` | none -> `Result<(), Error>` | Public; no authorization required. | `SurplusWithdrawalNotPending`, `SurplusWithdrawalNotStale` | No pause gate; removes the proposal and emits `surplus_withdrawal_swept`; transfers no funds. |
 
 ## Package and aggregate views
 

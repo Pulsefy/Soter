@@ -38,6 +38,17 @@ enum CancelReasonCode {
   reissued
 }
 
+enum RecipientRemovalReasonCode {
+  duplicate
+  deceased
+  relocated
+  ineligible
+  consent_withdrawn
+  fraud_flag
+  data_correction
+  other
+}
+
 model AidPackage {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -224,6 +235,7 @@ model VerificationRequest {
   @@index([orgId])
   @@index([status])
   @@index([reviewedAt])
+  @@index([status, deletedAt, createdAt(sort: Desc)])
 }
 
 model Claim {
@@ -281,6 +293,23 @@ model Claim {
   @@unique([importJobId, importRowNumber])
 }
 
+/// Append-only record of recipient removals. Claims keep their original
+/// recipientRef and are intentionally not related to this operational record.
+model RecipientRemoval {
+  id            String                     @id @default(cuid())
+  recipientRef  String
+  ngoId         String?
+  reasonCode    RecipientRemovalReasonCode
+  reason        String?
+  removedBy     String
+  removedAt     DateTime                   @default(now())
+
+  @@index([recipientRef, removedAt])
+  @@index([ngoId, removedAt])
+  @@index([removedAt])
+  @@index([reasonCode])
+}
+
 enum SorobanTransactionStatus {
   pending
   submitted  
@@ -314,6 +343,12 @@ model SorobanTransaction {
   packageId         String?               /// Soroban package ID if applicable
   txHash            String?               /// Actual transaction hash when submitted
   status            SorobanTransactionStatus @default(pending)
+
+  /// Idempotency key tying a logical operation (e.g. a claim disbursement) to
+  /// at most one transaction row. A retry after a partial failure reuses the
+  /// existing row instead of creating a second one, so it cannot double-submit.
+  /// Nullable: not all operations are keyed.
+  idempotencyKey    String?               @unique
   
   /// Retry mechanism tracking
   attemptCount      Int                   @default(0)

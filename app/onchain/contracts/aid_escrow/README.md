@@ -16,6 +16,10 @@ Explorer: [Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDSB
 
 Full deployment record with transaction hashes and verification steps: [deployments/testnet-2026-06-03.md](../../deployments/testnet-2026-06-03.md)
 
+## Full Contract Interface Reference
+
+The complete callable interface reference lives in [`INTERFACE.md`](./INTERFACE.md). It enumerates every public entry point with its parameters, return type, authorization requirement, errors, pause behavior, emitted events (cross-referenced to [`EVENTS.md`](./EVENTS.md)), and whether the function is currently reachable from the backend adapter. See [`BACKEND_COVERAGE.md`](./BACKEND_COVERAGE.md) for the adapter coverage inventory and the process for adding coverage.
+
 ## What It Does
 
 This contract allows an admin (and optionally designated distributors) to create
@@ -81,6 +85,8 @@ for current adapter status and the update process for adding coverage.
 | `view_package_status(env, id)` | — | Returns only the status (cheaper for polling). |
 | `get_aggregates(env, token)` | — | Returns aggregate stats: total committed, claimed, expired/cancelled for a token. |
 | `withdraw_surplus(env, token, to, amount)` | Admin | Withdraws surplus (unlocked) tokens from the contract. |
+
+The tables above are a quick summary. For the authoritative per-function contract — including full parameter and return types, authorization rules, error sets, pause interaction, event cross-references, and backend reachability — consult [`INTERFACE.md`](./INTERFACE.md).
 
 ## Package Lifecycle
 
@@ -194,6 +200,8 @@ All state-changing operations emit events with stable topics for indexer consump
 - `PackageRevoked` — admin revoked
 - `PackageRefunded` — admin refunded
 - `BatchCreatedEvent` — batch creation
+
+Each event's topic, payload, and the functions that emit it are documented in [`EVENTS.md`](./EVENTS.md). The per-function event cross-references in [`INTERFACE.md`](./INTERFACE.md) point back to the corresponding entries there.
 
 ## Testing
 

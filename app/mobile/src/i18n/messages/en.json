@@ -29,7 +29,8 @@
     "languageNameEn": "English",
     "languageNameEs": "Spanish",
     "languageNameFr": "French",
-    "done": "Done"
+    "done": "Done",
+    "continue": "Continue"
   },
   "navigation": {
     "home": "Home",
@@ -86,7 +87,16 @@
     "disconnect": "Disconnect",
     "copyAddress": "Copy Address",
     "addressCopied": "Address copied to clipboard",
-    "explorer": "View on Explorer"
+    "explorer": "View on Explorer",
+    "differentWalletDetected": "Different wallet detected",
+    "differentWalletWarning": "This is a different wallet than before. You previously connected {previousAddress}, but this session is trying to connect {newAddress}. Continue only if you intend to switch wallets.",
+    "sameWalletWarning": "This wallet matches the one already connected to this device."
+  },
+  "network": {
+    "qualityDegradedBadge": "Slow",
+    "qualityDegradedTitle": "Slow connection",
+    "qualityDegradedMessage": "Actions may take longer while the network recovers.",
+    "qualityDegradedLabel": "Slow connection. The network is available but responding slowly."
   },
   "settings": {
     "title": "Settings",
@@ -112,12 +122,31 @@
     "languageHint": "Choose the language used across the app",
     "securityTitle": "Security",
     "biometricLock": "Biometric Lock",
+    "sharedDeviceMode": "Shared Device Mode",
     "pushNotifications": "Push Notifications",
     "autoDetect": "Auto-detect",
     "aidCache": "Aid cache",
     "taskCache": "Task cache",
     "cacheTotal": "Total",
     "clearSyncedCache": "Clear synced cache",
+    "exportLocalData": "Export local data summary",
+    "exportLocalDataHint": "Shares counts of cached aid, tasks, and recent diagnostics",
+    "exportFailedTitle": "Unable to Export Data",
+    "exportFailedMessage": "The local data summary could not be prepared or shared. Please try again.",
+    "clearAllLocalData": "Clear all local data",
+    "clearAllLocalDataHint": "Permanently removes cached data and queued work after confirmation",
+    "clearLocalDataConfirmTitle": "Clear All Local Data?",
+    "clearLocalDataConfirmBase": "This permanently removes cached aid packages and details, tasks, health diagnostics, app preferences, and wallet/auth sessions on this device.",
+    "queuedItemsWillBeRemoved": "All {count} queued sync items will be removed.",
+    "unsyncedQueueWillBeLost": "{count} unsynced queued item(s) will be lost and will not be uploaded.",
+    "noUnsyncedQueue": "There are no unsynced queued items to upload.",
+    "cannotUndo": "This cannot be undone.",
+    "queueCheckFailedTitle": "Unable to Check Offline Queue",
+    "queueCheckFailedMessage": "Queued work could not be checked, so local data was not cleared. Please try again.",
+    "localDataClearedTitle": "Local Data Cleared",
+    "localDataClearedMessage": "All local app data was removed.",
+    "clearLocalDataFailedTitle": "Unable to Clear Local Data",
+    "clearLocalDataFailedMessage": "Some local data could not be cleared. Please try again from Settings.",
     "yourPublicKey": "Your Public Key",
     "stellarLabFaucet": "Stellar Lab faucet",
     "friendbotApi": "Friendbot API",
@@ -268,7 +297,12 @@
     "contractId": "contract ID"
   },
   "forceUpgrade": {
-    "updateNow": "Update Now"
+    "updateNow": "Update Now",
+    "warningTitle": "Update Required Soon",
+    "warningMessage": "A mandatory update will be required soon. Please complete and sync your current tasks, then update to continue using Soter.",
+    "gracePeriodCountdown": "Grace period remaining: {time}",
+    "gracePeriodExpired": "Grace period has expired. Update required to continue.",
+    "dismiss": "Dismiss"
   },
   "submissionQueue": {
     "retries": "Retries",
@@ -337,5 +371,15 @@
     "reasonManual": "Manually enabled",
     "subtitle": "Refresh, media, and background sync are reduced.",
     "accessible": "Saver mode is active. {reason}. Refresh, media, and background sync are reduced."
+  },
+  "networkGuard": {
+    "mainnetTitle": "⚠️ Mainnet Detected",
+    "networkIssueTitle": "⚠️ Network Issue",
+    "reconnectWallet": "Reconnect Wallet",
+    "reconnectWalletHint": "Disconnects the current session and opens WalletConnect so you can re-pair on the correct network",
+    "switchNetwork": "Switch Network",
+    "switchNetworkHint": "Opens your wallet to change the network setting",
+    "dismiss": "Dismiss",
+    "dismissHint": "Dismiss this network alert"
   }
 }

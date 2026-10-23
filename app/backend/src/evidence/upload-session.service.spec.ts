@@ -2,7 +2,10 @@ import { AppException } from '../common/dto/error-response.dto';
 
 import * as crypto from 'crypto';
 import * as fsPromises from 'fs/promises';
-import { UploadSessionService } from '../evidence/upload-session.service';
+import {
+  MAX_ARTIFACTS_PER_CLAIM,
+  UploadSessionService,
+} from '../evidence/upload-session.service';
 import { UploadSessionStatus } from '@prisma/client';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -48,8 +51,20 @@ const mockStore = {
   cleanupSession: jest.fn(),
 };
 
-const mockPrisma = {
+const mockTransaction = {
+  $queryRaw: jest.fn(),
   evidenceQueueItem: {
+    count: jest.fn(),
+    create: jest.fn(),
+  },
+};
+
+const mockPrisma = {
+  $transaction: jest.fn((callback: (tx: any) => any) =>
+    callback(mockTransaction),
+  ),
+  evidenceQueueItem: {
+    count: jest.fn(),
     findFirst: jest.fn(),
     create: jest.fn(),
   },
@@ -296,7 +311,14 @@ describe('UploadSessionService', () => {
       mockStore.updateSessionStatus.mockResolvedValue(undefined);
       mockStore.cleanupSession.mockResolvedValue(undefined);
       mockPrisma.evidenceQueueItem.findFirst.mockResolvedValue(null);
+      mockPrisma.evidenceQueueItem.count.mockResolvedValue(0);
       mockPrisma.evidenceQueueItem.create.mockResolvedValue({
+        id: 'ev-1',
+        fileName: 'evidence.txt',
+      });
+      mockTransaction.$queryRaw.mockResolvedValue([{ id: 'claim-1' }]);
+      mockTransaction.evidenceQueueItem.count.mockResolvedValue(0);
+      mockTransaction.evidenceQueueItem.create.mockResolvedValue({
         id: 'ev-1',
         fileName: 'evidence.txt',
       });
@@ -312,6 +334,56 @@ describe('UploadSessionService', () => {
         'sess-1',
         UploadSessionStatus.completed,
       );
+    });
+
+    it('allows associating an artifact when the resulting count is at the limit', async () => {
+      mockPrisma.evidenceQueueItem.count.mockResolvedValue(
+        MAX_ARTIFACTS_PER_CLAIM - 1,
+      );
+      mockTransaction.evidenceQueueItem.count.mockResolvedValue(
+        MAX_ARTIFACTS_PER_CLAIM - 1,
+      );
+
+      await service.finalize('sess-1', 'owner-1', 'claim-1');
+
+      expect(mockTransaction.evidenceQueueItem.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ metadata: { claimId: 'claim-1' } }),
+        }),
+      );
+    });
+
+    it('rejects associating an artifact one over the claim limit', async () => {
+      mockPrisma.evidenceQueueItem.count.mockResolvedValue(
+        MAX_ARTIFACTS_PER_CLAIM,
+      );
+
+      await expect(
+        service.finalize('sess-1', 'owner-1', 'claim-1'),
+      ).rejects.toThrow(
+        `Claim artifact limit of ${MAX_ARTIFACTS_PER_CLAIM} exceeded`,
+      );
+
+      expect(mockPrisma.evidenceQueueItem.create).not.toHaveBeenCalled();
+      expect(mockStore.getAllChunks).not.toHaveBeenCalled();
+    });
+
+    it('rechecks capacity under the claim lock before creating an artifact', async () => {
+      mockPrisma.evidenceQueueItem.count.mockResolvedValue(
+        MAX_ARTIFACTS_PER_CLAIM - 1,
+      );
+      mockTransaction.evidenceQueueItem.count.mockResolvedValue(
+        MAX_ARTIFACTS_PER_CLAIM,
+      );
+
+      await expect(
+        service.finalize('sess-1', 'owner-1', 'claim-1'),
+      ).rejects.toThrow(
+        `Claim artifact limit of ${MAX_ARTIFACTS_PER_CLAIM} exceeded`,
+      );
+
+      expect(mockTransaction.evidenceQueueItem.create).not.toHaveBeenCalled();
+      expect(fsPromises.unlink).toHaveBeenCalled();
     });
 
     it('throws BadRequestException when chunks are missing', async () => {

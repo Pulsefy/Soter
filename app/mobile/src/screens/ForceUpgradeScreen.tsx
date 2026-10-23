@@ -7,22 +7,32 @@ import {
   Linking,
   Platform,
   SafeAreaView,
-  Image,
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useUpdate } from '../contexts/UpdateContext';
 import { useTranslation } from '../i18n/useTranslation';
+import { formatGraceCountdown } from '../services/updateService';
 
-export const ForceUpgradeScreen: React.FC = () => {
+interface ForceUpgradeScreenProps {
+  /** Optional callback to allow continuing when viewed in warn state */
+  onContinue?: () => void;
+}
+
+export const ForceUpgradeScreen: React.FC<ForceUpgradeScreenProps> = ({
+  onContinue,
+}) => {
   const { colors } = useTheme();
   const { t } = useTranslation();
-  const { versionInfo } = useUpdate();
+  const { versionInfo, upgradeState, graceDeadline, remainingGraceMs } = useUpdate();
 
   const handleUpdate = () => {
     if (!versionInfo) return;
     const url = Platform.OS === 'ios' ? versionInfo.storeUrl.ios : versionInfo.storeUrl.android;
     Linking.openURL(url);
   };
+
+  const isWarnState = upgradeState === 'warn';
+  const hasExpiredGrace = upgradeState === 'block' && graceDeadline !== null;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -41,7 +51,13 @@ export const ForceUpgradeScreen: React.FC = () => {
 
         <View style={[styles.infoBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.infoTitle, { color: colors.textPrimary }]}>
-            Current Version Incompatible
+            {isWarnState
+              ? t('forceUpgrade.gracePeriodCountdown', {
+                  time: formatGraceCountdown(remainingGraceMs),
+                })
+              : hasExpiredGrace
+              ? t('forceUpgrade.gracePeriodExpired')
+              : 'Current Version Incompatible'}
           </Text>
           <Text style={[styles.infoText, { color: colors.textMuted }]}>
             Required: {versionInfo?.minRequiredVersion || 'Newer version'}
@@ -53,9 +69,25 @@ export const ForceUpgradeScreen: React.FC = () => {
         <TouchableOpacity
           style={[styles.button, { backgroundColor: colors.brand.primary }]}
           onPress={handleUpdate}
+          accessibilityRole="button"
+          accessibilityLabel="Update Soter now"
+          accessibilityHint="Open the store to install the required app update"
         >
           <Text style={styles.buttonText}>{t('forceUpgrade.updateNow')}</Text>
         </TouchableOpacity>
+
+        {isWarnState && onContinue ? (
+          <TouchableOpacity
+            style={[styles.continueButton, { borderColor: colors.border }]}
+            onPress={onContinue}
+            accessibilityRole="button"
+            accessibilityLabel="Continue using app"
+          >
+            <Text style={[styles.continueButtonText, { color: colors.textSecondary }]}>
+              Continue Using App
+            </Text>
+          </TouchableOpacity>
+        ) : null}
         
         <Text style={[styles.footerText, { color: colors.textMuted }]}>
           You will be redirected to the {Platform.OS === 'ios' ? 'App Store' : 'Google Play Store'}
@@ -128,5 +160,18 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 12,
     textAlign: 'center',
+  },
+  continueButton: {
+    height: 48,
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    backgroundColor: 'transparent',
+  },
+  continueButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

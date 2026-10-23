@@ -6,7 +6,14 @@ import {
   Delete,
   Body,
   Param,
+  Query,
+  Res,
+  ParseIntPipe,
+  DefaultValuePipe,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { Roles } from '../auth/roles.decorator';
+import { AppRole } from '../auth/app-role.enum';
 import {
   ApiTags,
   ApiOperation,
@@ -104,6 +111,29 @@ export class RetentionPolicyController {
       results,
       totalAffected: results.reduce((sum, r) => sum + r.affected, 0),
     };
+  }
+
+  @Get('dry-run-report')
+  @Roles(AppRole.admin)
+  @ApiOperation({
+    summary: 'Download a retention dry-run report',
+    description:
+      'Runs a dry run of all enabled policies on demand and returns a downloadable JSON report ' +
+      '(counts plus a sample of affected record ids per entity). No data is modified.',
+  })
+  @ApiQuery({ name: 'sampleSize', required: false })
+  async dryRunReport(
+    @Query('sampleSize', new DefaultValuePipe(10), ParseIntPipe)
+    sampleSize: number,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const report = await this.service.generateDryRunReport(
+      Math.min(Math.max(sampleSize, 1), 100),
+    );
+    res.set({
+      'Content-Disposition': `attachment; filename="retention-dry-run-${report.generatedAt}.json"`,
+    });
+    return report;
   }
 
   @Post('seed')

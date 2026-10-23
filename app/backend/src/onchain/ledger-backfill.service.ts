@@ -18,6 +18,7 @@ export interface BackfillJobData {
   campaignId?: string;
   batchSize: number;
   checkpointId: string;
+  dryRun?: boolean;
 }
 
 export interface BackfillResult {
@@ -32,6 +33,29 @@ export interface BackfillResult {
   errorCount: number;
   totalCount: number;
   resumeFrom?: number;
+  dryRun?: boolean;
+}
+
+export interface DryRunResult {
+  jobId: string;
+  jobKey: string;
+  startLedger: number;
+  endLedger: number;
+  campaignId?: string;
+  status: 'dry-run';
+  totalCount: number;
+  wouldCreate: number;
+  wouldSkip: number;
+  unattributable: number;
+  countsByEventType: Record<string, number>;
+  sampleRecords: Array<{
+    id: string;
+    ledger: number;
+    eventType: string;
+    amount: number;
+    txHash: string;
+    packageId?: string;
+  }>;
 }
 
 /**
@@ -59,6 +83,91 @@ export class LedgerBackfillService {
   ) {}
 
   /**
+   * Perform a dry-run backfill to preview what would be created/updated.
+   *
+   * Runs the same detection logic as the real backfill but does not persist
+   * anything. Returns counts by entity type and a sample of affected records.
+   *
+   * Refuses to run when no live on-chain source is configured for the same
+   * reason as triggerBackfill: a dry-run with nothing to copy would report
+   * zero movements, which is indistinguishable from a genuinely empty range.
+   */
+  async triggerDryRun(
+    startLedger: number,
+    endLedger: number,
+    campaignId?: string,
+    batchSize: number = 100,
+  ): Promise<DryRunResult> {
+    if (!this.ledgerSource.isEnabled()) {
+      throw new NotImplementedException(
+        `Dry-run is not available against live data: ${this.ledgerSource.describeUnavailable()} ` +
+          'Configure AID_ESCROW_CONTRACT_ID with STELLAR_RPC_URL / STELLAR_HORIZON_URL before running dry-run.',
+      );
+    }
+
+    const jobKey = buildJobKey(startLedger, endLedger, campaignId);
+    const totalCount = endLedger - startLedger + 1;
+
+    this.logger.log(
+      `[backfill] Dry-run request — range=${startLedger}-${endLedger} key=${jobKey} source=${this.ledgerSource.sourceKind}`,
+    );
+
+    let wouldCreate: OnChainLedgerEntry[] = [];
+    let wouldSkip = 0;
+    let unattributable: OnChainLedgerEntry[] = [];
+    const countsByEventType: Record<string, number> = {};
+
+    // Process the range in batches to avoid overwhelming the ledger source.
+    for (let ledger = startLedger; ledger <= endLedger; ledger += batchSize) {
+      const batchEnd = Math.min(ledger + batchSize - 1, endLedger);
+
+      const result = await this.detectLedgerChanges(
+        ledger,
+        batchEnd,
+        campaignId,
+      );
+      wouldCreate = wouldCreate.concat(result.wouldCreate);
+      wouldSkip += result.wouldSkip;
+      unattributable = unattributable.concat(result.unattributable);
+
+      // Aggregate counts by event type.
+      for (const entry of result.wouldCreate) {
+        countsByEventType[entry.eventType] =
+          (countsByEventType[entry.eventType] || 0) + 1;
+      }
+    }
+
+    // Take a sample of up to 10 records for inspection.
+    const sampleRecords = wouldCreate.slice(0, 10).map(entry => ({
+      id: entry.id,
+      ledger: entry.ledger,
+      eventType: entry.eventType,
+      amount: entry.amount,
+      txHash: entry.txHash,
+      packageId: entry.packageId,
+    }));
+
+    this.logger.log(
+      `[backfill] Dry-run complete — wouldCreate=${wouldCreate.length} wouldSkip=${wouldSkip} unattributable=${unattributable.length}`,
+    );
+
+    return {
+      jobId: 'dry-run',
+      jobKey,
+      startLedger,
+      endLedger,
+      campaignId,
+      status: 'dry-run',
+      totalCount,
+      wouldCreate: wouldCreate.length,
+      wouldSkip,
+      unattributable: unattributable.length,
+      countsByEventType,
+      sampleRecords,
+    };
+  }
+
+  /**
    * Trigger (or resume) a backfill for a ledger range.
    *
    * - If no checkpoint exists, a new one is created and the job is enqueued.
@@ -77,7 +186,13 @@ export class LedgerBackfillService {
     campaignId?: string,
     batchSize: number = 100,
     triggeredBy?: string,
-  ): Promise<BackfillResult> {
+    dryRun: boolean = false,
+  ): Promise<BackfillResult | DryRunResult> {
+    // Route to dry-run if requested.
+    if (dryRun) {
+      return this.triggerDryRun(startLedger, endLedger, campaignId, batchSize);
+    }
+
     if (!this.ledgerSource.isEnabled()) {
       throw new NotImplementedException(
         `Backfill is not available against live data: ${this.ledgerSource.describeUnavailable()} ` +
@@ -123,6 +238,7 @@ export class LedgerBackfillService {
           skippedCount: existing.skippedCount,
           errorCount: existing.errorCount,
           totalCount,
+          dryRun: false,
         };
       }
 
@@ -168,6 +284,7 @@ export class LedgerBackfillService {
         errorCount: existing.errorCount,
         totalCount,
         resumeFrom,
+        dryRun: false,
       };
     }
 
@@ -217,6 +334,7 @@ export class LedgerBackfillService {
       skippedCount: 0,
       errorCount: 0,
       totalCount,
+      dryRun: false,
     };
   }
 
@@ -230,14 +348,20 @@ export class LedgerBackfillService {
     skipped: number;
     errors: string[];
   }> {
-    const { startLedger, endLedger, campaignId, batchSize, checkpointId } =
-      data;
+    const {
+      startLedger,
+      endLedger,
+      campaignId,
+      batchSize,
+      checkpointId,
+      dryRun,
+    } = data;
     const errors: string[] = [];
     let processed = 0;
     let skipped = 0;
 
     this.logger.log(
-      `[backfill] Processing — checkpointId=${checkpointId} range=${startLedger}-${endLedger} batchSize=${batchSize}`,
+      `[backfill] Processing — checkpointId=${checkpointId} range=${startLedger}-${endLedger} batchSize=${batchSize} dryRun=${dryRun}`,
     );
 
     const totalBatches = Math.ceil((endLedger - startLedger + 1) / batchSize);
@@ -392,13 +516,21 @@ export class LedgerBackfillService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private async processLedgerRange(
+  /**
+   * Detects what would be created/skipped for a ledger range without persisting.
+   * This is the shared detection logic used by both dry-run and real runs.
+   */
+  private async detectLedgerChanges(
     startLedger: number,
     endLedger: number,
     campaignId?: string,
-  ): Promise<{ processed: number; skipped: number }> {
-    let processed = 0;
-    let skipped = 0;
+  ): Promise<{
+    wouldCreate: OnChainLedgerEntry[];
+    wouldSkip: number;
+    unattributable: OnChainLedgerEntry[];
+  }> {
+    const wouldCreate: OnChainLedgerEntry[] = [];
+    let wouldSkip = 0;
     const unattributable: OnChainLedgerEntry[] = [];
 
     // Check for existing ledger entries to ensure idempotency.
@@ -423,7 +555,7 @@ export class LedgerBackfillService {
 
     for (const entry of ledgerData) {
       if (existingIds.has(entry.id)) {
-        skipped++;
+        wouldSkip++;
         continue;
       }
 
@@ -437,6 +569,44 @@ export class LedgerBackfillService {
         continue;
       }
 
+      wouldCreate.push(entry);
+    }
+
+    return { wouldCreate, wouldSkip, unattributable };
+  }
+
+  private async processLedgerRange(
+    startLedger: number,
+    endLedger: number,
+    campaignId?: string,
+  ): Promise<{ processed: number; skipped: number }> {
+    const { wouldCreate, wouldSkip, unattributable } =
+      await this.detectLedgerChanges(startLedger, endLedger, campaignId);
+
+    if (unattributable.length > 0) {
+      throw new Error(
+        `Ledgers ${startLedger}-${endLedger}: ${unattributable.length} on-chain movement(s) cannot be stored without a campaignId ` +
+          '(BalanceLedger.campaignId is required and the contract event stream carries no campaign attribution). ' +
+          'Re-run the backfill with a campaignId.',
+      );
+    }
+
+    if (wouldCreate.length === 0) {
+      this.logger.debug(
+        `[backfill] Ledger range ${startLedger}-${endLedger}: 0 new, ${wouldSkip} skipped`,
+      );
+      return { processed: 0, skipped: wouldSkip };
+    }
+
+    if (!campaignId) {
+      throw new Error(
+        `Ledgers ${startLedger}-${endLedger}: cannot persist ledger entries without a campaignId. ` +
+          'Re-run the backfill with a campaignId.',
+      );
+    }
+
+    // Persist the entries that would be created.
+    for (const entry of wouldCreate) {
       await this.prisma.balanceLedger.create({
         data: {
           id: entry.id,
@@ -448,23 +618,13 @@ export class LedgerBackfillService {
           createdAt: entry.createdAt,
         },
       });
-
-      processed++;
-    }
-
-    if (unattributable.length > 0) {
-      throw new Error(
-        `Ledgers ${startLedger}-${endLedger}: ${unattributable.length} on-chain movement(s) cannot be stored without a campaignId ` +
-          '(BalanceLedger.campaignId is required and the contract event stream carries no campaign attribution). ' +
-          'Re-run the backfill with a campaignId.',
-      );
     }
 
     this.logger.debug(
-      `[backfill] Ledger range ${startLedger}-${endLedger}: ${processed} new, ${skipped} skipped`,
+      `[backfill] Ledger range ${startLedger}-${endLedger}: ${wouldCreate.length} new, ${wouldSkip} skipped`,
     );
 
-    return { processed, skipped };
+    return { processed: wouldCreate.length, skipped: wouldSkip };
   }
 
   /** Provenance string stored alongside every backfilled row. */

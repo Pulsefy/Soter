@@ -30,6 +30,7 @@ import { escapeCsvField, toCsvRow } from '../common/csv/csv.util';
 import { streamCursorPaginated } from '../common/streaming/cursor-paginate';
 import { VerificationService } from '../verification/verification.service';
 import { readPersistedVerificationResult } from '../verification/verification-result.persistence';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 export interface ClaimExportRow {
   id: string;
@@ -112,9 +113,20 @@ export class ClaimsService {
     private readonly sorobanTransactionService: SorobanTransactionLifecycleService,
     private readonly sorobanTransactionScheduler: SorobanTransactionScheduler,
     private readonly verificationService: VerificationService,
+    @Optional() private readonly analyticsService?: AnalyticsService,
   ) {
     this.onchainEnabled =
       this.configService.get<string>('ONCHAIN_ENABLED') === 'true';
+  }
+
+  private async invalidateDashboardSummary(reason: string) {
+    try {
+      await this.analyticsService?.invalidateCache(reason);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate dashboard summary cache after ${reason}: ${String(error)}`,
+      );
+    }
   }
 
   async create(createClaimDto: CreateClaimDto) {
@@ -183,6 +195,7 @@ export class ClaimsService {
     this.metricsService.adjustClaimsInFunnel('requested', 1);
 
     await this.enqueueVerificationForClaim(claim.id);
+    await this.invalidateDashboardSummary('claim_updated');
 
     return claim;
   }
@@ -349,6 +362,12 @@ export class ClaimsService {
             amount: claim.amount.toString(),
             tokenAddress,
             correlationId: traceId,
+            // One disbursement row per claim, ever. A retry after a partial
+            // failure (crash between submission and the local status update)
+            // reuses the existing row — and its onchain-state verification —
+            // instead of creating a second transaction that would resubmit
+            // and double-disburse.
+            idempotencyKey: `disburse:${id}`,
             metadata: {
               campaignId: claim.campaignId,
               claimAmount: claim.amount,
@@ -413,6 +432,7 @@ export class ClaimsService {
       },
     );
 
+    await this.invalidateDashboardSummary('claim_updated');
     return updatedClaim;
   }
 
@@ -661,6 +681,7 @@ export class ClaimsService {
     this.metricsService.adjustClaimsInFunnel(fromStatus, -1);
     this.metricsService.adjustClaimsInFunnel(toStatus, 1);
 
+    await this.invalidateDashboardSummary('claim_updated');
     return updatedClaim;
   }
 
@@ -793,6 +814,124 @@ export class ClaimsService {
           explorerUrl: txHash ? explorerTxUrl(txHash, network) : undefined,
         };
       });
+  }
+
+  /**
+   * Retrieve the complete status transition history for a claim.
+   *
+   * Returns all status changes from oldest to newest, including:
+   * - Previous and new status for each transition
+   * - Timestamp of each transition
+   * - Actor ID and trigger type where available from audit metadata
+   * - Additional metadata (reason, verification score, etc.) as applicable
+   *
+   * Uses AuditLog records which are created whenever a claim status changes.
+   * If a claim was created before this feature was implemented, the history
+   * starts from the first recorded transition.
+   */
+  async getStatusHistory(claimId: string): Promise<{
+    claimId: string;
+    history: Array<{
+      previousStatus?: string;
+      newStatus: string;
+      timestamp: string;
+      actor?: string;
+      trigger?: string;
+      metadata?: Record<string, unknown>;
+    }>;
+    historicalCoverageStart: string;
+    historicalCoverageNote?: string;
+  }> {
+    const claim = await this.prisma.claim.findUnique({
+      where: { id: claimId },
+      include: { campaign: true },
+    });
+
+    if (!claim || claim.deletedAt) {
+      throw new AppException(ERROR_CODES.NOT_FOUND, 404, 'Claim not found');
+    }
+
+    // Query all status change audit logs for this claim, ordered chronologically
+    const auditLogs = await this.prisma.auditLog.findMany({
+      where: {
+        entityId: claimId,
+        entity: 'claim',
+        action: {
+          startsWith: 'status_changed_to_',
+        },
+      },
+      orderBy: { timestamp: 'asc' },
+    });
+
+    // Transform audit logs into status history entries
+    const history = auditLogs.map(log => {
+      const metadata = log.metadata as Record<string, unknown> | null;
+      const previousStatus = metadata?.from as string | undefined;
+      const newStatus = log.action.replace('status_changed_to_', '');
+
+      // Extract actor and trigger from metadata
+      let actor: string | undefined;
+      let trigger: string | undefined;
+
+      // Determine actor and trigger type based on metadata patterns
+      if (metadata?.onchainResult) {
+        // Disbursement with on-chain result
+        actor = 'system';
+        trigger = 'on_chain_disbursement';
+      } else {
+        // Manual transition — actor is recorded in metadata if available
+        actor = metadata?.actorId as string | undefined;
+        // Infer trigger from status transition
+        if (previousStatus === 'requested' && newStatus === 'verified') {
+          trigger = 'manual_verification';
+        } else if (previousStatus === 'verified' && newStatus === 'approved') {
+          trigger = 'manual_approval';
+        } else if (previousStatus === 'approved' && newStatus === 'disbursed') {
+          trigger = 'manual_disbursement';
+        } else if (newStatus === 'cancelled') {
+          trigger = 'manual_cancellation';
+        } else if (newStatus === 'archived') {
+          trigger = 'manual_archive';
+        } else {
+          trigger = 'status_change';
+        }
+      }
+
+      return {
+        previousStatus,
+        newStatus,
+        timestamp: log.timestamp.toISOString(),
+        actor,
+        trigger,
+        metadata: {
+          // Preserve operational metadata but exclude internal fields
+          ...(metadata?.from ? { from: metadata.from } : {}),
+          ...(metadata?.to ? { to: metadata.to } : {}),
+          ...(metadata?.reason ? { cancelReason: metadata.reason } : {}),
+          ...(metadata?.code ? { cancelReasonCode: metadata.code } : {}),
+          ...(metadata?.verificationScore
+            ? { verificationScore: metadata.verificationScore }
+            : {}),
+        },
+      };
+    });
+
+    // Determine historical coverage
+    let historicalCoverageNote: string | undefined;
+    if (history.length === 0) {
+      historicalCoverageNote =
+        'No status transitions recorded. Claim may have been created before status history tracking was implemented.';
+    } else if (auditLogs[0].timestamp.getTime() > claim.createdAt.getTime()) {
+      historicalCoverageNote =
+        'Incomplete history. Status history begins from the first recorded transition and may not include claim creation or early transitions.';
+    }
+
+    return {
+      claimId,
+      history,
+      historicalCoverageStart: claim.createdAt.toISOString(),
+      historicalCoverageNote,
+    };
   }
 
   async shareReceipt(

@@ -87,10 +87,15 @@ export class SorobanTransactionScheduler {
             )
           : 0;
 
+        // Deterministic job ID: one job per transaction *attempt*. A cron
+        // tick re-enqueueing a row that is already waiting (e.g. after a
+        // restart) is deduplicated by BullMQ instead of piling up duplicates
+        // that would race to execute the same attempt twice.
         const job = await this.sorobanQueue.add(
           `retry-${transaction.id}`,
           jobData,
           {
+            jobId: `retry-${transaction.id}-a${transaction.attemptCount}`,
             delay,
             attempts: 3, // Job-level retries for the scheduler itself
             backoff: {
@@ -328,10 +333,16 @@ export class SorobanTransactionScheduler {
       correlationId: options.correlationId,
     };
 
+    // Deterministic job ID: scheduling the same transaction twice (e.g. a
+    // retried `disburse()` call after a crash) reuses the existing job rather
+    // than adding a second one, so the transaction cannot be executed twice
+    // concurrently. The lifecycle service's atomic pending→submitted claim is
+    // the second line of defence behind this.
     const job = await this.sorobanQueue.add(
       `execute-${transactionId}`,
       jobData,
       {
+        jobId: `execute-${transactionId}`,
         delay: options.delay || 0,
         priority: options.priority || 0,
         attempts: 3,

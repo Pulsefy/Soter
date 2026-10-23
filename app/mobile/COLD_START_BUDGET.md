@@ -41,10 +41,11 @@ something new added for this measurement.
    | App render start → interactive | `navigationReady - appRenderStart` |
    | **Total: launch → interactive** | `navigationReady - <launch invoked>` |
 
-   A device-vs-host clock offset is sampled once per iteration
-   (`adb shell date +%s%3N`) and applied before computing durations, so
-   the numbers are correct even when the emulator/device clock has
-   drifted from the CI runner's clock.
+   A device-vs-host clock offset is sampled before launch and again after
+   navigation is ready (`adb shell date +%s%3N`) to account for clock
+   corrections during emulator startup. Clock sampling retries transient
+   ADB failures up to three times; measurements with negative durations
+   are discarded rather than counted toward the budget.
 3. The median (not mean — deliberately outlier-resistant) total across
    iterations is compared against `perf/cold-start-budget.json`. The pure
    parsing/aggregation/budget-comparison logic lives in

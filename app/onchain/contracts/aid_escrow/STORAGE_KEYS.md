@@ -11,7 +11,7 @@ All keys are defined in exactly one place: [`src/keys.rs`](./src/keys.rs).
 Storage keys must not be constructed inline anywhere else — add a constant or
 constructor to `keys.rs` and update this catalog in the same PR.
 
-**Namespace revision 1** covers the 22 singleton symbols and two tuple
+**Namespace revision 2** covers the 24 singleton symbols and two tuple
 constructors below. This revision describes the layout in the source tree; it
 is separate from `KEY_VERSION`, the per-contract value changed by `migrate`.
 When a release adds or re-encodes a ledger key, increment this revision and
@@ -52,6 +52,8 @@ A singleton key is a bare `Symbol`; exactly one entry exists per key.
 | :---------------------- | :------------- | :---------- | :-------------------- |
 | `KEY_ADMIN`             | `"admin"`      | `Address`   | `init`; replaced by accepted admin transfer. Permanent. |
 | `KEY_PENDING_ADMIN`     | `"pend_adm"`   | `Address`   | `transfer_admin`. **Ephemeral**: removed by `accept_admin` / `cancel_admin_transfer`. Absent when no transfer is pending. |
+| `KEY_PENDING_WITHDRAWAL` | `"pend_wdr"` | `PendingWithdrawal` | `propose_surplus_withdrawal`; removed by cancel, execute, or stale sweep. |
+| `KEY_SURPLUS_WITHDRAWAL_STALENESS` | `"wdr_stale"` | `u64` seconds | Admin-set maximum proposal age; defaults to 30 days when absent. |
 | `KEY_VERSION`           | `"version"`    | `u32`       | `init` (=1); bumped by `migrate`. Permanent. |
 | `KEY_CONFIG`            | `"config"`     | `Config`    | `init`, `set_config`, `add_allowed_token`, `remove_allowed_token`. Permanent; readers fall back to defaults if absent. |
 | `KEY_DISTRIBUTORS`      | `"dstrbtrs"`   | `Map<Address, bool>` | `add_distributor` / `remove_distributor`. Bounded by `KEY_MAX_DISTRIBUTORS`; enumerable via `list_distributors`. Permanent. |

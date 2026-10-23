@@ -8,9 +8,10 @@ single place and is referenced by both the /v1 and the legacy /ai mounts.
 import base64
 import io
 import time
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Union
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -36,6 +37,7 @@ from services.ocr_batch_store import (
     OCRBatchDocument,
     ocr_batch_store,
 )
+from services.rate_limiter import evaluate_rate_limit
 from config import settings
 
 router = APIRouter(tags=["ocr"])
@@ -181,7 +183,7 @@ async def queue_batch_ocr_jobs(
     language_hint: Annotated[
         Optional[LanguageHint], Form(description="Language hint for OCR")
     ] = None,
-) -> BatchOCRResponse:
+) -> Union[BatchOCRResponse, JSONResponse]:
     """Queue OCR processing for a batch of uploaded document images.
 
     Every document is tracked on its own: documents that pass validation
@@ -192,6 +194,10 @@ async def queue_batch_ocr_jobs(
     ``status_url`` for the per-document breakdown; failed documents expose
     a ``retry_url`` so they can be requeued individually.
     """
+    rate_limit_response = evaluate_rate_limit(request, cost=max(1, len(files)))
+    if rate_limit_response is not None:
+        return rate_limit_response
+
     if not files:
         raise HTTPException(
             status_code=400,
@@ -208,6 +214,9 @@ async def queue_batch_ocr_jobs(
 
     document_statuses: list[BatchOCRDocumentStatus] = []
     for image in files:
+        # Pre-set to None so that if the read itself fails, the except
+        # branch still records a document with no retained payload (it is
+        # failed-but-not-retryable) rather than crashing the whole batch.
         contents: Optional[bytes] = None
         try:
             contents = await image.read()
@@ -244,6 +253,10 @@ async def queue_batch_ocr_jobs(
         [document.status for document in batch.documents.values()]
     )
     return BatchOCRResponse(
+        # The submission itself succeeded as long as the batch isn't wholly
+        # failed: a ``partially_failed`` batch still has work accepted, so
+        # ``success`` stays True and the caller inspects ``status``/``summary``
+        # for the per-document breakdown.
         success=batch_status != "failed",
         batch_id=batch.batch_id,
         status=batch_status,
@@ -631,6 +644,9 @@ def _summarize(batch: OCRBatch) -> BatchOCRSummary:
         elif document.status == "succeeded":
             summary.succeeded += 1
         else:
+            # The only remaining state in BatchOCRDocumentState is ``failed``
+            # (pending/processing/succeeded are handled above), so anything
+            # else counts as failed rather than being silently dropped.
             summary.failed += 1
     return summary
 

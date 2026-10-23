@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MetricsService } from '../observability/metrics/metrics.service';
 import { ConfigService } from '@nestjs/config';
@@ -18,6 +18,7 @@ import {
   RetryableErrorType,
   SorobanTransaction,
   Claim,
+  ClaimStatus,
 } from '@prisma/client';
 
 export interface CreateSorobanTransactionParams {
@@ -31,6 +32,13 @@ export interface CreateSorobanTransactionParams {
   correlationId?: string;
   metadata?: Record<string, any>;
   maxAttempts?: number;
+  /**
+   * Key tying a logical operation (e.g. `disburse:<claimId>`) to at most one
+   * transaction row. Creating with a key that already exists returns the
+   * existing row instead of a duplicate, so a retry after a partial failure
+   * cannot double-submit.
+   */
+  idempotencyKey?: string;
 }
 
 export interface ExecuteTransactionParams {
@@ -72,10 +80,50 @@ export interface StuckTransactionDetectionResult {
   transactions: StuckTransactionSummary[];
 }
 
+/**
+ * What the chain says actually happened to an in-flight transaction.
+ *
+ * - `confirmed` — the operation landed successfully; local state may be
+ *   completed without resubmitting.
+ * - `not_submitted` — the chain provably never saw the operation, so a retry
+ *   is safe.
+ * - `failed` — the operation landed but failed; retry is safe (funds did not
+ *   move).
+ * - `pending` — still in flight onchain; must be left alone until it settles.
+ * - `unknown` — the chain state could not be determined; nothing may be
+ *   assumed, so no resubmission is allowed without operator intervention.
+ */
+export type OnchainOutcome =
+  'confirmed' | 'not_submitted' | 'failed' | 'pending' | 'unknown';
+
+export interface OnchainVerification {
+  outcome: OnchainOutcome;
+  /** Hash observed onchain, when one is known. */
+  txHash?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Final disposition of one transaction inspected by
+ * {@link SorobanTransactionLifecycleService.reconcileInFlightTransactions}.
+ */
+export type ReconciliationOutcome =
+  | 'confirmed'
+  | 'reset_for_retry'
+  | 'failed_terminal'
+  | 'still_pending'
+  | 'unverifiable';
+
+export interface ReconciliationSummary {
+  scanned: number;
+  byOutcome: Record<ReconciliationOutcome, number>;
+  transactionIds: string[];
+}
+
 const LOG_CONTEXT = 'SorobanTransactionLifecycleService';
 
 @Injectable()
-export class SorobanTransactionLifecycleService {
+export class SorobanTransactionLifecycleService implements OnModuleInit {
   // Exponential backoff configuration
   private readonly BASE_RETRY_DELAY_MS = 2000; // 2 seconds
   private readonly MAX_RETRY_DELAY_MS = 300000; // 5 minutes
@@ -98,6 +146,35 @@ export class SorobanTransactionLifecycleService {
     private readonly onchainAdapter: OnchainAdapter,
   ) {
     this.STUCK_TRANSACTION_THRESHOLD_MS = this.resolveStuckThresholdMs();
+  }
+
+  /**
+   * On worker start, reconcile every transaction left in `submitted` by a
+   * previous run against actual onchain state *before* any retry can pick it
+   * up. A crash between submission and the local confirmation write leaves the
+   * row `submitted` with no way to know locally whether the transfer landed;
+   * resubmitting blindly could double-disburse. Runs fire-and-forget so a slow
+   * RPC never blocks application startup; failures are logged and counted, and
+   * the stuck-transaction detector remains the safety net.
+   */
+  onModuleInit(): void {
+    if (process.env.SKIP_BACKGROUND_JOBS === 'true') {
+      return;
+    }
+
+    void this.reconcileInFlightTransactions().catch(error => {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      this.loggerService.error(
+        `Startup reconciliation of in-flight Soroban transactions failed: ${errorMessage}`,
+        undefined,
+        LOG_CONTEXT,
+        { error: errorMessage },
+      );
+      this.metricsService.incrementCounter('soroban_reconciliation_failed', {
+        error: errorMessage.substring(0, 100),
+      });
+    });
   }
 
   /**
@@ -136,7 +213,13 @@ export class SorobanTransactionLifecycleService {
   }
 
   /**
-   * Create a new Soroban transaction record with lifecycle tracking
+   * Create a new Soroban transaction record with lifecycle tracking.
+   *
+   * When `idempotencyKey` is supplied, creation is idempotent: a second call
+   * with the same key (e.g. a retry of a disbursement whose first attempt
+   * crashed between submission and the local status update) returns the
+   * already-persisted row instead of creating a duplicate that would resubmit
+   * onchain.
    */
   async createTransaction(params: CreateSorobanTransactionParams) {
     // Resolve the correlation ID up front so the creation line carries it even
@@ -152,25 +235,59 @@ export class SorobanTransactionLifecycleService {
         claimId: params.claimId,
         operation: params.operation,
         correlationId,
+        idempotencyKey: params.idempotencyKey,
       },
     );
 
-    const transaction = await this.prisma.sorobanTransaction.create({
-      data: {
-        claimId: params.claimId,
-        operation: params.operation,
-        packageId: params.packageId,
-        operatorAddress: params.operatorAddress,
-        recipientAddress: params.recipientAddress,
-        amount: params.amount,
-        tokenAddress: params.tokenAddress,
-        correlationId: params.correlationId,
-        metadata: params.metadata,
-        maxAttempts: params.maxAttempts || 5,
-        status: SorobanTransactionStatus.pending,
-        nextRetryAt: new Date(),
-      },
-    });
+    let transaction: SorobanTransaction;
+    try {
+      transaction = await this.prisma.sorobanTransaction.create({
+        data: {
+          claimId: params.claimId,
+          operation: params.operation,
+          packageId: params.packageId,
+          operatorAddress: params.operatorAddress,
+          recipientAddress: params.recipientAddress,
+          amount: params.amount,
+          tokenAddress: params.tokenAddress,
+          correlationId: params.correlationId,
+          metadata: params.metadata,
+          maxAttempts: params.maxAttempts || 5,
+          status: SorobanTransactionStatus.pending,
+          nextRetryAt: new Date(),
+          idempotencyKey: params.idempotencyKey,
+        },
+      });
+    } catch (error) {
+      if (params.idempotencyKey && this.isUniqueConstraintViolation(error)) {
+        const existing = await this.prisma.sorobanTransaction.findUnique({
+          where: { idempotencyKey: params.idempotencyKey },
+        });
+
+        if (existing) {
+          this.loggerService.log(
+            'Idempotent create: reusing existing Soroban transaction for key',
+            LOG_CONTEXT,
+            {
+              idempotencyKey: params.idempotencyKey,
+              transactionId: existing.id,
+              existingStatus: existing.status,
+              claimId: params.claimId,
+              correlationId,
+            },
+          );
+          this.metricsService.incrementCounter(
+            'soroban_transaction_deduplicated',
+            {
+              operation: params.operation,
+              claimId: params.claimId || 'none',
+            },
+          );
+          return existing;
+        }
+      }
+      throw error;
+    }
 
     // Emit metrics for transaction creation
     this.metricsService.incrementCounter('soroban_transaction_created', {
@@ -179,6 +296,17 @@ export class SorobanTransactionLifecycleService {
     });
 
     return transaction;
+  }
+
+  /**
+   * Prisma surfaces unique-constraint violations as P2002 known request errors.
+   */
+  private isUniqueConstraintViolation(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      (error as { code?: string }).code === 'P2002'
+    );
   }
 
   /**
@@ -235,6 +363,116 @@ export class SorobanTransactionLifecycleService {
       return;
     }
 
+    // Terminal rows must never be resubmitted. Operators re-drive them through
+    // retryTransaction(forceRetry), which resets the row to `pending` first.
+    if (
+      transaction.status === SorobanTransactionStatus.confirmed ||
+      transaction.status === SorobanTransactionStatus.failed ||
+      transaction.status === SorobanTransactionStatus.expired
+    ) {
+      this.loggerService.warn(
+        `Transaction ${transactionId} is already ${transaction.status}, skipping execution`,
+        LOG_CONTEXT,
+        {
+          transactionId,
+          status: transaction.status,
+          correlationId,
+        },
+      );
+      this.metricsService.incrementCounter('soroban_submit_guard_total', {
+        action: 'skipped_terminal',
+        operation: transaction.operation,
+      });
+      return;
+    }
+
+    // A row that is `submitted`, or a `pending` retry of a disbursement whose
+    // previous attempt may already have reached the chain (the process — or
+    // the DB write — died between submission and the local confirmation), is
+    // ambiguous: locally there is no way to know whether the transfer landed.
+    // Verify actual onchain state before allowing any resubmission — this is
+    // what makes a crash-restart retry idempotent instead of double-
+    // disbursing. Operations with a recorded hash are verified by hash;
+    // disbursements additionally have the aid package's own status as an
+    // oracle. Other operations have neither and keep the original retry
+    // behaviour.
+    let verifiedNotSubmitted = false;
+    const ambiguous =
+      transaction.status === SorobanTransactionStatus.submitted ||
+      (transaction.status === SorobanTransactionStatus.pending &&
+        transaction.attemptCount > 0 &&
+        (transaction.txHash != null ||
+          transaction.operation === SorobanOperationType.disburse_claim));
+
+    if (ambiguous) {
+      const verification = await this.verifyOnchainOutcome(transaction);
+
+      switch (verification.outcome) {
+        case 'confirmed':
+          await this.markTransactionConfirmed(
+            transaction,
+            verification.txHash,
+            transaction.attemptCount + 1,
+          );
+          this.metricsService.incrementCounter('soroban_submit_guard_total', {
+            action: 'recovered_confirmed',
+            operation: transaction.operation,
+          });
+          return;
+
+        case 'failed': {
+          this.metricsService.incrementCounter('soroban_submit_guard_total', {
+            action: 'failed_onchain',
+            operation: transaction.operation,
+          });
+          await this.handleTransactionError(
+            transactionId,
+            new Error(
+              verification.errorMessage ||
+                'Previous submission failed onchain before local confirmation',
+            ),
+            transaction.attemptCount + 1,
+            Date.now(),
+          );
+          return;
+        }
+
+        case 'not_submitted':
+          // Provably never reached the chain: safe to submit now.
+          verifiedNotSubmitted = true;
+          this.metricsService.incrementCounter('soroban_submit_guard_total', {
+            action: 'resubmit_not_onchain',
+            operation: transaction.operation,
+          });
+          break;
+
+        case 'pending':
+          this.loggerService.log(
+            'In-flight transaction still pending onchain, not resubmitting',
+            LOG_CONTEXT,
+            { transactionId, correlationId },
+          );
+          this.metricsService.incrementCounter('soroban_submit_guard_total', {
+            action: 'skipped_still_pending',
+            operation: transaction.operation,
+          });
+          return;
+
+        case 'unknown':
+        default:
+          this.loggerService.warn(
+            'Could not verify onchain state of ambiguous transaction, not resubmitting',
+            LOG_CONTEXT,
+            { transactionId, status: transaction.status, correlationId },
+          );
+          this.metricsService.incrementCounter('soroban_submit_guard_total', {
+            action: 'skipped_unverifiable',
+            operation: transaction.operation,
+          });
+          return;
+      }
+    }
+
     const attemptNumber = transaction.attemptCount + 1;
 
     this.loggerService.log(
@@ -250,11 +488,41 @@ export class SorobanTransactionLifecycleService {
     const startTime = Date.now();
 
     try {
-      // Update transaction status to submitted
-      await this.updateTransactionStatus(
-        transactionId,
-        SorobanTransactionStatus.submitted,
-      );
+      // Atomically claim the row by moving it to `submitted`. If a concurrent
+      // worker (or a duplicate queue job) already claimed it, the count is 0
+      // and this attempt must not submit again. A row verified as never
+      // having reached the chain is still `submitted` locally, so it may be
+      // re-claimed from either state.
+      const claimed = await this.prisma.sorobanTransaction.updateMany({
+        where: {
+          id: transactionId,
+          status: verifiedNotSubmitted
+            ? {
+                in: [
+                  SorobanTransactionStatus.pending,
+                  SorobanTransactionStatus.submitted,
+                ],
+              }
+            : SorobanTransactionStatus.pending,
+        },
+        data: {
+          status: SorobanTransactionStatus.submitted,
+          submittedAt: new Date(),
+        },
+      });
+
+      if (claimed && claimed.count === 0) {
+        this.loggerService.warn(
+          'Transaction was already claimed by another attempt, skipping submission',
+          LOG_CONTEXT,
+          { transactionId, correlationId },
+        );
+        this.metricsService.incrementCounter('soroban_submit_guard_total', {
+          action: 'skipped_already_claimed',
+          operation: transaction.operation,
+        });
+        return;
+      }
 
       // Execute the transaction based on operation type
       let result: InitEscrowResult | CreateClaimResult | DisburseResult;
@@ -520,27 +788,267 @@ export class SorobanTransactionLifecycleService {
   }
 
   /**
-   * Update transaction status with timestamp tracking
+   * Persist the confirmed state of a transaction that is known to have landed
+   * onchain (either just executed, or recovered by verification after a
+   * crash). Also heals the claim row: when the crash happened between the
+   * onchain success and any local write, the claim may still be `approved`
+   * even though the money moved.
    */
-  private async updateTransactionStatus(
-    transactionId: string,
-    status: SorobanTransactionStatus,
+  private async markTransactionConfirmed(
+    transaction: Pick<
+      SorobanTransaction,
+      'id' | 'operation' | 'claimId' | 'attemptCount'
+    >,
+    txHash: string | undefined,
+    attemptNumber: number,
   ): Promise<void> {
     await this.prisma.sorobanTransaction.update({
-      where: { id: transactionId },
+      where: { id: transaction.id },
       data: {
-        status,
-        ...(status === SorobanTransactionStatus.submitted && {
-          submittedAt: new Date(),
-        }),
-        ...(status === SorobanTransactionStatus.confirmed && {
-          confirmedAt: new Date(),
-        }),
-        ...(status === SorobanTransactionStatus.failed && {
-          failedAt: new Date(),
-        }),
+        status: SorobanTransactionStatus.confirmed,
+        txHash: txHash ?? null,
+        confirmedAt: new Date(),
+        attemptCount: attemptNumber,
+        lastRetryAt: new Date(),
+        lastError: null,
+        errorType: null,
       },
     });
+
+    if (
+      transaction.operation === SorobanOperationType.disburse_claim &&
+      transaction.claimId
+    ) {
+      await this.prisma.claim.updateMany({
+        where: {
+          id: transaction.claimId,
+          status: ClaimStatus.approved,
+        },
+        data: { status: ClaimStatus.disbursed },
+      });
+    }
+
+    this.metricsService.incrementCounter('soroban_transaction_success', {
+      operation: transaction.operation,
+      attempt: attemptNumber.toString(),
+      recovered: 'true',
+    });
+  }
+
+  /**
+   * Ask the chain what actually happened to a transaction whose local state is
+   * ambiguous (status `submitted`, typically after a crash between submission
+   * and confirmation).
+   *
+   * Two sources of truth are consulted, in order:
+   * 1. The recorded transaction hash, when one was persisted before the
+   *    crash — the RPC can answer directly.
+   * 2. For disbursements, the aid package's own status: a successful
+   *    disbursement moves it to `Claimed`, so a package still `Created` is
+   *    proof the transfer never landed, and a `Claimed` package is proof it
+   *    did — regardless of whether the hash was ever recorded locally.
+   */
+  private async verifyOnchainOutcome(
+    transaction: Pick<
+      SorobanTransaction,
+      'id' | 'operation' | 'packageId' | 'txHash' | 'correlationId'
+    >,
+  ): Promise<OnchainVerification> {
+    try {
+      if (transaction.txHash) {
+        const status = await this.onchainAdapter.getTransactionStatus({
+          hash: transaction.txHash,
+        });
+
+        switch (status.status) {
+          case 'succeeded':
+            return { outcome: 'confirmed', txHash: transaction.txHash };
+          case 'failed':
+            return {
+              outcome: 'failed',
+              txHash: transaction.txHash,
+              errorMessage: status.errorMessage,
+            };
+          case 'pending':
+            return { outcome: 'pending', txHash: transaction.txHash };
+          default:
+            return { outcome: 'unknown', txHash: transaction.txHash };
+        }
+      }
+
+      if (
+        transaction.operation === SorobanOperationType.disburse_claim &&
+        transaction.packageId
+      ) {
+        const pkg = await this.onchainAdapter.getAidPackage({
+          packageId: transaction.packageId,
+        });
+
+        switch (pkg.package.status) {
+          case 'Claimed':
+            return { outcome: 'confirmed' };
+          case 'Created':
+            return { outcome: 'not_submitted' };
+          default:
+            // Expired/Cancelled/Refunded packages cannot be disbursed; a
+            // retry would only fail again.
+            return {
+              outcome: 'failed',
+              errorMessage: `Package ${transaction.packageId} is ${pkg.package.status}`,
+            };
+        }
+      }
+
+      return { outcome: 'unknown' };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      this.loggerService.warn(
+        'Onchain verification of in-flight transaction failed',
+        LOG_CONTEXT,
+        {
+          transactionId: transaction.id,
+          correlationId: transaction.correlationId,
+          error: errorMessage,
+        },
+      );
+      return { outcome: 'unknown' };
+    }
+  }
+
+  /**
+   * Reconcile every transaction left in `submitted` — typically by a crash
+   * between onchain submission and the local confirmation write — against
+   * actual onchain state.
+   *
+   * Outcomes per transaction:
+   * - confirmed onchain → local row completed (and the claim healed to
+   *   `disbursed` if the crash predated that write);
+   * - provably not submitted / failed onchain → reset to `pending` so the
+   *   normal retry scheduler can safely resubmit;
+   * - still pending onchain or unverifiable → left untouched.
+   *
+   * Runs on worker startup (see {@link onModuleInit}) so no retry is attempted
+   * before the ambiguity is resolved. Every outcome is logged and counted in
+   * the `soroban_reconciliation_total` metric.
+   */
+  async reconcileInFlightTransactions(): Promise<ReconciliationSummary> {
+    const startTime = Date.now();
+
+    // Only rows in-flight past the stuck threshold are reconciled: a fresher
+    // `submitted` row may belong to a *live* instance still waiting on the
+    // RPC, and resetting or confirming it here would race that submission.
+    // Stale rows are exactly the ones a crash left behind, and the
+    // execute-time guard verifies onchain state for any retry regardless.
+    const staleThreshold = new Date(
+      Date.now() - this.STUCK_TRANSACTION_THRESHOLD_MS,
+    );
+
+    const inFlight = await this.prisma.sorobanTransaction.findMany({
+      where: {
+        status: SorobanTransactionStatus.submitted,
+        updatedAt: { lt: staleThreshold },
+      },
+      orderBy: { updatedAt: 'asc' },
+      take: 100,
+    });
+
+    const byOutcome: Record<ReconciliationOutcome, number> = {
+      confirmed: 0,
+      reset_for_retry: 0,
+      failed_terminal: 0,
+      still_pending: 0,
+      unverifiable: 0,
+    };
+    const transactionIds: string[] = [];
+
+    for (const transaction of inFlight) {
+      const verification = await this.verifyOnchainOutcome(transaction);
+      let outcome: ReconciliationOutcome;
+
+      switch (verification.outcome) {
+        case 'confirmed':
+          await this.markTransactionConfirmed(
+            transaction,
+            verification.txHash ?? transaction.txHash ?? undefined,
+            transaction.attemptCount,
+          );
+          outcome = 'confirmed';
+          break;
+
+        case 'not_submitted':
+        case 'failed': {
+          const exhausted = transaction.attemptCount >= transaction.maxAttempts;
+          await this.prisma.sorobanTransaction.update({
+            where: { id: transaction.id },
+            data: {
+              status: exhausted
+                ? SorobanTransactionStatus.failed
+                : SorobanTransactionStatus.pending,
+              nextRetryAt: exhausted ? null : new Date(),
+              isRetryable: !exhausted,
+              lastError: verification.errorMessage ?? transaction.lastError,
+              failedAt: exhausted ? new Date() : null,
+            },
+          });
+          outcome = exhausted ? 'failed_terminal' : 'reset_for_retry';
+          break;
+        }
+
+        case 'pending':
+          outcome = 'still_pending';
+          break;
+
+        case 'unknown':
+        default:
+          outcome = 'unverifiable';
+          break;
+      }
+
+      byOutcome[outcome] += 1;
+      transactionIds.push(transaction.id);
+
+      this.loggerService.log(
+        `Reconciled in-flight Soroban transaction ${transaction.id}: ${outcome}`,
+        LOG_CONTEXT,
+        {
+          transactionId: transaction.id,
+          operation: transaction.operation,
+          claimId: transaction.claimId,
+          packageId: transaction.packageId,
+          txHash: verification.txHash ?? transaction.txHash,
+          outcome,
+          onchainOutcome: verification.outcome,
+          correlationId: transaction.correlationId,
+        },
+      );
+
+      this.metricsService.incrementCounter('soroban_reconciliation_total', {
+        operation: transaction.operation,
+        outcome,
+      });
+    }
+
+    const duration = (Date.now() - startTime) / 1000;
+
+    if (inFlight.length > 0) {
+      this.loggerService.log(
+        `Reconciled ${inFlight.length} in-flight Soroban transaction(s) in ${duration}s`,
+        LOG_CONTEXT,
+        { scanned: inFlight.length, byOutcome, duration },
+      );
+    }
+
+    this.metricsService.setGauge(
+      'soroban_reconciliation_last_run_scanned',
+      inFlight.length,
+    );
+
+    return {
+      scanned: inFlight.length,
+      byOutcome,
+      transactionIds,
+    };
   }
 
   /**

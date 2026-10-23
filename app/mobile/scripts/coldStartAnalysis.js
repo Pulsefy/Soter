@@ -62,6 +62,9 @@ function parseColdStartLogLines(logText) {
  *   sampled once per run to correct for clock drift between the host and
  *   an emulator/device that isn't perfectly time-synced. Defaults to 0
  *   (assume synced clocks).
+ * @param {number} [params.navigationDeviceToHostOffsetMs] - a fresh offset
+ *   sampled after navigation becomes ready, used for the total duration so
+ *   clock corrections during startup do not produce a negative measurement.
  * @returns {{
  *   nativeLaunchToJsStartMs: number|null,
  *   jsStartToAppRenderStartMs: number|null,
@@ -74,6 +77,7 @@ function computePhaseDurations({
   timestamps,
   launchWallClockMs,
   deviceToHostOffsetMs = 0,
+  navigationDeviceToHostOffsetMs = deviceToHostOffsetMs,
 }) {
   const missingPhases = PHASE_ORDER.filter(
     phase => timestamps[phase] === undefined,
@@ -84,23 +88,46 @@ function computePhaseDurations({
 
   const jsStart = toHostClock(timestamps.jsStart);
   const appRenderStart = toHostClock(timestamps.appRenderStart);
-  const navigationReady = toHostClock(timestamps.navigationReady);
+  const navigationReady =
+    timestamps.navigationReady === undefined
+      ? undefined
+      : timestamps.navigationReady + navigationDeviceToHostOffsetMs;
+  const navigationReadyAtLaunchOffset =
+    timestamps.navigationReady === undefined
+      ? undefined
+      : toHostClock(timestamps.navigationReady);
+
+  const nativeLaunchToJsStartMs =
+    jsStart !== undefined ? jsStart - launchWallClockMs : null;
+  const jsStartToAppRenderStartMs =
+    jsStart !== undefined && appRenderStart !== undefined
+      ? appRenderStart - jsStart
+      : null;
+  const appRenderStartToInteractiveMs =
+    appRenderStart !== undefined && navigationReadyAtLaunchOffset !== undefined
+      ? navigationReadyAtLaunchOffset - appRenderStart
+      : null;
+  const totalToInteractiveMs =
+    navigationReady !== undefined
+      ? navigationReady - launchWallClockMs
+      : null;
+  const negativeDurations = [
+    ['nativeLaunchToJsStartMs', nativeLaunchToJsStartMs],
+    ['jsStartToAppRenderStartMs', jsStartToAppRenderStartMs],
+    ['appRenderStartToInteractiveMs', appRenderStartToInteractiveMs],
+    ['totalToInteractiveMs', totalToInteractiveMs],
+  ].filter(([, duration]) => duration !== null && duration < 0);
 
   return {
-    nativeLaunchToJsStartMs:
-      jsStart !== undefined ? jsStart - launchWallClockMs : null,
-    jsStartToAppRenderStartMs:
-      jsStart !== undefined && appRenderStart !== undefined
-        ? appRenderStart - jsStart
-        : null,
-    appRenderStartToInteractiveMs:
-      appRenderStart !== undefined && navigationReady !== undefined
-        ? navigationReady - appRenderStart
-        : null,
-    totalToInteractiveMs:
-      navigationReady !== undefined
-        ? navigationReady - launchWallClockMs
-        : null,
+    nativeLaunchToJsStartMs,
+    jsStartToAppRenderStartMs,
+    appRenderStartToInteractiveMs,
+    totalToInteractiveMs: negativeDurations.length === 0
+      ? totalToInteractiveMs
+      : null,
+    invalidReason: negativeDurations.length
+      ? `negative duration(s): ${negativeDurations.map(([name]) => name).join(', ')}`
+      : undefined,
     missingPhases,
   };
 }
@@ -135,7 +162,7 @@ function aggregateMeasurements(measurements) {
 
   if (usable.length === 0) {
     return {
-      sampleCount: 0,
+      sampleCount: measurements.length,
       usableCount: 0,
       medians: null,
     };

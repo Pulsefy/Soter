@@ -69,10 +69,20 @@ export class CreateClaimDto {
   @IsDate()
   expiresAt?: Date;
 
+  @ApiPropertyOptional({
+    description:
+      'Recipient-import job that produced this claim. Set by the import pipeline; used for idempotent re-runs together with importRowNumber.',
+    example: 'import-job-uuid-123',
+  })
   @IsOptional()
   @IsString()
   importJobId?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Zero-based row number within the import job. Used with importJobId to make imports idempotent.',
+    example: 0,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

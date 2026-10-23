@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Request } from 'express';
@@ -37,6 +37,7 @@ import {
 } from './verification-result.persistence';
 import { CorrelationPropagationUtil } from '../common/utils/correlation-propagation.util';
 import { MetricsService } from '../observability/metrics/metrics.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 // ---------------------------------------------------------------------------
 // OCR service types
@@ -154,6 +155,7 @@ export class VerificationService {
     private readonly verificationMetadataService: VerificationMetadataService,
     private readonly correlationUtil: CorrelationPropagationUtil,
     private readonly metricsService: MetricsService,
+    @Optional() private readonly analyticsService?: AnalyticsService,
   ) {
     this.verificationMode =
       this.configService.get<string>('VERIFICATION_MODE') || 'mock';
@@ -365,6 +367,7 @@ export class VerificationService {
         ),
       },
     });
+    await this.analyticsService?.invalidateCache('claim_updated');
 
     this.logger.log(
       `Claim ${claimId} verification completed – score ${enhancedResult.score} ` +

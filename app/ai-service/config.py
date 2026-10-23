@@ -30,6 +30,8 @@ _SECRET_FIELDS = frozenset(
     {
         "openai_api_key",
         "groq_api_key",
+        "openai_fallback_api_key",
+        "groq_fallback_api_key",
         "ai_webhook_secret",
         "artifact_signing_secret",
     }
@@ -65,6 +67,7 @@ class Settings(BaseSettings):
         AI_DETERMINISTIC_MODE: Enable deterministic AI results for verification and classification during tests/CI
         TEST_PROVIDER_MODE: Enable test provider mode that returns fixture-driven results (no API keys required)
         LLM_TIMEOUT_SECONDS: Timeout for LLM API requests
+        PROVIDER_HTTP_IDLE_TIMEOUT_SECONDS: Idle period before pooled provider HTTP clients are recycled
         MAX_REQUEST_BODY_BYTES: Maximum request body size for AI endpoints
         MAX_REQUEST_TIMEOUT_SECONDS: Maximum caller-supplied provider timeout
         APP_ENV: Application environment (development, staging, production, test)
@@ -77,6 +80,7 @@ class Settings(BaseSettings):
         PROOF_OF_LIFE_CONFIDENCE_THRESHOLD: Default threshold for liveness verification
         PROOF_OF_LIFE_MIN_FACE_SIZE: Minimum detected face size in pixels
         CACHE_TTL_VERIFICATION: TTL for cached AI verification responses (artifact + model-version keyed)
+        VERIFICATION_COOLDOWN_SECONDS: Minimum interval between successful verifications of the same claim or artifacts
         FRAUD_PASS_MAX_SCORE: Claims scoring below this are banded 'pass'
         FRAUD_REVIEW_MAX_SCORE: Claims scoring below this (and above pass) are 'review'; at/above it is 'reject'
         DEFAULT_PROMPT_LANGUAGE: Configurable default language when no language hint is provided (default: en)
@@ -87,11 +91,20 @@ class Settings(BaseSettings):
     # API Keys
     openai_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
+    # Fallback API keys for key rotation (issue #1411).
+    # When the primary key fails with an authentication error (401), the
+    # provider will retry once using the fallback key, provided one is set.
+    # Fallback keys are optional; if not set or empty, no fallback retry occurs.
+    openai_fallback_api_key: Optional[str] = None
+    groq_fallback_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
     groq_model: str = "llama-3.3-70b-versatile"
     ai_deterministic_mode: bool = False
     test_provider_mode: bool = False
     llm_timeout_seconds: int = 30
+    # Recycle pooled provider HTTP clients before server/load-balancer idle
+    # timeouts can leave stale sockets behind.
+    provider_http_idle_timeout_seconds: float = 300.0
     humanitarian_primary_prompt_version: str = "v1"
     humanitarian_fallback_prompt_version: str = "v1"
     default_prompt_language: str = "en"
@@ -123,6 +136,7 @@ class Settings(BaseSettings):
 
     # Request throttling / Rate limiting
     request_rate_limit: str = "10/minute"
+    # Batch OCR consumes one per-key rate-limit unit per uploaded document.
     rate_limit_per_key_default: str = "60/minute"
     rate_limit_endpoint_overrides: Dict[str, str] = Field(
         default_factory=lambda: {
@@ -221,6 +235,7 @@ class Settings(BaseSettings):
     cache_ttl_verification: int = (
         120  # AI verification responses, keyed by claim/artifact/model version
     )
+    verification_cooldown_seconds: int = 300
 
     # Fraud detection decision thresholds.
     # A claim's normalised fraud_risk_score (0 = lowest risk, 1 = highest
@@ -364,6 +379,16 @@ class Settings(BaseSettings):
             _add("OPENAI_API_KEY", "is set but blank")
         if self.groq_api_key is not None and not self.groq_api_key.strip():
             _add("GROQ_API_KEY", "is set but blank")
+        if (
+            self.openai_fallback_api_key is not None
+            and not self.openai_fallback_api_key.strip()
+        ):
+            _add("OPENAI_FALLBACK_API_KEY", "is set but blank")
+        if (
+            self.groq_fallback_api_key is not None
+            and not self.groq_fallback_api_key.strip()
+        ):
+            _add("GROQ_FALLBACK_API_KEY", "is set but blank")
 
         # --- Callback/webhook signing secret -----------------------------
         if self.ai_webhook_secret is not None:
@@ -407,11 +432,16 @@ class Settings(BaseSettings):
         # --- Numeric settings must be positive ---------------------------
         positive_numeric_settings = (
             ("LLM_TIMEOUT_SECONDS", self.llm_timeout_seconds),
+            (
+                "PROVIDER_HTTP_IDLE_TIMEOUT_SECONDS",
+                self.provider_http_idle_timeout_seconds,
+            ),
             ("MAX_REQUEST_BODY_BYTES", self.max_request_body_bytes),
             ("MAX_REQUEST_TIMEOUT_SECONDS", self.max_request_timeout_seconds),
             ("CACHE_TTL_TASK_STATUS", self.cache_ttl_task_status),
             ("CACHE_TTL_ARTIFACT_ACCESS", self.cache_ttl_artifact_access),
             ("CACHE_TTL_VERIFICATION", self.cache_ttl_verification),
+            ("VERIFICATION_COOLDOWN_SECONDS", self.verification_cooldown_seconds),
             ("TASK_RETRY_DELAY_SECONDS", self.task_retry_delay_seconds),
             ("ASYNC_JOB_IDLE_TIMEOUT_SECONDS", self.async_job_idle_timeout_seconds),
             (
@@ -779,6 +809,41 @@ class Settings(BaseSettings):
                 return True
 
         return False
+
+    def reload_api_keys(self) -> None:
+        """Reload API keys from environment variables at runtime (issue #1411).
+
+        Updates the active primary and fallback API key configuration from
+        the current environment without requiring an application restart.
+        Existing in-flight requests continue with the keys they started with;
+        subsequent requests use the updated configuration.
+
+        This method is thread-safe and updates the configuration in-place
+        without creating a new Settings instance.
+        """
+        import os
+
+        # Reload primary and fallback keys from environment variables
+        self.openai_api_key = os.getenv("OPENAI_API_KEY") or None
+        self.groq_api_key = os.getenv("GROQ_API_KEY") or None
+        self.openai_fallback_api_key = os.getenv("OPENAI_FALLBACK_API_KEY") or None
+        self.groq_fallback_api_key = os.getenv("GROQ_FALLBACK_API_KEY") or None
+
+        # Validate the reloaded keys
+        if self.openai_api_key is not None and not self.openai_api_key.strip():
+            raise ValueError("OPENAI_API_KEY is set but blank")
+        if self.groq_api_key is not None and not self.groq_api_key.strip():
+            raise ValueError("GROQ_API_KEY is set but blank")
+        if (
+            self.openai_fallback_api_key is not None
+            and not self.openai_fallback_api_key.strip()
+        ):
+            raise ValueError("OPENAI_FALLBACK_API_KEY is set but blank")
+        if (
+            self.groq_fallback_api_key is not None
+            and not self.groq_fallback_api_key.strip()
+        ):
+            raise ValueError("GROQ_FALLBACK_API_KEY is set but blank")
 
 
 settings = Settings()

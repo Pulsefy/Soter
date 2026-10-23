@@ -19,6 +19,7 @@ from services.humanitarian_prompt import (
     HumanitarianPromptEngine,
     default_prompt_registry,
 )
+from services.humanitarian_prompt_languages import DEFAULT_LANGUAGE
 from services.prompt_registry import PromptRegistry
 from services.circuit_breaker import CircuitBreaker
 from services.providers import ProviderRegistry, ModelProvider, LLMResponse
@@ -104,9 +105,7 @@ class HumanitarianVerificationService:
         primary_prompt_version: Optional[str] = None,
         fallback_prompt_version: Optional[str] = None,
         on_token: Optional[Callable[[str], None]] = None,
-        language_hint: Optional[str] = None,
-        org_id: Optional[str] = None,
-        campaign_ref: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
         try:
@@ -130,8 +129,10 @@ class HumanitarianVerificationService:
 
             # Resolve primary and fallback prompt templates from registry
             pri_ver = primary_prompt_version or prompt_version
-            primary_prompt_obj = self.prompt_registry.get(
-                "humanitarian_primary", version=pri_ver
+            # Language comes from the caller's hint, else is detected from the
+            # claim; each language has its own registered, versioned prompt.
+            primary_prompt_obj = self.prompt_engine.resolve_prompt(
+                "primary", aid_claim, language=language, version=pri_ver
             )
             try:
                 primary_prompt = primary_prompt_obj.build_prompt(
@@ -154,8 +155,8 @@ class HumanitarianVerificationService:
                 and self.prompt_registry.has("humanitarian_fallback", prompt_version)
             ):
                 fb_ver = prompt_version
-            fallback_prompt_obj = self.prompt_registry.get(
-                "humanitarian_fallback", version=fb_ver
+            fallback_prompt_obj = self.prompt_engine.resolve_prompt(
+                "fallback", aid_claim, language=language, version=fb_ver
             )
             try:
                 fallback_prompt = fallback_prompt_obj.build_prompt(
@@ -274,7 +275,9 @@ class HumanitarianVerificationService:
                             "prompt_variant": prompt_variant,
                             "prompt_name": prompt_obj.name,
                             "prompt_version": prompt_obj.version,
-                            "language": effective_language,
+                            "prompt_language": getattr(
+                                prompt_obj, "language", DEFAULT_LANGUAGE
+                            ),
                             "verification": parsed,
                             "raw_response": response.content,
                         }

@@ -10,7 +10,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Header, Query, Request
+from fastapi import APIRouter, HTTPException, Header, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 
@@ -20,6 +20,7 @@ from schemas.humanitarian import (
     HumanitarianVerificationRequest,
 )
 from services.cache import cached_response
+from services.verification_cooldown import verification_cooldown
 from services.artifact_access import ArtifactAccessError
 from services.decision_audit import get_store as get_decision_audit_store
 from services.humanitarian_prompt import HUMANITARIAN_PROMPT_VERSION
@@ -236,14 +237,10 @@ def _build_verification_envelope(
 
 @cached_response(
     prefix="humanitarian_verification",
-    ttl_seconds=settings.cache_ttl_verification,
-    key_tags=[
-        "model_version",
-        "artifact_tag",
-        "org_id",
-        "prompt_version",
-        "language_hint",
-    ],
+    ttl_seconds=min(
+        settings.cache_ttl_verification, settings.verification_cooldown_seconds
+    ),
+    key_tags=["model_version", "artifact_tag", "org_id", "prompt_version"],
     content_hash_arg="content_hash",
 )
 async def _verify_claim_cached(
@@ -258,7 +255,7 @@ async def _verify_claim_cached(
     org_id: str,
     prompt_version: str = "",
     content_hash: str = "",
-    language_hint: str = "",
+    language: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Cacheable wrapper around HumanitarianVerificationService.verify_claim.
@@ -293,15 +290,13 @@ async def _verify_claim_cached(
             provider_preference=provider_preference,
             timeout=timeout,
             prompt_version=prompt_version or None,
-            language_hint=language_hint or None,
-            org_id=org_id or None,
+            language=language,
         )
     except TypeError as exc:
         if (
-            "prompt_version" in str(exc)
+            "language" in str(exc)
+            or "prompt_version" in str(exc)
             or "timeout" in str(exc)
-            or "language_hint" in str(exc)
-            or "org_id" in str(exc)
         ):
             try:
                 return humanitarian_verification_service.verify_claim(
@@ -334,6 +329,7 @@ async def _verify_claim_cached(
 @router.post("/ai/humanitarian/verify", response_model=ResultEnvelope[Dict[str, Any]])
 async def verify_humanitarian_claim(
     http_request: Request,
+    response: Response,
     request: HumanitarianVerificationRequest,
     x_org_id: str = Header(default="", alias="X-Org-Id"),
     x_user_id: str = Header(default="", alias="X-User-Id"),
@@ -345,7 +341,8 @@ async def verify_humanitarian_claim(
     Validates that all referenced evidence artifacts belong to the requesting
     organization before processing.  Maintains audit logs for access attempts.
     Set ``stream=true`` to receive provider token events followed by the usual
-    result envelope; streaming bypasses response caching to return live output.
+    result envelope; streaming bypasses the response cache but still observes
+    the claim cooldown. A cooldown replay emits only the previous result event.
 
     ``artifact_access_control`` and ``humanitarian_verification_service`` are
     resolved from ``request.app.state``.  Production wires them up in the
@@ -505,15 +502,68 @@ async def verify_humanitarian_claim(
         artifact_tag = (
             ",".join(sorted(request.artifact_ids)) if request.artifact_ids else ""
         )
-        content_hash = (
-            ""
-            if stream
-            else _compute_evidence_content_hash(
-                request.artifact_ids, artifact_access_control
+        evidence_content_hash = _compute_evidence_content_hash(
+            request.artifact_ids, artifact_access_control
+        )
+        anchor = request.anchor_metadata
+        claim_id = getattr(anchor, "claim_id", None)
+        identity = (
+            f"claim:{claim_id}:content:{evidence_content_hash}"
+            if claim_id
+            else (
+                f"artifacts:{artifact_tag}:content:{evidence_content_hash}"
+                if artifact_tag
+                else None
             )
         )
+        org_scope = (
+            x_org_id.strip()
+            or x_user_id.strip()
+            or http_request.headers.get("x-api-key", "").strip()
+            or (http_request.client.host if http_request.client else "anonymous")
+        )
+        cooldown_key = (
+            verification_cooldown.make_key(org_scope, identity)
+            if identity is not None
+            else None
+        )
+        cache = getattr(state, "cache", None)
+        cooldown_result = (
+            verification_cooldown.get(
+                cache, cooldown_key, settings.verification_cooldown_seconds
+            )
+            if cooldown_key is not None
+            else None
+        )
+        if cooldown_result is not None:
+            response.headers["X-Verification-Cooldown"] = "true"
+
+        content_hash = "" if stream else evidence_content_hash
 
         if stream:
+            if cooldown_result is not None:
+
+                async def cached_stream_events():
+                    envelope = _build_verification_envelope(
+                        http_request,
+                        request,
+                        cooldown_result,
+                        correlation_id=correlation_id,
+                        org_id=x_org_id,
+                        user_id=x_user_id,
+                        user_role=x_user_role,
+                        model_version=model_version,
+                        artifact_tag=artifact_tag,
+                        prompt_version=prompt_version,
+                    )
+                    data = json.dumps(jsonable_encoder(envelope), separators=(",", ":"))
+                    yield f"event: result\ndata: {data}\n\n"
+
+                return StreamingResponse(
+                    cached_stream_events(),
+                    media_type="text/event-stream",
+                    headers={"X-Verification-Cooldown": "true"},
+                )
 
             async def stream_events():
                 events: asyncio.Queue = asyncio.Queue()
@@ -532,9 +582,15 @@ async def verify_humanitarian_claim(
                             timeout=timeout,
                             prompt_version=prompt_version,
                             on_token=lambda token: publish("token", token),
-                            language_hint=request.language_hint,
-                            org_id=x_org_id,
+                            language=request.language,
                         )
+                        if cooldown_key is not None:
+                            verification_cooldown.store(
+                                cache,
+                                cooldown_key,
+                                raw_result,
+                                settings.verification_cooldown_seconds,
+                            )
                         publish("result", raw_result)
                     except Exception as exc:
                         logger.error(
@@ -593,20 +649,30 @@ async def verify_humanitarian_claim(
 
             return StreamingResponse(stream_events(), media_type="text/event-stream")
 
-        raw = await _verify_claim_cached(
-            humanitarian_verification_service,
-            aid_claim=request.aid_claim,
-            supporting_evidence=request.supporting_evidence,
-            context_factors=request.context_factors,
-            provider_preference=request.provider_preference,
-            timeout=timeout,
-            model_version=model_version,
-            artifact_tag=artifact_tag,
-            org_id=x_org_id,
-            prompt_version=prompt_version,
-            content_hash=content_hash,
-            language_hint=request.language_hint or "",
-        )
+        if cooldown_result is not None:
+            raw = cooldown_result
+        else:
+            raw = await _verify_claim_cached(
+                humanitarian_verification_service,
+                aid_claim=request.aid_claim,
+                supporting_evidence=request.supporting_evidence,
+                context_factors=request.context_factors,
+                provider_preference=request.provider_preference,
+                timeout=timeout,
+                model_version=model_version,
+                artifact_tag=artifact_tag,
+                org_id=x_org_id,
+                prompt_version=prompt_version,
+                content_hash=content_hash,
+                language=request.language,
+            )
+            if cooldown_key is not None:
+                verification_cooldown.store(
+                    cache,
+                    cooldown_key,
+                    raw,
+                    settings.verification_cooldown_seconds,
+                )
         return _build_verification_envelope(
             http_request,
             request,

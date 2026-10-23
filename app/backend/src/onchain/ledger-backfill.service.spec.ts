@@ -414,4 +414,125 @@ describe('LedgerBackfillService', () => {
       expect(result).toHaveLength(2);
     });
   });
+
+  // ── triggerDryRun ─────────────────────────────────────────────────────────
+
+  describe('triggerDryRun', () => {
+    it('refuses to run when no live on-chain source is configured', async () => {
+      mockLedgerSource.isEnabled.mockReturnValue(false);
+
+      await expect(service.triggerDryRun(1000, 2000)).rejects.toThrow(
+        NotImplementedException,
+      );
+      expect(mockPrisma.balanceLedger.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns dry-run result with counts and sample records', async () => {
+      mockPrisma.balanceLedger.findMany.mockResolvedValue([]);
+      mockLedgerSource.fetchLedgerEntries.mockResolvedValue([
+        makeEntry({ id: 'e1', eventType: 'disburse', amount: 1000 }),
+        makeEntry({ id: 'e2', eventType: 'refund', amount: 500 }),
+        makeEntry({ id: 'e3', eventType: 'disburse', amount: 750 }),
+      ]);
+
+      const result = await service.triggerDryRun(1000, 1000, 'cmp_1', 100);
+
+      expect(result.status).toBe('dry-run');
+      expect(result.wouldCreate).toBe(3);
+      expect(result.wouldSkip).toBe(0);
+      expect(result.unattributable).toBe(0);
+      expect(result.countsByEventType).toEqual({
+        disburse: 2,
+        refund: 1,
+      });
+      expect(result.sampleRecords).toHaveLength(3);
+      expect(result.sampleRecords[0]).toMatchObject({
+        id: 'e1',
+        ledger: 1,
+        eventType: 'disburse',
+        amount: 1000,
+      });
+    });
+
+    it('skips existing entries in dry-run', async () => {
+      mockPrisma.balanceLedger.findMany.mockResolvedValue([{ id: 'e1' }]);
+      mockLedgerSource.fetchLedgerEntries.mockResolvedValue([
+        makeEntry({ id: 'e1' }),
+        makeEntry({ id: 'e2' }),
+      ]);
+
+      const result = await service.triggerDryRun(1000, 1000, 'cmp_1');
+
+      expect(result.wouldCreate).toBe(1);
+      expect(result.wouldSkip).toBe(1);
+    });
+
+    it('reports unattributable entries when campaignId is missing', async () => {
+      mockPrisma.balanceLedger.findMany.mockResolvedValue([]);
+      mockLedgerSource.fetchLedgerEntries.mockResolvedValue([
+        makeEntry({ id: 'e1' }),
+      ]);
+
+      const result = await service.triggerDryRun(1000, 1000);
+
+      expect(result.unattributable).toBe(1);
+      expect(result.wouldCreate).toBe(0);
+    });
+
+    it('limits sample records to 10', async () => {
+      mockPrisma.balanceLedger.findMany.mockResolvedValue([]);
+      const entries = Array.from({ length: 15 }, (_, i) =>
+        makeEntry({ id: `e${i}` }),
+      );
+      mockLedgerSource.fetchLedgerEntries.mockResolvedValue(entries);
+
+      const result = await service.triggerDryRun(1000, 1000, 'cmp_1');
+
+      expect(result.sampleRecords).toHaveLength(10);
+      expect(result.wouldCreate).toBe(15);
+    });
+  });
+
+  // ── triggerBackfill with dryRun ────────────────────────────────────────────
+
+  describe('triggerBackfill with dryRun', () => {
+    it('routes to triggerDryRun when dryRun is true', async () => {
+      mockPrisma.balanceLedger.findMany.mockResolvedValue([]);
+      mockLedgerSource.fetchLedgerEntries.mockResolvedValue([
+        makeEntry({ id: 'e1' }),
+      ]);
+
+      const result = await service.triggerBackfill(
+        1000,
+        2000,
+        'cmp_1',
+        100,
+        undefined,
+        true,
+      );
+
+      expect(result.status).toBe('dry-run');
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockPrisma.backfillCheckpoint.create).not.toHaveBeenCalled();
+    });
+
+    it('behaves normally when dryRun is false', async () => {
+      mockPrisma.backfillCheckpoint.findUnique.mockResolvedValue(null);
+      const checkpoint = makeCheckpoint({ status: 'running' });
+      mockPrisma.backfillCheckpoint.create.mockResolvedValue(checkpoint);
+      mockQueue.add.mockResolvedValue({ id: 'job_001' });
+
+      const result = await service.triggerBackfill(
+        1000,
+        2000,
+        'cmp_1',
+        100,
+        undefined,
+        false,
+      );
+
+      expect(result.status).toBe('queued');
+      expect(mockQueue.add).toHaveBeenCalled();
+    });
+  });
 });

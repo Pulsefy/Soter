@@ -240,6 +240,10 @@ export class StructuredLogger {
     return this.entries.map((entry) => ({ ...entry }));
   }
 
+  clear(): void {
+    this.entries.length = 0;
+  }
+
   getRecentEntries(limit = 12): StructuredLogEntry[] {
     return this.entries.slice(-limit).map((entry) => ({ ...entry }));
   }
@@ -277,6 +281,7 @@ export const structuredLogger: StructuredLogger = {
   error: (message: string, data?: unknown, scope?: string) =>
     StructuredLogger.getInstance().error(message, data, scope),
   getEntries: () => StructuredLogger.getInstance().getEntries(),
+  clear: () => StructuredLogger.getInstance().clear(),
   getRecentEntries: (limit?: number) => StructuredLogger.getInstance().getRecentEntries(limit),
   getDiagnosticsText: (limit?: number) => StructuredLogger.getInstance().getDiagnosticsText(limit),
   getDiagnosticsPayload: (limit?: number) => StructuredLogger.getInstance().getDiagnosticsPayload(limit),

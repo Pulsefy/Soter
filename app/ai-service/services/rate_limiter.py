@@ -11,6 +11,7 @@ import logging
 import math
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
@@ -152,10 +153,15 @@ class RateLimiterService:
         default_limit = getattr(settings, "rate_limit_per_key_default", "60/minute")
         return parse_rate_limit(default_limit)
 
-    def check(self, request: Request) -> RateLimitResult:
+    def check(self, request: Request, cost: int = 1) -> RateLimitResult:
         """
         Evaluate rate limit for the incoming request using a sliding window algorithm.
+
+        ``cost`` is the number of rate-limit units consumed by the request.
         """
+        if not isinstance(cost, int) or cost < 1:
+            raise ValueError("Rate limit cost must be a positive integer")
+
         path = request.url.path
         method = request.method
         api_key = extract_api_key(request)
@@ -181,7 +187,15 @@ class RateLimiterService:
 
         # Try Redis sliding window if Redis is available and configured
         redis_result = self._check_redis(
-            storage_key, limit, window_seconds, now, window_start, path, method, api_key
+            storage_key,
+            limit,
+            window_seconds,
+            now,
+            window_start,
+            path,
+            method,
+            api_key,
+            cost,
         )
         if redis_result is not None:
             return redis_result
@@ -196,8 +210,8 @@ class RateLimiterService:
 
             current_count = len(records)
 
-            if current_count >= limit:
-                earliest = records[0]
+            if current_count + cost > limit:
+                earliest = records[0] if records else now
                 retry_after = max(1, int(math.ceil(earliest + window_seconds - now)))
                 reset_seconds = retry_after
                 return RateLimitResult(
@@ -213,8 +227,8 @@ class RateLimiterService:
                 )
 
             # Record this request
-            records.append(now)
-            remaining = max(0, limit - current_count - 1)
+            records.extend([now] * cost)
+            remaining = max(0, limit - current_count - cost)
             earliest = records[0]
             reset_seconds = max(1, int(math.ceil(earliest + window_seconds - now)))
 
@@ -240,6 +254,7 @@ class RateLimiterService:
         path: str,
         method: str,
         api_key: str,
+        cost: int,
     ) -> Optional[RateLimitResult]:
         """Attempt to check rate limit in Redis if available."""
         if getattr(settings, "app_env", "") == "test":
@@ -266,8 +281,8 @@ class RateLimiterService:
             current_count = results[1]
             oldest_entries = results[2]
 
-            if current_count >= limit:
-                earliest = oldest_entries[0][1] if oldest_entries else window_start
+            if current_count + cost > limit:
+                earliest = oldest_entries[0][1] if oldest_entries else now
                 retry_after = max(1, int(math.ceil(earliest + window_seconds - now)))
                 return RateLimitResult(
                     allowed=False,
@@ -283,13 +298,16 @@ class RateLimiterService:
 
             # Add current timestamp to sorted set
             pipe = client.pipeline()
-            pipe.zadd(rkey, {str(now): now})
+            pipe.zadd(
+                rkey,
+                {f"{now}:{uuid.uuid4().hex}:{index}": now for index in range(cost)},
+            )
             pipe.expire(rkey, window_seconds + 5)
             pipe.execute()
 
             earliest = oldest_entries[0][1] if oldest_entries else now
             reset_seconds = max(1, int(math.ceil(earliest + window_seconds - now)))
-            remaining = max(0, limit - current_count - 1)
+            remaining = max(0, limit - current_count - cost)
 
             return RateLimitResult(
                 allowed=True,
@@ -344,13 +362,13 @@ def build_rate_limit_response(result: RateLimitResult) -> JSONResponse:
     )
 
 
-def evaluate_rate_limit(request: Request) -> Optional[JSONResponse]:
+def evaluate_rate_limit(request: Request, cost: int = 1) -> Optional[JSONResponse]:
     """
     Evaluate per-key rate limit for a request.
     Returns JSONResponse (429) if limit is exceeded, or None if request is allowed.
     Attaches RateLimitResult to request.state.rate_limit_result when allowed.
     """
-    result = rate_limiter.check(request)
+    result = rate_limiter.check(request, cost=cost)
     if not result.allowed:
         return build_rate_limit_response(result)
 

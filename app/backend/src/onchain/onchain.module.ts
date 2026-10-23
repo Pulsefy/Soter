@@ -10,9 +10,12 @@ import { OnchainProcessor } from './onchain.processor';
 import { OnchainService } from './onchain.service';
 import { LedgerBackfillService } from './ledger-backfill.service';
 import { LedgerReconciliationService } from './ledger-reconciliation.service';
+import { LedgerReconciliationAlertService } from './ledger-reconciliation-alert.service';
 import { LedgerAdminController } from './ledger-admin.controller';
 import { AdminTransferController } from './admin-transfer.controller';
 import { AdminTransferService } from './admin-transfer.service';
+import { ActionPauseController } from './action-pause.controller';
+import { ActionPauseService } from './action-pause.service';
 import { StellarLedgerSource } from './stellar-ledger-source';
 import { SurplusWithdrawalController } from './surplus-withdrawal.controller';
 import { SurplusWithdrawalService } from './surplus-withdrawal.service';
@@ -27,6 +30,7 @@ import { SorobanEventCorrelationScheduler } from './soroban-event-correlation.sc
 import { SorobanCorrelationTraceService } from './soroban-correlation-trace.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CommonServicesModule } from '../common/services/common-services.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === 'true';
 
@@ -96,10 +100,12 @@ const onchainAdapterProvider: Provider = {
     LoggerModule,
     MetricsModule,
     CommonServicesModule,
+    NotificationsModule,
   ],
   controllers: [
     LedgerAdminController,
     AdminTransferController,
+    ActionPauseController,
     SurplusWithdrawalController,
   ],
   providers: [
@@ -111,8 +117,10 @@ const onchainAdapterProvider: Provider = {
     StellarLedgerSource,
     LedgerBackfillService,
     LedgerReconciliationService,
+    LedgerReconciliationAlertService,
     SurplusWithdrawalService,
     AdminTransferService,
+    ActionPauseService,
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,
     SorobanTransactionProcessor,
@@ -126,6 +134,7 @@ const onchainAdapterProvider: Provider = {
     StellarLedgerSource,
     LedgerBackfillService,
     LedgerReconciliationService,
+    LedgerReconciliationAlertService,
     SurplusWithdrawalService,
     SorobanTransactionLifecycleService,
     SorobanTransactionScheduler,

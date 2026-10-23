@@ -198,6 +198,39 @@ export interface PauseState {
   timestamp: Date;
 }
 
+/**
+ * Actions the contract can pause independently of the global pause. Mirrors
+ * the symbols accepted by the contract's `get_pause_key`; any other symbol is
+ * rejected on-chain with `InvalidState`.
+ */
+export const PAUSABLE_ACTIONS = [
+  'create',
+  'claim',
+  'withdraw',
+  'refund',
+] as const;
+
+export type PausableAction = (typeof PAUSABLE_ACTIONS)[number];
+
+export function isPausableAction(value: unknown): value is PausableAction {
+  return (
+    typeof value === 'string' &&
+    (PAUSABLE_ACTIONS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Result of a per-action pause or unpause write. `isPaused` is read back from
+ * the contract after the write, and so reflects the effective state: it stays
+ * `true` after `unpauseAction` while the contract is globally paused.
+ */
+export interface ActionPauseResult {
+  action: PausableAction;
+  transactionHash: string;
+  isPaused: boolean;
+  timestamp: Date;
+}
+
 export interface FeeConfig {
   feePercentage: string;
   maxFee: string;
@@ -359,6 +392,69 @@ export interface AdminTransferResult {
   timestamp: Date;
 }
 
+// --- Delegate Lifecycle Interfaces ---
+
+export interface DelegateHistoryEntry {
+  packageId: string;
+  previousDelegate?: string;
+  newDelegate: string;
+  changedBy: string;
+  changedAt: number;
+  reason: string;
+}
+
+export interface SetDelegateParams {
+  adminAddress: string;
+  packageId: string;
+  delegateAddress: string;
+  /** Optional expiry unix timestamp; omit for permanent delegation */
+  expiresAt?: number;
+}
+
+export interface SetDelegateResult {
+  packageId: string;
+  delegateAddress: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  expiresAt?: number;
+  metadata?: Record<string, any>;
+}
+
+export interface RevokeDelegateParams {
+  adminAddress: string;
+  packageId: string;
+}
+
+export interface RevokeDelegateResult {
+  packageId: string;
+  transactionHash: string;
+  timestamp: Date;
+  status: 'success' | 'failed';
+  metadata?: Record<string, any>;
+}
+
+export interface GetDelegateParams {
+  packageId: string;
+}
+
+export interface GetDelegateResult {
+  packageId: string;
+  delegateAddress?: string;
+  expiresAt?: number;
+  timestamp: Date;
+}
+
+export interface GetDelegateHistoryParams {
+  packageId: string;
+}
+
+export interface GetDelegateHistoryResult {
+  packageId: string;
+  history: DelegateHistoryEntry[];
+  timestamp: Date;
+}
+
 /**
  * Interface for on-chain operations with Soroban AidEscrow contract
  */
@@ -448,6 +544,23 @@ export interface OnchainAdapter {
     params: MigrateContractParams,
   ): Promise<MigrateContractResult>;
   getPauseState(): Promise<PauseState>;
+
+  /**
+   * Pause a single action (`pause_action`) without pausing the whole contract.
+   */
+  pauseAction(action: PausableAction): Promise<ActionPauseResult>;
+
+  /**
+   * Lift a per-action pause (`unpause_action`). Does not lift a global pause.
+   */
+  unpauseAction(action: PausableAction): Promise<ActionPauseResult>;
+
+  /**
+   * Whether `action` is currently blocked (`is_action_paused`). Returns `true`
+   * while the contract is globally paused, regardless of per-action state.
+   */
+  isActionPaused(action: PausableAction): Promise<boolean>;
+
   getFeeConfig(): Promise<FeeConfig>;
   getPackageSummary(packageId: string): Promise<PackageSummary>;
 
@@ -522,4 +635,27 @@ export interface OnchainAdapter {
   // Legacy methods - kept for backward compatibility
   createClaim(params: CreateClaimParams): Promise<CreateClaimResult>;
   disburse(params: DisburseParams): Promise<DisburseResult>;
+
+  /**
+   * Set or update a delegate for a package (admin only).
+   * Pass expiresAt for a time-limited delegation.
+   */
+  setDelegate(params: SetDelegateParams): Promise<SetDelegateResult>;
+
+  /**
+   * Revoke the delegate for a package (admin only).
+   */
+  revokeDelegate(params: RevokeDelegateParams): Promise<RevokeDelegateResult>;
+
+  /**
+   * Get the current active delegate for a package.
+   */
+  getDelegate(params: GetDelegateParams): Promise<GetDelegateResult>;
+
+  /**
+   * Get the full delegate change history for a package.
+   */
+  getDelegateHistory(
+    params: GetDelegateHistoryParams,
+  ): Promise<GetDelegateHistoryResult>;
 }

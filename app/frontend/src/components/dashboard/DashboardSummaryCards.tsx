@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fetchGlobalStats, type GlobalStats } from '@/lib/analytics-api';
 
 function formatCount(value: number): string {
@@ -32,16 +32,31 @@ export function DashboardSummaryCards() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
+  const hasLoadedRef = useRef(false);
+
+  // Silent background refresh when connectivity returns (issue #1345):
+  // keep showing the last-known figures while the refetch runs, and let the
+  // service worker's network-first strategy replace the cache transparently.
+  useEffect(() => {
+    const handleOnline = () => setAttempt(current => current + 1);
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
 
   useEffect(() => {
     let active = true;
 
     async function loadStats() {
-      setLoading(true);
+      // Skeleton only on the first load; reconnect/refresh keeps the
+      // previously rendered figures on screen.
+      setLoading(!hasLoadedRef.current);
       setError(null);
       try {
         const result = await fetchGlobalStats();
-        if (active) setStats(result);
+        if (active) {
+          hasLoadedRef.current = true;
+          setStats(result);
+        }
       } catch (loadError) {
         if (active) {
           setError(
@@ -79,7 +94,9 @@ export function DashboardSummaryCards() {
     );
   }
 
-  if (error || !stats) {
+  // Only when nothing has loaded yet: a failed background refresh keeps the
+  // last-known figures on screen (the offline banner explains the state).
+  if (!stats) {
     return (
       <div
         className="rounded-lg border border-red-200 dark:border-red-900 p-5"

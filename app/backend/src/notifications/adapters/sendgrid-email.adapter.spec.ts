@@ -106,6 +106,57 @@ describe('SendGridEmailAdapter', () => {
     expect(result.error).toContain('Network timeout');
   });
 
+  it('reports the provider reachable when SendGrid accepts the credentials', async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200 });
+
+    const result = await adapter.checkReachability(1000);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: 'sendgrid',
+        reachable: true,
+        latencyMs: expect.any(Number),
+      }),
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://api.sendgrid.com/v3/scopes',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer SG.test-api-key',
+        }),
+      }),
+    );
+  });
+
+  it('reports the provider unreachable on a non-ok response', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 503 });
+
+    const result = await adapter.checkReachability(1000);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: 'sendgrid',
+        reachable: false,
+        error: 'SendGrid health check failed: HTTP 503',
+      }),
+    );
+  });
+
+  it('reports the provider unreachable on a network error', async () => {
+    mockFetch.mockRejectedValue(new Error('Network timeout'));
+
+    const result = await adapter.checkReachability(1000);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: 'sendgrid',
+        reachable: false,
+        error: 'SendGrid health check failed: Network timeout',
+      }),
+    );
+  });
+
   it('should use default subject when not provided', async () => {
     mockFetch.mockResolvedValue({
       status: 202,

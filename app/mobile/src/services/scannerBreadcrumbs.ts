@@ -1,4 +1,5 @@
 import { addBreadcrumb } from './crashReporting';
+import { structuredLogger } from './logger';
 
 /**
  * Crash-reporting breadcrumbs for the QR scanner flow.
@@ -21,8 +22,18 @@ export type ScannerBreadcrumbEvent =
   | 'scan_started'
   | 'scan_received'
   | 'item_deduped'
+  | 'item_deduped_cross_session'
   | 'item_queued'
   | 'item_failed';
+
+export type ScannerFailureReason = 'no_barcode_detected' | 'format_unsupported' | 'low_confidence';
+
+export interface ScannerDiagnosticsSnapshot {
+  attempts: number;
+  failures: number;
+  failureRate: number;
+  byCause: Record<ScannerFailureReason, number>;
+}
 
 /** Breadcrumb category used for every scanner-flow breadcrumb. */
 export const SCANNER_BREADCRUMB_CATEGORY = 'scanner';
@@ -37,10 +48,78 @@ const ALLOWED_COUNT_KEYS = [
   'failed',
   'skipped',
   'queued',
+  'cause',
 ] as const;
 
+const createDefaultScannerDiagnostics = (): Record<ScannerFailureReason, number> => ({
+  no_barcode_detected: 0,
+  format_unsupported: 0,
+  low_confidence: 0,
+});
+
+let scannerDiagnosticsState = {
+  attempts: 0,
+  failures: 0,
+  byCause: createDefaultScannerDiagnostics(),
+};
+
+export const determineScannerFailureReason = (
+  data?: string | null,
+  confidence?: number | null,
+): ScannerFailureReason => {
+  if (!data || !data.trim()) {
+    return 'no_barcode_detected';
+  }
+
+  if (typeof confidence === 'number' && Number.isFinite(confidence) && confidence < 0.5) {
+    return 'low_confidence';
+  }
+
+  return 'format_unsupported';
+};
+
+export const resetScannerDiagnostics = (): void => {
+  scannerDiagnosticsState = {
+    attempts: 0,
+    failures: 0,
+    byCause: createDefaultScannerDiagnostics(),
+  };
+};
+
+export const getScannerDiagnosticsSnapshot = (): ScannerDiagnosticsSnapshot => {
+  const failureRate =
+    scannerDiagnosticsState.attempts > 0
+      ? scannerDiagnosticsState.failures / scannerDiagnosticsState.attempts
+      : 0;
+
+  return {
+    attempts: scannerDiagnosticsState.attempts,
+    failures: scannerDiagnosticsState.failures,
+    failureRate,
+    byCause: { ...scannerDiagnosticsState.byCause },
+  };
+};
+
+const recordScannerDiagnosticEvent = (
+  cause?: ScannerFailureReason,
+  counts?: Record<string, unknown>,
+): void => {
+  const attemptCount = typeof counts?.scanned === 'number' ? Number(counts.scanned) : 0;
+  const failedCount = typeof counts?.failed === 'number' ? Number(counts.failed) : 0;
+
+  scannerDiagnosticsState.attempts = Math.max(scannerDiagnosticsState.attempts, attemptCount);
+
+  if (cause) {
+    scannerDiagnosticsState.failures = Math.max(scannerDiagnosticsState.failures, failedCount);
+    scannerDiagnosticsState.byCause[cause] += 1;
+  }
+
+  const snapshot = getScannerDiagnosticsSnapshot();
+  structuredLogger.info('scanner.decode.summary', snapshot, 'scanner');
+};
+
 export type ScannerCounters = Partial<
-  Record<(typeof ALLOWED_COUNT_KEYS)[number], number>
+  Record<(typeof ALLOWED_COUNT_KEYS)[number], number | ScannerFailureReason>
 >;
 
 /**
@@ -59,6 +138,11 @@ export function sanitizeScannerBreadcrumbData(
     const value = data[key];
     if (typeof value === 'number' && Number.isFinite(value)) {
       safe[key] = value;
+      continue;
+    }
+
+    if (key === 'cause' && typeof value === 'string' && value in createDefaultScannerDiagnostics()) {
+      safe[key] = value as ScannerFailureReason;
     }
   }
 
@@ -77,10 +161,24 @@ export function recordScannerBreadcrumb(
   mode: ScannerMode,
   counts?: Record<string, unknown>,
 ): void {
+  const sanitized = sanitizeScannerBreadcrumbData(counts);
+
+  if (event === 'scan_received') {
+    recordScannerDiagnosticEvent(undefined, sanitized as Record<string, unknown>);
+  }
+
+  if (event === 'item_failed') {
+    const cause =
+      typeof counts?.cause === 'string' && counts.cause in createDefaultScannerDiagnostics()
+        ? (counts.cause as ScannerFailureReason)
+        : undefined;
+    recordScannerDiagnosticEvent(cause, sanitized as Record<string, unknown>);
+  }
+
   addBreadcrumb(SCANNER_BREADCRUMB_CATEGORY, `${mode}:${event}`, {
     mode,
     event,
-    ...sanitizeScannerBreadcrumbData(counts),
+    ...sanitized,
   });
 }
 
@@ -103,6 +201,14 @@ export function recordItemDeduped(
   counts?: Record<string, unknown>,
 ): void {
   recordScannerBreadcrumb('item_deduped', mode, counts);
+}
+
+/** A decoded QR code was dropped as a cross-session duplicate. */
+export function recordItemDedupedCrossSession(
+  mode: ScannerMode,
+  counts?: Record<string, unknown>,
+): void {
+  recordScannerBreadcrumb('item_deduped_cross_session', mode, counts);
 }
 
 /** A valid package was accepted and handed to the verification flow. */

@@ -22,6 +22,7 @@ _ISOLATED_ENV_KEYS = (
     "LLM_TIMEOUT_SECONDS",
     "PROVIDER_CAPABILITY_MATRIX",
     "CACHE_TTL_TASK_STATUS",
+    "VERIFICATION_COOLDOWN_SECONDS",
     "ASYNC_JOB_IDLE_TIMEOUT_SECONDS",
     "PORT",
 )
@@ -153,6 +154,24 @@ def test_non_positive_async_job_idle_timeout_rejected(monkeypatch):
         settings.validate_configuration()
 
     assert "ASYNC_JOB_IDLE_TIMEOUT_SECONDS" in str(excinfo.value)
+
+
+def test_verification_cooldown_defaults_to_five_minutes():
+    settings = Settings(_env_file=None)
+
+    assert settings.verification_cooldown_seconds == 300
+
+
+def test_non_positive_verification_cooldown_rejected(monkeypatch):
+    _isolate_env(monkeypatch)
+    monkeypatch.setenv("VERIFICATION_COOLDOWN_SECONDS", "0")
+
+    settings = Settings(_env_file=None)
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        settings.validate_configuration()
+
+    assert "VERIFICATION_COOLDOWN_SECONDS" in str(excinfo.value)
 
 
 def test_missing_and_malformed_keys_reported_together(monkeypatch):

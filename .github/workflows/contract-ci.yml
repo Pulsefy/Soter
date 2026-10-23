@@ -59,6 +59,12 @@ jobs:
           cargo test --target x86_64-unknown-linux-gnu --test gas_profiling -- --nocapture
           python3 scripts/check_gas_budgets.py
 
+      - name: Build contract WASM for size check
+        run: cargo build --release --target wasm32v1-none -p aid_escrow
+
+      - name: Gate WASM size regressions
+        run: python3 scripts/check_wasm_size.py
+
       - name: Upload gas metrics
         if: always()
         uses: actions/upload-artifact@v4
@@ -105,6 +111,10 @@ jobs:
       - name: Build contract WASM
         working-directory: app/onchain
         run: cargo build --release --target wasm32v1-none -p aid_escrow
+
+      - name: Gate WASM size regressions
+        working-directory: app/onchain
+        run: python3 scripts/check_wasm_size.py
 
       - name: Check contract interface spec drift
         run: pnpm --dir app/backend run contract:check:wasm
