@@ -887,6 +887,24 @@ class HumanitarianPrimaryPromptV3(VerificationPrompt):
 default_prompt_registry.register(HumanitarianPrimaryPromptV3(), set_active=True)
 ```
 
+### 3.2.1 Default prompt language configuration
+
+Callers without an explicit `language_hint` resolve to a configurable default language rather than hardcoding English:
+
+1. **Hierarchy of Resolution**:
+   - Explicit `language_hint` in the request payload (highest precedence).
+   - Campaign-level configured default from `CAMPAIGN_DEFAULT_LANGUAGES` (JSON mapping campaign reference to language code).
+   - Organization-level configured default from `ORG_DEFAULT_LANGUAGES` (JSON mapping organization ID to language code).
+   - Per-deployment global default from `DEFAULT_PROMPT_LANGUAGE` (default: `"en"`).
+2. **Environment Variables**:
+   ```bash
+   DEFAULT_PROMPT_LANGUAGE=en
+   ORG_DEFAULT_LANGUAGES='{"org-redcross": "es", "org-msf": "fr"}'
+   CAMPAIGN_DEFAULT_LANGUAGES='{"camp-sahel-2026": "fr", "camp-latam-2026": "es"}'
+   ```
+3. **Audit & Traceability**:
+   The resolved `language` is passed into prompt builders, returned in the verification response payload, and recorded in the audit record metadata.
+
 ### 3.3 Change process — recommended steps
 
 **Step 1 — Understand the invariants.**

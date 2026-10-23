@@ -107,6 +107,7 @@ def _audit_inputs(request: HumanitarianVerificationRequest) -> Dict[str, Any]:
         "artifact_ids": list(request.artifact_ids),
         "provider_preference": request.provider_preference,
         "requested_timeout": request.timeout,
+        "language_hint": request.language_hint,
     }
 
 
@@ -216,6 +217,7 @@ def _build_verification_envelope(
             "artifact_tag": artifact_tag,
             "user_id": user_id,
             "user_role": user_role,
+            "language": raw.get("language") if isinstance(raw, dict) else None,
         },
     )
 
@@ -303,14 +305,24 @@ async def _verify_claim_cached(
                     context_factors=context_factors,
                     provider_preference=provider_preference,
                     timeout=timeout,
+                    prompt_version=prompt_version or None,
                 )
             except TypeError:
-                return humanitarian_verification_service.verify_claim(
-                    aid_claim=aid_claim,
-                    supporting_evidence=supporting_evidence,
-                    context_factors=context_factors,
-                    provider_preference=provider_preference,
-                )
+                try:
+                    return humanitarian_verification_service.verify_claim(
+                        aid_claim=aid_claim,
+                        supporting_evidence=supporting_evidence,
+                        context_factors=context_factors,
+                        provider_preference=provider_preference,
+                        timeout=timeout,
+                    )
+                except TypeError:
+                    return humanitarian_verification_service.verify_claim(
+                        aid_claim=aid_claim,
+                        supporting_evidence=supporting_evidence,
+                        context_factors=context_factors,
+                        provider_preference=provider_preference,
+                    )
         raise
 
 

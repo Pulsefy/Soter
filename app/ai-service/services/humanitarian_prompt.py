@@ -7,6 +7,7 @@ All prompts are versioned and managed through a PromptRegistry.
 """
 
 from typing import Any, Dict, List, Optional
+from config import settings
 from services.prompt_registry import VerificationPrompt, PromptRegistry
 from services.humanitarian_prompt_languages import (
     DEFAULT_LANGUAGE,
@@ -22,6 +23,36 @@ from services.humanitarian_prompt_languages import (
 #: user prompt text changes so decision audit records (issue #990) can tie a
 #: past decision to the exact prompt that produced it.
 HUMANITARIAN_PROMPT_VERSION = "humanitarian-sphere-v1"
+
+
+def resolve_default_language(
+    language_hint: Optional[str] = None,
+    org_id: Optional[str] = None,
+    campaign_ref: Optional[str] = None,
+) -> str:
+    """Resolve the target prompt language when hints and overrides are present.
+
+    Hierarchy:
+    1. Caller-supplied explicit language_hint (if non-empty)
+    2. Campaign-level configured default (settings.campaign_default_languages)
+    3. Organization-level configured default (settings.org_default_languages)
+    4. Per-deployment configured default (settings.default_prompt_language)
+    """
+    if language_hint and language_hint.strip():
+        return language_hint.strip()
+
+    if campaign_ref and hasattr(settings, "campaign_default_languages"):
+        camp_lang = settings.campaign_default_languages.get(campaign_ref)
+        if camp_lang and camp_lang.strip():
+            return camp_lang.strip()
+
+    if org_id and hasattr(settings, "org_default_languages"):
+        org_lang = settings.org_default_languages.get(org_id)
+        if org_lang and org_lang.strip():
+            return org_lang.strip()
+
+    return getattr(settings, "default_prompt_language", "en") or "en"
+
 
 SPHERE_HANDBOOK_CRITERIA: Dict[str, List[str]] = {
     "water_supply_sanitation_hygiene": [
@@ -111,6 +142,7 @@ class HumanitarianPrimaryPromptV1(VerificationPrompt):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         criteria_text = format_sphere_criteria()
         evidence_text = format_evidence(supporting_evidence)
@@ -146,6 +178,9 @@ class HumanitarianPrimaryPromptV1(VerificationPrompt):
             "}"
         )
 
+        if language:
+            system_prompt = f"{system_prompt} Respond using language: {language}."
+
         return {"system": system_prompt, "user": user_prompt}
 
     def build_primary_prompt(
@@ -153,11 +188,13 @@ class HumanitarianPrimaryPromptV1(VerificationPrompt):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         return self.build_prompt(
             aid_claim=aid_claim,
             supporting_evidence=supporting_evidence,
             context_factors=context_factors,
+            language=language,
         )
 
 
@@ -181,6 +218,7 @@ class HumanitarianFallbackPromptV1(VerificationPrompt):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         evidence_text = format_evidence(supporting_evidence)
         context_text = format_context_factors(context_factors)
@@ -200,6 +238,9 @@ class HumanitarianFallbackPromptV1(VerificationPrompt):
             '"confidence":0.0,"summary":"",'
             '"risk_flags":[],"missing_information":[],"recommended_next_steps":[]}'
         )
+
+        if language:
+            system_prompt = f"{system_prompt} Respond using language: {language}."
 
         return {"system": system_prompt, "user": user_prompt}
 
@@ -229,6 +270,7 @@ class HumanitarianPrimaryPromptV2(VerificationPrompt):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         criteria_text = format_sphere_criteria()
         evidence_text = format_evidence(supporting_evidence)
@@ -264,6 +306,9 @@ class HumanitarianPrimaryPromptV2(VerificationPrompt):
             "}"
         )
 
+        if language:
+            system_prompt = f"{system_prompt} Respond using language: {language}."
+
         return {"system": system_prompt, "user": user_prompt}
 
 
@@ -287,6 +332,7 @@ class HumanitarianFallbackPromptV2(VerificationPrompt):
         aid_claim: str,
         supporting_evidence: List[str],
         context_factors: Dict[str, Any],
+        language: Optional[str] = None,
     ) -> Dict[str, str]:
         evidence_text = format_evidence(supporting_evidence)
         context_text = format_context_factors(context_factors)
@@ -306,6 +352,9 @@ class HumanitarianFallbackPromptV2(VerificationPrompt):
             '"confidence":0.0,"summary":"",'
             '"risk_flags":[],"missing_information":[],"recommended_next_steps":[]}'
         )
+
+        if language:
+            system_prompt = f"{system_prompt} Respond using language: {language}."
 
         return {"system": system_prompt, "user": user_prompt}
 

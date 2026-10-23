@@ -112,6 +112,21 @@ class HumanitarianVerificationService:
             evidence = supporting_evidence or []
             context = context_factors or {}
 
+            # Resolve effective prompt language from hint or configured defaults
+            resolved_campaign = (
+                campaign_ref
+                or context.get("campaign_ref")
+                or context.get("campaign_id")
+            )
+            resolved_org = (
+                org_id or context.get("org_id") or context.get("organization_id")
+            )
+            effective_language = self.prompt_engine.resolve_language(
+                language_hint=language_hint,
+                org_id=resolved_org,
+                campaign_ref=resolved_campaign,
+            )
+
             # Resolve primary and fallback prompt templates from registry
             pri_ver = primary_prompt_version or prompt_version
             # Language comes from the caller's hint, else is detected from the
@@ -119,11 +134,19 @@ class HumanitarianVerificationService:
             primary_prompt_obj = self.prompt_engine.resolve_prompt(
                 "primary", aid_claim, language=language, version=pri_ver
             )
-            primary_prompt = primary_prompt_obj.build_prompt(
-                aid_claim=aid_claim,
-                supporting_evidence=evidence,
-                context_factors=context,
-            )
+            try:
+                primary_prompt = primary_prompt_obj.build_prompt(
+                    aid_claim=aid_claim,
+                    supporting_evidence=evidence,
+                    context_factors=context,
+                    language=effective_language,
+                )
+            except TypeError:
+                primary_prompt = primary_prompt_obj.build_prompt(
+                    aid_claim=aid_claim,
+                    supporting_evidence=evidence,
+                    context_factors=context,
+                )
 
             fb_ver = fallback_prompt_version
             if (
@@ -135,11 +158,19 @@ class HumanitarianVerificationService:
             fallback_prompt_obj = self.prompt_engine.resolve_prompt(
                 "fallback", aid_claim, language=language, version=fb_ver
             )
-            fallback_prompt = fallback_prompt_obj.build_prompt(
-                aid_claim=aid_claim,
-                supporting_evidence=evidence,
-                context_factors=context,
-            )
+            try:
+                fallback_prompt = fallback_prompt_obj.build_prompt(
+                    aid_claim=aid_claim,
+                    supporting_evidence=evidence,
+                    context_factors=context,
+                    language=effective_language,
+                )
+            except TypeError:
+                fallback_prompt = fallback_prompt_obj.build_prompt(
+                    aid_claim=aid_claim,
+                    supporting_evidence=evidence,
+                    context_factors=context,
+                )
 
             providers = self.registry.resolve_llm(provider_preference)
             if not providers:

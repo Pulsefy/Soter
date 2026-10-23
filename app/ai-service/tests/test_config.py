@@ -447,3 +447,23 @@ def test_boot_report_marks_unset_secrets(monkeypatch, caplog):
         "AI_WEBHOOK_SECRET=<unset>" in caplog.text
         or "AI_WEBHOOK_SECRET=[REDACTED]" in caplog.text
     )
+
+
+def test_default_prompt_language_configuration(monkeypatch):
+    _isolate_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    assert settings.default_prompt_language == "en"
+    assert settings.org_default_languages == {}
+    assert settings.campaign_default_languages == {}
+
+    # Configurable via environment/overrides
+    settings.default_prompt_language = "es"
+    settings.org_default_languages = {"org-alpha": "fr"}
+    settings.campaign_default_languages = {"camp-1": "sw"}
+    settings.validate_configuration()
+
+    # Invalid empty language string should fail validation
+    settings.default_prompt_language = "   "
+    with pytest.raises(ConfigurationError) as excinfo:
+        settings.validate_configuration()
+    assert "DEFAULT_PROMPT_LANGUAGE" in str(excinfo.value)

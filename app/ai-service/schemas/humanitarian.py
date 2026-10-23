@@ -99,6 +99,7 @@ class HumanitarianVerificationResponse(BaseModel):
     prompt_variant: Optional[str] = Field(None, examples=["primary"])
     prompt_name: Optional[str] = Field(None, examples=["humanitarian_primary"])
     prompt_version: Optional[str] = Field(None, examples=["v1"])
+    language: Optional[str] = Field(None, examples=["en"])
     verification: Optional[Dict[str, Any]] = Field(
         None,
         examples=[
