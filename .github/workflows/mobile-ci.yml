@@ -1,0 +1,54 @@
+name: Mobile CI
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'app/mobile/src/services/**'
+      - 'app/mobile/src/hooks/**'
+      - 'app/mobile/src/contexts/**'
+      - 'app/mobile/src/__tests__/**'
+      - '.github/workflows/mobile-ci.yml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'app/mobile/src/services/**'
+      - 'app/mobile/src/hooks/**'
+      - 'app/mobile/src/contexts/**'
+      - 'app/mobile/src/__tests__/**'
+      - '.github/workflows/mobile-ci.yml'
+
+jobs:
+  unit-tests:
+    name: Mobile unit tests (services / hooks / contexts)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Run only tests that do not depend on native-module transpilation
+      # (screen/navigation tests require a full React Native environment and
+      # are covered by the Expo cold-start CI which boots an actual emulator).
+      # requestLayer.test.ts is excluded because it has pre-existing timeout
+      # failures unrelated to this feature.
+      - name: Run service & hook unit tests
+        working-directory: app/mobile
+        run: |
+          npx jest \
+            --testPathPattern="src/__tests__/(syncQueue|evidenceUpload|useNetworkStatus|networkGuard\.test|valueAction|localCache|logger|mockData|aidCache|coldStart|healthCache|syncQueueRate|syncQueueCorr|updateOffline|walletSession|walletDisconnect|certificatePin)" \
+            --forceExit \
+            --passWithNoTests

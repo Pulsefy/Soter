@@ -69,20 +69,5 @@
     "ts-jest": "^29.2.5",
     "typescript": "~5.9.2"
   },
-  "jest": {
-    "preset": "jest-expo",
-    "setupFilesAfterEnv": [
-      "<rootDir>/jest.setup.ts"
-    ],
-    "moduleNameMapper": {
-      "^react$": "<rootDir>/node_modules/react",
-      "^react-test-renderer$": "<rootDir>/../../node_modules/react-test-renderer",
-      "^expo-modules-core$": "<rootDir>/../../node_modules/expo/node_modules/expo-modules-core",
-      "^expo-modules-core/src/polyfill/dangerous-internal$": "<rootDir>/../../node_modules/expo/node_modules/expo-modules-core/src/polyfill/dangerous-internal.ts"
-    },
-    "transformIgnorePatterns": [
-      "node_modules/(?!(?:.pnpm/)?((jest-)?react-native|@react-native(?:/.*)?|react-clone-referenced-element|@react-navigation(?:/.*)?|expo(?:nent)?(?:/.*)?|@expo(?:nent)?(?:/.*)?|expo-.*|@expo-google-fonts/.*|react-navigation|@walletconnect(?:/.*)?|@sentry(?:/.*)?))"
-    ]
-  },
   "private": true
 }

@@ -268,5 +268,191 @@ describe('Resumable Evidence Upload Chunks', () => {
       const state = await getSyncQueueState();
       expect(state.items).toHaveLength(0);
     });
+
+    it('resumes after network-type change (WiFi → cellular) mid-upload without restarting from chunk 0', async () => {
+      // This is the core acceptance criterion: a WiFi→cellular switch happens
+      // while uploading chunk 1 of 3.  The OS tears down the socket, the fetch
+      // for chunk 1 rejects, and the action lands in "retrying" state with
+      // sessionId and uploadedChunks=[0] persisted.  On the next flush the
+      // queue must query /status (not create a new session) and upload only the
+      // missing chunks.
+      const { flushPendingNetworkActions, getSyncQueueState } = loadFreshQueue();
+
+      const requestPayload = {
+        filename: 'large-video.mp4',
+        contentType: 'video/mp4',
+        // Represent a multi-chunk file; content doesn't matter for routing logic
+        imageBase64: 'SGVsbG8gV29ybGQ=',
+      };
+
+      // Action is in 'retrying' state with chunk 0 already uploaded before the
+      // network change interrupted the upload of chunk 1.
+      const interruptedAction = {
+        id: 'action-network-change',
+        type: 'evidence-upload',
+        payload: {
+          aidId: 'aid-xyz',
+          url: 'http://localhost:3000/api/v1/verification/upload',
+          body: JSON.stringify(requestPayload),
+          sessionId: 'session-mid-upload',
+          totalChunks: 3,
+          uploadedChunks: [0], // Chunk 0 was committed before the switch
+          progress: 0.33,
+        },
+        state: 'retrying', // Set by flushPendingNetworkActions when the chunk fetch threw
+        retryCount: 1,
+        maxRetries: 5,
+        nextRetryAt: new Date(Date.now() - 1000).toISOString(), // due immediately
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastError: 'Network request failed', // typical fetch error on interface change
+      };
+
+      await AsyncStorage.setItem('@soter/sync-queue', JSON.stringify([interruptedAction]));
+
+      // Step 1: GET /status — server confirms chunk 0 received, chunks 1 & 2 missing
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessionId: 'session-mid-upload',
+          totalChunks: 3,
+          receivedChunks: [0],
+        }),
+      });
+
+      // Step 2: POST chunk 1
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ sessionId: 'session-mid-upload', index: 1, received: true, duplicate: false }),
+      });
+
+      // Step 3: POST chunk 2
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ sessionId: 'session-mid-upload', index: 2, received: true, duplicate: false }),
+      });
+
+      // Step 4: POST /finalize
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: 'ev-item-network-change', fileName: 'large-video.mp4', status: 'pending' }),
+      });
+
+      // Simulate what SyncContext.handleNetworkChange does: flush with online=true
+      await flushPendingNetworkActions({ online: true });
+
+      // Must NOT have called POST /evidence/upload-sessions (that would be a restart)
+      const sessionCreateCalls = mockFetch.mock.calls.filter(
+        (call) =>
+          typeof call[0] === 'string' &&
+          call[0].endsWith('/evidence/upload-sessions') &&
+          call[1]?.method === 'POST',
+      );
+      expect(sessionCreateCalls).toHaveLength(0); // No new session created
+
+      // Must have queried /status first (resume path)
+      expect(mockFetch.mock.calls[0][0]).toContain('/evidence/upload-sessions/session-mid-upload/status');
+
+      // Uploaded exactly chunks 1 and 2 (chunk 0 was already on server)
+      const chunkCalls = mockFetch.mock.calls.filter((call) =>
+        typeof call[0] === 'string' &&
+        call[0].includes('/chunks'),
+      );
+      expect(chunkCalls).toHaveLength(2);
+
+      const uploadedIndices = chunkCalls.map((call) => {
+        const fd = call[1].body as FormData;
+        return fd.get('index');
+      });
+      expect(uploadedIndices).toEqual(['1', '2']);
+
+      // Finalized with the existing session
+      expect(mockFetch.mock.calls[3][0]).toContain('/evidence/upload-sessions/session-mid-upload/finalize');
+
+      // Action removed from queue after successful completion
+      const finalState = await getSyncQueueState();
+      expect(finalState.items).toHaveLength(0);
+
+      // Total fetch calls: 1 status + 2 chunks + 1 finalize = 4
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+    });
+
+    it('falls back to a new session when the existing session has expired (404 on status)', async () => {
+      // If the server-side session expired (e.g. upload was dormant for >24h),
+      // the mobile client must create a new session and restart from chunk 0
+      // rather than hanging on an unknown sessionId.
+      const { flushPendingNetworkActions, getSyncQueueState } = loadFreshQueue();
+
+      const requestPayload = {
+        filename: 'test.jpg',
+        contentType: 'image/jpeg',
+        imageBase64: 'SGVsbG8gV29ybGQ=',
+      };
+
+      const staleAction = {
+        id: 'action-stale-session',
+        type: 'evidence-upload',
+        payload: {
+          aidId: 'aid-stale',
+          url: 'http://localhost:3000/api/v1/verification/upload',
+          body: JSON.stringify(requestPayload),
+          sessionId: 'session-expired',
+          totalChunks: 1,
+          uploadedChunks: [0],
+          progress: 1.0,
+        },
+        state: 'retrying',
+        retryCount: 1,
+        maxRetries: 5,
+        nextRetryAt: new Date(Date.now() - 1000).toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastError: 'Network request failed',
+      };
+
+      await AsyncStorage.setItem('@soter/sync-queue', JSON.stringify([staleAction]));
+
+      // Status returns 404 — session expired
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ message: 'Upload session not found' }),
+      });
+
+      // New session creation
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'session-new',
+          totalChunks: 1,
+          chunkSize: 524288,
+        }),
+      });
+
+      // Upload chunk 0
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ sessionId: 'session-new', index: 0, received: true, duplicate: false }),
+      });
+
+      // Finalize
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: 'ev-item-new', fileName: 'test.jpg', status: 'pending' }),
+      });
+
+      await flushPendingNetworkActions({ online: true });
+
+      // status → new session → chunk 0 → finalize = 4 calls
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+
+      // New session was created
+      const sessionCreateCall = mockFetch.mock.calls[1];
+      expect(sessionCreateCall[0]).toContain('/evidence/upload-sessions');
+      expect(sessionCreateCall[1].method).toBe('POST');
+
+      const finalState = await getSyncQueueState();
+      expect(finalState.items).toHaveLength(0);
+    });
   });
 });

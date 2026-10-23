@@ -110,7 +110,21 @@ export const SyncProvider: React.FC<PropsWithChildren> = ({ children }) => {
   const handleReconnect = useCallback(async () => {
     await flushPendingNetworkActions({ online: true });
   }, []);
-  const { isConnected } = useNetworkStatus(handleReconnect);
+
+  /**
+   * Fired when the network *type* changes while staying connected (e.g. WiFi
+   * switches to cellular mid-upload).  The OS will have torn down the old
+   * socket, aborting any in-flight fetch.  By flushing immediately we let the
+   * sync queue re-run any `evidence-upload` actions that have a saved
+   * `sessionId`, which causes them to query the server's `/status` endpoint
+   * and resume from the last successfully received chunk rather than starting
+   * over from zero.
+   */
+  const handleNetworkChange = useCallback(async () => {
+    await flushPendingNetworkActions({ online: true });
+  }, []);
+
+  const { isConnected } = useNetworkStatus(handleReconnect, handleNetworkChange);
   const { active: saverModeActive } = useSaverMode();
   const { 
     batteryLevel, 
